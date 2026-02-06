@@ -1,0 +1,27 @@
+metadata:
+  project: konflux-release-data
+  persona: meetings
+  last_updated: '2026-02-02T06:00:30.762387'
+  last_scanned: '2026-02-02T06:00:30.762364'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: '[![pipeline status](https://gitlab.cee.redhat.com/releng/konflux-release-data/badges/main/pipeline.svg)](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/commits/main)'
+  key_modules:
+  - path: tests/
+    purpose: Tests module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding:
+  - pattern: Python project
+    location: pyproject.toml
+  testing:
+  - pattern: pytest test suite
+    example: pytest tests/
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+gotchas: []
+learned_from_tasks: []

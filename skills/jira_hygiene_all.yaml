@@ -57,7 +57,7 @@ steps:
     description: "Fetch all issues assigned to me"
     tool: jira_my_issues
     args:
-      status: "{{ inputs.status }}"
+      status: "{{ inputs.status | default('') }}"
     output: my_issues_raw
     on_error: auto_heal
 

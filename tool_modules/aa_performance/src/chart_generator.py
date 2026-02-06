@@ -7,7 +7,6 @@ Generates:
 """
 
 import math
-from typing import Any
 
 
 def get_color_for_percentage(pct: int) -> str:

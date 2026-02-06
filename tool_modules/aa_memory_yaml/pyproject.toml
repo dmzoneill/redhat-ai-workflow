@@ -1,0 +1,11 @@
+[project]
+name = "aa-memory-yaml"
+version = "0.1.0"
+description = "YAML-based memory storage adapter for the memory abstraction layer"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

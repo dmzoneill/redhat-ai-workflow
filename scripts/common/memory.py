@@ -67,8 +67,8 @@ def _get_current_project() -> str:
                 return project_name
             except ValueError:
                 continue
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Error detecting project from cwd: {e}")
 
     # Default to redhat-ai-workflow
     return "redhat-ai-workflow"

@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import AsyncIterator, Callable, Optional
+from typing import Callable, Optional
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -45,8 +45,6 @@ logger = logging.getLogger(__name__)
 
 class BrowserClosedError(Exception):
     """Raised when the browser has been closed unexpectedly."""
-
-    pass
 
 
 @dataclass
@@ -113,7 +111,7 @@ class GoogleMeetController:
         # Caption display - these selectors target the caption container
         "caption_container": '.a4cQT, [jsname="dsyhDe"], .iOzk7',
         "caption_text": '.CNusmb, .TBMuR, [jsname="YSxPC"]',
-        "caption_speaker": ".zs7s8d, .KcIKyf",
+        "caption_speaker": ".zs7s8d, .KcIKy",
         # Meeting info
         "participant_count": "[data-participant-count], .rua5Nb",
         "meeting_title": ".u6vdEc, [data-meeting-title]",
@@ -881,7 +879,6 @@ class GoogleMeetController:
             video_enabled: If True, start full AI video overlay. If False, start black screen.
         """
         self._video_enabled = video_enabled
-        import subprocess
 
         try:
             from playwright.async_api import async_playwright
@@ -1222,25 +1219,27 @@ class GoogleMeetController:
                     "#username", timeout=15000  # Red Hat SSO username field
                 )
                 if saml_username:
-                    logger.info("Red Hat SSO page detected - entering credentials")
+                    logger.info("Red Hat SSO page detected - using aa_sso helper")
 
-                    # Enter Kerberos ID (username)
-                    await saml_username.fill(username)
-                    await asyncio.sleep(0.5)
+                    # Use the centralized SSO form filler from aa_sso module
+                    try:
+                        from tool_modules.aa_sso.src.tools_basic import fill_sso_form
 
-                    # Enter PIN and token (password)
-                    saml_password = await self.page.wait_for_selector("#password", timeout=5000)
-                    if saml_password:
-                        await saml_password.fill(password)
+                        await fill_sso_form(self.page, username, password)
+                    except ImportError:
+                        # Fallback to inline implementation if aa_sso not available
+                        logger.warning("aa_sso module not available, using inline SSO form fill")
+                        await saml_username.fill(username)
                         await asyncio.sleep(0.5)
+                        saml_password = await self.page.wait_for_selector("#password", timeout=5000)
+                        if saml_password:
+                            await saml_password.fill(password)
+                            await asyncio.sleep(0.5)
+                        submit_button = await self.page.wait_for_selector("#submit", timeout=5000)
+                        if submit_button:
+                            await submit_button.click()
 
-                    # Click "Log in to SSO" submit button
-                    submit_button = await self.page.wait_for_selector("#submit", timeout=5000)
-                    if submit_button:
-                        logger.info("Clicking 'Log in to SSO'...")
-                        await submit_button.click()
-                        await asyncio.sleep(10)  # Wait for SSO processing and redirect
-
+                    await asyncio.sleep(10)  # Wait for SSO processing and redirect
                     logger.info("SSO login submitted, waiting for redirect to Meet...")
 
                     # Wait for redirect back to Meet (or intermediate verification page)
@@ -1337,23 +1336,23 @@ class GoogleMeetController:
         Returns:
             True if successfully joined, False otherwise.
         """
-        logger.info(f"[JOIN] ========== Starting join_meeting ==========")
+        logger.info("[JOIN] ========== Starting join_meeting ==========")
         logger.info(f"[JOIN] URL: {meet_url}")
 
         # Check if browser needs reinitialization
         needs_reinit = False
         if not self.page:
-            logger.warning(f"[JOIN] page is None")
+            logger.warning("[JOIN] page is None")
             needs_reinit = True
         elif self.page.is_closed():
-            logger.warning(f"[JOIN] page.is_closed() is True")
+            logger.warning("[JOIN] page.is_closed() is True")
             needs_reinit = True
         elif getattr(self, "_browser_closed", False):
-            logger.warning(f"[JOIN] _browser_closed flag is True")
+            logger.warning("[JOIN] _browser_closed flag is True")
             needs_reinit = True
 
         if needs_reinit:
-            logger.warning(f"[JOIN] Browser needs reinitialization...")
+            logger.warning("[JOIN] Browser needs reinitialization...")
             # Reset the closed flag
             self._browser_closed = False
             # Close any existing browser resources
@@ -1365,7 +1364,7 @@ class GoogleMeetController:
                 if self.state:
                     self.state.errors.append(error_msg)
                 return False
-            logger.info(f"[JOIN] Browser reinitialized successfully")
+            logger.info("[JOIN] Browser reinitialized successfully")
 
         if not self.page:
             error_msg = "Browser not initialized - page is None"
@@ -1391,12 +1390,12 @@ class GoogleMeetController:
 
         try:
             # Navigate to meeting - use domcontentloaded instead of networkidle (faster, more reliable)
-            logger.info(f"[JOIN] Navigating to meeting URL...")
+            logger.info("[JOIN] Navigating to meeting URL...")
             await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
             logger.info(f"[JOIN] Navigation complete. Current URL: {self.page.url}")
 
             # Wait for page to load
-            logger.info(f"[JOIN] Waiting 2s for page to settle...")
+            logger.info("[JOIN] Waiting 2s for page to settle...")
             await asyncio.sleep(2)
 
             # Log page title and URL for debugging
@@ -1409,22 +1408,22 @@ class GoogleMeetController:
 
             # Handle permissions dialog - "Do you want people to hear you in the meeting?"
             # This appears before joining and asks about mic/camera permissions
-            logger.info(f"[JOIN] Checking for permissions dialog...")
+            logger.info("[JOIN] Checking for permissions dialog...")
             await self._handle_permissions_dialog()
 
             # Handle "Got it" dialog if present
-            logger.info(f"[JOIN] Checking for 'Got it' dialog...")
+            logger.info("[JOIN] Checking for 'Got it' dialog...")
             try:
                 got_it = await self.page.wait_for_selector(self.SELECTORS["got_it_button"], timeout=3000)
                 if got_it:
-                    logger.info(f"[JOIN] Found 'Got it' dialog - clicking")
+                    logger.info("[JOIN] Found 'Got it' dialog - clicking")
                     await got_it.click()
                     await asyncio.sleep(1)
             except Exception:
-                logger.info(f"[JOIN] No 'Got it' dialog found")
+                logger.info("[JOIN] No 'Got it' dialog found")
 
             # Check if we need to sign in (look for Sign in button or name input for guest)
-            logger.info(f"[JOIN] Checking if sign-in is required...")
+            logger.info("[JOIN] Checking if sign-in is required...")
             sign_in_button = await self.page.locator('div[role="button"]:has-text("Sign in")').count() > 0
             name_input = await self.page.query_selector(self.SELECTORS["name_input"])
             logger.info(
@@ -1624,7 +1623,7 @@ class GoogleMeetController:
 
                 # Check if we're in the meeting
                 self.state.joined = True
-                logger.info(f"[JOIN] Meeting state set to joined=True")
+                logger.info("[JOIN] Meeting state set to joined=True")
 
                 # Enable captions if configured
                 if self.config.auto_enable_captions:
@@ -1646,7 +1645,7 @@ class GoogleMeetController:
                 logger.info(f"[JOIN] ========== SUCCESS: Joined meeting {meeting_id} ==========")
                 return True
             else:
-                logger.error(f"[JOIN] ========== FAILED: Join button not found ==========")
+                logger.error("[JOIN] ========== FAILED: Join button not found ==========")
                 logger.error(f"[JOIN] Current URL: {self.page.url}")
                 self.state.errors.append("Join button not found")
                 return False
@@ -1876,8 +1875,8 @@ class GoogleMeetController:
                 aria_label = await camera_button.get_attribute("aria-label") or ""
                 aria_label_lower = aria_label.lower()
 
-                # Determine current state - if label says "turn off", camera is currently ON
-                camera_currently_on = "turn off" in aria_label_lower or "stop" in aria_label_lower
+                # Determine current state - if label says "turn of", camera is currently ON
+                camera_currently_on = "turn of" in aria_label_lower or "stop" in aria_label_lower
 
                 if camera_currently_on != camera_on:
                     await camera_button.click()
@@ -2058,7 +2057,7 @@ class GoogleMeetController:
         try:
             # First, find the device in the browser's device list
             kind = "audioinput" if device_type == "microphone" else "audiooutput"
-            js_find_device = f"""
+            js_find_device = """
             async () => {{
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const matches = devices.filter(d => d.kind === '{kind}');
@@ -2100,7 +2099,7 @@ class GoogleMeetController:
             await asyncio.sleep(0.3)
 
             # Step 3: Find and click the MeetBot option using stable selectors
-            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5Ff"] contains device name
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
             is_speaker = device_type == "speaker"
             js_click_option = """
             async (args) => {
@@ -2109,7 +2108,7 @@ class GoogleMeetController:
                 const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
 
                 for (const item of menuItems) {
-                    // Get the device name from span[jsname="K4r5Ff"]
+                    // Get the device name from span[jsname="K4r5F"]
                     const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
                     if (!nameSpan) continue;
 
@@ -2235,14 +2234,14 @@ class GoogleMeetController:
             await asyncio.sleep(0.3)
 
             # Step 3: Find and click the MeetBot option using stable selectors
-            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5Ff"] contains device name
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
             js_click_option = """
             async (searchText) => {
                 // Find all menu items with role="menuitemradio" and data-device-id
                 const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
 
                 for (const item of menuItems) {
-                    // Get the device name from span[jsname="K4r5Ff"]
+                    // Get the device name from span[jsname="K4r5F"]
                     const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
                     if (!nameSpan) continue;
 
@@ -2279,7 +2278,7 @@ class GoogleMeetController:
             # Step 3: Try using JavaScript to programmatically select the camera
             # This uses the MediaDevices API to request the specific camera
             logger.info("[CAMERA] Attempting programmatic camera selection via JS...")
-            js_select_camera = f"""
+            js_select_camera = """
             async () => {{
                 try {{
                     // Get the MeetBot device
@@ -2357,7 +2356,7 @@ class GoogleMeetController:
                             dialog_found = True
                             logger.info(f"Chrome sync dialog detected: {selector}")
                             break
-                    except:
+                    except Exception:
                         pass
 
             if not dialog_found:
@@ -2925,7 +2924,7 @@ class GoogleMeetController:
             "remove",
             "more options",
             "more actions",
-            "turn off",
+            "turn of",
             "turn on",
             "present",
             "presentation",
@@ -3010,7 +3009,7 @@ class GoogleMeetController:
                     // UI keywords to filter out (lowercase)
                     const uiKeywords = [
                         'mute', 'unmute', 'pin', 'unpin', 'remove', 'more options',
-                        'more actions', 'turn off', 'turn on', 'present', 'presentation',
+                        'more actions', 'turn of', 'turn on', 'present', 'presentation',
                         'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting',
                         'contributors', 'in the meeting', 'waiting to join'
                     ];
@@ -3315,7 +3314,9 @@ class GoogleMeetController:
 
         # Also run orphan cleanup to catch anything else
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+            from tool_modules.aa_meet_bot.src.virtual_devices import (
+                cleanup_orphaned_meetbot_devices,
+            )
 
             results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
             if results.get("removed_modules") or results.get("killed_processes"):

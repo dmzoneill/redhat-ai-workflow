@@ -72,8 +72,11 @@ class SkillErrorRecovery:
                 if learned and "patterns" in learned:
                     # Merge learned patterns with defaults
                     default_patterns.update(learned["patterns"])
-            except Exception:
-                pass  # Use defaults if memory read fails
+            except Exception as e:
+                # Log but continue with defaults
+                import logging
+
+                logging.getLogger(__name__).debug(f"Could not load learned patterns: {e}")
 
         return default_patterns
 
@@ -213,7 +216,10 @@ class SkillErrorRecovery:
 
             return similar[:5]  # Return last 5 similar fixes
 
-        except Exception:
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).debug(f"Could not get similar fixes: {e}")
             return []
 
     async def prompt_user_for_action(self, error_info: dict, ask_question_fn=None) -> dict:
@@ -406,8 +412,11 @@ class SkillErrorRecovery:
             else:
                 self.memory.increment("learned/skill_error_fixes", f"stats.{action}_failed")
 
-        except Exception:
-            pass  # Best-effort logging
+        except Exception as e:
+            # Best-effort logging - don't fail the main operation
+            import logging
+
+            logging.getLogger(__name__).debug(f"Could not log fix to memory: {e}")
 
     def apply_auto_fix(self, skill_path: str, step_name: str, fix_code: str) -> dict:
         """

@@ -307,14 +307,22 @@ export class SkillWebSocketClient {
     skill.currentStepName = stepName;
     skill.currentStepDescription = description;
 
-    if (skill.steps[stepIndex]) {
-      skill.steps[stepIndex] = {
-        index: stepIndex,
-        name: stepName,
-        description,
-        status: 'running',
-      };
+    // Ensure step exists in array (expand if needed)
+    while (skill.steps.length <= stepIndex) {
+      skill.steps.push({
+        index: skill.steps.length,
+        name: '',
+        description: '',
+        status: 'pending' as const,
+      });
     }
+    
+    skill.steps[stepIndex] = {
+      index: stepIndex,
+      name: stepName,
+      description,
+      status: 'running',
+    };
 
     this._onSkillUpdate.fire(skill);
     this._onStepUpdate.fire({ skillId, step: skill.steps[stepIndex] });
@@ -333,10 +341,9 @@ export class SkillWebSocketClient {
     if (skill.steps[stepIndex]) {
       skill.steps[stepIndex].status = 'completed';
       skill.steps[stepIndex].durationMs = durationMs;
+      this._onSkillUpdate.fire(skill);
+      this._onStepUpdate.fire({ skillId, step: skill.steps[stepIndex] });
     }
-
-    this._onSkillUpdate.fire(skill);
-    this._onStepUpdate.fire({ skillId, step: skill.steps[stepIndex] });
   }
 
   private handleStepFailed(data: Record<string, unknown>): void {
@@ -352,10 +359,9 @@ export class SkillWebSocketClient {
     if (skill.steps[stepIndex]) {
       skill.steps[stepIndex].status = 'failed';
       skill.steps[stepIndex].error = error;
+      this._onSkillUpdate.fire(skill);
+      this._onStepUpdate.fire({ skillId, step: skill.steps[stepIndex] });
     }
-
-    this._onSkillUpdate.fire(skill);
-    this._onStepUpdate.fire({ skillId, step: skill.steps[stepIndex] });
   }
 
   private handleSkillEnded(data: Record<string, unknown>): void {

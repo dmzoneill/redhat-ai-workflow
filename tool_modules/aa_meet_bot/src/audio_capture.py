@@ -7,14 +7,11 @@ Uses shared memory ring buffer for minimal latency.
 
 import asyncio
 import logging
-import mmap
 import os
-import struct
 import time
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
-from typing import AsyncIterator, Callable, Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -224,7 +221,7 @@ class PulseAudioCapture:
             # Start reader task (track it for cleanup)
             self._read_task = asyncio.create_task(self._read_loop())
 
-            logger.info(f"Audio capture started")
+            logger.info("Audio capture started")
             return True
 
         except Exception as e:

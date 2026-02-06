@@ -1,0 +1,203 @@
+# Skill: Slop Scan Now
+# Trigger a slop scan via D-Bus to the running daemon
+
+name: slop_scan_now
+description: |
+  Trigger a slop code quality scan via D-Bus.
+  
+  The slop daemon must be running (systemctl --user start bot-slop).
+  This skill sends a scan_now command to the daemon, which runs all
+  analysis loops (security, dead code, complexity, etc.).
+  
+  Use this to refresh findings before running slop_fix.
+
+version: "1.0"
+
+inputs:
+  - name: wait_for_completion
+    type: boolean
+    required: false
+    default: true
+    description: "If true, wait for scan to complete before returning"
+
+  - name: timeout_seconds
+    type: integer
+    required: false
+    default: 600
+    description: "Maximum time to wait for scan completion (default 10 minutes)"
+
+steps:
+  - name: check_daemon_running
+    description: "Check if slop daemon is running"
+    compute: |
+      import subprocess
+      
+      try:
+          result = subprocess.run(
+              ["systemctl", "--user", "is-active", "bot-slop"],
+              capture_output=True,
+              text=True,
+              timeout=5
+          )
+          if result.returncode == 0 and result.stdout.strip() == "active":
+              result = "✅ Slop daemon is running"
+          else:
+              result = "❌ Slop daemon is not running. Start with: systemctl --user start bot-slop"
+      except Exception as e:
+          result = f"❌ Failed to check daemon status: {e}"
+    output: daemon_status
+
+  - name: check_if_not_running
+    description: "Skip if daemon not running"
+    compute: |
+      result = "not running" in daemon_status or "❌" in daemon_status
+    output: should_skip
+
+  - name: trigger_scan
+    description: "Send scan_now command via D-Bus"
+    condition: "not should_skip"
+    compute: |
+      import subprocess
+      import json
+      
+      try:
+          # Call D-Bus method to trigger scan
+          result = subprocess.run(
+              [
+                  "busctl", "--user", "call",
+                  "com.aiworkflow.BotSlop",
+                  "/com/aiworkflow/BotSlop",
+                  "com.aiworkflow.BotSlop",
+                  "HandleMethod", "ss", "scan_now", "{}"
+              ],
+              capture_output=True,
+              text=True,
+              timeout=30
+          )
+          
+          if result.returncode == 0:
+              result = "✅ Scan triggered successfully"
+          else:
+              result = f"❌ Failed to trigger scan: {result.stderr}"
+      except subprocess.TimeoutExpired:
+          result = "❌ D-Bus call timed out"
+      except Exception as e:
+          result = f"❌ Failed to trigger scan: {e}"
+    output: trigger_result
+
+  - name: wait_for_scan
+    description: "Wait for scan to complete"
+    condition: "not should_skip and inputs.wait_for_completion"
+    compute: |
+      import subprocess
+      import time
+      import json
+      
+      timeout = inputs.get('timeout_seconds', 600)
+      start_time = time.time()
+      poll_interval = 10  # Check every 10 seconds
+      
+      result = "Waiting for scan to complete..."
+      
+      while time.time() - start_time < timeout:
+          try:
+              # Check scan status via D-Bus
+              status_result = subprocess.run(
+                  [
+                      "busctl", "--user", "call",
+                      "com.aiworkflow.BotSlop",
+                      "/com/aiworkflow/BotSlop",
+                      "com.aiworkflow.BotSlop",
+                      "HandleMethod", "ss", "get_stats", "{}"
+                  ],
+                  capture_output=True,
+                  text=True,
+                  timeout=10
+              )
+              
+              if status_result.returncode == 0:
+                  # Parse response to check if scan is in progress
+                  output = status_result.stdout
+                  if "scan_in_progress" in output and "false" in output.lower():
+                      elapsed = int(time.time() - start_time)
+                      result = f"✅ Scan completed in {elapsed} seconds"
+                      break
+              
+              time.sleep(poll_interval)
+              
+          except Exception as e:
+              # Continue waiting on transient errors
+              time.sleep(poll_interval)
+      else:
+          result = f"⚠️ Scan still in progress after {timeout} seconds"
+    output: wait_result
+
+  - name: get_stats
+    description: "Get scan statistics"
+    condition: "not should_skip"
+    compute: |
+      import subprocess
+      import json
+      
+      try:
+          result = subprocess.run(
+              [
+                  "busctl", "--user", "call",
+                  "com.aiworkflow.BotSlop",
+                  "/com/aiworkflow/BotSlop",
+                  "com.aiworkflow.BotSlop",
+                  "HandleMethod", "ss", "get_stats", "{}"
+              ],
+              capture_output=True,
+              text=True,
+              timeout=10
+          )
+          
+          if result.returncode == 0:
+              # Extract stats from D-Bus response
+              result = f"Stats retrieved: {result.stdout[:500]}"
+          else:
+              result = "Could not retrieve stats"
+      except Exception as e:
+          result = f"Could not retrieve stats: {e}"
+    output: stats_result
+
+  - name: log_execution
+    description: "Log the execution to session"
+    tool: memory_session_log
+    args:
+      action: "Slop scan triggered"
+      details: "{{ trigger_result }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## Slop Scan Results
+      
+      ### Daemon Status
+      {{ daemon_status }}
+      
+      {% if should_skip %}
+      Scan skipped - daemon not running.
+      
+      Start the daemon with:
+      ```bash
+      systemctl --user start bot-slop
+      ```
+      {% else %}
+      ### Trigger Result
+      {{ trigger_result }}
+      
+      {% if inputs.wait_for_completion %}
+      ### Completion Status
+      {{ wait_result }}
+      {% endif %}
+      
+      ### Statistics
+      {{ stats_result }}
+      {% endif %}
+      
+      ---
+      Run `slop_fixable()` to see what can be auto-fixed.
+      Run `slop_fix()` to apply fixes.

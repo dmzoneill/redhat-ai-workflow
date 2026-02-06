@@ -135,7 +135,7 @@ class GPUTextRenderer:
 
     Usage:
         renderer = GPUTextRenderer(1920, 1080)
-        renderer.load_font("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 16)
+        renderer.load_font("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.tt", 16)
 
         # Render text to numpy array
         frame = renderer.render_text_to_array([
@@ -932,9 +932,9 @@ class VideoTextRenderer:
 
     # Standard monospace fonts to try
     FONT_PATHS = [
-        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.tt",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.tt",
+        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt",
         "/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf",
     ]
 
@@ -1210,7 +1210,7 @@ def render_text_gpu(
     width: int,
     height: int,
     text_items: List[Tuple[str, int, int, Tuple[int, int, int]]],
-    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    font_path: str = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.tt",
     font_size: int = 16,
     background: Tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
@@ -1234,11 +1234,11 @@ if __name__ == "__main__":
 
     # Find a monospace font
     font_paths = [
-        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/google-droid-sans-mono-fonts/DroidSansMono.ttf",
-        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf",
-        "/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf",
+        "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.tt",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.tt",
+        "/usr/share/fonts/google-droid-sans-mono-fonts/DroidSansMono.tt",
+        "/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt",
+        "/usr/share/fonts/google-noto-vf/NotoSansMono[wght].tt",
     ]
 
     font_path = None
@@ -1292,8 +1292,8 @@ if __name__ == "__main__":
     fps = iterations / elapsed
     ms_per_frame = (elapsed / iterations) * 1000
 
-    print(f"\nBenchmark results:")
-    print(f"  Resolution: 1280x720")
+    print("\nBenchmark results:")
+    print("  Resolution: 1280x720")
     print(f"  Text items: {len(text_items)}")
     print(f"  Time per frame: {ms_per_frame:.2f}ms")
     print(f"  Potential FPS: {fps:.1f}")
@@ -1305,7 +1305,7 @@ if __name__ == "__main__":
     # Convert RGBA to BGR for saving
     bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
     cv2.imwrite("/tmp/gpu_text_test.png", bgr)
-    print(f"\nSaved test image to /tmp/gpu_text_test.png")
+    print("\nSaved test image to /tmp/gpu_text_test.png")
 
     renderer.cleanup()
     print("Done!")

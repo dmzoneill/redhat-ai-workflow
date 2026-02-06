@@ -12,7 +12,6 @@ import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
-from typing import Any
 
 from fastmcp import FastMCP
 from mcp.types import TextContent

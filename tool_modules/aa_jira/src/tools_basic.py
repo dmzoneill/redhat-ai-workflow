@@ -31,16 +31,21 @@ def _get_jira_url() -> str:
 logger = logging.getLogger(__name__)
 
 
-async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
+async def run_rh_issue(args: list[str], timeout: int = 30, env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run rh-issue command through user's shell environment.
 
     Uses unified run_cmd which sources ~/.bashrc for:
     - JIRA_JPAT and other env vars
     - pipenv virtualenv access (needs HOME)
     - User's PATH with ~/bin
+
+    Args:
+        args: Command arguments to pass to rh-issue
+        timeout: Command timeout in seconds
+        env: Additional environment variables to set (e.g., JIRA_PROJECT_KEY)
     """
     # Use unified run_cmd (sources shell by default)
-    success, output = await run_cmd(["rh-issue"] + args, timeout=timeout)
+    success, output = await run_cmd(["rh-issue"] + args, timeout=timeout, env=env)
 
     if not success:
         # Check for common auth issues
@@ -428,6 +433,7 @@ async def _jira_create_issue_impl(
     components: str = "",
     project: str = "AAP",
     convert_markdown: bool = True,
+    priority: str = "",
 ) -> str:
     """
     Create a new Jira issue using the rh-issue CLI with --input-file.
@@ -453,6 +459,7 @@ async def _jira_create_issue_impl(
         components: Comma-separated components (e.g., "Automation Analytics")
         project: Jira project key (default: AAP)
         convert_markdown: Whether to convert Markdown to Jira markup (default: True)
+        priority: Issue priority - "blocker", "critical", "major", "normal", "minor" (optional)
 
     Returns:
         The created issue key and details.
@@ -464,7 +471,8 @@ async def _jira_create_issue_impl(
             description="## Overview\\n\\nSpeed up test suite with parallel execution.",
             user_story="As a developer, I want faster test runs.",
             acceptance_criteria="- Tests run in parallel\\n- No flaky tests",
-            labels="testing,performance"
+            labels="testing,performance",
+            priority="major"
         )
     """
     import tempfile
@@ -525,10 +533,53 @@ async def _jira_create_issue_impl(
         if story_points is not None and story_points > 0:
             args.extend(["--story-points", str(story_points)])
 
-        success, output = await run_rh_issue(args, timeout=60)
+        # Set project via environment variable (rh-issue reads JIRA_PROJECT_KEY)
+        env = {"JIRA_PROJECT_KEY": project} if project else None
+
+        success, output = await run_rh_issue(args, timeout=60, env=env)
     finally:
         # Clean up temp file
         Path(input_file).unlink(missing_ok=True)
+
+    # If creation succeeded and priority was specified, set it
+    if success and priority:
+        import re
+
+        priority_normalized = priority.lower().strip()
+
+        # Map alternative priority names to rh-issue expected values
+        priority_mapping = {
+            # Standard rh-issue values
+            "blocker": "blocker",
+            "critical": "critical",
+            "major": "major",
+            "normal": "normal",
+            "minor": "minor",
+            # Alternative names (Jira UI style)
+            "highest": "blocker",
+            "high": "critical",
+            "medium": "major",
+            "low": "minor",
+            "lowest": "minor",
+        }
+
+        mapped_priority = priority_mapping.get(priority_normalized)
+
+        if mapped_priority:
+            # Extract issue key from output
+            issue_key_match = re.search(r"([A-Z]+-\d+)", output)
+            if issue_key_match:
+                issue_key = issue_key_match.group(1)
+                priority_success, priority_output = await run_rh_issue(
+                    ["set-priority", issue_key, mapped_priority], timeout=30
+                )
+                if priority_success:
+                    output += f"\n\n✅ Priority set to: {mapped_priority}"
+                else:
+                    output += f"\n\n⚠️ Issue created but failed to set priority: {priority_output}"
+        else:
+            valid_options = "blocker, critical, major, normal, minor (or: highest, high, medium, low, lowest)"
+            output += f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
 
     return _parse_create_issue_result(success, output)
 
@@ -888,6 +939,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         components: str = "",
         project: str = "AAP",
         convert_markdown: bool = True,
+        priority: str = "",
     ) -> str:
         """
         Create a new Jira issue using the rh-issue CLI with --input-file.
@@ -913,6 +965,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
             components: Comma-separated components (e.g., "Automation Analytics")
             project: Jira project key (default: AAP)
             convert_markdown: Whether to convert Markdown to Jira markup (default: True)
+            priority: Issue priority - "blocker", "critical", "major", "normal", "minor" (optional)
 
         Returns:
             The created issue key and details.
@@ -922,7 +975,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
                 issue_type="task",
                 summary="Fix Slack bot issue creation",
                 description="The @me jira command fails to create issues.",
-                problem_description="create_jira_issue skill missing required AAP fields"
+                problem_description="create_jira_issue skill missing required AAP fields",
+                priority="major"
             )
         """
         return await _jira_create_issue_impl(
@@ -939,6 +993,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
             components,
             project,
             convert_markdown,
+            priority,
         )
 
     @auto_heal()

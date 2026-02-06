@@ -4,6 +4,57 @@
 
 **IMPORTANT:** Multiple Cursor chats share the same MCP server. You MUST track your session_id to maintain separate context per chat.
 
+## Bootstrap Context - AUTO-LOADED
+
+When you call `session_start()`, the system automatically:
+
+1. **Classifies intent** from the session name/project context
+2. **Suggests a persona** based on the detected intent
+3. **Auto-loads the persona** if confidence > 80%
+4. **Shows current work** (active issues, branches)
+5. **Recommends next actions** based on intent
+
+### What Bootstrap Returns
+
+```
+## 🎯 Bootstrap Context
+
+**Detected Intent:** code_lookup (85% confidence)
+**Auto-loading Persona:** developer (confidence: 85%)
+  ✅ Switched from researcher to developer
+**Active Issues:** AAP-12345, AAP-12346
+**Recommended Actions:**
+  - Use code_search to find relevant code
+  - Check memory for similar patterns
+```
+
+### Acting on Bootstrap Context
+
+After `session_start()` returns, **follow the recommended actions**:
+
+| Intent | Recommended Follow-up |
+|--------|----------------------|
+| `code_lookup` | Call `memory_query("...")` with code-related question |
+| `troubleshooting` | Call `check_known_issues()` for known fixes |
+| `issue_context` | Call `jira_view_issue()` for issue details |
+| `status_check` | Review the current work shown in bootstrap |
+| `documentation` | Call `inscope_ask()` for documentation |
+
+### If Persona Wasn't Auto-Loaded
+
+If the suggested persona confidence is below 80%, the bootstrap shows:
+
+```
+**Suggested Persona:** incident (confidence: 70% - below auto-load threshold)
+```
+
+In this case, **decide based on the user's request** whether to load it:
+
+```json
+// If the task matches the suggestion, load it manually
+CallMcpTool(toolName: "persona_load", arguments: {"persona": "incident"})
+```
+
 ## MCP Tool Call Syntax
 
 All session tools are called via `CallMcpTool` with the server `project-0-redhat-ai-workflow-aa_workflow`.
@@ -130,3 +181,76 @@ Load a persona when the task matches their expertise:
 - **Log important actions**: `memory_session_log("action", "details")`
 - **Track active work**: `memory_append("state/current_work", "active_issues", '{...}')`
 - **Save learned patterns**: `memory_write("learned/patterns", content)` for reusable knowledge
+
+## Unified Memory Query
+
+**NEW:** Use `memory_ask` for intelligent context gathering across all sources:
+
+### Memory Source Latency Classes
+
+Sources are categorized by latency to keep bootstrap fast:
+
+| Class | Sources | Latency | Used In |
+|-------|---------|---------|---------|
+| **Fast** | yaml, code, slack | <2s | Bootstrap, default queries |
+| **Slow** | inscope, jira, gitlab, github, calendar, gmail, gdrive | >2s | On-demand only |
+
+**Bootstrap only queries fast sources** to keep session startup under 2 seconds.
+
+### Querying Memory
+
+```json
+// Auto-selects FAST sources only (default)
+CallMcpTool(
+  server: "project-0-redhat-ai-workflow-aa_workflow",
+  toolName: "memory_ask",
+  arguments: {"question": "What am I working on?"}
+)
+
+// Include slow sources for comprehensive results
+CallMcpTool(
+  toolName: "memory_ask",
+  arguments: {
+    "question": "How do I configure RDS?",
+    "include_slow": true  // Includes inscope, jira, etc.
+  }
+)
+
+// Query specific slow sources explicitly
+CallMcpTool(
+  toolName: "memory_ask",
+  arguments: {
+    "question": "What's the status of AAP-12345?",
+    "sources": "jira"  // Explicit source bypasses latency filter
+  }
+)
+
+// Query InScope for documentation
+CallMcpTool(
+  toolName: "memory_ask",
+  arguments: {
+    "question": "Konflux release process",
+    "sources": "inscope"
+  }
+)
+```
+
+### When to Use Each Approach
+
+| Situation | Approach |
+|-----------|----------|
+| Quick context check | Default (fast sources only) |
+| Need documentation | `sources="inscope"` |
+| Need issue details | `sources="jira"` |
+| Need MR/pipeline info | `sources="gitlab"` |
+| Comprehensive search | `include_slow=true` |
+| Simple YAML read | Use `memory_read` directly |
+
+### memory_ask Output
+
+Returns LLM-friendly markdown with:
+- **Intent classification** at the top
+- **Results grouped by source**
+- **Relevance scores** for weighting
+- **Code blocks** preserved
+- **Tip** about slow sources if not included

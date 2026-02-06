@@ -133,9 +133,10 @@ class RetryConfig:
         return True
 
 
-# Project paths
-PROJECT_DIR = Path(__file__).parent.parent.parent.parent
-SKILLS_DIR = PROJECT_DIR / "skills"
+# Project paths - use common module for consistency
+from tool_modules.common import PROJECT_ROOT
+
+SKILLS_DIR = PROJECT_ROOT / "skills"
 
 # Import ConfigManager for thread-safe config access
 from server.config_manager import CONFIG_FILE
@@ -568,7 +569,9 @@ class CronScheduler:
 
         # Emit toast notification for job start
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_started
+            from tool_modules.aa_workflow.src.notification_emitter import (
+                notify_cron_job_started,
+            )
 
             notify_cron_job_started(job_name, skill)
         except Exception:
@@ -663,11 +666,15 @@ class CronScheduler:
         # Emit toast notification for job completion
         try:
             if success:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_completed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_cron_job_completed,
+                )
 
                 notify_cron_job_completed(job_name, skill, duration_seconds)
             else:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_failed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_cron_job_failed,
+                )
 
                 notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
         except Exception:
@@ -761,7 +768,6 @@ class CronScheduler:
         Returns:
             Tuple of (remediation_applied, success)
         """
-        import asyncio
 
         if failure_type == "auth":
             logger.info(f"Job {job_name}: Applying auth remediation (kube_login)")

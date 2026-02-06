@@ -707,11 +707,42 @@ async def _google_calendar_quick_meeting_impl(
 
         when_lower = when.lower()
 
-        # Extract time component
-        time_match = re.search(r"(\d{1,2})[:\.]?(\d{2})?", when)
+        # Check for ISO format first (e.g., "2026-02-10T15:00:00" or "2026-02-10 15:00")
+        iso_match = re.match(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})", when)
+        if iso_match:
+            # Full ISO datetime - parse directly
+            try:
+                if "T" in when:
+                    start_time = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                    if start_time.tzinfo is None:
+                        start_time = start_time.replace(tzinfo=tz)
+                    else:
+                        start_time = start_time.astimezone(tz)
+                else:
+                    start_time = datetime.strptime(when[:16], "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+
+                return await _google_calendar_schedule_meeting_impl(
+                    title=title,
+                    attendee_email=attendee_email,
+                    start_time=start_time.isoformat(),
+                    duration_minutes=duration_minutes,
+                    auto_find_slot=False,
+                )
+            except ValueError:
+                pass  # Fall through to natural language parsing
+
+        # Extract time component - look for time after T, space, or "at"
+        # Patterns: "15:00", "3pm", "3:30pm", "at 15:00"
+        time_match = re.search(r"(?:T|\s|at\s*)(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)?", when, re.IGNORECASE)
         if time_match:
             hour = int(time_match.group(1))
             minute = int(time_match.group(2) or 0)
+            ampm = time_match.group(3)
+            if ampm:
+                if ampm.lower() == "pm" and hour < 12:
+                    hour += 12
+                elif ampm.lower() == "am" and hour == 12:
+                    hour = 0
         else:
             hour, minute = 15, 0  # Default to 3pm if no time specified
 
@@ -736,7 +767,7 @@ async def _google_calendar_quick_meeting_impl(
             days_ahead = (4 - now.weekday()) % 7 or 7
             target_date = now + timedelta(days=days_ahead)
         elif re.match(r"\d{4}-\d{2}-\d{2}", when):
-            # Full date provided
+            # Date provided (YYYY-MM-DD) without full ISO time
             try:
                 target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(tzinfo=tz)
             except ValueError:

@@ -262,7 +262,6 @@ class AudioWakeWordDetector:
         """Initialize the wake word model."""
         try:
             # Try to import openwakeword
-            import openwakeword
             from openwakeword.model import Model
 
             # Load model - using a pre-trained model that can detect "hey" patterns

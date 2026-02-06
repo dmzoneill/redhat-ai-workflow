@@ -17,7 +17,6 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import AsyncIterator, List, Optional
 
 from tool_modules.common import PROJECT_ROOT
@@ -360,7 +359,7 @@ The user message contains a QUESTION. Answer it."""
 
             # Add recent meeting transcript (what others are saying)
             if context_before:
-                prompt_parts.append(f"\n## Recent meeting discussion:")
+                prompt_parts.append("\n## Recent meeting discussion:")
                 for line in context_before[-10:]:  # Last 10 lines of transcript
                     prompt_parts.append(f"  {line}")
 

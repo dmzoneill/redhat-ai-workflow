@@ -151,7 +151,10 @@ async def fetch_sprint_issues(config: SprintBotConfig) -> list[dict[str, Any]]:
     # Import Jira tools - these are MCP tools so we call them via tool_exec
     # For now, we'll use a direct import approach
     try:
-        from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint, jira_get_sprint_issues
+        from tool_modules.aa_jira.src.tools_basic import (
+            jira_get_active_sprint,
+            jira_get_sprint_issues,
+        )
 
         # Get active sprint
         sprint_result = await jira_get_active_sprint(project=config.jira_project)
@@ -406,7 +409,7 @@ def process_next_issue(state: SprintState, config: SprintBotConfig) -> bool:
             TimelineEvent(
                 timestamp=datetime.now().isoformat(),
                 action="chat_created",
-                description=f"Cursor chat created",
+                description="Cursor chat created",
                 chat_link=chat_id,
             ),
         )
@@ -565,7 +568,7 @@ def approve_issue(issue_key: str) -> dict[str, Any]:
         return {
             "success": False,
             "message": f"Issue {issue_key} is not actionable (status: {issue.jira_status}). "
-            f"Bot only works on issues in New/Refinement/Backlog.",
+            "Bot only works on issues in New/Refinement/Backlog.",
         }
 
     success = update_issue_status(issue_key, "approved")

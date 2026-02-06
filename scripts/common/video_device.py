@@ -42,7 +42,16 @@ def find_existing_device() -> Optional[tuple[str, int]]:
     Returns:
         Tuple of (device_path, device_number) or None if not found
     """
-    result = subprocess.run(["v4l2-ctl", "--list-devices"], capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "--list-devices"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.debug(f"v4l2-ctl not available or timed out: {e}")
+        return None
     if result.returncode != 0:
         return None
 
@@ -89,7 +98,16 @@ def get_device_format(device_path: str) -> tuple[int, int]:
     Returns:
         Tuple of (width, height), or (0, 0) if unable to determine
     """
-    result = subprocess.run(["v4l2-ctl", "-d", device_path, "--get-fmt-video"], capture_output=True, text=True)
+    try:
+        result = subprocess.run(
+            ["v4l2-ctl", "-d", device_path, "--get-fmt-video"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.debug(f"Could not get device format: {e}")
+        return (0, 0)
 
     width, height = 0, 0
     for line in result.stdout.split("\n"):
@@ -126,8 +144,12 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
     logger.info(f"Setting up video device for {width}x{height}...")
 
     # Check if v4l2loopback module is loaded
-    result = subprocess.run(["lsmod"], capture_output=True, text=True)
-    module_loaded = "v4l2loopback" in result.stdout
+    try:
+        result = subprocess.run(["lsmod"], capture_output=True, text=True, timeout=10)
+        module_loaded = "v4l2loopback" in result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        logger.warning(f"Could not check loaded modules: {e}")
+        module_loaded = False
 
     # Try to find existing device and check its format
     existing = find_existing_device()
@@ -262,8 +284,6 @@ def unload_v4l2loopback() -> bool:
     Returns:
         True if successful, False otherwise
     """
-    global _active_device_path, _active_v4l2_fd
-
     # Clean up our state first
     cleanup_device()
 

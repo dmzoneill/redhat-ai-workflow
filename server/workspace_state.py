@@ -341,43 +341,42 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
             return {}
 
         # Use Python sqlite3 directly (faster than subprocess)
-        conn = sqlite3.connect(str(global_db), timeout=10)
-        cursor = conn.cursor()
-
+        # Use context manager to ensure connection is always closed
         chat_issue_sets: dict[str, set[str]] = {}
         issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
 
-        # Query each chat ID separately to avoid huge result sets
-        for cid in chat_ids:
-            try:
-                # Query for this specific chat's messages containing AAP-
-                cursor.execute(
-                    "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? AND value LIKE '%AAP-%' LIMIT 100",
-                    (f"bubbleId:{cid}:%",),
-                )
+        with sqlite3.connect(str(global_db), timeout=10) as conn:
+            cursor = conn.cursor()
 
-                for key, value in cursor.fetchall():
-                    try:
-                        # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
-                        parts = key.split(":")
-                        if len(parts) >= 2:
-                            chat_id = parts[1]
-                            data = json.loads(value)
-                            text = data.get("text", "")
-                            if text:
-                                matches = issue_pattern.findall(text)
-                                if matches:
-                                    if chat_id not in chat_issue_sets:
-                                        chat_issue_sets[chat_id] = set()
-                                    for m in matches:
-                                        chat_issue_sets[chat_id].add(m.upper())
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-            except sqlite3.Error as e:
-                logger.debug(f"Error querying chat {cid}: {e}")
-                continue
+            # Query each chat ID separately to avoid huge result sets
+            for cid in chat_ids:
+                try:
+                    # Query for this specific chat's messages containing AAP-
+                    cursor.execute(
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? AND value LIKE '%AAP-%' LIMIT 100",
+                        (f"bubbleId:{cid}:%",),
+                    )
 
-        conn.close()
+                    for key, value in cursor.fetchall():
+                        try:
+                            # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
+                            parts = key.split(":")
+                            if len(parts) >= 2:
+                                chat_id = parts[1]
+                                data = json.loads(value)
+                                text = data.get("text", "")
+                                if text:
+                                    matches = issue_pattern.findall(text)
+                                    if matches:
+                                        if chat_id not in chat_issue_sets:
+                                            chat_issue_sets[chat_id] = set()
+                                        for m in matches:
+                                            chat_issue_sets[chat_id].add(m.upper())
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                except sqlite3.Error as e:
+                    logger.debug(f"Error querying chat {cid}: {e}")
+                    continue
 
         # Return sorted, comma-separated issue keys for each chat
         result_map = {}
@@ -436,6 +435,7 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
     """
     import re
     import subprocess
+    import uuid
 
     result = {
         "chat_id": chat_id,
@@ -450,13 +450,20 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
         },
     }
 
+    # Validate chat_id is a valid UUID to prevent SQL injection
+    try:
+        uuid.UUID(chat_id)
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}")
+        return result
+
     try:
         global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
         if not global_db.exists():
             logger.debug("Cursor global storage not found")
             return result
 
-        # Query all bubbles for this chat
+        # Query all bubbles for this chat - chat_id is validated as UUID above
         query = f"SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:{chat_id}:%'"
         db_result = subprocess.run(
             ["sqlite3", str(global_db), query],
@@ -708,9 +715,7 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
             return {}
 
         # Use Python sqlite3 directly (faster than subprocess)
-        conn = sqlite3.connect(str(global_db), timeout=10)
-        cursor = conn.cursor()
-
+        # Use context manager to ensure connection is always closed
         # Patterns to detect persona loads (ordered by specificity)
         patterns = [
             # persona_load("developer") or persona_load('developer')
@@ -728,48 +733,49 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
         # Collect all persona mentions per chat with their position (to find last one)
         chat_personas: dict[str, list[tuple[int, str]]] = {}
 
-        # Query each chat ID separately
-        for cid in chat_ids:
-            try:
-                cursor.execute(
-                    """SELECT key, value FROM cursorDiskKV
-                       WHERE key LIKE ?
-                       AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')
-                       LIMIT 50""",
-                    (f"bubbleId:{cid}:%",),
-                )
+        with sqlite3.connect(str(global_db), timeout=10) as conn:
+            cursor = conn.cursor()
 
-                for key, value in cursor.fetchall():
-                    try:
-                        parts = key.split(":")
-                        if len(parts) >= 3:
-                            chat_id = parts[1]
-                            try:
-                                bubble_id = int(parts[2]) if parts[2].isdigit() else 0
-                            except (ValueError, IndexError):
-                                bubble_id = 0
+            # Query each chat ID separately
+            for cid in chat_ids:
+                try:
+                    cursor.execute(
+                        """SELECT key, value FROM cursorDiskKV
+                           WHERE key LIKE ?
+                           AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')
+                           LIMIT 50""",
+                        (f"bubbleId:{cid}:%",),
+                    )
 
-                            data = json.loads(value)
-                            text = data.get("text", "")
-                            if not text:
-                                continue
+                    for key, value in cursor.fetchall():
+                        try:
+                            parts = key.split(":")
+                            if len(parts) >= 3:
+                                chat_id = parts[1]
+                                try:
+                                    bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                                except (ValueError, IndexError):
+                                    bubble_id = 0
 
-                            for pattern in patterns:
-                                matches = pattern.findall(text)
-                                for match in matches:
-                                    persona = match.lower()
-                                    if persona in VALID_PERSONAS:
-                                        if chat_id not in chat_personas:
-                                            chat_personas[chat_id] = []
-                                        chat_personas[chat_id].append((bubble_id, persona))
+                                data = json.loads(value)
+                                text = data.get("text", "")
+                                if not text:
+                                    continue
 
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-            except sqlite3.Error as e:
-                logger.debug(f"Error querying chat {cid} for personas: {e}")
-                continue
+                                for pattern in patterns:
+                                    matches = pattern.findall(text)
+                                    for match in matches:
+                                        persona = match.lower()
+                                        if persona in VALID_PERSONAS:
+                                            if chat_id not in chat_personas:
+                                                chat_personas[chat_id] = []
+                                            chat_personas[chat_id].append((bubble_id, persona))
 
-        conn.close()
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                except sqlite3.Error as e:
+                    logger.debug(f"Error querying chat {cid} for personas: {e}")
+                    continue
 
         # Return the last (highest bubble_id) persona for each chat
         result_map = {}
@@ -846,9 +852,7 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
             return {}
 
         # Use Python sqlite3 directly (faster than subprocess)
-        conn = sqlite3.connect(str(global_db), timeout=10)
-        cursor = conn.cursor()
-
+        # Use context manager to ensure connection is always closed
         # Build regex patterns for each project
         project_patterns = []
         for proj in VALID_PROJECTS:
@@ -865,54 +869,55 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
         # Collect all project mentions per chat
         chat_projects: dict[str, list[tuple[int, int, str]]] = {}
 
-        # Query each chat ID separately
-        for cid in chat_ids:
-            try:
-                # Build a simple query for this chat - check for project-related content
-                cursor.execute(
-                    """SELECT key, value FROM cursorDiskKV
-                       WHERE key LIKE ?
-                       AND (value LIKE '%project=%' OR value LIKE '%Project:%')
-                       LIMIT 50""",
-                    (f"bubbleId:{cid}:%",),
-                )
+        with sqlite3.connect(str(global_db), timeout=10) as conn:
+            cursor = conn.cursor()
 
-                for key, value in cursor.fetchall():
-                    try:
-                        parts = key.split(":")
-                        if len(parts) >= 3:
-                            chat_id = parts[1]
-                            try:
-                                bubble_id = int(parts[2]) if parts[2].isdigit() else 0
-                            except (ValueError, IndexError):
-                                bubble_id = 0
+            # Query each chat ID separately
+            for cid in chat_ids:
+                try:
+                    # Build a simple query for this chat - check for project-related content
+                    cursor.execute(
+                        """SELECT key, value FROM cursorDiskKV
+                           WHERE key LIKE ?
+                           AND (value LIKE '%project=%' OR value LIKE '%Project:%')
+                           LIMIT 50""",
+                        (f"bubbleId:{cid}:%",),
+                    )
 
-                            data = json.loads(value)
-                            text = data.get("text", "")
-                            if not text:
-                                continue
+                    for key, value in cursor.fetchall():
+                        try:
+                            parts = key.split(":")
+                            if len(parts) >= 3:
+                                chat_id = parts[1]
+                                try:
+                                    bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+                                except (ValueError, IndexError):
+                                    bubble_id = 0
 
-                            for pattern, priority in project_patterns:
-                                matches = pattern.findall(text)
-                                for match in matches:
-                                    project_name = match.lower()
-                                    for valid_proj in VALID_PROJECTS:
-                                        if valid_proj.lower() == project_name:
-                                            project_name = valid_proj
-                                            break
+                                data = json.loads(value)
+                                text = data.get("text", "")
+                                if not text:
+                                    continue
 
-                                    if project_name in VALID_PROJECTS:
-                                        if chat_id not in chat_projects:
-                                            chat_projects[chat_id] = []
-                                        chat_projects[chat_id].append((bubble_id, priority, project_name))
+                                for pattern, priority in project_patterns:
+                                    matches = pattern.findall(text)
+                                    for match in matches:
+                                        project_name = match.lower()
+                                        for valid_proj in VALID_PROJECTS:
+                                            if valid_proj.lower() == project_name:
+                                                project_name = valid_proj
+                                                break
 
-                    except (json.JSONDecodeError, ValueError):
-                        continue
-            except sqlite3.Error as e:
-                logger.debug(f"Error querying chat {cid} for projects: {e}")
-                continue
+                                        if project_name in VALID_PROJECTS:
+                                            if chat_id not in chat_projects:
+                                                chat_projects[chat_id] = []
+                                            chat_projects[chat_id].append((bubble_id, priority, project_name))
 
-        conn.close()
+                        except (json.JSONDecodeError, ValueError):
+                            continue
+                except sqlite3.Error as e:
+                    logger.debug(f"Error querying chat {cid} for projects: {e}")
+                    continue
 
         # Return the best project for each chat
         result_map = {}
@@ -1157,11 +1162,18 @@ def inject_context_to_cursor_chat(
                     else:
                         composer_data = json.loads(result.stdout.strip())
 
-                    # Generate a new chat ID if not provided
-                    if chat_id is None:
-                        import uuid
+                    # Generate a new chat ID if not provided, or validate provided one
+                    import uuid as uuid_module
 
-                        chat_id = str(uuid.uuid4())
+                    if chat_id is None:
+                        chat_id = str(uuid_module.uuid4())
+                    else:
+                        # Validate chat_id is a valid UUID to prevent SQL injection
+                        try:
+                            uuid_module.UUID(chat_id)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}")
+                            return False
 
                     # Build the context message
                     context_text = ""
@@ -1288,6 +1300,12 @@ class ChatSession:
     # Format: [{"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3}, ...]
     meeting_references: list[dict] = field(default_factory=list)
 
+    # Memory abstraction caches (per-session to avoid cross-chat interference)
+    # Intent classification cache: {query_hash: IntentClassification}
+    intent_cache: dict[str, dict] = field(default_factory=dict)
+    # Memory query cache: {query_hash: QueryResult}
+    memory_query_cache: dict[str, dict] = field(default_factory=dict)
+
     @property
     def tool_count(self) -> int:
         """Computed tool count: dynamic if available, else static.
@@ -1379,6 +1397,66 @@ class ChatSession:
             del self.tool_filter_cache[oldest_key]
 
         self.tool_filter_cache[key] = tools
+
+    # ==================== Memory Abstraction Cache Methods ====================
+
+    MAX_INTENT_CACHE_SIZE = 100
+    MAX_QUERY_CACHE_SIZE = 50
+
+    def cache_intent(self, query_hash: str, intent: dict) -> None:
+        """Cache an intent classification result.
+
+        Args:
+            query_hash: Hash of the query
+            intent: IntentClassification as dict
+        """
+        # Evict oldest entries if cache is full
+        while len(self.intent_cache) >= self.MAX_INTENT_CACHE_SIZE:
+            oldest_key = next(iter(self.intent_cache))
+            del self.intent_cache[oldest_key]
+
+        self.intent_cache[query_hash] = intent
+
+    def get_cached_intent(self, query_hash: str) -> dict | None:
+        """Get a cached intent classification.
+
+        Args:
+            query_hash: Hash of the query
+
+        Returns:
+            Cached IntentClassification as dict, or None if not cached
+        """
+        return self.intent_cache.get(query_hash)
+
+    def cache_memory_query(self, query_hash: str, result: dict) -> None:
+        """Cache a memory query result.
+
+        Args:
+            query_hash: Hash of the query
+            result: QueryResult as dict
+        """
+        # Evict oldest entries if cache is full
+        while len(self.memory_query_cache) >= self.MAX_QUERY_CACHE_SIZE:
+            oldest_key = next(iter(self.memory_query_cache))
+            del self.memory_query_cache[oldest_key]
+
+        self.memory_query_cache[query_hash] = result
+
+    def get_cached_memory_query(self, query_hash: str) -> dict | None:
+        """Get a cached memory query result.
+
+        Args:
+            query_hash: Hash of the query
+
+        Returns:
+            Cached QueryResult as dict, or None if not cached
+        """
+        return self.memory_query_cache.get(query_hash)
+
+    def clear_memory_caches(self) -> None:
+        """Clear all memory-related caches."""
+        self.intent_cache.clear()
+        self.memory_query_cache.clear()
 
 
 @dataclass

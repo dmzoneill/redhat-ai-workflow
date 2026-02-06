@@ -157,10 +157,12 @@ class DaemonDBusBase(ABC):
 
         checks = {
             "running": self.is_running,
+            # Note: uptime_ok is informational only, not required for health
             "uptime_ok": (time.time() - self.start_time) > 10 if self.start_time else False,
         }
 
-        healthy = all(checks.values())
+        # Only "running" is required for health - uptime_ok is informational
+        healthy = checks.get("running", False)
 
         return {
             "healthy": healthy,

@@ -1,0 +1,9 @@
+[project]
+name = "aa-sso"
+version = "1.0.0"
+description = "Red Hat SSO authentication automation tools"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.40.0",
+    "PyJWT>=2.8.0",
+]

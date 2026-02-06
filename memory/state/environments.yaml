@@ -38,7 +38,7 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.p
-    last_check: '2026-01-29T14:47:37.374Z'
+    last_check: '2026-02-06T00:27:32.312Z'
     namespace: tower-analytics-prod
     notes: ''
     status: healthy
@@ -48,13 +48,13 @@ environments:
     deployments: []
     known_issues: []
     kubeconfig: ~/.kube/config.s
-    last_check: '2026-01-29T14:47:37.374Z'
+    last_check: '2026-02-06T00:27:32.312Z'
     namespace: tower-analytics-stage
-    notes: ''
+    notes: 'Slack alert: AutomationAnalyticsAAPBillingProcessorErrors'
     status: healthy
 known_issues: []
 last_checked: null
-last_updated: '2026-01-20T15:41:38.208109'
+last_updated: '2026-02-03T18:19:45.556850'
 recent_deployments: []
 stage.alerts:
 - alert: AutomationAnalyticsProcessorStoppedProcessing
@@ -68,3 +68,57 @@ stage.alerts:
   namespace: tower-analytics-stage
   note: eda processor stopped processing payloads for 24hrs - needs pod/kafka/db check
   status: investigating
+- alert: AutomationAnalyticsAAPBillingLowAccuracy
+  namespace: tower-analytics-stage-billing
+  fired_at: '2026-01-30T17:24:00Z'
+  status: investigating
+  note: billing accuracy below 99.5%, 26 firing instances. k8s api issues prevented
+    direct inspection. related to MR !1491
+- alert: AutomationAnalyticsAAPBillingProcessorErrors
+  fired_at: '2026-01-30T21:06:10Z'
+  namespace: tower-analytics-stage
+  note: billing processor errors in last hour - k8s auth expired, needs fresh oc login
+    to investigate
+  status: needs_investigation
+- alert: AutomationAnalyticsAAPBillingProcessorErrors
+  fired_at: '2026-02-01T08:30:00Z'
+  namespace: tower-analytics-stage
+  note: recurring billing processor errors - investigation blocked by persona_load
+    bug in all automation skills. needs manual oc login and pod inspection
+  status: needs_manual_investigation
+- alert: AutomationAnalyticsAAPBillingProcessorErrors
+  fired_at: '2026-02-01T08:30:00Z'
+  namespace: tower-analytics-stage
+  status: resolved
+  note: alert auto-resolved. investigation blocked by persona_load bug affecting all
+    automation skills. recurring pattern - 5th occurrence, transient issue likely
+    pod restart or connection recovery
+- alert: AutomationAnalyticsProcessorAAPEdaStoppedProcessing
+  fired_at: '2026-02-02T19:00:00Z'
+  namespace: tower-analytics-stage
+  note: eda processor stopped processing payloads for 24hrs. recurring pattern (3rd
+    occurrence). investigation blocked by missing slack tools and persona_load failures.
+    needs manual pod/kafka/db check
+  status: needs_manual_investigation
+- alert: AutomationAnalyticsAAPBillingProcessorErrors
+  fired_at: '2026-02-02T21:00:40Z'
+  namespace: tower-analytics-stage
+  note: alert auto-resolved. recurring transient pattern (6th occurrence). no slack
+    tool available for reply. likely pod restart or connection recovery
+  status: resolved
+- alert: AutomationAnalyticsProcessorAAPEdaServiceAbsent
+  fired_at: '2026-02-03T10:00:00Z'
+  namespace: tower-analytics-stage
+  note: all eda processor pods down for 2+ minutes. recurring eda processor issues
+    - jan 20 stopped processing, feb 2 same. automation skills broken (persona_load
+    bugs), needs manual oc login investigation. likely causes - deployment scaled
+    to 0, crashloop, or resource issues
+  status: needs_manual_investigation
+- alert: AutomationAnalyticsProcessorAAPEdaStoppedProcessing
+  fired_at: '2026-02-03T18:11:10Z'
+  namespace: tower-analytics-stage
+  note: 'recurring eda processor stopped processing (4th occurrence: jan 20, feb 2,
+    feb 3). 3 firing alerts = all replicas affected. investigation blocked - k8s 403
+    forbidden, no slack tool available for reply. pattern suggests chronic issue with
+    kafka consumer, db conn, or upstream payload generation'
+  status: needs_escalation

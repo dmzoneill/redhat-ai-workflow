@@ -197,13 +197,22 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
         # Build skill_run call
         if inputs:
             input_parts = []
-            for inp in inputs:
-                inp_name = inp.get("name", "param")
-                inp_required = inp.get("required", False)
-                if inp_required:
-                    input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
-                else:
-                    input_parts.append(f'"{inp_name}": ""')
+            # Handle both list format and dict format for inputs
+            if isinstance(inputs, list):
+                for inp in inputs:
+                    inp_name = inp.get("name", "param")
+                    inp_required = inp.get("required", False)
+                    if inp_required:
+                        input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
+                    else:
+                        input_parts.append(f'"{inp_name}": ""')
+            elif isinstance(inputs, dict):
+                for inp_name, inp_def in inputs.items():
+                    inp_required = inp_def.get("required", False) if isinstance(inp_def, dict) else False
+                    if inp_required:
+                        input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
+                    else:
+                        input_parts.append(f'"{inp_name}": ""')
             inputs_json = "{" + ", ".join(input_parts) + "}"
             lines.append("```text")
             lines.append(f"skill_run(\"{full_skill_name}\", '{inputs_json}')")
@@ -228,14 +237,28 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
             lines.append("")
             lines.append("| Parameter | Description | Required |")
             lines.append("|-----------|-------------|----------|")
-            for inp in inputs:
-                inp_name = inp.get("name", "param")
-                inp_desc = inp.get("description", "")
-                inp_required = "Yes" if inp.get("required", False) else "No"
-                inp_default = inp.get("default", "")
-                if inp_default:
-                    inp_desc += f" (default: {inp_default})"
-                lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
+            # Handle both list format and dict format for inputs
+            if isinstance(inputs, list):
+                for inp in inputs:
+                    inp_name = inp.get("name", "param")
+                    inp_desc = inp.get("description", "")
+                    inp_required = "Yes" if inp.get("required", False) else "No"
+                    inp_default = inp.get("default", "")
+                    if inp_default:
+                        inp_desc += f" (default: {inp_default})"
+                    lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
+            elif isinstance(inputs, dict):
+                for inp_name, inp_def in inputs.items():
+                    if isinstance(inp_def, dict):
+                        inp_desc = inp_def.get("description", "")
+                        inp_required = "Yes" if inp_def.get("required", False) else "No"
+                        inp_default = inp_def.get("default", "")
+                        if inp_default:
+                            inp_desc += f" (default: {inp_default})"
+                    else:
+                        inp_desc = ""
+                        inp_required = "No"
+                    lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
 
         lines.append("")
 

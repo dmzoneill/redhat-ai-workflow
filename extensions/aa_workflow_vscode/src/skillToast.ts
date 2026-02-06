@@ -639,7 +639,7 @@ export class SkillToastWebview {
         const progress = ((skill.currentStep + 1) / skill.totalSteps) * 100;
         html += \`
           <div class="toast \${state.isExpanded ? 'expanded' : ''}" data-skill-id="\${skill.skillId}">
-            <div class="toast-header" onclick="toggleExpand('\${skill.skillId}')">
+            <div class="toast-header" data-action="toggleExpand" data-skill-id="\${skill.skillId}">
               <span class="skill-icon">\${skill.status === 'running' ? '▶' : skill.status === 'completed' ? '✓' : '✗'}</span>
               <span class="skill-name">\${skill.skillName}</span>
               <span class="step-info">[\${skill.currentStep + 1}/\${skill.totalSteps}] \${skill.currentStepName || ''}</span>
@@ -696,7 +696,7 @@ export class SkillToastWebview {
       const percent = (conf.remainingSeconds / conf.timeoutSeconds) * 100;
 
       return \`
-        <div class="confirmation" onclick="pauseTimer('\${conf.id}')">
+        <div class="confirmation" data-action="pauseTimer" data-conf-id="\${conf.id}">
           <div class="confirmation-header">
             <span>⚠️ CONFIRMATION REQUIRED</span>
             <span class="confirmation-timer">\${conf.remainingSeconds}s</span>
@@ -710,18 +710,18 @@ export class SkillToastWebview {
             </div>
           \` : ''}
 
-          <div class="timer-bar \${state.isPaused ? 'paused' : ''}" onclick="togglePause(event, '\${conf.id}')">
+          <div class="timer-bar \${state.isPaused ? 'paused' : ''}" data-action="togglePause" data-conf-id="\${conf.id}">
             <div class="timer-fill" style="width: \${percent}%"></div>
           </div>
 
           <div class="confirmation-actions">
-            <button class="btn-primary" onclick="respond('\${conf.id}', 'let_claude')">
+            <button class="btn-primary" data-action="respond" data-conf-id="\${conf.id}" data-response="let_claude">
               Let Claude Handle
             </button>
-            <button class="btn-secondary" onclick="respond('\${conf.id}', 'retry_with_fix')">
+            <button class="btn-secondary" data-action="respond" data-conf-id="\${conf.id}" data-response="retry_with_fix">
               Retry with Fix
             </button>
-            <button class="btn-secondary" onclick="respond('\${conf.id}', 'abort')">
+            <button class="btn-secondary" data-action="respond" data-conf-id="\${conf.id}" data-response="abort">
               Abort
             </button>
           </div>
@@ -741,25 +741,39 @@ export class SkillToastWebview {
       \`;
     }
 
-    function toggleExpand(skillId) {
-      vscode.postMessage({ type: state.isExpanded ? 'collapse' : 'expand' });
-    }
+    // Event delegation for all click handlers
+    document.addEventListener('click', function(e) {
+      const target = e.target;
+      const actionEl = target.closest('[data-action]');
+      if (!actionEl) return;
 
-    function pauseTimer(id) {
-      if (!state.isPaused) {
-        vscode.postMessage({ type: 'pause_timer', id });
+      const action = actionEl.dataset.action;
+      const confId = actionEl.dataset.confId;
+      const skillId = actionEl.dataset.skillId;
+
+      switch (action) {
+        case 'toggleExpand':
+          vscode.postMessage({ type: state.isExpanded ? 'collapse' : 'expand' });
+          break;
+
+        case 'pauseTimer':
+          if (!state.isPaused) {
+            vscode.postMessage({ type: 'pause_timer', id: confId });
+          }
+          break;
+
+        case 'togglePause':
+          e.stopPropagation();
+          vscode.postMessage({ type: state.isPaused ? 'resume_timer' : 'pause_timer', id: confId });
+          break;
+
+        case 'respond':
+          const response = actionEl.dataset.response;
+          const remember = document.getElementById('remember-' + confId)?.value || 'none';
+          vscode.postMessage({ type: 'respond', id: confId, response, remember });
+          break;
       }
-    }
-
-    function togglePause(event, id) {
-      event.stopPropagation();
-      vscode.postMessage({ type: state.isPaused ? 'resume_timer' : 'pause_timer', id });
-    }
-
-    function respond(id, response) {
-      const remember = document.getElementById('remember-' + id)?.value || 'none';
-      vscode.postMessage({ type: 'respond', id, response, remember });
-    }
+    });
 
     // Initial render
     render();

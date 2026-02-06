@@ -16,6 +16,7 @@ Usage:
     await loader.switch_persona("devops", ctx)  # ctx provides workspace context
 """
 
+import asyncio
 import importlib.util
 import logging
 from pathlib import Path
@@ -28,17 +29,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Paths - server/ is at project root level
-PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
-TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
-PERSONAS_DIR = PROJECT_DIR / "personas"
+# Import shared path resolution utilities
+from .tool_paths import (
+    PROJECT_DIR,
+    TOOL_MODULES_DIR,
+    TOOLS_FILE,
+    TOOLS_CORE_FILE,
+    TOOLS_BASIC_FILE,
+    TOOLS_EXTRA_FILE,
+    TOOLS_STYLE_FILE,
+    get_tools_file_path,
+)
 
-# Tool file naming conventions
-TOOLS_FILE = "tools.py"
-TOOLS_CORE_FILE = "tools_core.py"
-TOOLS_BASIC_FILE = "tools_basic.py"
-TOOLS_EXTRA_FILE = "tools_extra.py"
-TOOLS_STYLE_FILE = "tools_style.py"
+# Import protocol for validation
+from .protocols import is_tool_module, validate_tool_module
+
+PERSONAS_DIR = PROJECT_DIR / "personas"
 
 
 def discover_tool_modules() -> set[str]:
@@ -126,6 +132,12 @@ CORE_TOOLS = {
     "persona_list",
     "session_start",
     "debug_tool",
+    # Unified memory abstraction tools
+    "memory_ask",
+    "memory_search",
+    "memory_store",
+    "memory_health",
+    "memory_list_adapters",
 }
 
 
@@ -137,6 +149,8 @@ class PersonaLoader:
         self.current_persona: str = ""
         self.loaded_modules: set[str] = set()
         self._tool_to_module: dict[str, str] = {}  # tool_name -> module_name
+        # Lock for thread-safe access to shared state
+        self._state_lock = asyncio.Lock()
 
     def load_persona_config(self, persona_name: str) -> dict | None:
         """Load persona configuration from YAML file."""
@@ -151,49 +165,9 @@ class PersonaLoader:
             logger.error(f"Failed to load persona config {persona_name}: {e}")
             return None
 
-    def _get_tools_file_path(self, module_name: str) -> Path:
-        """
-        Determine the correct tools file path for a tool module name.
-
-        Handles _core, _basic, _extra, and _style suffixes properly:
-        - k8s_core -> aa_k8s/src/tools_core.py
-        - k8s_basic -> aa_k8s/src/tools_basic.py
-        - k8s_extra -> aa_k8s/src/tools_extra.py
-        - slack_style -> aa_slack/src/tools_style.py
-        - workflow -> aa_workflow/src/tools_core.py (if exists) or tools_basic.py fallback
-        """
-        if module_name.endswith("_core"):
-            base_name = module_name[:-5]  # Remove "_core"
-            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-            return module_dir / "src" / TOOLS_CORE_FILE
-        elif module_name.endswith("_basic"):
-            base_name = module_name[:-6]  # Remove "_basic"
-            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-            return module_dir / "src" / TOOLS_BASIC_FILE
-        elif module_name.endswith("_extra"):
-            base_name = module_name[:-6]  # Remove "_extra"
-            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-            return module_dir / "src" / TOOLS_EXTRA_FILE
-        elif module_name.endswith("_style"):
-            base_name = module_name[:-6]  # Remove "_style"
-            module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-            return module_dir / "src" / TOOLS_STYLE_FILE
-        else:
-            # For non-suffixed modules, try tools_core.py first (new default),
-            # then tools_basic.py, then tools.py
-            module_dir = TOOL_MODULES_DIR / f"aa_{module_name}"
-            tools_core = module_dir / "src" / TOOLS_CORE_FILE
-            if tools_core.exists():
-                return tools_core
-            tools_basic = module_dir / "src" / TOOLS_BASIC_FILE
-            if tools_basic.exists():
-                return tools_basic
-            # Fallback to legacy tools.py
-            return module_dir / "src" / TOOLS_FILE
-
     async def _load_tool_module(self, module_name: str) -> list[str]:
         """Load a tool module and return list of tool names added."""
-        tools_file = self._get_tools_file_path(module_name)
+        tools_file = get_tools_file_path(module_name)
 
         if not tools_file.exists():
             logger.warning(f"Tools file not found: {tools_file}")
@@ -212,18 +186,28 @@ class PersonaLoader:
             # Load the module (registers tools with server)
             spec.loader.exec_module(module)
 
-            if hasattr(module, "register_tools"):
-                module.register_tools(self.server)
+            # Validate module structure before calling register_tools
+            if not is_tool_module(module):
+                logger.warning(f"Module {module_name} does not implement ToolModuleProtocol")
+                return []
+
+            # Log any validation warnings (non-fatal)
+            validation_errors = validate_tool_module(module, module_name)
+            for error in validation_errors:
+                logger.warning(f"Tool module validation: {error}")
+
+            module.register_tools(self.server)
 
             # Get tool names after loading
             tools_after = {t.name for t in await self.server.list_tools()}
             new_tool_names = list(tools_after - tools_before)
 
-            # Track which tools came from this module
-            for tool_name in new_tool_names:
-                self._tool_to_module[tool_name] = module_name
+            # Track which tools came from this module (with lock for thread safety)
+            async with self._state_lock:
+                for tool_name in new_tool_names:
+                    self._tool_to_module[tool_name] = module_name
+                self.loaded_modules.add(module_name)
 
-            self.loaded_modules.add(module_name)
             logger.info(f"Loaded {module_name}: {len(new_tool_names)} tools")
 
             return new_tool_names
@@ -232,20 +216,22 @@ class PersonaLoader:
             logger.error(f"Error loading {module_name}: {e}")
             return []
 
-    def _unload_module_tools(self, module_name: str) -> int:
+    async def _unload_module_tools(self, module_name: str) -> int:
         """Remove all tools from a specific module."""
-        tools_to_remove = [
-            name for name, mod in self._tool_to_module.items() if mod == module_name and name not in CORE_TOOLS
-        ]
+        async with self._state_lock:
+            tools_to_remove = [
+                name for name, mod in self._tool_to_module.items() if mod == module_name and name not in CORE_TOOLS
+            ]
 
-        for tool_name in tools_to_remove:
-            try:
-                self.server.remove_tool(tool_name)
-                del self._tool_to_module[tool_name]
-            except Exception as e:
-                logger.warning(f"Failed to remove tool {tool_name}: {e}")
+            for tool_name in tools_to_remove:
+                try:
+                    self.server.remove_tool(tool_name)
+                    del self._tool_to_module[tool_name]
+                except Exception as e:
+                    logger.warning(f"Failed to remove tool {tool_name}: {e}")
 
-        self.loaded_modules.discard(module_name)
+            self.loaded_modules.discard(module_name)
+
         return len(tools_to_remove)
 
     async def _clear_non_core_tools(self) -> int:
@@ -262,8 +248,9 @@ class PersonaLoader:
                 except Exception as e:
                     logger.warning(f"Failed to remove {tool_name}: {e}")
 
-        self._tool_to_module.clear()
-        self.loaded_modules.clear()
+        async with self._state_lock:
+            self._tool_to_module.clear()
+            self.loaded_modules.clear()
 
         return removed
 

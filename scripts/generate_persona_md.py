@@ -13,16 +13,28 @@ PERSONAS_DIR = PROJECT_ROOT / "personas"
 
 # Load profile
 profile_file = STYLE_DIR / "dave_style_profile.yaml"
-with open(profile_file) as f:
-    profile = yaml.safe_load(f)
+try:
+    with open(profile_file) as f:
+        profile = yaml.safe_load(f)
+except FileNotFoundError:
+    print(f"❌ Profile file not found: {profile_file}")
+    sys.exit(1)
+except yaml.YAMLError as e:
+    print(f"❌ Invalid YAML in profile: {e}")
+    sys.exit(1)
 
 # Load corpus for examples
 corpus_file = STYLE_DIR / "slack_corpus.jsonl"
 messages = []
-with open(corpus_file) as f:
-    for line in f:
-        if line.strip():
-            messages.append(json.loads(line))
+try:
+    with open(corpus_file) as f:
+        for line in f:
+            if line.strip():
+                messages.append(json.loads(line))
+except FileNotFoundError:
+    print(f"⚠️ Corpus file not found: {corpus_file}, continuing without examples")
+except json.JSONDecodeError as e:
+    print(f"⚠️ Invalid JSON in corpus: {e}, continuing with partial data")
 
 # Extract profile data
 tone = profile.get("tone", {})
@@ -192,10 +204,14 @@ lines.append("5. **Minimal punctuation** - Few exclamations, occasional question
 
 # Write file
 md_file = PERSONAS_DIR / "dave.md"
-with open(md_file, "w") as f:
-    f.write("\n".join(lines))
-
-print(f"✅ Persona markdown saved to: {md_file}")
+try:
+    PERSONAS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(md_file, "w") as f:
+        f.write("\n".join(lines))
+    print(f"✅ Persona markdown saved to: {md_file}")
+except OSError as e:
+    print(f"❌ Failed to write persona file: {e}")
+    sys.exit(1)
 print(f"   - {len(examples)} example messages included")
 print()
 print("To use the persona:")

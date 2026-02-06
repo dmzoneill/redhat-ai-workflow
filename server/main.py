@@ -26,22 +26,12 @@ from typing import cast
 
 from fastmcp import FastMCP
 
-# Directory structure:
-# ai-workflow/
-#   server/         <- This file is here
-#     main.py
-#   tool_modules/   <- Plugins are here
-#     aa_git/
-#     aa_jira/
-#     ...
-PROJECT_DIR = Path(__file__).parent.parent  # ai-workflow root
-TOOL_MODULES_DIR = PROJECT_DIR / "tool_modules"
-
-# Tool file naming conventions (shared with persona_loader)
-TOOLS_FILE = "tools.py"
-TOOLS_CORE_FILE = "tools_core.py"
-TOOLS_BASIC_FILE = "tools_basic.py"
-TOOLS_EXTRA_FILE = "tools_extra.py"
+# Import shared path resolution utilities
+from .tool_paths import (
+    PROJECT_DIR,
+    TOOL_MODULES_DIR,
+    get_tools_file_path,
+)
 
 
 def get_available_modules() -> set[str]:
@@ -117,48 +107,20 @@ def setup_logging() -> logging.Logger:
     return logging.getLogger(__name__)
 
 
-def _get_tools_file_path(tool_name: str) -> Path:
-    """
-    Determine the correct tools file path for a tool module name.
-
-    Args:
-        tool_name: Tool module name (e.g., "git", "git_core", "git_basic", "git_extra")
-
-    Returns:
-        Path to the tools file
-    """
-    if tool_name.endswith("_core"):
-        base_name = tool_name[:-5]  # Remove "_core"
-        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-        return module_dir / "src" / TOOLS_CORE_FILE
-    elif tool_name.endswith("_basic"):
-        base_name = tool_name[:-6]  # Remove "_basic"
-        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-        return module_dir / "src" / TOOLS_BASIC_FILE
-    elif tool_name.endswith("_extra"):
-        base_name = tool_name[:-6]  # Remove "_extra"
-        module_dir = TOOL_MODULES_DIR / f"aa_{base_name}"
-        return module_dir / "src" / TOOLS_EXTRA_FILE
-    else:
-        # For non-suffixed modules, try tools_core.py first (new default),
-        # then tools_basic.py, then tools.py
-        module_dir = TOOL_MODULES_DIR / f"aa_{tool_name}"
-        tools_core = module_dir / "src" / TOOLS_CORE_FILE
-        if tools_core.exists():
-            return tools_core
-        tools_basic = module_dir / "src" / TOOLS_BASIC_FILE
-        if tools_basic.exists():
-            return tools_basic
-        # Fallback to legacy tools.py
-        return module_dir / "src" / TOOLS_FILE
-
-
 def _get_tool_names_sync(server: FastMCP) -> set[str]:
     """
     Get tool names from FastMCP server synchronously.
 
+    NOTE: This uses FastMCP's internal _components API because:
+    1. The public list_tools() method is async
+    2. This function is called during synchronous module loading
+    3. We need to detect which tools were added by each module
+
     FastMCP v3 stores tools in providers._components with keys like 'tool:name@'.
-    This helper extracts tool names without requiring async.
+    If FastMCP changes this internal structure, this function will need updating.
+
+    TODO: When FastMCP provides a sync API for listing tools, migrate to that.
+    See: https://gofastmcp.com/python-sdk/fastmcp-server-server#list_tools
 
     Args:
         server: FastMCP server instance
@@ -166,12 +128,15 @@ def _get_tool_names_sync(server: FastMCP) -> set[str]:
     Returns:
         Set of tool names
     """
-    tool_names = set()
+    tool_names: set[str] = set()
     for provider in server.providers:
-        if hasattr(provider, "_components"):
-            for key in provider._components:
+        # Access internal _components dict - this is FastMCP v3 specific
+        # Keys are formatted as 'tool:name@version'
+        components = getattr(provider, "_components", None)
+        if components is not None:
+            for key in components:
                 if key.startswith("tool:"):
-                    # Extract name from 'tool:name@' format
+                    # Extract name from 'tool:name@version' format
                     name = key.split(":")[1].split("@")[0]
                     tool_names.add(name)
     return tool_names
@@ -191,7 +156,7 @@ def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[
     """
     logger = logging.getLogger(__name__)
 
-    tools_file = _get_tools_file_path(tool_name)
+    tools_file = get_tools_file_path(tool_name)
 
     if not tools_file.exists():
         logger.warning(f"Tools file not found: {tools_file}")
@@ -233,7 +198,7 @@ def _register_debug_for_module(server: FastMCP, tool_name: str):
 
     from .debuggable import wrap_all_tools
 
-    tools_file = _get_tools_file_path(tool_name)
+    tools_file = get_tools_file_path(tool_name)
 
     if not tools_file.exists():
         return
@@ -517,6 +482,31 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
         logger.debug("WebSocket server not available (websockets package not installed)")
     except Exception as e:
         logger.warning(f"Failed to start WebSocket server: {e}")
+
+    # Initialize Memory Abstraction Layer
+    try:
+        from services.memory_abstraction import (
+            MemoryInterface,
+            discover_and_load_all_adapters,
+            set_memory_interface,
+        )
+
+        # Discover and load all memory adapters
+        adapters = discover_and_load_all_adapters()
+        logger.info(f"Discovered {len(adapters)} memory adapters: {list(adapters.keys())}")
+
+        # Create memory interface with WebSocket for events
+        memory = MemoryInterface(adapters=adapters, websocket_server=ws_server)
+        set_memory_interface(memory)
+
+        # Attach to server for tool access
+        server.memory = memory
+
+        logger.info("Memory abstraction layer initialized")
+    except ImportError as e:
+        logger.debug(f"Memory abstraction not available: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to initialize memory abstraction: {e}")
 
     try:
         await server.run_stdio_async()

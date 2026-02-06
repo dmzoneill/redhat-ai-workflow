@@ -119,7 +119,7 @@ async def _vpn_connect_impl() -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=f"""❌ VPN connect script not found at: {vpn_script}
+                    text="""❌ VPN connect script not found at: {vpn_script}
 
 **To fix:**
 1. Clone the redhatter repo or ensure the script exists
@@ -292,7 +292,7 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text=f"""❌ Unknown cluster: {cluster}
+                text="""❌ Unknown cluster: {cluster}
 
 **Valid options:**
 - `s` or `stage` = Stage cluster
@@ -439,7 +439,7 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 else:
                     # Detailed error analysis for connection test failure
                     test_error = (test_err or test_out or "").lower()
-                    lines.append(f"❌ Connection test failed")
+                    lines.append("❌ Connection test failed")
                     lines.append("")
 
                     if "unauthorized" in test_error or "401" in test_error:

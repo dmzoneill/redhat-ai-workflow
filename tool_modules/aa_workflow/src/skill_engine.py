@@ -487,10 +487,14 @@ class SkillExecutor:
         self.source_details = source_details
         # Load config.json config for compute blocks
         self.config = load_config()
+        # Add today's date for templating (YYYY-MM-DD format)
+        from datetime import date
+
         self.context = {
             "inputs": inputs,
             "config": self.config,
             "workspace_uri": workspace_uri,
+            "today": date.today().isoformat(),
         }
         self.log: list[str] = []
         self.step_results: list[dict] = []
@@ -502,7 +506,10 @@ class SkillExecutor:
         if emit_events:
             try:
                 # Use absolute import to avoid relative import issues
-                from tool_modules.aa_workflow.src.skill_execution_events import SkillExecutionEmitter, set_emitter
+                from tool_modules.aa_workflow.src.skill_execution_events import (
+                    SkillExecutionEmitter,
+                    set_emitter,
+                )
 
                 self.event_emitter = SkillExecutionEmitter(
                     skill.get("name", "unknown"),
@@ -1323,12 +1330,10 @@ class SkillExecutor:
                     loop = None
 
                 if loop and loop.is_running():
-                    # We're already in an async context, need to run in thread
-                    import concurrent.futures
-
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(lambda: asyncio.run(nested_executor.execute()))
-                        outputs, _ = future.result(timeout=300)
+                    # We're already in an async context, schedule on the existing loop
+                    # Use run_coroutine_threadsafe to safely run from sync context
+                    future = asyncio.run_coroutine_threadsafe(nested_executor.execute(), loop)
+                    outputs, _ = future.result(timeout=300)
                 else:
                     # No running loop, can use asyncio.run directly
                     outputs, _ = asyncio.run(nested_executor.execute())
@@ -1954,7 +1959,9 @@ class SkillExecutor:
 
                 # Emit toast notification for auto-heal triggered
                 try:
-                    from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_triggered
+                    from tool_modules.aa_workflow.src.notification_emitter import (
+                        notify_auto_heal_triggered,
+                    )
 
                     fix_action = f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
@@ -1989,7 +1996,9 @@ class SkillExecutor:
 
                     # Emit toast notification for auto-heal success
                     try:
-                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_succeeded
+                        from tool_modules.aa_workflow.src.notification_emitter import (
+                            notify_auto_heal_succeeded,
+                        )
 
                         notify_auto_heal_succeeded(step_name, heal_type)
                     except Exception:
@@ -2026,7 +2035,9 @@ class SkillExecutor:
 
                     # Emit toast notification for auto-heal failure
                     try:
-                        from tool_modules.aa_workflow.src.notification_emitter import notify_auto_heal_failed
+                        from tool_modules.aa_workflow.src.notification_emitter import (
+                            notify_auto_heal_failed,
+                        )
 
                         notify_auto_heal_failed(step_name, error_msg[:100])
                     except Exception:
@@ -2098,7 +2109,9 @@ class SkillExecutor:
 
             # Emit toast notification for continue-mode failures (helps visibility)
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_step_failed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_step_failed,
+                )
 
                 notify_step_failed(skill_name, step_name, error_msg[:150])
             except Exception:
@@ -2186,8 +2199,12 @@ class SkillExecutor:
             Error message if validation fails, None if valid.
         """
         # Check for empty required arguments that came from templates
+        # Skip validation for args that use 'default' or 'or' in the template (these are optional)
         for key, raw_value in raw_args.items():
             if isinstance(raw_value, str) and "{{" in raw_value:
+                # Skip if template has a default/fallback (e.g., "{{ x | default('') }}" or "{{ x or '' }}")
+                if "default(" in raw_value or " or " in raw_value:
+                    continue
                 rendered_value = args.get(key, "")
                 if rendered_value == "" or rendered_value is None:
                     # Extract variable name from template for better error message
@@ -2375,9 +2392,13 @@ class SkillExecutor:
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
             if name not in self.inputs and "default" in inp:
-                self.inputs[name] = inp["default"]
+                # Template the default value to resolve variables like {{ today }}
+                default_val = inp["default"]
+                if isinstance(default_val, str) and "{{" in default_val:
+                    default_val = self._template(default_val)
+                self.inputs[name] = default_val
                 self.context["inputs"] = self.inputs
-                self._debug(f"Applied default: {name} = {inp['default']}")
+                self._debug(f"Applied default: {name} = {default_val}")
 
         defaults = self.skill.get("defaults", {})
         self.context["defaults"] = defaults

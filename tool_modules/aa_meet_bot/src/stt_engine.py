@@ -7,12 +7,11 @@ Falls back to CPU if NPU is unavailable.
 
 import asyncio
 import logging
-import os
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Callable, List, Optional
+from typing import AsyncIterator, Callable, Optional
 
 import numpy as np
 
@@ -414,7 +413,7 @@ class RealtimeSTT:
     async def _capture_audio(self, config: StreamingConfig):
         """Capture audio from PulseAudio source."""
         try:
-            import subprocess
+            pass
 
             # Use parec to capture audio
             cmd = [

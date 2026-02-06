@@ -6,6 +6,7 @@ Updates pattern confidence based on effectiveness.
 """
 
 import logging
+import threading
 from typing import Optional
 
 from server.usage_pattern_learner import UsagePatternLearner
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 class UsagePreventionTracker:
     """Track prevention success and update pattern confidence."""
 
-    _instance = None
+    _instance: Optional["UsagePreventionTracker"] = None
+    _lock = threading.Lock()
 
     def __init__(self):
         """Initialize tracker."""
@@ -24,9 +26,12 @@ class UsagePreventionTracker:
 
     @classmethod
     def get_instance(cls) -> "UsagePreventionTracker":
-        """Get singleton instance."""
+        """Get singleton instance (thread-safe)."""
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._lock:
+                # Double-check pattern to avoid race condition
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     async def track_warning_shown(

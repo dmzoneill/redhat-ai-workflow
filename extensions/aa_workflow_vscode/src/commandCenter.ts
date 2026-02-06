@@ -56,7 +56,8 @@ import { loadMeetBotState, getUpcomingMeetingsHtml, MeetBotState } from "./meeti
 import { loadSprintHistory, loadToolGapRequests, getSprintTabContent, SprintState } from "./sprintRenderer";
 import { loadPerformanceState, PerformanceState } from "./performanceRenderer";
 import { createLogger } from "./logger";
-import { RefreshCoordinator, RefreshPriority, StateSection } from "./refreshCoordinator";
+// NOTE: RefreshCoordinator removed - it was sending messages that were never handled in the webview.
+// UI updates now go through TabManager and tabContentUpdate messages.
 import { dbus } from "./dbusClient";
 import { execAsync, getNonce } from "./utils";
 import {
@@ -65,17 +66,18 @@ import {
   UtilityMessageHandler,
   CommandMessageHandler,
   SessionMessageHandler,
-  SprintMessageHandler,
-  MeetingMessageHandler,
+  // NOTE: SprintMessageHandler removed - SprintTab handles sprintAction directly
+  // NOTE: MeetingMessageHandler removed - MeetingsTab handles meeting messages directly
   SlackMessageHandler,
-  SkillMessageHandler,
+  // NOTE: SkillMessageHandler removed - SkillsTab handles skill messages directly
   ServiceMessageHandler,
-  CronMessageHandler,
+  // NOTE: CronMessageHandler removed - CronTab handles cron messages directly
   MeetingHistoryMessageHandler,
   VideoPreviewMessageHandler,
   MeetingAudioMessageHandler,
   InferenceMessageHandler,
-  PersonaMessageHandler,
+  SlackPersonaTestHandler,
+  // NOTE: PersonaMessageHandler removed - PersonasTab handles persona messages directly
   WorkspaceMessageHandler,
   TabMessageHandler,
   CreateSessionMessageHandler,
@@ -159,8 +161,7 @@ export class CommandCenterPanel {
   // Cached sprint state from D-Bus (for sync access in UI updates)
   private _cachedSprintState: SprintState | null = null;
 
-  // Unified refresh coordinator - handles all UI updates with debouncing and change detection
-  private _refreshCoordinator: RefreshCoordinator | null = null;
+  // NOTE: _refreshCoordinator removed - UI updates now go through TabManager
 
   // Debounce timer for workspace watcher
   private _workspaceWatcherDebounce: NodeJS.Timeout | null = null;
@@ -375,106 +376,24 @@ export class CommandCenterPanel {
       .register(new UtilityMessageHandler())
       .register(new CommandMessageHandler())
       .register(new SessionMessageHandler({
-        // Using SessionService for decoupled business logic
-        onRefresh: () => this._syncAndRefreshSessions(),  // Still uses local state for rendering
-        onCopySessionId: async (sessionId: string) => {
-          await this._sessionService!.copySessionId(sessionId);
-        },
+        // NOTE: copySessionId, searchSessions removed - SessionsTab handles them directly
+        onRefresh: () => this._syncAndRefreshSessions(),
         onOpenChatSession: async (sessionId: string, sessionName?: string) => {
           await this._sessionService!.openChatSession(sessionId, sessionName);
-        },
-        onSearchSessions: async (query: string) => {
-          // Try D-Bus first, fall back to local search
-          const results = await this._sessionService!.searchSessions(query);
-          if (results.length === 0 && this._workspaceState) {
-            this._sessionService!.searchSessionsLocal(query, this._workspaceState);
-          }
         },
         onViewMeetingNotes: async (sessionId: string) => {
           await this._sessionService!.viewMeetingNotes(sessionId);
         },
       }))
-      .register(new SprintMessageHandler({
-        // Using SprintService for decoupled business logic
-        onSprintAction: async (action: string, issueKey?: string, chatId?: string, enabled?: boolean) => {
-          const result = await this._sprintService!.handleAction(action, issueKey, chatId, enabled);
-
-          // Handle VSCode-specific UI actions that can't be in the service
-          if (!result.handled && result.action) {
-            switch (result.action) {
-              case "openChat":
-                if (chatId) {
-                  try {
-                    await vscode.commands.executeCommand("composer.showComposerHistory");
-                    vscode.window.showInformationMessage(
-                      `Looking for chat for ${issueKey}... Check the chat history panel.`
-                    );
-                  } catch (e) {
-                    vscode.window.showWarningMessage(`Could not open chat directly. Chat ID: ${chatId}`);
-                  }
-                }
-                break;
-              case "viewTimeline":
-                if (result.data?.timeline && result.data.timeline.length > 0) {
-                  const content = result.data.timeline
-                    .map((e: any) => `[${e.timestamp}] ${e.action}: ${e.description}`)
-                    .join("\n");
-                  const doc = await vscode.workspace.openTextDocument({
-                    content: `Timeline for ${result.data.issueKey}\n${"=".repeat(40)}\n\n${content}`,
-                    language: "markdown",
-                  });
-                  await vscode.window.showTextDocument(doc);
-                } else {
-                  vscode.window.showInformationMessage(`No timeline events for ${result.data?.issueKey}`);
-                }
-                break;
-              case "testChatLauncher":
-                await this.testChatLauncher(undefined, result.data?.backgroundTasks ?? false);
-                break;
-            }
-          }
-        },
-      }))
-      .register(new MeetingMessageHandler({
-        // Using MeetingService for decoupled business logic
-        // Wrap calls to convert Promise<boolean> to Promise<void>
-        onApproveMeeting: async (meetingId: string, _meetUrl: string, mode: string) => {
-          await this._meetingService!.approveMeeting(meetingId, mode);
-        },
-        onRejectMeeting: async (meetingId: string) => {
-          await this._meetingService!.rejectMeeting(meetingId);
-        },
-        onUnapproveMeeting: async (meetingId: string) => {
-          await this._meetingService!.unapproveMeeting(meetingId);
-        },
-        onJoinMeetingNow: async (meetUrl: string, title: string, mode: string, videoEnabled: boolean) => {
-          await this._meetingService!.joinMeeting(meetUrl, title, mode, videoEnabled);
-        },
-        onSetMeetingMode: async (meetingId: string, mode: string) => {
-          await this._meetingService!.setMeetingMode(meetingId, mode);
-        },
-        onStartScheduler: async () => {
-          await this._meetingService!.startScheduler();
-        },
-        onStopScheduler: async () => {
-          await this._meetingService!.stopScheduler();
-        },
-        onLeaveMeeting: async (sessionId: string) => {
-          await this._meetingService!.leaveMeeting(sessionId);
-        },
-        onLeaveAllMeetings: async () => {
-          await this._meetingService!.leaveAllMeetings();
-        },
-        onRefreshCalendar: async () => {
-          await this._meetingService!.refreshCalendars();
-        },
-      }))
+      // NOTE: SprintMessageHandler removed - SprintTab handles sprintAction directly via D-Bus
+      // NOTE: MeetingMessageHandler removed - MeetingsTab handles meeting messages directly via D-Bus
       .register(new SlackMessageHandler({
-        // Using SlackService for decoupled business logic
+        // NOTE: sendSlackMessage, approveSlackMessage, rejectSlackMessage, approveAllSlack removed
+        // - SlackTab handles them directly via D-Bus
         onLoadHistory: async () => {
           await this._slackService!.loadHistory();
         },
-        onSendMessage: async (channel: string, text: string, threadTs?: string) => {
+        onReplyToThread: async (channel: string, text: string, threadTs?: string) => {
           await this._slackService!.sendMessage(channel, text, threadTs || "");
         },
         onRefreshChannels: async () => {
@@ -491,15 +410,6 @@ export class CommandCenterPanel {
         },
         onRefreshPending: async () => {
           await this._slackService!.getPending();
-        },
-        onApproveMessage: async (messageId: string) => {
-          await this._slackService!.approveMessage(messageId);
-        },
-        onRejectMessage: async (messageId: string) => {
-          await this._slackService!.rejectMessage(messageId);
-        },
-        onApproveAll: async () => {
-          await this._slackService!.approveAll();
         },
         onRefreshCache: async () => {
           await this._slackService!.refreshCache();
@@ -526,45 +436,13 @@ export class CommandCenterPanel {
           await this._slackService!.setDebugMode(enabled);
         },
       }))
-      .register(new SkillMessageHandler({
-        onLoadSkill: (skillName: string) => this.loadSkillDefinition(skillName),
-        onOpenSkillFile: (skillName: string) => this.openSkillFile(skillName),
-        onRunSkill: async (skillName?: string) => {
-          if (skillName) {
-            await this._runSkillInNewChat(skillName);
-          } else {
-            await vscode.commands.executeCommand("aa-workflow.runSkill");
-          }
-        },
-        onSelectRunningSkill: (executionId: string) => this._selectRunningSkill(executionId),
-        onClearStaleSkills: () => this._clearStaleSkills(),
-        onClearSkillExecution: (executionId: string) => this._clearSkillExecution(executionId),
-      }))
+      // NOTE: SkillMessageHandler removed - SkillsTab handles skill messages directly
       .register(new ServiceMessageHandler({
+        // NOTE: refreshServices, serviceControl, testOllamaInstance removed - ServicesTab handles them directly
         onQueryDBus: (service: string, method: string, args: any[]) => this.handleDBusQuery(service, method, args as unknown as Record<string, string>),
-        onRefreshServices: async () => { this._backgroundSync(); },
-        onServiceControl: (action: string, service: string) => this.handleServiceControl(action, service),
         onRefreshOllamaStatus: async () => { this._backgroundSync(); },
-        onTestOllamaInstance: (instance: string) => this.testOllamaInstance(instance),
       }))
-      .register(new CronMessageHandler({
-        // Using CronService for decoupled business logic
-        onRefreshCron: async () => {
-          await this._cronService!.refreshData();
-        },
-        onLoadMoreHistory: async (limit: number) => {
-          await this._cronService!.refreshData(limit);
-        },
-        onToggleScheduler: async () => {
-          await this._cronService!.toggleScheduler();
-        },
-        onToggleCronJob: async (jobName: string, enabled: boolean) => {
-          await this._cronService!.toggleJob(jobName, enabled);
-        },
-        onRunCronJobNow: async (jobName: string) => {
-          await this._cronService!.runJobNow(jobName);
-        },
-      }))
+      // NOTE: CronMessageHandler removed - CronTab handles cron messages directly via D-Bus
       .register(new MeetingHistoryMessageHandler({
         // Using MeetingService for decoupled business logic
         onViewNote: (noteId: string) => this._handleViewNoteWithService(parseInt(noteId, 10)),
@@ -622,28 +500,17 @@ export class CommandCenterPanel {
         onResetInferenceConfig: () => this.resetInferenceConfig(),
         onSaveInferenceConfig: () => this.saveInferenceConfig(),
       }))
-      .register(new PersonaMessageHandler({
-        onLoadPersona: (personaName: string) => this.loadPersona(personaName),
-        onViewPersonaFile: (personaName: string) => this.openPersonaFile(personaName),
-        onChangePersonaViewMode: (mode: string) => {
-          this._personaViewMode = mode as 'card' | 'table';
-          this.update(true);
-        },
+      .register(new SlackPersonaTestHandler({
+        onRunPersonaTest: (query: string) => this.runContextTest(query),
+        onFetchContextStatus: () => this.fetchContextStatus(),
       }))
+      // NOTE: PersonaMessageHandler removed - PersonasTab handles persona messages directly
       .register(new WorkspaceMessageHandler({
+        // NOTE: changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow removed - SessionsTab handles them directly
         onViewWorkspaceTools: (uri: string) => this._viewWorkspaceTools(uri),
         onSwitchToWorkspace: (uri: string) => this._switchToWorkspace(uri),
         onChangeWorkspacePersona: (uri: string, persona: string) => this._changeWorkspacePersona(uri, persona),
         onRemoveWorkspace: (uri: string) => this._removeWorkspace(uri),
-        onChangeSessionGroupBy: (value: string) => {
-          this._sessionGroupBy = value as 'none' | 'project' | 'persona';
-          this._updateWorkspacesTab();
-        },
-        onChangeSessionViewMode: (value: string) => {
-          this._sessionViewMode = value as 'card' | 'table';
-          this._updateWorkspacesTab();
-        },
-        onRefreshSessionsNow: () => this._triggerImmediateRefresh(),
       }))
       .register(new TabMessageHandler({
         onSwitchTab: (tab: string) => {
@@ -677,6 +544,15 @@ export class CommandCenterPanel {
       extensionUri: this._extensionUri,
       webview: this._panel.webview,
     });
+    // Inject services into tabs so they can use Services instead of D-Bus directly
+    this._tabManager.setServices({
+      meeting: this._meetingService,
+      slack: this._slackService,
+      session: this._sessionService,
+      cron: this._cronService,
+      sprint: this._sprintService,
+      video: this._videoService,
+    });
     // Set up render callback so tabs can trigger re-renders when their state changes
     this._tabManager.setRenderCallback(() => {
       debugLog("Tab requested re-render");
@@ -693,10 +569,7 @@ export class CommandCenterPanel {
     });
     debugLog("Constructor - HtmlGenerator initialized");
 
-    debugLog("Constructor - initializing RefreshCoordinator...");
-    // Initialize the unified refresh coordinator
-    this._refreshCoordinator = new RefreshCoordinator(panel);
-    debugLog("Constructor - RefreshCoordinator initialized");
+    // NOTE: RefreshCoordinator removed - UI updates go through TabManager
 
     // CRITICAL: Set up message handler FIRST, before any HTML is set
     // This ensures we don't miss any messages from the webview
@@ -744,11 +617,7 @@ export class CommandCenterPanel {
       (e) => {
         if (e.webviewPanel.visible) {
           debugLog("Panel became visible - refreshing data");
-          // Invalidate coordinator cache to force updates
-          if (this._refreshCoordinator) {
-            this._refreshCoordinator.invalidateCache();
-          }
-          // Background sync will trigger file watcher which calls _dispatchAllUIUpdates
+          // Background sync will refresh tab data
           this._backgroundSync();
         }
       },
@@ -1092,6 +961,259 @@ export class CommandCenterPanel {
     }
   }
 
+  /**
+   * Run context injection test.
+   * Tests what knowledge sources would be used to answer a question.
+   */
+  private async runContextTest(query: string): Promise<void> {
+    debugLog(`runContextTest called: query="${query}"`);
+
+    if (!query) {
+      debugLog("runContextTest: No query provided, aborting");
+      vscode.window.showWarningMessage("Please enter a test query");
+      return;
+    }
+
+    try {
+      // Notify that test is starting - update SlackTab state
+      const slackTab = this._tabManager.getTab("slack");
+      if (slackTab) {
+        slackTab.handleMessage({ command: "contextTestStarted" });
+        slackTab.handleMessage({ command: "contextTestQueryUpdate", query });
+      }
+      this._panel.webview.postMessage({
+        command: "contextTestStarted",
+      });
+      // Also send legacy command for compatibility
+      this._panel.webview.postMessage({
+        command: "personaTestStarted",
+      });
+
+      // Get the project root from workspace folders
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      const projectRoot = workspaceFolders && workspaceFolders.length > 0
+        ? workspaceFolders[0].uri.fsPath
+        : path.join(os.homedir(), "src", "redhat-ai-workflow");
+
+      // Use external Python script
+      const scriptPath = path.join(this._extensionUri.fsPath, "scripts", "slack_persona_test.py");
+      const args = [
+        scriptPath,
+        "--query", query,
+        "--project-root", projectRoot,
+        "--include-jira",
+        "--include-code",
+        "--include-memory",
+        "--include-inscope",
+      ];
+
+      debugLog(`Running context test with scriptPath: ${scriptPath}`);
+      debugLog(`Args: ${args.join(" ")}`);
+
+      const python = spawn("python3", args, {
+        cwd: projectRoot,
+      });
+      let output = "";
+      let errorOutput = "";
+
+      debugLog(`Python process spawned, pid: ${python.pid}`);
+
+      // Set a timeout (45 seconds - context gathering can take a while)
+      const timeoutId = setTimeout(() => {
+        debugLog("Python process timed out after 45s, killing...");
+        python.kill();
+        const timeoutData = {
+          query: query,
+          error: "Context gathering timed out after 45 seconds",
+          sources: [],
+          sources_used: [],
+          total_results: 0,
+        };
+        // Update SlackTab state
+        const slackTab = this._tabManager.getTab("slack");
+        if (slackTab) {
+          slackTab.handleMessage({ command: "contextTestResult", data: timeoutData });
+        }
+        this._panel.webview.postMessage({
+          command: "contextTestResult",
+          data: timeoutData,
+        });
+      }, 45000);
+
+      python.stdout.on("data", (data: Buffer) => {
+        output += data.toString();
+        debugLog(`Python stdout: ${data.toString().substring(0, 200)}`);
+      });
+
+      python.stderr.on("data", (data: Buffer) => {
+        errorOutput += data.toString();
+        debugLog(`Python stderr: ${data.toString().substring(0, 500)}`);
+      });
+
+      python.on("error", (err: Error) => {
+        clearTimeout(timeoutId);
+        debugLog(`Python spawn error: ${err.message}`);
+        const errorData = {
+          query: query,
+          error: "Failed to spawn Python: " + err.message,
+          sources: [],
+          sources_used: [],
+          total_results: 0,
+        };
+        // Update SlackTab state
+        const slackTab = this._tabManager.getTab("slack");
+        if (slackTab) {
+          slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+        }
+        this._panel.webview.postMessage({
+          command: "contextTestResult",
+          data: errorData,
+        });
+      });
+
+      python.on("close", (code: number) => {
+        clearTimeout(timeoutId);
+        debugLog(`Python closed with code: ${code}, output length: ${output.length}`);
+        try {
+          const trimmedOutput = output.trim();
+          const data = JSON.parse(trimmedOutput);
+          debugLog(`Posting contextTestResult with ${data.total_results} results`);
+          
+          // Update the SlackTab's state directly and trigger re-render
+          const slackTab = this._tabManager.getTab("slack");
+          if (slackTab) {
+            slackTab.handleMessage({ command: "contextTestResult", data });
+          }
+          
+          // Also send to webview for any direct UI updates
+          this._panel.webview.postMessage({
+            command: "contextTestResult",
+            data,
+          });
+          // Also send legacy command for compatibility
+          this._panel.webview.postMessage({
+            command: "personaTestResult",
+            data,
+          });
+        } catch (parseErr) {
+          debugLog(`Failed to parse output: ${parseErr}`);
+          const errorData = {
+            query: query,
+            error: errorOutput || "Failed to parse response: " + String(parseErr),
+            sources: [],
+            sources_used: [],
+            total_results: 0,
+          };
+          // Update SlackTab state
+          const slackTab = this._tabManager.getTab("slack");
+          if (slackTab) {
+            slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+          }
+          this._panel.webview.postMessage({
+            command: "personaTestResult",
+            data: errorData,
+          });
+        }
+      });
+    } catch (error) {
+      const errorData = {
+        query: query,
+        error: String(error),
+        sources: [],
+        sources_used: [],
+        total_results: 0,
+      };
+      // Update SlackTab state
+      const slackTab = this._tabManager.getTab("slack");
+      if (slackTab) {
+        slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+      }
+      this._panel.webview.postMessage({
+        command: "personaTestResult",
+        data: errorData,
+      });
+    }
+  }
+
+  /**
+   * Fetch context injection status without running a full test.
+   * This is called on initial load to show the status of knowledge sources.
+   */
+  private async fetchContextStatus(): Promise<void> {
+    debugLog("fetchContextStatus called");
+
+    try {
+      // Get the project root from workspace folders
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      const projectRoot = workspaceFolders && workspaceFolders.length > 0
+        ? workspaceFolders[0].uri.fsPath
+        : path.join(os.homedir(), "src", "redhat-ai-workflow");
+
+      // Use external Python script with --status-only flag
+      const scriptPath = path.join(this._extensionUri.fsPath, "scripts", "slack_persona_test.py");
+      const args = [
+        scriptPath,
+        "--status-only",
+        "--project-root", projectRoot,
+      ];
+
+      debugLog(`Running status fetch with scriptPath: ${scriptPath}`);
+
+      const python = spawn("python3", args, {
+        cwd: projectRoot,
+      });
+      let output = "";
+      let errorOutput = "";
+
+      // Set a shorter timeout for status-only (10 seconds)
+      const timeoutId = setTimeout(() => {
+        debugLog("Status fetch timed out after 10s, killing...");
+        python.kill();
+      }, 10000);
+
+      python.stdout.on("data", (data: Buffer) => {
+        output += data.toString();
+      });
+
+      python.stderr.on("data", (data: Buffer) => {
+        errorOutput += data.toString();
+        // Only log actual errors, not warnings
+        if (!data.toString().includes("DeprecationWarning")) {
+          debugLog(`Status fetch stderr: ${data.toString().substring(0, 200)}`);
+        }
+      });
+
+      python.on("error", (err: Error) => {
+        clearTimeout(timeoutId);
+        debugLog(`Status fetch spawn error: ${err.message}`);
+      });
+
+      python.on("close", (code: number) => {
+        clearTimeout(timeoutId);
+        debugLog(`Status fetch closed with code: ${code}`);
+        try {
+          const trimmedOutput = output.trim();
+          const data = JSON.parse(trimmedOutput);
+          debugLog(`Posting contextTestResult (status only) with status: ${JSON.stringify(data.status)}`);
+          // Update SlackTab state directly
+          const slackTab = this._tabManager.getTab("slack");
+          if (slackTab) {
+            slackTab.handleMessage({ command: "contextTestResult", data });
+          }
+          // Send as contextTestResult so it populates the status in SlackTab
+          this._panel.webview.postMessage({
+            command: "contextTestResult",
+            data,
+          });
+        } catch (parseErr) {
+          debugLog(`Failed to parse status output: ${parseErr}`);
+        }
+      });
+    } catch (error) {
+      debugLog(`fetchContextStatus error: ${error}`);
+    }
+  }
+
   private async getInferenceStats(): Promise<void> {
     try {
       // Get all available personas from the personas directory
@@ -1409,11 +1531,7 @@ except Exception as e:
       clearTimeout(this._workspaceWatcherDebounce);
     }
 
-    // Dispose the refresh coordinator
-    if (this._refreshCoordinator) {
-      this._refreshCoordinator.dispose();
-      this._refreshCoordinator = null;
-    }
+    // NOTE: RefreshCoordinator disposal removed - it was dead code
 
     this._panel.dispose();
 
@@ -1632,35 +1750,11 @@ print(result[0].text if result else '[]')
       // Cache for synchronous access in UI updates
       this._cachedSprintState = sprintState;
 
-      // Update the Overview tab's issue list (for backward compatibility)
-      this._panel.webview.postMessage({
-        type: "sprintIssuesUpdate",
-        issues: issues.map((i: any) => ({
-          key: i.key,
-          type: i.issueType,
-          status: i.jiraStatus,
-          priority: i.priority,
-          summary: i.summary,
-          assignee: i.assignee,
-          storyPoints: i.storyPoints,
-        })),
-      });
-
-      // Sprint history and tool gap requests still come from files (not daemon state)
-      const sprintHistory = loadSprintHistory();
-      const toolGapRequests = loadToolGapRequests();
-
-      this._panel.webview.postMessage({
-        type: "sprintTabUpdate",
-        issues: sprintState.issues,
-        renderedHtml: getSprintTabContent(sprintState, sprintHistory, toolGapRequests, this._dataProvider.getJiraUrl()),
-      });
+      // NOTE: Dead postMessage calls removed (sprintIssuesUpdate, sprintTabUpdate)
+      // These messages were never handled in the webview.
+      // The SprintTab class handles its own rendering via TabManager.
     } catch (e) {
       console.error("Failed to load sprint via D-Bus:", e);
-      this._panel.webview.postMessage({
-        type: "sprintIssuesError",
-        error: "Failed to load issues from cache",
-      });
     }
   }
 
@@ -2320,10 +2414,10 @@ print(result[0].text if result else '[]')
         case "start":
           await execAsync(`systemctl --user start ${unit}`);
           vscode.window.showInformationMessage(`Started ${service} service`);
-          // Refresh status after a short delay with HIGH priority (user action)
+          // Refresh status after a short delay
           setTimeout(() => {
             this._loadWorkspaceState();
-            this._dispatchAllUIUpdates(RefreshPriority.HIGH);
+            this._dispatchAllUIUpdates();
           }, 1000);
           break;
 
@@ -2348,10 +2442,10 @@ print(result[0].text if result else '[]')
             await execAsync(`systemctl --user stop ${unit}`);
             vscode.window.showInformationMessage(`Stopped ${service} service`);
           }
-          // Refresh with HIGH priority (user action)
+          // Refresh after a short delay
           setTimeout(() => {
             this._loadWorkspaceState();
-            this._dispatchAllUIUpdates(RefreshPriority.HIGH);
+            this._dispatchAllUIUpdates();
           }, 1000);
           break;
 
@@ -2935,21 +3029,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           break;
       }
 
-      // Use incremental badge update instead of full re-render
-      const performanceState = loadPerformanceState();
-      this._panel.webview.postMessage({
-        type: "performanceTabBadgeUpdate",
-        percentage: performanceState.overall_percentage || 0,
-      });
+      // NOTE: performanceTabBadgeUpdate message removed - it was never handled in webview.
+      // The PerformanceTab class handles its own badge updates via TabManager.
     } catch (e: any) {
       vscode.window.showErrorMessage(`Performance action failed: ${e.message}`);
     }
   }
 
-  /**
-   * Test the chat launcher functionality.
-   * Creates a new Cursor chat and pastes a skill_run command.
-   */
   /**
    * Launch a new chat for a sprint issue.
    * @param issueKey Optional issue key - if not provided, prompts user
@@ -3735,135 +3821,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   }
 
   /**
-   * Dispatch updates to ALL UI sections from daemon state.
-   * Called after D-Bus polling retrieves fresh state.
-   *
-   * Uses the RefreshCoordinator for centralized state management,
-   * debouncing, and change detection to eliminate UI flicker.
+   * Dispatch updates to UI sections.
+   * 
+   * NOTE: RefreshCoordinator was removed - it was sending messages that were never handled
+   * in the webview. UI updates now go through TabManager and tabContentUpdate messages.
+   * This method is kept for backward compatibility but only updates workspaces.
    */
-  private _dispatchAllUIUpdates(priority: RefreshPriority = RefreshPriority.NORMAL): void {
-    if (!this._refreshCoordinator) {
-      debugLog("RefreshCoordinator not initialized, skipping dispatch");
-      return;
-    }
-
-    // Collect all state updates
-    const updates: Array<{ section: StateSection; data: any }> = [];
-
-    // Services
-    updates.push({
-      section: "services",
-      data: {
-        list: this._formatServicesForUI(),
-        mcp: this._services.mcp || { running: false }
-      }
-    });
-
-    // Ollama
-    updates.push({
-      section: "ollama",
-      data: { status: this._ollama }
-    });
-
-    // Cron
-    updates.push({
-      section: "cron",
-      data: {
-        enabled: this._cronData.enabled || false,
-        timezone: this._cronData.timezone || "UTC",
-        jobs: this._cronData.jobs || [],
-        execution_mode: this._cronData.execution_mode || "claude_cli",
-        history: this._cronData.history || [],
-        total_history: this._cronData.total_history || 0
-      }
-    });
-
-    // Slack
-    updates.push({
-      section: "slack",
-      data: { channels: this._slackChannels }
-    });
-
-    // Sprint (badge only for background updates) - use cached state from D-Bus
-    const sprintState = this._cachedSprintState || { issues: [], automaticMode: false, manuallyStarted: false, backgroundTasks: false, lastUpdated: "", processingIssue: null, currentSprint: null, nextSprint: null };
-    const pendingCount = (sprintState.issues || []).filter(
-      (i: any) => i.approvalStatus === "pending" || i.approvalStatus === "waiting"
-    ).length;
-    updates.push({
-      section: "sprint",
-      data: {
-        issues: sprintState.issues || [],
-        pendingCount,
-        totalIssues: sprintState.issues?.length || 0
-        // Note: renderedHtml is NOT included for background updates to avoid expensive regeneration
-      }
-    });
-
-    // Meetings
-    const meetBotState = loadMeetBotState(this._meetData);
-    updates.push({
-      section: "meetings",
-      data: {
-        currentMeeting: meetBotState.currentMeeting,
-        currentMeetings: meetBotState.currentMeetings || [],
-        upcomingMeetings: meetBotState.upcomingMeetings || [],
-        renderedUpcomingHtml: getUpcomingMeetingsHtml(meetBotState)
-      }
-    });
-
-    // Performance
-    const performanceState = loadPerformanceState();
-    updates.push({
-      section: "performance",
-      data: { overall_percentage: performanceState.overall_percentage || 0 }
-    });
-
-    // Sessions (workspaces)
-    if (this._workspaceState) {
-      updates.push({
-        section: "sessions",
-        data: {
-          workspaces: this._workspaceState.workspaces || [],
-          totalCount: this._workspaceCount
-        }
-      });
-    }
-
-    // Overview stats
-    const stats = this.getCachedStats();
-    const workflowStatus = this._dataProvider.getStatus();
-    const currentWork = this.getCachedCurrentWork();
-    const memoryHealth = this.getCachedMemoryHealth();
-    const today = new Date().toISOString().split("T")[0];
-    const todayStats = stats?.daily?.[today] || { tool_calls: 0, skill_executions: 0 };
-    const session = stats?.current_session || { tool_calls: 0, skill_executions: 0, memory_ops: 0 };
-    const lifetime = stats?.lifetime || { tool_calls: 0, tool_successes: 0 };
-    const toolSuccessRate = lifetime.tool_calls > 0
-      ? Math.round((lifetime.tool_successes / lifetime.tool_calls) * 100)
-      : 100;
-
-    updates.push({
-      section: "overview",
-      data: {
-        stats,
-        todayStats,
-        session,
-        toolSuccessRate,
-        workflowStatus,
-        currentWork,
-        workspaceCount: this._workspaceCount,
-        memoryHealth
-      }
-    });
-
-    // Send all updates through the coordinator
-    const changedSections = this._refreshCoordinator.updateSections(updates, priority);
-
-    if (changedSections.length > 0) {
-      debugLog(`RefreshCoordinator: ${changedSections.length} sections changed: ${changedSections.join(", ")}`);
-    }
-
-    // Also update workspaces tab (has its own rendering logic)
+  private _dispatchAllUIUpdates(_priority?: any): void {
+    // Update workspaces tab (has its own rendering logic)
     this._updateWorkspacesTab();
   }
 
@@ -3896,19 +3861,29 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Tiered background sync using epoch time modulo for efficient polling.
    * Called every 1 second by the interval timer.
    *
-   * Refresh tiers:
-   * - Every 1 second: Session state only (active session detection)
-   * - Every 10 seconds: Everything else (services, meetings, ollama, MCP, inference)
+   * STAGGERED REFRESH SCHEDULE (to avoid D-Bus request spikes):
+   * 
+   * Second 0:  Session state only
+   * Second 1:  Session state only
+   * Second 2:  Session state + Slop tab (if not active)
+   * Second 3:  Session state only
+   * Second 4:  Session state + Meetings tab (if not active)
+   * Second 5:  Session state + Active tab refresh + Badge update
+   * Second 6:  Session state + Cron tab (if not active)
+   * Second 7:  Session state only
+   * Second 8:  Session state + Slack tab (if not active)
+   * Second 9:  Session state only
+   * Second 10: Session state + Active tab + Background sync (services, Ollama, MCP)
+   * ... pattern repeats with staggered critical tab refreshes
    *
-   * This provides responsive session updates (shows active session immediately)
-   * while keeping the 10-second interval for everything else.
+   * This spreads D-Bus load across time instead of bursting at specific seconds.
    */
   private _tieredBackgroundSync(): void {
     const epochSecond = Math.floor(Date.now() / 1000);
+    const cycleSecond = epochSecond % 30; // 30-second cycle
 
     // TIER 1: Every 1 second - Session state (active session detection)
     // This is critical for showing which session is currently active
-    // Must await the async load before updating the UI
     this._loadSessionStateViaDBus().then(sessionResult => {
       if (sessionResult) {
         this._workspaceState = sessionResult.workspaces || {};
@@ -3919,24 +3894,110 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       debugLog(`Tiered sync: Failed to load session state: ${e}`);
     });
 
-    // TIER 1.5: Every 5 seconds - Refresh SessionsTab data via TabManager
-    // This ensures the new SessionsTab gets fresh data from D-Bus
-    if (epochSecond % 5 === 0) {
-      const sessionsTab = this._tabManager.getTab("sessions");
-      if (sessionsTab && this._currentTab === "sessions") {
-        sessionsTab.loadData().then(() => {
-          // Trigger re-render if we're on the sessions tab
+    // TIER 2: Every 5 seconds - Refresh active tab + update all badges
+    // Fires at: 0, 5, 10, 15, 20, 25
+    if (cycleSecond % 5 === 0) {
+      const activeTab = this._tabManager.getTab(this._currentTab);
+      if (activeTab) {
+        this._logActivity(`Refreshing ${this._currentTab}`);
+        activeTab.loadData().then(() => {
           this._triggerTabRerender();
+          this._updateAllTabBadges();
         }).catch(e => {
-          debugLog(`Tiered sync: Failed to refresh SessionsTab: ${e}`);
+          debugLog(`Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`);
         });
+      } else {
+        // Still update badges even if no active tab
+        this._updateAllTabBadges();
       }
     }
 
-    // TIER 2: Every 10 seconds - Full sync (everything else)
-    if (epochSecond % 10 === 0) {
-      // Full background sync for all other data
+    // TIER 3: Every 10 seconds - Background sync (services, Ollama, MCP)
+    // Fires at: 0, 10, 20 - but OFFSET by 1 second to avoid collision with Tier 2
+    if (cycleSecond === 1 || cycleSecond === 11 || cycleSecond === 21) {
       this._backgroundSync();
+    }
+
+    // TIER 4: Staggered critical tab refresh (one tab per designated second)
+    // Each critical tab gets refreshed once per 30-second cycle, spread out
+    // This prevents D-Bus request spikes
+    this._refreshStaggeredTab(cycleSecond);
+  }
+
+  /**
+   * Refresh a single critical tab based on the current cycle second.
+   * Spreads tab refreshes across the 30-second cycle to avoid D-Bus spikes.
+   * 
+   * Schedule:
+   *   Second 2:  slop
+   *   Second 4:  meetings  
+   *   Second 6:  cron
+   *   Second 8:  slack
+   *   Second 12: services
+   *   Second 14: inference
+   *   Second 16: slop (2nd refresh for running scans)
+   *   Second 18: skills (skill list rarely changes, 30s is enough)
+   *   Second 22: meetings (2nd refresh for active meetings)
+   */
+  private _refreshStaggeredTab(cycleSecond: number): void {
+    const schedule: Record<number, string> = {
+      2: "slop",
+      4: "meetings",
+      6: "cron",
+      8: "slack",
+      12: "services",
+      14: "inference",
+      16: "slop",      // Extra refresh for slop (running scans need updates)
+      18: "skills",    // Skills list rarely changes, 30s refresh is enough
+      22: "meetings",  // Extra refresh for meetings (active meetings need updates)
+    };
+
+    const tabId = schedule[cycleSecond];
+    if (!tabId) return;
+
+    // Skip if this is the active tab (already refreshed every 5 seconds)
+    if (tabId === this._currentTab) {
+      debugLog(`Staggered refresh: Skipping ${tabId} (active tab)`);
+      return;
+    }
+
+    const tab = this._tabManager.getTab(tabId);
+    if (tab) {
+      debugLog(`Staggered refresh: Loading ${tabId} at cycle second ${cycleSecond}`);
+      this._logActivity(`Syncing ${tabId}`);
+      tab.loadData().then(() => {
+        // Update badges after this tab loads
+        this._updateAllTabBadges();
+      }).catch(e => {
+        debugLog(`Staggered refresh: Failed to refresh ${tabId}: ${e}`);
+      });
+    }
+  }
+
+  /**
+   * Log an activity message to the header activity log.
+   * Shows the user what background refreshes are happening.
+   */
+  private _logActivity(message: string): void {
+    if (this._panel) {
+      this._panel.webview.postMessage({
+        command: "activityLog",
+        text: message,
+      });
+    }
+  }
+
+  /**
+   * Update all tab badges by sending badge data to the webview.
+   * This is lightweight - just reads cached state from tabs.
+   */
+  private _updateAllTabBadges(): void {
+    const badges = this._tabManager.getAllBadges();
+    if (this._panel) {
+      this._panel.webview.postMessage({
+        command: "updateBadges",
+        badges: badges,
+      });
     }
   }
 
@@ -3949,6 +4010,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * No file watching or sync processes are used.
    */
   private _backgroundSync(): void {
+    this._logActivity("Background sync");
+    
     // Clear personas cache to ensure fresh data on next access
     this._personasCache = null;
 
@@ -4037,7 +4100,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     debugLog(`_refreshServicesViaDBus: Final this._services = ${JSON.stringify(this._services)}`);
     // Dispatch UI update with new service status
-    this._dispatchAllUIUpdates(RefreshPriority.LOW);
+    this._dispatchAllUIUpdates();
   }
 
   /**
@@ -4211,7 +4274,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <div class="empty-state">
           <div class="empty-state-icon">💬</div>
           <div>No active sessions</div>
-          <div style="font-size: 0.8rem; margin-top: 8px;">
+          <div class="text-sm mt-8">
             Start a session with <code>session_start()</code> in a Cursor chat
           </div>
         </div>
@@ -4236,15 +4299,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <table class="data-table sessions-data-table">
           <thead>
             <tr>
-              <th style="width: 3%;"></th>
-              <th style="text-align: left; width: 22%;">Name</th>
-              <th style="width: 14%;">Project</th>
-              <th style="width: 12%;">Persona</th>
-              <th style="width: 12%;">Issue</th>
-              <th style="width: 8%;">Last Active</th>
-              <th style="width: 5%;">Tools</th>
-              <th style="width: 5%;">Skills</th>
-              <th style="width: 14%;">Actions</th>
+              <th class="col-icon"></th>
+              <th class="col-name text-left">Name</th>
+              <th class="col-project">Project</th>
+              <th class="col-persona">Persona</th>
+              <th class="col-issue">Issue</th>
+              <th class="col-time">Last Active</th>
+              <th class="col-count">Tools</th>
+              <th class="col-count">Skills</th>
+              <th class="col-actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -4280,7 +4343,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               return `
               <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
                 <td><span class="persona-icon-small ${personaColor}">${personaIcon}</span></td>
-                <td style="text-align: left;">
+                <td class="text-left">
                   <span class="clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat">
                     <strong>${sessionName}</strong>
                   </span>
@@ -4329,7 +4392,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         <div class="empty-state">
           <div class="empty-state-icon">💬</div>
           <div>No active sessions</div>
-          <div style="font-size: 0.8rem; margin-top: 8px;">
+          <div class="text-sm mt-8">
             Start a session with <code>session_start()</code> in a Cursor chat
           </div>
         </div>

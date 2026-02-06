@@ -28,7 +28,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # Local imports after path setup
-from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status, get_client  # noqa: E402
+from scripts.common.dbus_base import (  # noqa: E402
+    DBUS_AVAILABLE,
+    check_daemon_health,
+    check_daemon_status,
+    get_client,
+)
 
 SERVICES = ["slack", "cron", "meet", "sprint"]
 
@@ -249,7 +254,7 @@ async def cmd_fix(args):
             continue
 
         print(f"❌ {service.upper()}: Unhealthy - {health.get('message')}")
-        print(f"   Attempting restart...")
+        print("   Attempting restart...")
 
         unit = systemd_units.get(service)
         if not unit:
@@ -274,7 +279,7 @@ async def cmd_fix(args):
             else:
                 print(f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}")
         except subprocess.TimeoutExpired:
-            print(f"   ⚠️  Restart timed out")
+            print("   ⚠️  Restart timed out")
         except Exception as e:
             print(f"   ⚠️  Restart failed: {e}")
 

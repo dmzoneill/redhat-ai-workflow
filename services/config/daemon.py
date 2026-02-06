@@ -16,32 +16,28 @@ Features:
 - Single source of truth for configuration
 - D-Bus IPC for external queries
 - Graceful shutdown handling
+- Systemd watchdog support
 
 Usage:
-    python scripts/config_daemon.py                # Run daemon
-    python scripts/config_daemon.py --status       # Check if running
-    python scripts/config_daemon.py --stop         # Stop running daemon
+    python -m services.config                # Run daemon
+    python -m services.config --status       # Check if running
+    python -m services.config --stop         # Stop running daemon
+    python -m services.config --dbus         # Enable D-Bus IPC
 
 Systemd:
-    systemctl --user start config-daemon
-    systemctl --user status config-daemon
-    systemctl --user stop config-daemon
+    systemctl --user start bot-config
+    systemctl --user status bot-config
+    systemctl --user stop bot-config
 
 D-Bus:
-    Service: com.aiworkflow.Config
-    Path: /com/aiworkflow/Config
+    Service: com.aiworkflow.BotConfig
+    Path: /com/aiworkflow/BotConfig
 """
 
-import argparse
 import ast
-import asyncio
-import fcntl
 import json
 import logging
-import os
 import re
-import signal
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -49,79 +45,25 @@ from typing import Any
 
 import yaml
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-
-LOCK_FILE = Path("/tmp/config-daemon.lock")
-PID_FILE = Path("/tmp/config-daemon.pid")
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
 
 # Paths
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 SKILLS_DIR = PROJECT_ROOT / "skills"
 PERSONAS_DIR = PROJECT_ROOT / "personas"
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 CONFIG_FILE = PROJECT_ROOT / "config.json"
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-class ConfigDaemon(DaemonDBusBase):
+class ConfigDaemon(DaemonDBusBase, BaseDaemon):
     """Config daemon with D-Bus support - owns all static configuration."""
+
+    # BaseDaemon configuration
+    name = "config"
+    description = "Config Daemon - Centralized configuration service"
 
     # D-Bus configuration
     # Note: Using "BotConfig" instead of "Config" due to D-Bus name resolution issues
@@ -131,10 +73,8 @@ class ConfigDaemon(DaemonDBusBase):
     interface_name = "com.aiworkflow.BotConfig"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = None  # Created in run() to ensure correct event loop
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
 
         # Caches
         self._skills_cache: dict[str, dict] | None = None
@@ -796,12 +736,11 @@ class ConfigDaemon(DaemonDBusBase):
 
     # ==================== Lifecycle ====================
 
-    async def run(self):
-        """Main daemon loop."""
-        logger.info("Config daemon starting...")
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
 
-        # Create shutdown event in async context to ensure correct event loop binding
-        self._shutdown_event = asyncio.Event()
+        logger.info("Config daemon starting...")
 
         # Pre-load caches
         self._load_skills_list()
@@ -817,122 +756,54 @@ class ConfigDaemon(DaemonDBusBase):
             try:
                 await self.start_dbus()
                 logger.info(f"D-Bus service started: {self.service_name}")
-                # Debug: log the interface methods
-                if self._dbus_interface:
-                    logger.info(f"D-Bus interface class: {type(self._dbus_interface).__name__}")
-                    logger.info(f"D-Bus interface name: {self._dbus_interface.name}")
             except Exception as e:
                 logger.error(f"Failed to start D-Bus: {e}")
 
-        # Mark as running
         self.is_running = True
-        self.start_time = time.time()
+        logger.info("Config daemon ready")
 
-        logger.info("Config daemon running")
-
-        # Main loop - simple wait for shutdown
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
         # The D-Bus library uses add_reader() to process messages via the event loop
-        logger.info("Entering main loop")
         await self._shutdown_event.wait()
-        logger.info("Shutdown signal received")
 
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Config daemon shutting down...")
+
+        # Cancel file watchers
         for watcher in self._watchers:
             watcher.cancel()
 
+        # Stop D-Bus
         if self.enable_dbus:
             await self.stop_dbus()
 
         self.is_running = False
+        await super().shutdown()
         logger.info("Config daemon stopped")
 
-    def shutdown(self):
-        """Signal the daemon to shut down."""
-        logger.info("Shutdown requested")
-        self._shutdown_event.set()
+    async def health_check(self) -> dict:
+        """Perform a health check on the config daemon."""
+        self._last_health_check = time.time()
 
+        checks = {
+            "running": self.is_running,
+            "skills_loaded": self._skills_cache is not None or self._skills_list_cache is not None,
+            "personas_loaded": self._personas_cache is not None or self._personas_list_cache is not None,
+            "tool_modules_loaded": self._tool_modules_cache is not None,
+            "config_loaded": self._config_cache is not None,
+        }
 
-def _close_inherited_fds():
-    """Close file descriptors inherited from parent process.
+        healthy = all(checks.values())
 
-    When running from Cursor's terminal, we inherit FDs for inotify watches,
-    sockets, and log files. These can interfere with asyncio's epoll.
-    """
-    import resource
-
-    # Get the maximum FD number
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-
-    # Close FDs > 2 (keep stdin, stdout, stderr)
-    # But skip FDs that we'll need (3-10 are typically used by Python/asyncio)
-    for fd in range(20, min(soft, 1024)):
-        try:
-            os.close(fd)
-        except OSError:
-            pass  # FD not open, ignore
-
-
-def main():
-    # Close inherited FDs early to prevent interference with asyncio
-    _close_inherited_fds()
-
-    parser = argparse.ArgumentParser(description="Config Daemon")
-    parser.add_argument("--status", action="store_true", help="Check if daemon is running")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--dbus", action="store_true", help="Enable D-Bus IPC")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    args = parser.parse_args()
-
-    instance = SingleInstance()
-
-    if args.status:
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Config daemon is running (PID: {pid})")
-            sys.exit(0)
-        else:
-            print("Config daemon is not running")
-            sys.exit(1)
-
-    if args.stop:
-        pid = instance.get_running_pid()
-        if pid:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print(f"Sent SIGTERM to PID {pid}")
-                sys.exit(0)
-            except OSError as e:
-                print(f"Failed to stop daemon: {e}")
-                sys.exit(1)
-        else:
-            print("Config daemon is not running")
-            sys.exit(1)
-
-    # Try to acquire lock
-    if not instance.acquire():
-        pid = instance.get_running_pid()
-        print(f"Config daemon already running (PID: {pid})")
-        sys.exit(1)
-
-    # Create daemon
-    daemon = ConfigDaemon(verbose=args.verbose, enable_dbus=args.dbus)
-
-    async def run_with_signals():
-        """Run daemon with proper asyncio signal handling."""
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            daemon.shutdown()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, signal_handler)
-
-        await daemon.run()
-
-    try:
-        asyncio.run(run_with_signals())
-    finally:
-        instance.release()
+        return {
+            "healthy": healthy,
+            "checks": checks,
+            "message": "Config daemon is healthy" if healthy else "Some caches not loaded",
+            "timestamp": self._last_health_check,
+        }
 
 
 if __name__ == "__main__":
-    main()
+    ConfigDaemon.main()

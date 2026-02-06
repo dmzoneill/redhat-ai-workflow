@@ -1316,6 +1316,34 @@
         },
         "notify": ["memory"],
         "timeout_seconds": 3600
+      },
+      {
+        "name": "daily_slop_scan",
+        "description": "Run slop code quality scan daily at 5 AM",
+        "skill": "slop_scan_now",
+        "cron": "0 5 * * *",
+        "persona": "slop",
+        "inputs": {
+          "wait_for_completion": true,
+          "timeout_seconds": 600
+        },
+        "notify": ["memory"],
+        "timeout_seconds": 900
+      },
+      {
+        "name": "weekly_slop_fix",
+        "description": "Auto-fix high-confidence slop findings weekly on Monday at 6 AM",
+        "skill": "slop_fix",
+        "cron": "0 6 * * 1",
+        "persona": "slop",
+        "inputs": {
+          "dry_run": false,
+          "min_confidence": 0.90,
+          "limit": 50,
+          "commit": true
+        },
+        "notify": ["memory"],
+        "timeout_seconds": 600
       }
     ]
   },

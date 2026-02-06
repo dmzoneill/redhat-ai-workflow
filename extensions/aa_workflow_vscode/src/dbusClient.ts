@@ -701,6 +701,7 @@ class DBusClient {
       return { success: true, data };
     } catch (e: unknown) {
       const error = e instanceof Error ? e.message : "D-Bus query failed";
+      logger.error(`queryDBus(${daemon}, ${method}) error: ${error}`);
 
       // Check if it's a connection error and trigger reconnect
       if (error.includes("connection") || error.includes("disconnected")) {
@@ -1549,6 +1550,48 @@ class DBusClient {
     ]);
   }
 
+  /**
+   * Run persona/context test
+   */
+  async slack_runPersonaTest(message: string, persona: string = ""): Promise<DBusResult> {
+    return this.queryDBus("slack", "RunPersonaTest", [
+      { type: "string", value: message },
+      { type: "string", value: persona },
+    ]);
+  }
+
+  // ==========================================================================
+  // Workspace/Session Methods
+  // ==========================================================================
+
+  /**
+   * Get tools for a workspace/session
+   */
+  async workspace_getTools(sessionId?: string): Promise<DBusResult> {
+    return this.callMethod("session", "get_tools", { session_id: sessionId || "" });
+  }
+
+  /**
+   * Switch workspace/session
+   */
+  async workspace_switch(sessionId: string): Promise<DBusResult> {
+    return this.callMethod("session", "switch", { session_id: sessionId });
+  }
+
+  /**
+   * Set persona for a workspace/session
+   */
+  async workspace_setPersona(persona: string, sessionId?: string): Promise<DBusResult> {
+    return this.callMethod("session", "set_persona", { persona, session_id: sessionId || "" });
+  }
+
+  /**
+   * Remove a workspace/session
+   */
+  async workspace_remove(sessionId: string): Promise<DBusResult> {
+    return this.callMethod("session", "remove", { session_id: sessionId });
+  }
+
   // ==========================================================================
   // Stats Bot Methods
   // ==========================================================================
@@ -1579,6 +1622,62 @@ class DBusClient {
    */
   async stats_getSkillExecution(): Promise<DBusResult<{ execution: SkillExecution }>> {
     return this.callMethod("stats", "get_skill_execution");
+  }
+
+  /**
+   * Collect daily statistics
+   */
+  async stats_collectDaily(): Promise<DBusResult> {
+    return this.callMethod("stats", "collect_daily");
+  }
+
+  /**
+   * Backfill historical statistics
+   */
+  async stats_backfill(days: number = 7): Promise<DBusResult> {
+    return this.callMethod("stats", "backfill", { days });
+  }
+
+  /**
+   * Export statistics report
+   */
+  async stats_exportReport(format: string = "json"): Promise<DBusResult> {
+    return this.callMethod("stats", "export_report", { format });
+  }
+
+  /**
+   * Log an activity
+   */
+  async stats_logActivity(activity: string, details?: any): Promise<DBusResult> {
+    return this.callMethod("stats", "log_activity", { activity, details: details ? JSON.stringify(details) : "" });
+  }
+
+  /**
+   * Evaluate all pending items
+   */
+  async stats_evaluateAll(): Promise<DBusResult> {
+    return this.callMethod("stats", "evaluate_all");
+  }
+
+  /**
+   * Get question summary statistics
+   */
+  async stats_getQuestionSummary(questionId?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_question_summary", questionId ? { question_id: questionId } : undefined);
+  }
+
+  /**
+   * Add a note to statistics
+   */
+  async stats_addNote(note: string, category?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "add_note", { note, category: category || "" });
+  }
+
+  /**
+   * Evaluate a specific question
+   */
+  async stats_evaluateQuestion(questionId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "evaluate_question", { question_id: questionId });
   }
 
   // ==========================================================================
@@ -1704,6 +1803,45 @@ class DBusClient {
    */
   async config_getState(): Promise<DBusResult<{ state: ConfigState }>> {
     return this.callMethod("config", "get_state");
+  }
+
+  /**
+   * Get inference context for a message
+   */
+  async config_getInferenceContext(message: string): Promise<DBusResult> {
+    return this.callMethod("config", "get_inference_context", { message });
+  }
+
+  /**
+   * Set configuration value
+   */
+  async config_setConfig(key: string, value: any): Promise<DBusResult> {
+    return this.callMethod("config", "set_config", { key, value: JSON.stringify(value) });
+  }
+
+  // ==========================================================================
+  // Video Daemon Methods
+  // ==========================================================================
+
+  /**
+   * Start video preview
+   */
+  async video_startPreview(sessionId?: string): Promise<DBusResult> {
+    return this.callMethod("video", "start_preview", sessionId ? { session_id: sessionId } : undefined);
+  }
+
+  /**
+   * Stop video preview
+   */
+  async video_stopPreview(sessionId?: string): Promise<DBusResult> {
+    return this.callMethod("video", "stop_preview", sessionId ? { session_id: sessionId } : undefined);
+  }
+
+  /**
+   * Get current video frame
+   */
+  async video_getFrame(sessionId?: string): Promise<DBusResult> {
+    return this.callMethod("video", "get_frame", sessionId ? { session_id: sessionId } : undefined);
   }
 
   // ==========================================================================

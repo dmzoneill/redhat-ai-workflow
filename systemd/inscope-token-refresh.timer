@@ -1,0 +1,14 @@
+[Unit]
+Description=Refresh InScope token every 45 minutes
+After=network.target
+
+[Timer]
+# Run 45 minutes after boot
+OnBootSec=5min
+# Then every 45 minutes (token lasts 1 hour, refresh at 45min for safety margin)
+OnUnitActiveSec=45min
+# Also run if we missed the last scheduled time
+Persistent=true
+
+[Install]
+WantedBy=timers.target

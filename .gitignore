@@ -90,3 +90,9 @@ scripts/debug_*.py
 # TypeScript/JavaScript compiled output
 **/out/
 **/dist/
+
+# Tool module backup files (auto-generated during refactoring)
+tool_modules/*/src/backup/
+*.py.new
+*.py.[0-9]*
+memory/style/

@@ -15,9 +15,12 @@ import logging
 import re
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import yaml
+
+if TYPE_CHECKING:
+    from .attendee_service import EnrichedAttendee
 
 logger = logging.getLogger(__name__)
 
@@ -404,7 +407,6 @@ class AttendeeEnricher:
         Returns:
             The same attendee object with additional data filled in.
         """
-        from .attendee_service import EnrichedAttendee
 
         # Try to find in app-interface
         user_data = None

@@ -7,7 +7,7 @@ Implements debouncing to avoid excessive re-indexing during rapid saves.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 

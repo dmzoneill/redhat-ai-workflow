@@ -331,6 +331,18 @@ def notify_session_resumed(session_id: str, name: str | None = None) -> None:
     )
 
 
+def notify_session_updated(session_id: str, change_description: str) -> None:
+    """Notify that a session was updated (e.g., project changed, renamed)."""
+    emit_notification(
+        category="session",
+        event_type="updated",
+        title="Session Updated",
+        message=change_description,
+        level="info",
+        data={"session_id": session_id, "change": change_description},
+    )
+
+
 def notify_auto_heal_triggered(step_name: str, error_type: str, fix_action: str) -> None:
     """Notify that auto-heal was triggered."""
     emit_notification(

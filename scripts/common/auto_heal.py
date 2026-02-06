@@ -243,8 +243,11 @@ def log_failure(
                 memory_helper.increment_field("learned/tool_failures", "stats.auto_fixed")
             else:
                 memory_helper.increment_field("learned/tool_failures", "stats.manual_required")
-        except Exception:
-            pass  # Memory logging is best-effort
+        except Exception as e:
+            # Memory logging is best-effort - don't fail the main operation
+            import logging
+
+            logging.getLogger(__name__).debug(f"Could not log failure to memory: {e}")
 
     return entry
 

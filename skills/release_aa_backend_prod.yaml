@@ -182,7 +182,7 @@ steps:
     compute: |
       from scripts.common.parsers import parse_deploy_clowder_ref
 
-      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
+      deploy_path = f"{cfg['appinterface_repo']}/{cfg['deploy_file']}"
       with open(deploy_path, 'r') as f:
         content = f.read()
 
@@ -192,51 +192,83 @@ steps:
       if not current_sha:
         raise Exception("Could not find production ref in deploy-clowder.yml")
 
-      return current_sha
+      result = current_sha
     output: current_prod_sha
 
-  # Step 4: Get commit log for changelog (using MCP tool)
+  # Step 4: Get commit log for changelog (using compute with subprocess since git_log doesn't support range)
   - name: get_changelog_log
     description: "Get list of commits being released"
-    tool: git_log
-    args:
-      repo: "{{ cfg.backend_repo }}"
-      range: "{{ current_prod_sha }}..{{ inputs.commit_sha }}"
-      oneline: true
+    compute: |
+      import subprocess
+      backend_repo = cfg['backend_repo']
+      try:
+          cmd = f'cd "{backend_repo}" && git log --oneline "{current_prod_sha}..{inputs.commit_sha}"'
+          proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+          result = proc.stdout.strip() if proc.returncode == 0 else "No commits found"
+      except Exception as e:
+          result = f"Error getting changelog: {e}"
     output: changelog_raw
     on_error: continue
 
   - name: format_changelog
     description: "Format changelog output"
     compute: |
-      # parsers is available from skill engine safe_globals
       commits_str = str(changelog_raw) if changelog_raw else ""
 
       if not commits_str.strip() or "error" in commits_str.lower():
         result = "No new commits (same SHA as current production)"
       else:
-        commits = parsers.parse_git_log(commits_str) if parsers else []
-        commit_count = len(commits)
-        result = f"📦 {commit_count} commits to release:\n\n{commits_str.strip()}"
+        # Split into lines and format as markdown list
+        lines = [line.strip() for line in commits_str.strip().split('\n') if line.strip()]
+        commit_count = len(lines)
+        # Format each commit as a bullet point with code formatting for the SHA
+        formatted_lines = []
+        for line in lines:
+            # Each line is like "df42bb8b Merge branch..."
+            parts = line.split(' ', 1)
+            if len(parts) == 2:
+                sha, msg = parts
+                formatted_lines.append(f"- `{sha}` {msg}")
+            else:
+                formatted_lines.append(f"- {line}")
+        result = f"📦 **{commit_count} commits** to release:\n\n" + "\n".join(formatted_lines)
     output: changelog
 
   # ==================== CREATE JIRA ISSUE ====================
   # Switch to developer persona for Jira tools
 
-  # Step 5: Create release Jira issue (uses create_jira_issue skill)
-  - name: create_jira_issue
-    description: "Create Jira story for tracking this release (uses create_jira_issue skill)"
-    tool: skill_run
+  - name: load_developer_persona_for_jira
+    description: "Load developer persona for Jira tools"
+    tool: persona_load
     args:
-      skill_name: create_jira_issue
-      inputs: |
-        {
-          "summary": "{{ inputs.release_date }} Analytics HCC Service Release",
-          "issue_type": "Story",
-          "project": "AAP",
-          "description": "Production release tracking for {{ inputs.release_date }}\\n\\nCommit SHA: {{ inputs.commit_sha }}",
-          "labels": "release,production"
-        }
+      persona_name: "developer"
+
+  # Step 5: Create release Jira issue (uses jira_create_issue tool directly)
+  - name: create_jira_issue_raw
+    description: "Create Jira story for tracking this release"
+    tool: jira_create_issue
+    args:
+      summary: "{{ inputs.release_date }} Analytics HCC Service Release"
+      issue_type: "Story"
+      project: "AAP"
+      description: "Production release tracking for {{ inputs.release_date }}\n\nCommit SHA: {{ inputs.commit_sha }}"
+      labels: "release,production"
+    output: jira_issue_raw
+    on_error: continue
+
+  - name: parse_jira_issue
+    description: "Parse Jira issue key from tool output"
+    compute: |
+      import re
+      # Parse issue key from output like "✅ Issue created: AAP-64709\n..."
+      issue_key = None
+      issue_url = None
+      if jira_issue_raw:
+          match = re.search(r'(AAP-\d+)', str(jira_issue_raw))
+          if match:
+              issue_key = match.group(1)
+              issue_url = f"https://issues.redhat.com/browse/{issue_key}"
+      result = {"key": issue_key, "url": issue_url, "raw": str(jira_issue_raw) if jira_issue_raw else None}
     output: jira_issue
     on_error: continue
 
@@ -288,13 +320,20 @@ steps:
     output: pull_result
     on_error: continue
 
-  # Step 8: Get existing branches (using MCP tool)
+  # Step 8: Get existing branches (using compute with subprocess since git_branch_list doesn't support pattern)
   - name: list_existing_branches
     description: "Check for existing release branches"
-    tool: git_branch_list
-    args:
-      repo: "{{ cfg.appinterface_repo }}"
-      pattern: "aa-release-{{ inputs.release_date }}"
+    compute: |
+      import subprocess
+
+      appinterface_repo = cfg['appinterface_repo']
+      release_date = inputs.release_date
+      try:
+          cmd = f'cd "{appinterface_repo}" && git branch -a 2>/dev/null | grep "aa-release-{release_date}" || echo ""'
+          proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=30)
+          result = proc.stdout.strip()
+      except Exception as e:
+          result = ""
     output: existing_branches_raw
     on_error: continue
 
@@ -303,7 +342,8 @@ steps:
     compute: |
       from scripts.common.parsers import parse_git_branches, get_next_version
 
-      base_name = f"aa-release-{inputs.release_date}"
+      release_date = inputs.release_date
+      base_name = f"aa-release-{release_date}"
 
       # Parse existing branches
       existing = parse_git_branches(str(existing_branches_raw) if existing_branches_raw else "")
@@ -317,7 +357,7 @@ steps:
           version = get_next_version(matching, base_name)
           branch_name = f"{base_name}-v{version}"
 
-      result = {"name": branch_name, "version": version, "existing": len(matching)}
+      result = {"name": branch_name, "version": version, "existing": len(matching), "release_date": release_date}
     output: branch_info
 
   - name: create_release_branch
@@ -342,7 +382,9 @@ steps:
     compute: |
       from scripts.common.parsers import update_deploy_clowder_ref
 
-      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
+      appinterface_repo = cfg['appinterface_repo']
+      deploy_file = cfg['deploy_file']
+      deploy_path = f"{appinterface_repo}/{deploy_file}"
 
       with open(deploy_path, 'r') as f:
         content = f.read()
@@ -356,7 +398,7 @@ steps:
       with open(deploy_path, 'w') as f:
         f.write(new_content)
 
-      return f"Updated tower-analytics-prod ref: {current_prod_sha[:12]} → {inputs.commit_sha[:12]}"
+      result = f"Updated tower-analytics-prod ref: {current_prod_sha[:12]} → {inputs.commit_sha[:12]}"
     output: prod_update_result
 
   # Step 10: Optionally update billing ref
@@ -366,7 +408,9 @@ steps:
     compute: |
       from scripts.common.parsers import update_deploy_clowder_ref
 
-      deploy_path = f"{cfg["appinterface_repo"]}/{cfg["deploy_file"]}"
+      appinterface_repo = cfg['appinterface_repo']
+      deploy_file = cfg['deploy_file']
+      deploy_path = f"{appinterface_repo}/{deploy_file}"
 
       with open(deploy_path, 'r') as f:
         content = f.read()
@@ -380,7 +424,7 @@ steps:
       with open(deploy_path, 'w') as f:
         f.write(new_content)
 
-      return f"Updated tower-analytics-prod-billing ref to {inputs.commit_sha[:12]}"
+      result = f"Updated tower-analytics-prod-billing ref to {inputs.commit_sha[:12]}"
     output: billing_update_result
 
   # ==================== COMMIT AND PUSH ====================
@@ -397,7 +441,7 @@ steps:
     description: "Build commit message following commit lint rules"
     compute: |
       # Commit format: {issue_key} - {type}({scope}): {description}
-      # For releases without a specific Jira issue, use the release Jira if available
+      # jira_issue is now a dict with 'key', 'url', 'raw'
       issue_key = jira_issue.get('key', '') if jira_issue else ''
 
       description = f"release {inputs.commit_sha[:12]} to production"
@@ -407,7 +451,7 @@ steps:
       # The git_commit tool will format this properly with issue_key and commit_type
       result = {
         "description": description,
-        "issue_key": issue_key,
+        "issue_key": issue_key or '',
       }
     output: commit_message
 
@@ -431,26 +475,17 @@ steps:
       set_upstream: true
     output: push_result
 
-  # Step 13: Build MR title following commit format
+  # Step 13: Build MR title following release format
   - name: build_mr_title
-    description: "Build MR title using config.json commit format"
+    description: "Build MR title in format: AAP-XXXXX - YYYY-MM-DD Analytics HCC Service Release"
     compute: |
-      from scripts.common.config_loader import format_commit_message
-
       issue_key = jira_issue.get('key', '') if jira_issue else ''
-      description = f"release {inputs.commit_sha[:12]} to production"
+      release_date = inputs.release_date
 
       if issue_key:
-        # Use the centralized formatter
-        title = format_commit_message(
-          description=description,
-          issue_key=issue_key,
-          commit_type="chore",
-          scope="release",
-        )
+        title = f"{issue_key} - {release_date} Analytics HCC Service Release"
       else:
-        # Fallback if no Jira issue - still follow format pattern
-        title = f"chore(release): tower-analytics {description}"
+        title = f"{release_date} Analytics HCC Service Release"
 
       result = title
     output: mr_title
@@ -462,34 +497,49 @@ steps:
     args:
       persona_name: "developer"
 
-  # Step 14: Create merge request
+  # Step 14: Build MR description with proper formatting
+  - name: build_mr_description
+    description: "Build MR description with properly formatted changelog"
+    compute: |
+      # Build the MR description with explicit newlines
+      jira_key = jira_issue.get('key', 'N/A') if jira_issue else 'N/A'
+      quay_image = cfg.get('quay_image', 'quay.io/redhat-services-prod/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main')
+
+      billing_line = "- [x] tower-analytics-prod-billing\n" if inputs.include_billing else ""
+
+      lines = [
+          f"## Release: {inputs.release_date} Analytics HCC Service",
+          "",
+          f"**Commit SHA:** `{inputs.commit_sha}`",
+          f"**Jira:** {jira_key}",
+          "",
+          "### Changes Included",
+          "",
+          changelog,
+          "",
+          "### Components Updated",
+          "- [x] tower-analytics-prod (main)",
+          billing_line,
+          "### Quay Image",
+          f"`{quay_image}:{inputs.commit_sha}`",
+          "",
+          "### Checklist",
+          "- [ ] Verified image exists in Quay",
+          "- [ ] Reviewed changelog",
+          "- [ ] Stage has been validated",
+          "- [ ] Ready for production deployment",
+      ]
+      result = "\n".join(lines)
+    output: mr_description
+
+  # Step 15: Create merge request
   - name: create_mr
     description: "Create merge request for team approval"
     tool: gitlab_mr_create
     args:
-      project: "app-interface"  # Adjust if different
+      project: "app-interface"
       title: "{{ mr_title }}"
-      description: |
-        ## Release: {{ inputs.release_date }} Analytics HCC Service
-
-        **Commit SHA:** `{{ inputs.commit_sha }}`
-        **Jira:** {{ jira_issue.key if jira_issue else 'N/A' }}
-
-        ### Changes Included
-        {{ changelog }}
-
-        ### Components Updated
-        - [x] tower-analytics-prod (main)
-        {% if inputs.include_billing %}- [x] tower-analytics-prod-billing{% endif %}
-
-        ### Quay Image
-        `{{ cfg.quay_image }}:{{ inputs.commit_sha }}`
-
-        ### Checklist
-        - [ ] Verified image exists in Quay
-        - [ ] Reviewed changelog
-        - [ ] Stage has been validated
-        - [ ] Ready for production deployment
+      description: "{{ mr_description }}"
       target_branch: "master"
       source_branch: "{{ branch_name }}"
       draft: false

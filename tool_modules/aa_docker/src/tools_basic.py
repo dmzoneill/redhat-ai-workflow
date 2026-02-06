@@ -318,7 +318,7 @@ async def _docker_ps_impl(
         return f"❌ Failed to list containers: {output}"
 
     if not output.strip() or output.strip() == "CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS":
-        return "No containers found" + (f" matching filters" if filter_name or filter_status else "")
+        return "No containers found" + (" matching filters" if filter_name or filter_status else "")
 
     return f"## Docker Containers\n\n```\n{output}\n```"
 
@@ -402,7 +402,7 @@ async def _docker_volume_rm_impl(
     """
     cmd = ["docker", "volume", "rm"]
     if force:
-        cmd.append("-f")
+        cmd.append("-")
     cmd.append(volume)
 
     success, output = await run_cmd(cmd, timeout=30)
@@ -427,7 +427,7 @@ async def _docker_volume_prune_impl(
     """
     cmd = ["docker", "volume", "prune"]
     if force:
-        cmd.append("-f")
+        cmd.append("-")
 
     success, output = await run_cmd(cmd, timeout=60)
 
@@ -634,7 +634,7 @@ async def _docker_rm_impl(
     """
     cmd = ["docker", "rm"]
     if force:
-        cmd.append("-f")
+        cmd.append("-")
     if volumes:
         cmd.append("-v")
     cmd.append(container)
@@ -696,7 +696,7 @@ async def _docker_image_rm_impl(
     """
     cmd = ["docker", "rmi"]
     if force:
-        cmd.append("-f")
+        cmd.append("-")
     cmd.append(image)
 
     success, output = await run_cmd(cmd, timeout=60)
@@ -729,7 +729,7 @@ async def _docker_system_prune_impl(
     if volumes:
         cmd.append("--volumes")
     if force:
-        cmd.append("-f")
+        cmd.append("-")
 
     success, output = await run_cmd(cmd, timeout=120)
 

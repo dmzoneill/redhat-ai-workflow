@@ -17,7 +17,12 @@ from mcp.types import TextContent
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import prometheus_client
 from server.tool_registry import ToolRegistry
-from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+from server.utils import (
+    get_bearer_token,
+    get_env_config,
+    get_kubeconfig,
+    get_service_url,
+)
 
 # Setup project path for server imports
 

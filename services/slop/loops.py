@@ -47,10 +47,13 @@ logger = logging.getLogger(__name__)
 
 
 # Loop configurations - each focuses on ONE code smell type
+# Each loop specifies its primary category and allowed sub-categories
 LOOP_CONFIGS = {
     "leaky": {
         "name": "LEAKY",
         "task": "memory_leaks",
+        "category": "memory_leaks",  # Primary category for this loop
+        "allowed_categories": ["memory_leaks"],
         "description": "Memory leaks, unbounded caches, global mutables",
         "fast_tools": ["radon"],
         "max_iterations": 5,
@@ -70,25 +73,29 @@ Focus ONLY on memory issues. Ignore other code smells.""",
     "zombie": {
         "name": "ZOMBIE",
         "task": "dead_code",
+        "category": "dead_code",  # Primary category
+        "allowed_categories": ["dead_code", "unused_imports", "unused_variables", "unreachable_code"],
         "description": "Dead code, unused functions, stale imports",
         "fast_tools": ["vulture"],
         "max_iterations": 3,
         "prompt": """Find DEAD CODE in this codebase:
 
 Look for:
-1. Functions that are never called
-2. Classes that are never instantiated
-3. Imports that are never used
-4. Variables that are assigned but never read
-5. Unreachable code after return/raise/break
-6. Commented-out code blocks
-7. Deprecated functions marked for removal
+1. Functions that are never called → category: dead_code
+2. Classes that are never instantiated → category: dead_code
+3. Imports that are never used → category: unused_imports
+4. Variables that are assigned but never read → category: unused_variables
+5. Unreachable code after return/raise/break → category: unreachable_code
+6. Commented-out code blocks → category: dead_code
+7. Deprecated functions marked for removal → category: dead_code
 
 Use the vulture hints provided. Focus ONLY on dead code.""",
     },
     "racer": {
         "name": "RACER",
         "task": "race_conditions",
+        "category": "race_conditions",
+        "allowed_categories": ["race_conditions"],
         "description": "Race conditions, async/await issues, concurrency bugs",
         "fast_tools": [],
         "max_iterations": 5,
@@ -108,23 +115,27 @@ Focus ONLY on concurrency issues. This requires careful analysis.""",
     "ghost": {
         "name": "GHOST",
         "task": "hallucinated_imports",
+        "category": "hallucinated_imports",
+        "allowed_categories": ["hallucinated_imports", "unused_imports"],
         "description": "Hallucinated imports, fake dependencies",
         "fast_tools": ["slop-detector"],
         "max_iterations": 2,
         "prompt": """Find HALLUCINATED IMPORTS in this codebase:
 
 Look for:
-1. Imports of packages that don't exist in PyPI/npm
-2. Imports from wrong package names (e.g., 'from react import useRouter')
-3. Purpose-specific imports that are never used (ML, HTTP, DB libraries)
-4. Imports of internal modules that don't exist
-5. Version-specific imports that reference non-existent APIs
+1. Imports of packages that don't exist in PyPI/npm → category: hallucinated_imports
+2. Imports from wrong package names (e.g., 'from react import useRouter') → category: hallucinated_imports
+3. Purpose-specific imports that are never used (ML, HTTP, DB libraries) → category: unused_imports
+4. Imports of internal modules that don't exist → category: hallucinated_imports
+5. Version-specific imports that reference non-existent APIs → category: hallucinated_imports
 
 Focus ONLY on import issues. Check if packages actually exist.""",
     },
     "copycat": {
         "name": "COPYCAT",
         "task": "code_duplication",
+        "category": "code_duplication",
+        "allowed_categories": ["code_duplication"],
         "description": "Code duplication, similar functions",
         "fast_tools": ["jscpd"],
         "max_iterations": 2,
@@ -142,25 +153,29 @@ Use the jscpd hints provided. Focus ONLY on duplication.""",
     "sloppy": {
         "name": "SLOPPY",
         "task": "ai_slop",
+        "category": "ai_slop",
+        "allowed_categories": ["ai_slop", "placeholder_code", "docstring_inflation"],
         "description": "AI slop patterns (placeholders, buzzwords, fake docs)",
         "fast_tools": ["slop-detector"],
         "max_iterations": 3,
         "prompt": """Find AI SLOP PATTERNS in this codebase:
 
 Look for:
-1. Empty functions with only 'pass' or '...'
-2. NotImplementedError without actual implementation
-3. Buzzword claims without evidence ("production-ready", "enterprise-grade")
-4. Docstring inflation (more docs than code)
-5. Vibe coding comments ("might work", "should be fine")
-6. Generic boilerplate that doesn't fit the domain
-7. TODO/FIXME comments that were never addressed
+1. Empty functions with only 'pass' or '...' → category: placeholder_code
+2. NotImplementedError without actual implementation → category: placeholder_code
+3. Buzzword claims without evidence ("production-ready", "enterprise-grade") → category: ai_slop
+4. Docstring inflation (more docs than code) → category: docstring_inflation
+5. Vibe coding comments ("might work", "should be fine") → category: ai_slop
+6. Generic boilerplate that doesn't fit the domain → category: ai_slop
+7. TODO/FIXME comments that were never addressed → category: placeholder_code
 
 Focus ONLY on AI-generated slop patterns.""",
     },
     "tangled": {
         "name": "TANGLED",
         "task": "complexity",
+        "category": "complexity",
+        "allowed_categories": ["complexity"],
         "description": "Complexity, god classes, feature envy",
         "fast_tools": ["radon"],
         "max_iterations": 4,
@@ -180,6 +195,8 @@ Focus ONLY on complexity and design issues.""",
     "leaker": {
         "name": "LEAKER",
         "task": "security",
+        "category": "security",
+        "allowed_categories": ["security"],
         "description": "Security vulnerabilities",
         "fast_tools": ["bandit"],
         "max_iterations": 3,
@@ -199,38 +216,42 @@ Use the bandit hints provided. Focus ONLY on security issues.""",
     "swallower": {
         "name": "SWALLOWER",
         "task": "exception_handling",
+        "category": "exception_handling",
+        "allowed_categories": ["exception_handling", "bare_except", "empty_except"],
         "description": "Exception handling gaps",
         "fast_tools": ["ruff"],
         "max_iterations": 3,
         "prompt": """Find EXCEPTION HANDLING ISSUES in this codebase:
 
 Look for:
-1. Bare except clauses (except:)
-2. Empty except blocks (except: pass)
-3. Catching too broad exceptions (except Exception)
-4. Missing error handling for I/O operations
-5. Swallowed exceptions that should be logged
-6. Missing finally blocks for cleanup
-7. Re-raising without preserving stack trace
+1. Bare except clauses (except:) → category: bare_except
+2. Empty except blocks (except: pass) → category: empty_except
+3. Catching too broad exceptions (except Exception) → category: exception_handling
+4. Missing error handling for I/O operations → category: exception_handling
+5. Swallowed exceptions that should be logged → category: empty_except
+6. Missing finally blocks for cleanup → category: exception_handling
+7. Re-raising without preserving stack trace → category: exception_handling
 
 Focus ONLY on exception handling issues.""",
     },
     "drifter": {
         "name": "DRIFTER",
         "task": "verbosity",
+        "category": "verbosity",
+        "allowed_categories": ["verbosity", "style_issues"],
         "description": "Verbosity, over-engineering",
         "fast_tools": [],
         "max_iterations": 3,
         "prompt": """Find VERBOSITY and OVER-ENGINEERING in this codebase:
 
 Look for:
-1. Unnecessary abstraction layers
-2. Over-complicated solutions for simple problems
-3. Excessive defensive programming
-4. Redundant validation that's already done elsewhere
-5. Verbose code that could be simplified
-6. Design patterns used inappropriately
-7. Configuration for things that never change
+1. Unnecessary abstraction layers → category: verbosity
+2. Over-complicated solutions for simple problems → category: verbosity
+3. Excessive defensive programming → category: verbosity
+4. Redundant validation that's already done elsewhere → category: verbosity
+5. Verbose code that could be simplified → category: style_issues
+6. Design patterns used inappropriately → category: verbosity
+7. Configuration for things that never change → category: verbosity
 
 Focus ONLY on verbosity and over-engineering.""",
     },
@@ -313,6 +334,10 @@ class AnalysisLoop:
         self.prompt_template = config.get("prompt", "")
         self.fast_tools = config.get("fast_tools", [])
         self.max_iterations = config.get("max_iterations", 5)
+
+        # Category configuration
+        self.primary_category = config.get("category", "unknown")
+        self.allowed_categories = config.get("allowed_categories", [self.primary_category])
 
         self._db = db
         self._ai_router = ai_router
@@ -414,6 +439,15 @@ class AnalysisLoop:
                     logger.info(f"Loop {self.name} found {len(new_findings)} new issues")
                     for finding in new_findings:
                         finding["loop"] = self.name
+                        # Validate and default category
+                        finding_category = finding.get("category", "")
+                        if finding_category not in self.allowed_categories:
+                            # Default to primary category if invalid/missing
+                            logger.debug(
+                                f"Finding category '{finding_category}' not in allowed "
+                                f"{self.allowed_categories}, defaulting to '{self.primary_category}'"
+                            )
+                            finding["category"] = self.primary_category
                         self._findings.append(finding)
 
                 # Check if done
@@ -522,6 +556,9 @@ class AnalysisLoop:
             if len(self._findings) > 10:
                 prev_findings_text = f"... {len(self._findings) - 10} earlier findings ...\n" + prev_findings_text
 
+        # Format allowed categories
+        allowed_cats = ", ".join(self.allowed_categories)
+
         return f"""## Analysis Task: {self.display_name}
 
 {self.prompt_template}
@@ -549,6 +586,8 @@ Iteration: {self._current_iteration}/{self.max_iterations}
 2. Analyze across ALL files, not just one at a time
 3. Return JSON: {{"findings": [...], "done": true/false}}
 4. Set done=true when you've found all issues or confirmed none exist
-5. Each finding needs: file, line, description, severity, suggestion
-6. Don't repeat findings from previous iterations
+5. Each finding MUST include: file, line, category, description, severity, suggestion
+6. CATEGORY must be one of: {allowed_cats}
+7. SUGGESTION must be actionable (e.g., "Remove import 'os' on line 42" not "Consider removing...")
+8. Don't repeat findings from previous iterations
 """

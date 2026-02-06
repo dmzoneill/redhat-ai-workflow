@@ -23,15 +23,14 @@ Architecture:
 
 Usage:
     # Production (wait for meet_daemon to call StartVideo)
-    python scripts/video_daemon.py
+    python -m services.video
 
     # Test mode (self-contained)
-    python scripts/video_daemon.py --test --create-device --flip
+    python -m services.video --test --create-device --flip
 
     # Control running daemon
-    python scripts/video_daemon.py --status
-    python scripts/video_daemon.py --stop
-    python scripts/video_daemon.py --start-video /dev/video10 --audio default
+    python -m services.video --status
+    python -m services.video --stop
 
 Systemd:
     systemctl --user start bot-video
@@ -66,107 +65,27 @@ D-Bus Interface (com.aiworkflow.BotVideo):
         Error(message)
 """
 
-import argparse
 import asyncio
-import fcntl
 import json
 import logging
-import os
-import signal
-import sys
 import time
 from pathlib import Path
 from typing import Optional
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+from scripts.common.video_device import cleanup_device, setup_v4l2_device
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
+from services.base.sleep_wake import SleepWakeAwareDaemon
 
-from scripts.common.video_device import cleanup_device, setup_v4l2_device  # noqa: E402
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-
-# Optional: sleep/wake awareness
-try:
-    from services.base.sleep_wake import SleepWakeAwareDaemon
-
-    HAS_SLEEP_WAKE = True
-except ImportError:
-    HAS_SLEEP_WAKE = False
-
-    class SleepWakeAwareDaemon:
-        """Dummy class when sleep_wake not available."""
-
-        pass
-
-
-LOCK_FILE = Path("/tmp/video-daemon.lock")
-PID_FILE = Path("/tmp/video-daemon.pid")
-
-# Configure logging for journalctl
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> Optional[int]:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-# Determine base class
-if HAS_SLEEP_WAKE:
-    _BaseClass = type("_BaseClass", (SleepWakeAwareDaemon, DaemonDBusBase), {})
-else:
-    _BaseClass = DaemonDBusBase
-
-
-class VideoDaemon(_BaseClass):
+class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     """Video generator daemon with D-Bus support."""
+
+    # BaseDaemon configuration
+    name = "video"
+    description = "Video Generator Daemon"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.BotVideo"
@@ -181,14 +100,13 @@ class VideoDaemon(_BaseClass):
         default_flip: bool = False,
         test_mode: bool = False,
     ):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
+        SleepWakeAwareDaemon.__init__(self)
+        self.is_running = False  # Set to True in startup()
         self.create_device = create_device  # If True, daemon creates v4l2 device
         self.default_flip = default_flip
         self.test_mode = test_mode  # If True, use default mic/speakers
-
-        self._shutdown_event = asyncio.Event()
 
         # Rendering state
         self._status = "idle"  # idle, rendering, error
@@ -1042,13 +960,12 @@ class VideoDaemon(_BaseClass):
             await self._stop_render()
 
     # =========================================================================
-    # Main Loop
+    # Lifecycle
     # =========================================================================
 
-    async def run(self):
-        """Main daemon loop."""
-        self.is_running = True
-        self.start_time = time.time()
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
 
         # Start D-Bus if enabled
         if self.enable_dbus:
@@ -1064,10 +981,12 @@ class VideoDaemon(_BaseClass):
             except Exception as e:
                 logger.error(f"Failed to create video device: {e}")
 
-        logger.info(f"Video daemon started (flip={self._flip}, create_device={self.create_device})")
+        self.is_running = True
+        logger.info(f"Video daemon ready (flip={self._flip}, create_device={self.create_device})")
         logger.info("Waiting for D-Bus commands...")
 
-        # Main idle loop - just wait for shutdown
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
         try:
             while not self._shutdown_requested:
                 await asyncio.sleep(1.0)
@@ -1081,18 +1000,23 @@ class VideoDaemon(_BaseClass):
         except asyncio.CancelledError:
             logger.info("Daemon cancelled")
 
-        # Cleanup
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Video daemon shutting down...")
+
+        # Stop rendering
         await self._handle_stop_video()
-        await self.stop_dbus()
+
+        # Stop D-Bus
+        if self.enable_dbus:
+            await self.stop_dbus()
+
+        # Clean up device
         cleanup_device()
 
         self.is_running = False
+        await super().shutdown()
         logger.info("Video daemon stopped")
-
-    def request_shutdown(self):
-        """Request graceful shutdown."""
-        self._shutdown_requested = True
-        self._shutdown_event.set()
 
 
 # =============================================================================
@@ -1162,117 +1086,5 @@ async def stop_video_cli():
     return False
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Video Generator Daemon",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run daemon in production mode (wait for meet_daemon)
-  python scripts/video_daemon.py
-
-  # Run in test mode (self-contained, uses default mic/speakers)
-  python scripts/video_daemon.py --test --create-device --flip
-
-  # Start video rendering via D-Bus
-  python scripts/video_daemon.py --start-video /dev/video10 --audio-input default
-
-  # Check status
-  python scripts/video_daemon.py --status
-""",
-    )
-    parser.add_argument("--status", action="store_true", help="Check daemon status")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument("--no-dbus", action="store_true", help="Disable D-Bus")
-    parser.add_argument(
-        "--create-device",
-        action="store_true",
-        help="Create v4l2loopback device (for testing without meet_daemon)",
-    )
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Test mode: use default mic/speakers instead of meet_daemon devices",
-    )
-    parser.add_argument(
-        "--flip",
-        action="store_true",
-        help="Enable horizontal flip (for Google Meet)",
-    )
-
-    # D-Bus control commands
-    parser.add_argument(
-        "--start-video",
-        metavar="DEVICE",
-        help="Start video rendering to device (e.g., /dev/video10)",
-    )
-    parser.add_argument(
-        "--stop-video",
-        action="store_true",
-        help="Stop video rendering",
-    )
-    parser.add_argument(
-        "--audio-input",
-        metavar="SOURCE",
-        help="PulseAudio source for waveform (e.g., meet_bot_sink.monitor or 'default')",
-    )
-    parser.add_argument(
-        "--audio-output",
-        metavar="SOURCE",
-        help="PulseAudio source for TTS output (e.g., meet_bot_mic or empty for speakers)",
-    )
-
-    args = parser.parse_args()
-
-    # Handle CLI commands
-    if args.status:
-        sys.exit(0 if asyncio.run(check_status()) else 1)
-
-    if args.stop:
-        sys.exit(0 if asyncio.run(stop_daemon()) else 1)
-
-    if args.start_video:
-        audio_input = args.audio_input or ("default" if args.test else "")
-        audio_output = args.audio_output or ""
-        sys.exit(0 if asyncio.run(start_video_cli(args.start_video, audio_input, audio_output, args.flip)) else 1)
-
-    if args.stop_video:
-        sys.exit(0 if asyncio.run(stop_video_cli()) else 1)
-
-    # Run daemon
-    instance = SingleInstance()
-    if not instance.acquire():
-        pid = instance.get_running_pid()
-        print(f"Video daemon already running (PID: {pid})")
-        sys.exit(1)
-
-    daemon = VideoDaemon(
-        verbose=args.verbose,
-        enable_dbus=not args.no_dbus,
-        create_device=args.create_device,
-        default_flip=args.flip,
-        test_mode=args.test,
-    )
-
-    async def run_with_signals():
-        """Run daemon with proper asyncio signal handling."""
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            logger.info("Received shutdown signal, shutting down...")
-            daemon.request_shutdown()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, signal_handler)
-
-        await daemon.run()
-
-    try:
-        asyncio.run(run_with_signals())
-    finally:
-        instance.release()
-
-
 if __name__ == "__main__":
-    main()
+    VideoDaemon.main()

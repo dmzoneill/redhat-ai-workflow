@@ -36,6 +36,21 @@ daily_summaries:
   merged_today: 5
   open_prs: 9
   uncommitted_repos: 0
+- commits: 0
+  date: '2026-01-29'
+  merged_today: 5
+  open_prs: 7
+  uncommitted_repos: 0
+- commits: 0
+  date: '2026-02-03'
+  merged_today: 5
+  open_prs: 7
+  uncommitted_repos: 0
+- commits: 0
+  date: '2026-02-05'
+  merged_today: 0
+  open_prs: 0
+  uncommitted_repos: 0
 discovered_work: []
 feedback_waiting: []
 follow_ups:
@@ -215,9 +230,13 @@ follow_ups:
   issue_key: AAP-58565
   priority: low
   task: 'Fix hygiene issues on AAP-58565: '
-last_beer: '2026-01-28T17:31:34.538496'
-last_coffee: '2026-01-28T08:37:56.159521'
-last_updated: '2026-01-28T17:31:34.550995'
+- created: '2026-02-04T21:02:08.430642'
+  issue_key: AAP-64892
+  priority: low
+  task: 'Fix hygiene issues on AAP-64892: '
+last_beer: '2026-02-05T17:33:42.525394'
+last_coffee: '2026-02-05T17:20:43.163381'
+last_updated: '2026-02-05T17:33:42.538964'
 notes: 'Work state for redhat-ai-workflow project.
 
   Use memory_append("state/current_work", "active_issues", ''{"key": "...", ...}'')
@@ -226,12 +245,6 @@ notes: 'Work state for redhat-ai-workflow project.
 
   '
 open_mrs:
-- id: 1498
-  status: open
-  title: 'AAP-62316 - fix(security): fix CVE-2026-21441 in u'
-- id: 1497
-  status: open
-  title: 'AAP-61939 - fix(deps): update aiohttp to 3.13.3 fo'
 - id: 1491
   status: open
   title: 'AAP-58394 - fix(billing): calculate accuracy after'
@@ -253,4 +266,7 @@ open_mrs:
 - id: 1440
   status: open
   title: 'AAP-59793 - fix(billing): AttributeError: ''str'' ob'
+- id: 173798
+  status: open
+  title: 2026-02-05 Analytics Billing HCC Service Release
 reviews_assigned: []

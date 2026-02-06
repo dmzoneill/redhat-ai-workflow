@@ -11,12 +11,14 @@ Features:
 - Full-text search of chat content
 - Real-time state change notifications
 - Periodic sync with workspace_states.json
+- Systemd watchdog support
 
 Usage:
-    python scripts/session_daemon.py                # Run daemon
-    python scripts/session_daemon.py --status       # Check if running
-    python scripts/session_daemon.py --stop         # Stop running daemon
-    python scripts/session_daemon.py --search "query"  # Search chats
+    python -m services.session                # Run daemon
+    python -m services.session --status       # Check if running
+    python -m services.session --stop         # Stop running daemon
+    python -m services.session --search "query"  # Search chats
+    python -m services.session --dbus         # Enable D-Bus IPC
 
 Systemd:
     systemctl --user start bot-session
@@ -37,92 +39,34 @@ D-Bus:
     - StateChanged(change_type: str) - Emitted when sessions change
 """
 
-import argparse
 import asyncio
-import fcntl
 import hashlib
 import json
 import logging
 import os
 import re
-import signal
 import sqlite3
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-
-LOCK_FILE = Path("/tmp/session-daemon.lock")
-PID_FILE = Path("/tmp/session-daemon.pid")
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase, get_client
+from services.base.sleep_wake import SleepWakeAwareDaemon
 
 # Import centralized paths
 from server.paths import AA_CONFIG_DIR, SESSION_STATE_FILE
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
 
 
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
+class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
+    """Main session daemon with D-Bus and sleep/wake support."""
 
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
-
-
-class SessionDaemon(DaemonDBusBase):
-    """Main session daemon with D-Bus support."""
+    # BaseDaemon configuration
+    name = "session"
+    description = "Session Daemon - Cursor session state manager"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.BotSession"
@@ -130,10 +74,9 @@ class SessionDaemon(DaemonDBusBase):
     interface_name = "com.aiworkflow.BotSession"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = True):
-        super().__init__()
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = asyncio.Event()
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
+        SleepWakeAwareDaemon.__init__(self)
 
         # State tracking
         self._last_state_hash: str = ""
@@ -222,21 +165,23 @@ class SessionDaemon(DaemonDBusBase):
             "config_loaded": len(self._configured_paths) > 0,
         }
 
-        # Check if we've synced recently
+        # Check if we've synced recently (informational, not required for health)
         if self._last_sync_time > 0:
             time_since_sync = now - self._last_sync_time
             checks["recent_sync"] = time_since_sync < (self._sync_interval * 3)
         else:
             checks["recent_sync"] = False
 
-        # Check uptime
+        # Check uptime (informational, not required for health)
         if self.start_time:
             checks["uptime_ok"] = (now - self.start_time) > 5
         else:
             checks["uptime_ok"] = False
 
-        healthy = all(checks.values())
-        message = "Session daemon is healthy" if healthy else f"Unhealthy: {[k for k, v in checks.items() if not v]}"
+        # Only core checks required for health - uptime_ok and recent_sync are informational
+        core_checks = ["running", "config_loaded"]
+        healthy = all(checks.get(k, False) for k in core_checks)
+        message = "Session daemon is healthy" if healthy else f"Unhealthy: {[k for k in core_checks if not checks.get(k, False)]}"
 
         return {
             "healthy": healthy,
@@ -288,11 +233,11 @@ class SessionDaemon(DaemonDBusBase):
                     if not db_path.exists():
                         continue
 
-                    conn = sqlite3.connect(str(db_path))
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
-                    row = cursor.fetchone()
-                    conn.close()
+                    # Use context manager to ensure connection is always closed
+                    with sqlite3.connect(str(db_path)) as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
+                        row = cursor.fetchone()
 
                     if not row or not row[0]:
                         continue
@@ -584,11 +529,11 @@ class SessionDaemon(DaemonDBusBase):
                     continue
 
                 # Use sqlite3 module directly (faster than subprocess)
-                conn = sqlite3.connect(str(db_path))
-                cursor = conn.cursor()
-                cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
-                row = cursor.fetchone()
-                conn.close()
+                # Use context manager to ensure connection is always closed
+                with sqlite3.connect(str(db_path)) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
+                    row = cursor.fetchone()
 
                 if row and row[0]:
                     composer_data = json.loads(row[0])
@@ -1025,11 +970,13 @@ class SessionDaemon(DaemonDBusBase):
                 logger.error(f"Background sync loop error: {e}")
                 await asyncio.sleep(10)
 
-    async def run(self):
-        """Main daemon run loop."""
+    # ==================== Lifecycle ====================
+
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
         logger.info("Session daemon starting...")
-        self.is_running = True
-        self.start_time = time.time()
 
         # Load configuration
         self._load_configured_paths()
@@ -1043,186 +990,61 @@ class SessionDaemon(DaemonDBusBase):
         if self.enable_dbus:
             await self.start_dbus()
 
+        self.is_running = True
+
         # Create tiered sync tasks
-        fast_task = asyncio.create_task(self._fast_sync_loop())
-        recent_task = asyncio.create_task(self._recent_sync_loop())
-        background_task = asyncio.create_task(self._background_sync_loop())
+        self._fast_task = asyncio.create_task(self._fast_sync_loop())
+        self._recent_task = asyncio.create_task(self._recent_sync_loop())
+        self._background_task = asyncio.create_task(self._background_sync_loop())
+
+        # Start sleep/wake monitor
+        await self.start_sleep_monitor()
 
         logger.info(
-            f"Session daemon running with tiered sync: "
+            f"Session daemon ready with tiered sync: "
             f"fast={self._fast_sync_interval}s, "
             f"recent={self._recent_sync_interval}s (top {self._recent_session_count}), "
             f"background={self._background_sync_interval}s (batch {self._background_batch_size})"
         )
 
-        try:
-            # Wait for shutdown
-            await self._shutdown_event.wait()
-        finally:
-            # Cleanup
-            fast_task.cancel()
-            recent_task.cancel()
-            background_task.cancel()
+    async def run_daemon(self):
+        """Main daemon loop - wait for shutdown."""
+        await self._shutdown_event.wait()
 
-            for task in [fast_task, recent_task, background_task]:
+    async def shutdown(self):
+        """Clean up daemon resources."""
+        logger.info("Session daemon shutting down...")
+
+        # Stop sleep/wake monitor
+        await self.stop_sleep_monitor()
+
+        # Cancel sync tasks
+        for task in [self._fast_task, self._recent_task, self._background_task]:
+            if task and not task.done():
+                task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
 
-            if self.enable_dbus:
-                await self.stop_dbus()
+        # Stop D-Bus
+        if self.enable_dbus:
+            await self.stop_dbus()
 
-            self.is_running = False
-            logger.info("Session daemon stopped")
+        self.is_running = False
+        await super().shutdown()
+        logger.info("Session daemon stopped")
 
-    def shutdown(self):
-        """Signal the daemon to shutdown."""
-        logger.info("Shutdown requested")
-        self._shutdown_event.set()
-
-
-# ==================== CLI ====================
-
-
-def check_status() -> int:
-    """Check if daemon is running."""
-    instance = SingleInstance()
-    pid = instance.get_running_pid()
-
-    if pid:
-        print(f"Session daemon is running (PID: {pid})")
-        return 0
-    else:
-        print("Session daemon is not running")
-        return 1
-
-
-def stop_daemon() -> int:
-    """Stop the running daemon."""
-    instance = SingleInstance()
-    pid = instance.get_running_pid()
-
-    if not pid:
-        print("Session daemon is not running")
-        return 1
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-        print(f"Sent SIGTERM to PID {pid}")
-
-        # Wait for process to exit
-        for _ in range(10):
-            time.sleep(0.5)
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                print("Session daemon stopped")
-                return 0
-
-        print("Daemon did not stop, sending SIGKILL")
-        os.kill(pid, signal.SIGKILL)
-        return 0
-
-    except OSError as e:
-        print(f"Failed to stop daemon: {e}")
-        return 1
-
-
-async def search_chats(query: str, limit: int = 20) -> int:
-    """Search chats via D-Bus."""
-    try:
-        client = get_client("session")
-    except ValueError:
-        # Client not registered yet, add it
-        from services.base.dbus import DaemonClient
-
-        client = DaemonClient(
-            service_name="com.aiworkflow.BotSession",
-            object_path="/com/aiworkflow/BotSession",
-            interface_name="com.aiworkflow.BotSession",
-        )
-
-    if not await client.connect():
-        print("Failed to connect to session daemon. Is it running?")
-        return 1
-
-    try:
-        result = await client.call_method("search_chats", [query, limit])
-        await client.disconnect()
-
-        if "error" in result:
-            print(f"Search error: {result['error']}")
-            return 1
-
-        results = result.get("results", [])
-        print(f"Found {len(results)} results for '{query}':\n")
-
-        for r in results:
-            print(f"  [{r['project']}] {r['name']}")
-            if r.get("name_match"):
-                print(f"    ✓ Name matches")
-            if r.get("content_matches"):
-                for m in r["content_matches"][:2]:
-                    print(f"    → {m['snippet']}")
-            print()
-
-        return 0
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Session Daemon - Cursor session state manager")
-    parser.add_argument("--status", action="store_true", help="Check if daemon is running")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--search", type=str, help="Search chats for query")
-    parser.add_argument("--limit", type=int, default=20, help="Search result limit")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-    parser.add_argument("--no-dbus", action="store_true", help="Disable D-Bus IPC")
-
-    args = parser.parse_args()
-
-    if args.status:
-        sys.exit(check_status())
-
-    if args.stop:
-        sys.exit(stop_daemon())
-
-    if args.search:
-        sys.exit(asyncio.run(search_chats(args.search, args.limit)))
-
-    # Run daemon
-    instance = SingleInstance()
-    if not instance.acquire():
-        pid = instance.get_running_pid()
-        print(f"Another instance is already running (PID: {pid})")
-        sys.exit(1)
-
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    daemon = SessionDaemon(verbose=args.verbose, enable_dbus=not args.no_dbus)
-
-    async def run_with_signals():
-        """Run daemon with proper asyncio signal handling."""
-        loop = asyncio.get_running_loop()
-
-        def signal_handler():
-            daemon.shutdown()
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, signal_handler)
-
-        await daemon.run()
-
-    try:
-        asyncio.run(run_with_signals())
-    finally:
-        instance.release()
+    async def on_system_wake(self):
+        """Handle system wake from sleep - refresh session state."""
+        logger.info("System wake detected - triggering session refresh")
+        try:
+            # Trigger immediate sync of recent sessions
+            await self._sync_recent_sessions()
+            logger.info("Post-wake session refresh complete")
+        except Exception as e:
+            logger.error(f"Error refreshing sessions after wake: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    SessionDaemon.main()

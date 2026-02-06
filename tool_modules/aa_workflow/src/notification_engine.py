@@ -8,12 +8,10 @@ Provides:
 
 import asyncio
 import logging
-import os
 import platform
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import yaml
 

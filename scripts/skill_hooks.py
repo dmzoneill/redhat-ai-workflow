@@ -128,8 +128,13 @@ class SkillHooks:
             # Fallback to direct file read if ConfigManager not available
             if config_path is None:
                 config_path = Path(__file__).parent.parent / "config.json"
-            with open(config_path) as f:
-                config = json.load(f)
+            try:
+                with open(config_path) as f:
+                    config = json.load(f)
+            except FileNotFoundError:
+                raise RuntimeError(f"Config file not found: {config_path}")
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Invalid JSON in config: {e}")
             return cls(config)
 
     def _get_client(self) -> httpx.AsyncClient:

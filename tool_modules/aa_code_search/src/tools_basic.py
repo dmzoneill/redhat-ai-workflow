@@ -19,13 +19,11 @@ Performance Optimizations:
 import hashlib
 import json
 import logging
-import os
 import re
 import sys
 import time
 from collections import OrderedDict
 from datetime import datetime, timedelta
-from functools import wraps
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -262,8 +260,6 @@ def _load_openvino_model():
     Requires: uv add optimum[openvino] openvino
     """
     try:
-        import numpy as np
-        import openvino as ov
         from transformers import AutoTokenizer
 
         vs_config = _get_vector_search_config()
@@ -321,7 +317,7 @@ def _load_openvino_npu_static():
     Uses optimum-intel's export with static shapes.
     """
     try:
-        from pathlib import Path
+        pass
 
         import numpy as np
         import openvino as ov
@@ -649,7 +645,7 @@ def _chunk_by_size(
             overlap_lines = int(CHUNK_OVERLAP / 50)  # Approximate lines for overlap
             current_chunk_lines = current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
             current_start = current_start + len(current_chunk_lines) - overlap_lines
-            current_size = sum(len(l) + 1 for l in current_chunk_lines)
+            current_size = sum(len(line_text) + 1 for line_text in current_chunk_lines)
 
         current_chunk_lines.append(line)
         current_size += line_size
@@ -1482,7 +1478,7 @@ def register_tools(registry: Any) -> None:
             if stats.get("index_note"):
                 index_info += f"\n- Note: {stats['index_note']}"
 
-            result = f"""✅ **Indexed {project}**
+            result = """✅ **Indexed {project}**
 
 📊 **Statistics:**
 - Files indexed: {stats['files_indexed']}
@@ -1498,7 +1494,7 @@ def register_tools(registry: Any) -> None:
                     result += f"- ... and {len(stats['errors']) - 5} more\n"
 
             result += f"\n💡 Now use `code_search('{project}', 'your query')` to search semantically."
-            result += f"\n🏥 Use `code_health()` to check performance metrics."
+            result += "\n🏥 Use `code_health()` to check performance metrics."
 
             return [TextContent(type="text", text=result)]
 
@@ -1827,7 +1823,7 @@ def register_tools(registry: Any) -> None:
                 pass
 
         # Format findings for Claude to analyze
-        output = f"""## 🔬 Deep Scan Results: {project}
+        output = """## 🔬 Deep Scan Results: {project}
 
 **Indexed:** {stats.get('chunks_count', 0)} code chunks from {stats.get('file_count', 0)} files
 
@@ -1949,7 +1945,7 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
                 return [
                     TextContent(
                         type="text",
-                        text=f"""✅ **Started watching {project}**
+                        text="""✅ **Started watching {project}**
 
 📁 Path: `{project_path}`
 ⏱️ Debounce: {debounce_seconds}s (waits for quiet period before re-indexing)
@@ -2068,7 +2064,7 @@ Use `code_watch('{project}', 'stop')` to stop watching.
                 "unhealthy": "🔴",
             }.get(health["status"], "⚪")
 
-            output = f"""## 🏥 Vector Search Health
+            output = """## 🏥 Vector Search Health
 
 ### Status: {status_emoji} {health['status'].upper()}
 
@@ -2150,7 +2146,7 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
         stats = _embedding_cache.stats()
 
-        output = f"""## 🗄️ Embedding Cache
+        output = """## 🗄️ Embedding Cache
 
 | Metric | Value |
 |--------|-------|

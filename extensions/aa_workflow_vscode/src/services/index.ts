@@ -90,3 +90,28 @@ export {
   type VideoPreviewState,
   type VideoFrame,
 } from "./VideoService";
+
+// ============================================================================
+// Service Container for Tab Injection
+// ============================================================================
+
+import type { MeetingService } from "./MeetingService";
+import type { SlackService } from "./SlackService";
+import type { SessionService } from "./SessionService";
+import type { CronService } from "./CronService";
+import type { SprintService } from "./SprintService";
+import type { VideoService } from "./VideoService";
+
+/**
+ * Container for domain services that can be injected into Tabs.
+ * This allows Tabs to use Services instead of calling D-Bus directly,
+ * eliminating duplicate business logic.
+ */
+export interface ServiceContainer {
+  meeting?: MeetingService;
+  slack?: SlackService;
+  session?: SessionService;
+  cron?: CronService;
+  sprint?: SprintService;
+  video?: VideoService;
+}

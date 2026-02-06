@@ -3,7 +3,7 @@
 Sprint Bot Daemon
 
 A standalone service that automates sprint work by orchestrating Cursor chats.
-Designed to run as a systemd user service, similar to meet_daemon.py.
+Designed to run as a systemd user service.
 
 Features:
 - Working hours enforcement (Mon-Fri, 9am-5pm configurable)
@@ -11,16 +11,16 @@ Features:
 - Cursor chat launching via D-Bus to VS Code extension
 - Sequential issue processing with skip-on-block
 - Real-time UI updates via workspace state file
-- Single instance enforcement (lock file)
 - D-Bus IPC for external control
 - Graceful shutdown handling
+- Systemd watchdog support
 
 Usage:
-    python scripts/sprint_daemon.py                # Run daemon
-    python scripts/sprint_daemon.py --status       # Check if running
-    python scripts/sprint_daemon.py --stop         # Stop running daemon
-    python scripts/sprint_daemon.py --list         # List sprint issues
-    python scripts/sprint_daemon.py --dbus         # Enable D-Bus IPC
+    python -m services.sprint                # Run daemon
+    python -m services.sprint --status       # Check if running
+    python -m services.sprint --stop         # Stop running daemon
+    python -m services.sprint --list         # List sprint issues
+    python -m services.sprint --dbus         # Enable D-Bus IPC
 
 Systemd:
     systemctl --user start bot-sprint
@@ -32,97 +32,31 @@ D-Bus:
     Path: /com/aiworkflow/BotSprint
 """
 
-import argparse
 import asyncio
-import fcntl
 import json
 import logging
 import os
-import signal
-import sys
 import time as time_module
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-from services.base.dbus import DaemonDBusBase, get_client  # noqa: E402
-from services.base.sleep_wake import SleepWakeAwareDaemon  # noqa: E402
+from services.base.daemon import BaseDaemon
+from services.base.dbus import DaemonDBusBase
+from services.base.sleep_wake import SleepWakeAwareDaemon
 from services.sprint.bot.execution_tracer import ExecutionTracer, StepStatus, WorkflowState, get_trace, list_traces
-
-# Import workflow configuration and execution tracer
 from services.sprint.bot.workflow_config import WorkflowConfig, get_workflow_config
-
-LOCK_FILE = Path("/tmp/sprint-daemon.lock")
-PID_FILE = Path("/tmp/sprint-daemon.pid")
 
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
 
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
 
 # Directory for background work logs
 SPRINT_WORK_DIR = PROJECT_ROOT / "memory" / "state" / "sprint_work"
 
-# Configure logging for journalctl
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stderr),
-    ],
-)
 logger = logging.getLogger(__name__)
-
-
-class SingleInstance:
-    """Ensures only one instance of the daemon runs at a time."""
-
-    def __init__(self):
-        self._lock_file = None
-        self._acquired = False
-
-    def acquire(self) -> bool:
-        """Try to acquire the lock. Returns True if successful."""
-        try:
-            self._lock_file = open(LOCK_FILE, "w")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            # Write PID
-            PID_FILE.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
-        except OSError:
-            return False
-
-    def release(self):
-        """Release the lock."""
-        if self._lock_file:
-            try:
-                fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
-            except Exception:
-                pass
-        if PID_FILE.exists():
-            try:
-                PID_FILE.unlink()
-            except Exception:
-                pass
-        self._acquired = False
-
-    def get_running_pid(self) -> int | None:
-        """Get PID of running instance, or None if not running."""
-        if PID_FILE.exists():
-            try:
-                pid = int(PID_FILE.read_text().strip())
-                # Check if process exists
-                os.kill(pid, 0)
-                return pid
-            except (ValueError, OSError):
-                pass
-        return None
 
 
 # Maximum timeline entries per issue to prevent unbounded memory growth
@@ -138,8 +72,12 @@ def _add_timeline_event(issue: dict, event: dict) -> None:
         issue["timeline"] = issue["timeline"][-MAX_TIMELINE_ENTRIES:]
 
 
-class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
+class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     """Main Sprint Bot daemon with D-Bus support."""
+
+    # BaseDaemon configuration
+    name = "sprint"
+    description = "Sprint Bot Daemon"
 
     # D-Bus configuration
     service_name = "com.aiworkflow.BotSprint"
@@ -147,7 +85,9 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase):
     interface_name = "com.aiworkflow.BotSprint"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
-        super().__init__()
+        BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
+        DaemonDBusBase.__init__(self)
+        SleepWakeAwareDaemon.__init__(self)
         self.verbose = verbose
         self.enable_dbus = enable_dbus
         self._shutdown_event = asyncio.Event()
@@ -2531,14 +2471,20 @@ Also output the MR ID if found: [MR_ID: <number>]
         except asyncio.TimeoutError:
             return False  # Normal timeout
 
-    async def run(self):
-        """Main daemon loop."""
+    # ==================== Lifecycle ====================
+
+    async def startup(self):
+        """Initialize daemon resources."""
+        await super().startup()
+
         logger.info("Sprint bot daemon starting...")
-        self.is_running = True
-        self.start_time = time_module.time()
 
         # Start sleep/wake monitor
         await self.start_sleep_monitor()
+
+        # Start D-Bus if enabled
+        if self.enable_dbus:
+            await self.start_dbus()
 
         # Initial Jira refresh
         await self._refresh_from_jira()
@@ -2546,8 +2492,11 @@ Also output the MR ID if found: [MR_ID: <number>]
         # Save initial state for UI
         state = self._load_state()
         self._save_state(state)
-        logger.info(f"Initial state saved: {len(state.get('issues', []))} issues")
+        self.is_running = True
+        logger.info(f"Sprint daemon ready: {len(state.get('issues', []))} issues")
 
+    async def run_daemon(self):
+        """Main daemon loop."""
         while not self._shutdown_event.is_set():
             try:
                 state = self._load_state()
@@ -2616,123 +2565,21 @@ Also output the MR ID if found: [MR_ID: <number>]
                 if await self._wait_with_shutdown(60):
                     break
 
-        # Cleanup
-        await self.stop_sleep_monitor()
-        self.is_running = False
-        logger.info("Sprint bot daemon stopped")
-
     async def shutdown(self):
-        """Graceful shutdown."""
-        logger.info("Shutting down sprint bot daemon...")
-        self._shutdown_event.set()
-        # Give the main loop a moment to exit cleanly
-        await asyncio.sleep(0.5)
+        """Clean up daemon resources."""
+        logger.info("Sprint daemon shutting down...")
 
+        # Stop sleep monitor
+        await self.stop_sleep_monitor()
 
-async def main_async(args):
-    """Async main entry point."""
-    instance = SingleInstance()
+        # Stop D-Bus
+        if self.enable_dbus:
+            await self.stop_dbus()
 
-    # Handle --status
-    if args.status:
-        pid = instance.get_running_pid()
-        if pid:
-            print(f"Sprint bot daemon is running (PID: {pid})")
-            return 0
-        else:
-            print("Sprint bot daemon is not running")
-            return 1
-
-    # Handle --stop
-    if args.stop:
-        pid = instance.get_running_pid()
-        if pid:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                print(f"Sent SIGTERM to sprint bot daemon (PID: {pid})")
-                return 0
-            except OSError as e:
-                print(f"Failed to stop daemon: {e}")
-                return 1
-        else:
-            print("Sprint bot daemon is not running")
-            return 1
-
-    # Handle --list
-    if args.list:
-        try:
-            client = get_client("com.aiworkflow.BotSprint", "/com/aiworkflow/BotSprint", "com.aiworkflow.BotSprint")
-            result = client.call_method("list_issues", {})
-            issues = json.loads(result).get("issues", [])
-
-            if not issues:
-                print("No sprint issues found")
-                return 0
-
-            print(f"\n{'Key':<12} {'Status':<12} {'Priority':<10} {'Summary'}")
-            print("-" * 80)
-            for issue in issues:
-                print(
-                    f"{issue.get('key', ''):<12} {issue.get('approvalStatus', ''):<12} "
-                    f"{issue.get('priority', ''):<10} {issue.get('summary', '')[:40]}"
-                )
-            return 0
-        except Exception as e:
-            print(f"Failed to list issues: {e}")
-            print("Is the sprint bot daemon running?")
-            return 1
-
-    # Try to acquire lock
-    if not instance.acquire():
-        pid = instance.get_running_pid()
-        print(f"Sprint bot daemon is already running (PID: {pid})")
-        return 1
-
-    daemon = SprintDaemon(verbose=args.verbose, enable_dbus=args.dbus)
-
-    # Setup signal handlers
-    loop = asyncio.get_event_loop()
-
-    def signal_handler():
-        asyncio.create_task(daemon.shutdown())
-
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, signal_handler)
-
-    try:
-        # Start D-Bus if enabled
-        if args.dbus:
-            await daemon.start_dbus()
-
-        # Run main loop
-        await daemon.run()
-
-    finally:
-        if args.dbus:
-            await daemon.stop_dbus()
-        instance.release()
-
-    return 0
-
-
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Sprint Bot Daemon")
-    parser.add_argument("--status", action="store_true", help="Check if daemon is running")
-    parser.add_argument("--stop", action="store_true", help="Stop running daemon")
-    parser.add_argument("--list", action="store_true", help="List sprint issues")
-    parser.add_argument("--dbus", action="store_true", help="Enable D-Bus IPC")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
-
-    args = parser.parse_args()
-
-    try:
-        exit_code = asyncio.run(main_async(args))
-        sys.exit(exit_code)
-    except KeyboardInterrupt:
-        logger.info("Interrupted")
-        sys.exit(0)
+        self.is_running = False
+        await super().shutdown()
+        logger.info("Sprint bot daemon stopped")
 
 
 if __name__ == "__main__":
-    main()
+    SprintDaemon.main()

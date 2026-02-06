@@ -8,7 +8,6 @@ Provides tools for:
 """
 
 import logging
-from typing import Optional
 
 from fastmcp import FastMCP
 

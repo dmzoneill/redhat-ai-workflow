@@ -118,3 +118,26 @@ tool_fixes:
   root_cause: VPN not connected - internal GitLab not reachable
   times_prevented: 0
   tool_name: gitlab_mr_list
+- date_fixed: '2026-02-01'
+  date_learned: '2026-01-30'
+  error_pattern: Cannot generate a JsonSchema for core_schema.CallableSchema
+  fix_applied: 'FIXED: Two issues were causing this error: 1. @auto_heal decorator
+    was used without parentheses in aa_style, aa_slack_persona, and aa_slack tools_style.py.
+    Changed @auto_heal to @auto_heal() in all files. 2. Tool discovery prefix matching
+    was incorrectly mapping persona_load to style module. Fixed get_module_for_tool()
+    to check full manifest before prefix matching.'
+  root_cause: '@auto_heal decorator requires parentheses (@auto_heal() not @auto_heal)
+    because it is a decorator factory. Without parentheses, the function itself gets
+    passed as the cluster argument, causing Pydantic to try to serialize a callable.
+    Additionally, tool discovery was using prefix matching which mapped persona_load
+    to style module instead of workflow module.'
+  times_prevented: 0
+  tool_name: persona_load
+- date_learned: '2026-02-05'
+  error_pattern: HandleMethod with signature "ss" could not be found
+  fix_applied: Use CallMethod instead of HandleMethod when calling D-Bus methods on
+    the slop daemon
+  root_cause: The skill's compute step was calling HandleMethod instead of CallMethod
+    on the D-Bus interface
+  times_prevented: 0
+  tool_name: slop_scan_now skill

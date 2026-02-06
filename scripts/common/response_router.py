@@ -316,7 +316,7 @@ class ResponseFormatter:
 
     def format_error(self, error: str, command: str = "") -> dict[str, Any]:
         """Format an error response."""
-        text = f"❌ *Error*"
+        text = "❌ *Error*"
         if command:
             text += f" running `{command}`"
         text += f"\n\n{error}"

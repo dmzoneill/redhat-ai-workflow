@@ -120,36 +120,34 @@ export class MessageRouter {
 
 /**
  * Handler for session-related messages.
+ * 
+ * NOTE: Many handlers removed - SessionsTab handles them directly:
+ * - copySessionId, searchSessions, changeSessionGroupBy, changeSessionViewMode
+ * 
+ * Remaining handlers are for messages NOT handled by SessionsTab:
+ * - refresh/refreshWorkspaces/refreshSessionsNow - global refresh
+ * - openChatSession - opens chat in Cursor (VSCode-specific)
+ * - viewMeetingNotes - opens meeting notes (VSCode-specific)
  */
 export class SessionMessageHandler extends BaseMessageHandler {
   private onRefresh: () => Promise<void>;
-  private onCopySessionId: (sessionId: string) => Promise<void>;
   private onOpenChatSession: (sessionId: string, sessionName?: string) => Promise<void>;
-  private onSearchSessions: (query: string) => Promise<void>;
   private onViewMeetingNotes: (sessionId: string) => Promise<void>;
 
   constructor(callbacks: {
     onRefresh: () => Promise<void>;
-    onCopySessionId: (sessionId: string) => Promise<void>;
     onOpenChatSession: (sessionId: string, sessionName?: string) => Promise<void>;
-    onSearchSessions: (query: string) => Promise<void>;
     onViewMeetingNotes: (sessionId: string) => Promise<void>;
   }) {
     super([
       "refresh",
       "refreshWorkspaces",
       "refreshSessionsNow",
-      "copySessionId",
       "openChatSession",
-      "searchSessions",
       "viewMeetingNotes",
-      "changeSessionGroupBy",
-      "changeSessionViewMode",
     ]);
     this.onRefresh = callbacks.onRefresh;
-    this.onCopySessionId = callbacks.onCopySessionId;
     this.onOpenChatSession = callbacks.onOpenChatSession;
-    this.onSearchSessions = callbacks.onSearchSessions;
     this.onViewMeetingNotes = callbacks.onViewMeetingNotes;
   }
 
@@ -162,136 +160,36 @@ export class SessionMessageHandler extends BaseMessageHandler {
       case "refreshSessionsNow":
         await this.onRefresh();
         break;
-      case "copySessionId":
-        await this.onCopySessionId(message.sessionId);
-        break;
       case "openChatSession":
         await this.onOpenChatSession(message.sessionId, message.sessionName);
-        break;
-      case "searchSessions":
-        await this.onSearchSessions(message.query);
         break;
       case "viewMeetingNotes":
         await this.onViewMeetingNotes(message.sessionId);
         break;
-      // View mode changes are handled by the panel directly
-      case "changeSessionGroupBy":
-      case "changeSessionViewMode":
-        // These are handled by the panel's state management
-        break;
     }
   }
 }
 
-/**
- * Handler for sprint bot messages.
- */
-export class SprintMessageHandler extends BaseMessageHandler {
-  private onSprintAction: (action: string, issueKey?: string, chatId?: string, enabled?: boolean) => Promise<void>;
-
-  constructor(callbacks: {
-    onSprintAction: (action: string, issueKey?: string, chatId?: string, enabled?: boolean) => Promise<void>;
-  }) {
-    super(["sprintAction"]);
-    this.onSprintAction = callbacks.onSprintAction;
-  }
-
-  async handle(message: WebviewMessage, context: MessageContext): Promise<void> {
-    await this.onSprintAction(message.action, message.issueKey, message.chatId, message.enabled);
-  }
-}
-
-/**
- * Handler for meeting bot messages.
- */
-export class MeetingMessageHandler extends BaseMessageHandler {
-  private callbacks: {
-    onApproveMeeting: (meetingId: string, meetUrl: string, mode: string) => Promise<void>;
-    onRejectMeeting: (meetingId: string) => Promise<void>;
-    onUnapproveMeeting: (meetingId: string) => Promise<void>;
-    onJoinMeetingNow: (meetUrl: string, title: string, mode: string, videoEnabled: boolean) => Promise<void>;
-    onSetMeetingMode: (meetingId: string, mode: string) => Promise<void>;
-    onStartScheduler: () => Promise<void>;
-    onStopScheduler: () => Promise<void>;
-    onLeaveMeeting: (sessionId: string) => Promise<void>;
-    onLeaveAllMeetings: () => Promise<void>;
-    onRefreshCalendar: () => Promise<void>;
-  };
-
-  constructor(callbacks: MeetingMessageHandler["callbacks"]) {
-    super([
-      "approveMeeting",
-      "rejectMeeting",
-      "unapproveMeeting",
-      "joinMeetingNow",
-      "setMeetingMode",
-      "startScheduler",
-      "stopScheduler",
-      "leaveMeeting",
-      "leaveAllMeetings",
-      "refreshCalendar",
-    ]);
-    this.callbacks = callbacks;
-  }
-
-  async handle(message: WebviewMessage, context: MessageContext): Promise<void> {
-    const msgType = message.command || message.type;
-
-    switch (msgType) {
-      case "approveMeeting":
-        await this.callbacks.onApproveMeeting(message.meetingId, message.meetUrl, message.mode || "notes");
-        break;
-      case "rejectMeeting":
-        await this.callbacks.onRejectMeeting(message.meetingId);
-        break;
-      case "unapproveMeeting":
-        await this.callbacks.onUnapproveMeeting(message.meetingId);
-        break;
-      case "joinMeetingNow":
-        await this.callbacks.onJoinMeetingNow(
-          message.meetUrl,
-          message.title,
-          message.mode || "notes",
-          message.videoEnabled || false
-        );
-        break;
-      case "setMeetingMode":
-        await this.callbacks.onSetMeetingMode(message.meetingId, message.mode);
-        break;
-      case "startScheduler":
-        await this.callbacks.onStartScheduler();
-        break;
-      case "stopScheduler":
-        await this.callbacks.onStopScheduler();
-        break;
-      case "leaveMeeting":
-        await this.callbacks.onLeaveMeeting(message.sessionId);
-        break;
-      case "leaveAllMeetings":
-        await this.callbacks.onLeaveAllMeetings();
-        break;
-      case "refreshCalendar":
-        await this.callbacks.onRefreshCalendar();
-        break;
-    }
-  }
-}
+// NOTE: SprintMessageHandler removed - SprintTab handles sprintAction directly via D-Bus
+// NOTE: MeetingMessageHandler removed - MeetingsTab handles meeting messages directly via D-Bus
 
 /**
  * Handler for Slack-related messages.
+ * 
+ * NOTE: Some handlers removed - SlackTab handles them directly:
+ * - sendSlackMessage, approveSlackMessage, rejectSlackMessage, approveAllSlack
+ * 
+ * Remaining handlers are for messages NOT handled by SlackTab (different message names).
  */
 export class SlackMessageHandler extends BaseMessageHandler {
   private callbacks: {
     onLoadHistory: () => Promise<void>;
-    onSendMessage: (channel: string, text: string, threadTs?: string) => Promise<void>;
+    onReplyToThread: (channel: string, text: string, threadTs?: string) => Promise<void>;
     onRefreshChannels: () => Promise<void>;
     onSearchUsers: (query: string) => Promise<void>;
     onRefreshTargets: () => Promise<void>;
     onSearchMessages: (query: string) => Promise<void>;
     onRefreshPending: () => Promise<void>;
-    onApproveMessage: (messageId: string) => Promise<void>;
-    onRejectMessage: (messageId: string) => Promise<void>;
-    onApproveAll: () => Promise<void>;
     onRefreshCache: () => Promise<void>;
     onRefreshCacheStats: () => Promise<void>;
     onLoadChannelBrowser: (query: string) => Promise<void>;
@@ -305,16 +203,14 @@ export class SlackMessageHandler extends BaseMessageHandler {
   constructor(callbacks: SlackMessageHandler["callbacks"]) {
     super([
       "loadSlackHistory",
-      "sendSlackMessage",
+      // NOTE: sendSlackMessage removed - SlackTab handles it directly
       "replyToSlackThread",
       "refreshSlackChannels",
       "searchSlackUsers",
       "refreshSlackTargets",
       "searchSlackMessages",
       "refreshSlackPending",
-      "approveSlackMessage",
-      "rejectSlackMessage",
-      "approveAllSlack",
+      // NOTE: approveSlackMessage, rejectSlackMessage, approveAllSlack removed - SlackTab handles them directly
       "refreshSlackCache",
       "refreshSlackCacheStats",
       "loadSlackChannelBrowser",
@@ -334,9 +230,8 @@ export class SlackMessageHandler extends BaseMessageHandler {
       case "loadSlackHistory":
         await this.callbacks.onLoadHistory();
         break;
-      case "sendSlackMessage":
       case "replyToSlackThread":
-        await this.callbacks.onSendMessage(message.channel, message.text, message.threadTs);
+        await this.callbacks.onReplyToThread(message.channel, message.text, message.threadTs);
         break;
       case "refreshSlackChannels":
         await this.callbacks.onRefreshChannels();
@@ -352,15 +247,6 @@ export class SlackMessageHandler extends BaseMessageHandler {
         break;
       case "refreshSlackPending":
         await this.callbacks.onRefreshPending();
-        break;
-      case "approveSlackMessage":
-        await this.callbacks.onApproveMessage(message.messageId);
-        break;
-      case "rejectSlackMessage":
-        await this.callbacks.onRejectMessage(message.messageId);
-        break;
-      case "approveAllSlack":
-        await this.callbacks.onApproveAll();
         break;
       case "refreshSlackCache":
         await this.callbacks.onRefreshCache();
@@ -390,76 +276,27 @@ export class SlackMessageHandler extends BaseMessageHandler {
   }
 }
 
-/**
- * Handler for skill-related messages.
- */
-export class SkillMessageHandler extends BaseMessageHandler {
-  private callbacks: {
-    onLoadSkill: (skillName: string) => Promise<void>;
-    onOpenSkillFile: (skillName: string) => Promise<void>;
-    onRunSkill: (skillName?: string) => Promise<void>;
-    onSelectRunningSkill: (executionId: string) => void;
-    onClearStaleSkills: () => void;
-    onClearSkillExecution: (executionId: string) => void;
-  };
-
-  constructor(callbacks: SkillMessageHandler["callbacks"]) {
-    super([
-      "loadSkill",
-      "openSkillFile",
-      "runSkill",
-      "selectRunningSkill",
-      "clearStaleSkills",
-      "clearSkillExecution",
-    ]);
-    this.callbacks = callbacks;
-  }
-
-  async handle(message: WebviewMessage, context: MessageContext): Promise<void> {
-    const msgType = message.command || message.type;
-
-    switch (msgType) {
-      case "loadSkill":
-        await this.callbacks.onLoadSkill(message.skillName);
-        break;
-      case "openSkillFile":
-        await this.callbacks.onOpenSkillFile(message.skillName);
-        break;
-      case "runSkill":
-        await this.callbacks.onRunSkill(message.skillName);
-        break;
-      case "selectRunningSkill":
-        this.callbacks.onSelectRunningSkill(message.executionId);
-        break;
-      case "clearStaleSkills":
-        this.callbacks.onClearStaleSkills();
-        break;
-      case "clearSkillExecution":
-        this.callbacks.onClearSkillExecution(message.executionId);
-        break;
-    }
-  }
-}
+// NOTE: SkillMessageHandler removed - SkillsTab handles skill messages directly
 
 /**
  * Handler for D-Bus and service-related messages.
+ * 
+ * NOTE: Some handlers removed - ServicesTab handles them directly:
+ * - refreshServices, serviceControl, testOllamaInstance
+ * 
+ * Remaining handlers are for messages NOT handled by ServicesTab.
  */
 export class ServiceMessageHandler extends BaseMessageHandler {
   private callbacks: {
     onQueryDBus: (service: string, method: string, args: any[]) => Promise<void>;
-    onRefreshServices: () => Promise<void>;
-    onServiceControl: (action: string, service: string) => Promise<void>;
     onRefreshOllamaStatus: () => Promise<void>;
-    onTestOllamaInstance: (instance: string) => Promise<void>;
   };
 
   constructor(callbacks: ServiceMessageHandler["callbacks"]) {
     super([
       "queryDBus",
-      "refreshServices",
-      "serviceControl",
+      // NOTE: refreshServices, serviceControl, testOllamaInstance removed - ServicesTab handles them directly
       "refreshOllamaStatus",
-      "testOllamaInstance",
     ]);
     this.callbacks = callbacks;
   }
@@ -471,67 +308,14 @@ export class ServiceMessageHandler extends BaseMessageHandler {
       case "queryDBus":
         await this.callbacks.onQueryDBus(message.service, message.method, message.args);
         break;
-      case "refreshServices":
-        await this.callbacks.onRefreshServices();
-        break;
-      case "serviceControl":
-        await this.callbacks.onServiceControl(message.action, message.service);
-        break;
       case "refreshOllamaStatus":
         await this.callbacks.onRefreshOllamaStatus();
         break;
-      case "testOllamaInstance":
-        await this.callbacks.onTestOllamaInstance(message.instance);
-        break;
     }
   }
 }
 
-/**
- * Handler for cron-related messages.
- */
-export class CronMessageHandler extends BaseMessageHandler {
-  private callbacks: {
-    onRefreshCron: () => Promise<void>;
-    onLoadMoreHistory: (limit: number) => Promise<void>;
-    onToggleScheduler: () => Promise<void>;
-    onToggleCronJob: (jobName: string, enabled: boolean) => Promise<void>;
-    onRunCronJobNow: (jobName: string) => Promise<void>;
-  };
-
-  constructor(callbacks: CronMessageHandler["callbacks"]) {
-    super([
-      "refreshCron",
-      "loadMoreCronHistory",
-      "toggleScheduler",
-      "toggleCronJob",
-      "runCronJobNow",
-    ]);
-    this.callbacks = callbacks;
-  }
-
-  async handle(message: WebviewMessage, context: MessageContext): Promise<void> {
-    const msgType = message.command || message.type;
-
-    switch (msgType) {
-      case "refreshCron":
-        await this.callbacks.onRefreshCron();
-        break;
-      case "loadMoreCronHistory":
-        await this.callbacks.onLoadMoreHistory(message.limit || 20);
-        break;
-      case "toggleScheduler":
-        await this.callbacks.onToggleScheduler();
-        break;
-      case "toggleCronJob":
-        await this.callbacks.onToggleCronJob(message.jobName, message.enabled);
-        break;
-      case "runCronJobNow":
-        await this.callbacks.onRunCronJobNow(message.jobName);
-        break;
-    }
-  }
-}
+// NOTE: CronMessageHandler removed - CronTab handles cron messages directly via D-Bus
 
 /**
  * Handler for simple command messages that just trigger VS Code commands.
@@ -812,43 +596,60 @@ export class InferenceMessageHandler extends BaseMessageHandler {
 }
 
 /**
- * Handler for persona-related messages.
+ * Handler for Slack persona / context injection test messages.
  */
-export class PersonaMessageHandler extends BaseMessageHandler {
+export class SlackPersonaTestHandler extends BaseMessageHandler {
   private callbacks: {
-    onLoadPersona: (personaName: string) => Promise<void>;
-    onViewPersonaFile: (personaName: string) => Promise<void>;
-    onChangePersonaViewMode: (mode: string) => void;
+    onRunPersonaTest: (query: string) => Promise<void>;
+    onFetchContextStatus?: () => Promise<void>;
   };
 
-  constructor(callbacks: PersonaMessageHandler["callbacks"]) {
+  constructor(callbacks: SlackPersonaTestHandler["callbacks"]) {
     super([
-      "loadPersona",
-      "viewPersonaFile",
-      "changePersonaViewMode",
+      "runPersonaTest",
+      "runContextTest",
+      "fetchContextStatus",
+      "fetchChannelContext",
+      "copyFormattedContext",
     ]);
     this.callbacks = callbacks;
   }
 
   async handle(message: WebviewMessage, context: MessageContext): Promise<void> {
     const msgType = message.command || message.type;
+    logger.log(`SlackPersonaTestHandler.handle: ${msgType}, query="${message.query}"`);
 
     switch (msgType) {
-      case "loadPersona":
-        await this.callbacks.onLoadPersona(message.personaName);
+      case "runPersonaTest":
+      case "runContextTest":
+        await this.callbacks.onRunPersonaTest(message.query);
         break;
-      case "viewPersonaFile":
-        await this.callbacks.onViewPersonaFile(message.personaName);
+      case "fetchContextStatus":
+        if (this.callbacks.onFetchContextStatus) {
+          await this.callbacks.onFetchContextStatus();
+        }
         break;
-      case "changePersonaViewMode":
-        this.callbacks.onChangePersonaViewMode(message.value);
+      case "fetchChannelContext":
+        // TODO: Implement channel context fetching
+        logger.log("fetchChannelContext not yet implemented");
+        break;
+      case "copyFormattedContext":
+        // TODO: Implement copy to clipboard
+        logger.log("copyFormattedContext not yet implemented");
         break;
     }
   }
 }
 
+// NOTE: PersonaMessageHandler removed - PersonasTab handles persona messages directly
+
 /**
  * Handler for workspace-related messages.
+ * 
+ * NOTE: Some handlers removed - SessionsTab handles them directly:
+ * - changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow
+ * 
+ * Remaining handlers are for workspace management NOT handled by SessionsTab.
  */
 export class WorkspaceMessageHandler extends BaseMessageHandler {
   private callbacks: {
@@ -856,9 +657,6 @@ export class WorkspaceMessageHandler extends BaseMessageHandler {
     onSwitchToWorkspace: (uri: string) => void;
     onChangeWorkspacePersona: (uri: string, persona: string) => void;
     onRemoveWorkspace: (uri: string) => void;
-    onChangeSessionGroupBy: (value: string) => void;
-    onChangeSessionViewMode: (value: string) => void;
-    onRefreshSessionsNow: () => Promise<void>;
   };
 
   constructor(callbacks: WorkspaceMessageHandler["callbacks"]) {
@@ -867,9 +665,7 @@ export class WorkspaceMessageHandler extends BaseMessageHandler {
       "switchToWorkspace",
       "changeWorkspacePersona",
       "removeWorkspace",
-      "changeSessionGroupBy",
-      "changeSessionViewMode",
-      "refreshSessionsNow",
+      // NOTE: changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow removed - SessionsTab handles them directly
     ]);
     this.callbacks = callbacks;
   }
@@ -889,15 +685,6 @@ export class WorkspaceMessageHandler extends BaseMessageHandler {
         break;
       case "removeWorkspace":
         this.callbacks.onRemoveWorkspace(message.uri);
-        break;
-      case "changeSessionGroupBy":
-        this.callbacks.onChangeSessionGroupBy(message.value);
-        break;
-      case "changeSessionViewMode":
-        this.callbacks.onChangeSessionViewMode(message.value);
-        break;
-      case "refreshSessionsNow":
-        await this.callbacks.onRefreshSessionsNow();
         break;
     }
   }

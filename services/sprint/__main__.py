@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Entry point for running sprint service as a module."""
 
-import asyncio
-
-from services.sprint.daemon import main
+from services.sprint.daemon import SprintDaemon
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    SprintDaemon.main()

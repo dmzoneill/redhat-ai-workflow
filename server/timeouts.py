@@ -25,6 +25,11 @@ class Timeouts:
         success, output = await run_cmd(cmd, timeout=Timeouts.DEFAULT)
     """
 
+    # Instant operations (< 5 seconds expected)
+    INSTANT = 2  # UI operations (wmctrl, paplay)
+    QUICK = 5  # Quick subprocess calls, simple queries
+    SHORT = 10  # Short DB queries, config reads
+
     # Quick operations (< 1 minute expected)
     FAST = 30  # Simple commands, API calls
     DEFAULT = 60  # Standard git/CLI operations
@@ -45,6 +50,13 @@ class Timeouts:
     BONFIRE_RESERVE = 660  # Namespace reservation
     BONFIRE_DEPLOY = 960  # Full deploy
     BONFIRE_IQE = 900  # IQE test run
+
+    # Database operations
+    DB_CONNECT = 10  # SQLite connection timeout
+    DB_QUERY = 30  # Standard database query
+
+    # Process management
+    PROCESS_WAIT = 60  # Waiting for subprocess to complete
 
 
 class OutputLimits:

@@ -17,14 +17,14 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
-from pptx.util import Emu, Inches, Pt
+from pptx.enum.text import PP_ALIGN
+from pptx.util import Inches, Pt
 
 
 def RgbColor(r: int, g: int, b: int):
     """Create an RGB color from components."""
     # In python-pptx, we set colors via the .rgb property with an RGBColor
-    from pptx.dml.color import RGBColor, _Color
+    from pptx.dml.color import RGBColor
 
     return RGBColor(r, g, b)
 
@@ -362,7 +362,7 @@ def main():
     print(f"   Found {len(slides)} slides")
 
     # Generate presentation
-    print(f"🎨 Generating presentation...")
+    print("🎨 Generating presentation...")
     create_presentation(slides, args.output)
 
     return 0

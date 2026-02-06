@@ -260,10 +260,13 @@ def generate_dashboard(output_file: Path = None) -> str:
 
     # Write to file if specified
     if output_file:
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(content)
-        print(f"✅ Dashboard written to: {output_file}")
+        try:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"✅ Dashboard written to: {output_file}")
+        except OSError as e:
+            print(f"❌ Failed to write dashboard: {e}")
 
     return content
 
