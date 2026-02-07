@@ -11,7 +11,7 @@
 #   make test              - Run tests
 # =============================================================================
 
-.PHONY: help install install-dev test lint format clean \
+.PHONY: help setup test-setup install install-dev test test-skills test-skills-fast test-skills-exec lint format clean \
         check-env config-validate status quick-start \
         slack-daemon slack-daemon-bg slack-daemon-stop slack-daemon-logs \
         slack-daemon-verbose slack-daemon-dry slack-daemon-debug slack-daemon-dbus slack-daemon-status \
@@ -94,6 +94,9 @@ help:
 	@printf "  \033[32mmake check-env\033[0m          Validate Slack configuration\n"
 	@printf "\n"
 	@printf "\033[1mTesting:\033[0m\n"
+	@printf "  \033[32mmake test-skills\033[0m        Run all skill unit tests (structural, template, execution)\n"
+	@printf "  \033[32mmake test-skills-fast\033[0m   Run fast skill tests only (structural, template, regression)\n"
+	@printf "  \033[32mmake test-skills-exec\033[0m   Run skill execution tests (mock-based, async)\n"
 	@printf "  \033[32mmake integration-test\033[0m   Run integration tests across agents\n"
 	@printf "  \033[32mmake integration-test-fix\033[0m  Run with auto-fix enabled\n"
 	@printf "  \033[32mmake skill-test\033[0m         Run skill tests (live execution)\n"
@@ -140,6 +143,23 @@ help:
 # =============================================================================
 # INSTALLATION
 # =============================================================================
+
+setup:
+	@printf "\033[36mProject setup...\033[0m\n"
+	@if [ ! -f "$(PROJECT_ROOT)/config.json" ] && [ -f "$(PROJECT_ROOT)/config.json.example" ]; then \
+		cp $(PROJECT_ROOT)/config.json.example $(PROJECT_ROOT)/config.json; \
+		printf "\033[33mCreated config.json from example\033[0m\n"; \
+	fi
+	@printf "\033[32m✅ Setup complete\033[0m\n"
+
+test-setup:
+	@printf "\033[36mInstalling test dependencies...\033[0m\n"
+	@if command -v uv >/dev/null 2>&1; then \
+		$(UV) sync --extra dev; \
+	else \
+		pip install pyyaml jinja2 pytest pytest-asyncio pytest-cov fastmcp "mcp>=1.0.0" pydantic httpx python-dotenv; \
+	fi
+	@printf "\033[32m✅ Test dependencies installed\033[0m\n"
 
 install:
 	@printf "\033[36mInstalling dependencies...\033[0m\n"
@@ -340,6 +360,19 @@ mcp-custom:
 test:
 	@printf "\033[36mRunning tests...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) -m pytest tests/ -v
+
+# Skill unit tests (mocked, no external services)
+test-skills:
+	@printf "\033[36mRunning all skill unit tests...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) -m pytest tests/skills/ -v
+
+test-skills-fast:
+	@printf "\033[36mRunning fast skill tests (structural + templates + regression)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) -m pytest tests/skills/test_skill_structural.py tests/skills/test_skill_templates.py tests/skills/test_skill_conditions.py tests/skills/test_skill_regression.py -v
+
+test-skills-exec:
+	@printf "\033[36mRunning skill execution tests (mock-based)...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) -m pytest tests/skills/test_skill_execution.py tests/skills/test_skill_compute.py -v
 
 # Integration tests with auto-remediation
 integration-test:

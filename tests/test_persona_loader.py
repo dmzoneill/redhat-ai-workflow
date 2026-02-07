@@ -1,13 +1,15 @@
 """Tests for persona_loader module."""
 
-# Adjust import path to work with tests
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
+# Ensure project root is on sys.path so `server` is importable as a package
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from persona_loader import (
+from server.persona_loader import (
     CORE_TOOLS,
     PERSONAS_DIR,
     PROJECT_DIR,
@@ -164,7 +166,7 @@ class TestGlobalLoader:
 
     def test_get_loader_initial(self):
         """get_loader should return None initially."""
-        from persona_loader import get_loader
+        from server.persona_loader import get_loader
 
         # Note: This could be non-None if other tests ran first
         # Just verify it returns without error
@@ -173,7 +175,7 @@ class TestGlobalLoader:
 
     def test_init_loader(self):
         """init_loader should create and return loader."""
-        from persona_loader import get_loader, init_loader
+        from server.persona_loader import get_loader, init_loader
 
         mock_server = MagicMock()
         loader = init_loader(mock_server)

@@ -1,0 +1,358 @@
+# Default tool response overrides for skill testing.
+#
+# These responses are loaded by the conftest.py `mock_tool_responses` fixture
+# and merged on top of the programmatic defaults in mock_responses.py.
+# Use this file when you need richer, multi-line, or scenario-specific
+# responses that are awkward to maintain in Python dicts.
+
+# ============================================================================
+# Jira tools
+# ============================================================================
+jira_view_issue:
+  success: true
+  result: |
+    AAP-12345: Improve billing calculation accuracy
+    Status: In Progress | Priority: High | Type: Story
+    Assignee: testuser@redhat.com
+    Sprint: Sprint 42
+    Labels: billing, backend
+    Fix Version: 2024.1
+    Description: |
+      Update the billing module to handle vCPU fractional hours correctly.
+      Current implementation rounds down, causing revenue leakage on short-lived instances.
+    Acceptance Criteria:
+      - Fractional hours billed to the minute
+      - Existing tests updated
+      - No regression in report generation
+  duration: 0.45
+
+jira_search:
+  success: true
+  result: |
+    Found 3 issues:
+    1. AAP-12345 - Improve billing calculation accuracy [In Progress]
+       Assignee: testuser | Sprint: Sprint 42
+    2. AAP-12346 - Fix timezone handling in reports [Open]
+       Assignee: unassigned | Sprint: Sprint 42
+    3. AAP-12347 - Add retry logic to API client [Code Review]
+       Assignee: testuser | Sprint: Sprint 42
+  duration: 0.62
+
+jira_set_status:
+  success: true
+  result: "AAP-12345 status updated to In Progress"
+  duration: 0.38
+
+jira_add_comment:
+  success: true
+  result: "Comment added to AAP-12345"
+  duration: 0.30
+
+jira_create_issue:
+  success: true
+  result: "Created AAP-12348: New issue"
+  duration: 0.55
+
+# ============================================================================
+# GitLab tools
+# ============================================================================
+gitlab_mr_list:
+  success: true
+  result: |
+    Open MRs for automation-analytics-backend:
+    1. !789 - feat(billing): improve vCPU calculation [WIP]
+       Author: testuser | Pipeline: passed | Updated: 2024-01-15
+    2. !790 - fix(api): handle timeout errors [Ready]
+       Author: reviewer1 | Pipeline: passed | Updated: 2024-01-14
+    3. !791 - chore(deps): bump dependencies [Ready]
+       Author: bot | Pipeline: running | Updated: 2024-01-15
+  duration: 0.50
+
+gitlab_mr_view:
+  success: true
+  result: |
+    MR !789: feat(billing): improve vCPU calculation
+    Author: testuser | Status: open | Pipeline: passed
+    Branch: AAP-12345-billing-calc -> main
+    Created: 2024-01-12 | Updated: 2024-01-15
+    Changes: 5 files, +120 -45
+    Approvals: 0/2 required
+    Description: |
+      Implements fractional hour billing for vCPU usage.
+      Resolves AAP-12345.
+  duration: 0.40
+
+gitlab_mr_comments:
+  success: true
+  result: |
+    No unresolved comments on MR !789.
+  duration: 0.35
+
+gitlab_ci_status:
+  success: true
+  result: |
+    Pipeline #456789: passed (4m 32s)
+    Jobs:
+      lint: passed (45s)
+      test: passed (2m 10s)
+      build: passed (1m 37s)
+    All 3 jobs succeeded.
+  duration: 0.42
+
+gitlab_project_info:
+  success: true
+  result: |
+    Project: automation-analytics/automation-analytics-backend
+    Default branch: main
+    Visibility: internal
+    Open MRs: 5 | Open Issues: 12
+    Last activity: 2024-01-15
+  duration: 0.38
+
+# ============================================================================
+# Git tools
+# ============================================================================
+git_status:
+  success: true
+  result: |
+    On branch AAP-12345-billing-calc
+    Your branch is up to date with 'origin/AAP-12345-billing-calc'.
+
+    nothing to commit, working tree clean
+  duration: 0.05
+
+git_branch_list:
+  success: true
+  result: |
+    * AAP-12345-billing-calc
+      main
+      AAP-12300-old-feature
+  duration: 0.04
+
+git_log:
+  success: true
+  result: |
+    abc1234 feat(billing): add fractional hour support (2024-01-15)
+    def5678 fix(billing): correct rounding error (2024-01-14)
+    ghi9012 chore: update test fixtures (2024-01-13)
+  duration: 0.04
+
+git_fetch:
+  success: true
+  result: "Fetched from origin"
+  duration: 0.15
+
+git_pull:
+  success: true
+  result: "Already up to date."
+  duration: 0.10
+
+git_diff:
+  success: true
+  result: "No differences found."
+  duration: 0.03
+
+git_remote:
+  success: true
+  result: "origin\tgit@gitlab.cee.redhat.com:automation-analytics/automation-analytics-backend.git (fetch)"
+  duration: 0.02
+
+git_branch_create:
+  success: true
+  result: "Created branch AAP-12345-billing-calc from main"
+  duration: 0.08
+
+git_checkout:
+  success: true
+  result: "Switched to branch 'AAP-12345-billing-calc'"
+  duration: 0.06
+
+# ============================================================================
+# Kubernetes tools
+# ============================================================================
+kubectl_get_pods:
+  success: true
+  result: |
+    NAME                              READY   STATUS    RESTARTS   AGE
+    aa-backend-api-6f8b4d7c9-x2j4k   1/1     Running   0          2d
+    aa-backend-api-6f8b4d7c9-m8n3p    1/1     Running   0          2d
+    aa-backend-worker-5c9d8e7f1-q7w2  1/1     Running   0          2d
+  duration: 0.80
+
+kubectl_get_deployments:
+  success: true
+  result: |
+    NAME              READY   UP-TO-DATE   AVAILABLE   AGE
+    aa-backend-api    2/2     2            2           30d
+    aa-backend-worker 1/1     1            1           30d
+  duration: 0.75
+
+kubectl_logs:
+  success: true
+  result: |
+    2024-01-15 10:30:00 INFO  Application started successfully
+    2024-01-15 10:30:01 INFO  Connected to database
+    2024-01-15 10:30:02 INFO  Listening on port 8080
+  duration: 0.60
+
+# ============================================================================
+# Bonfire / ephemeral tools
+# ============================================================================
+bonfire_namespace_list:
+  success: true
+  result: "ephemeral-abc123 (reserved by testuser, expires in 2h)"
+  duration: 0.55
+
+bonfire_namespace_reserve:
+  success: true
+  result: "Reserved namespace: ephemeral-xyz789 (duration: 4h)"
+  duration: 2.50
+
+bonfire_deploy_aa:
+  success: true
+  result: "Deployed automation-analytics to ephemeral-xyz789"
+  duration: 5.00
+
+bonfire_apps_list:
+  success: true
+  result: |
+    automation-analytics
+    automation-hub
+    insights-dashboard
+  duration: 0.45
+
+# ============================================================================
+# Memory / workflow tools
+# ============================================================================
+memory_read:
+  success: true
+  result: "OK"
+  duration: 0.02
+
+memory_write:
+  success: true
+  result: "OK"
+  duration: 0.03
+
+memory_session_log:
+  success: true
+  result: "OK"
+  duration: 0.02
+
+memory_ask:
+  success: true
+  result: "No relevant results found."
+  duration: 0.15
+
+persona_load:
+  success: true
+  result: "Persona 'developer' loaded successfully."
+  duration: 0.10
+
+persona_list:
+  success: true
+  result: "Available personas: developer, devops, incident, release"
+  duration: 0.05
+
+skill_list:
+  success: true
+  result: "126 skills available"
+  duration: 0.08
+
+skill_run:
+  success: true
+  result: "Skill completed successfully."
+  duration: 1.00
+
+session_start:
+  success: true
+  result: "Session started: test-session-001"
+  duration: 0.15
+
+# ============================================================================
+# Knowledge / code search tools
+# ============================================================================
+check_known_issues:
+  success: true
+  result: "No known issues found."
+  duration: 0.05
+
+learn_tool_fix:
+  success: true
+  result: "Fix learned and saved."
+  duration: 0.04
+
+code_search:
+  success: true
+  result: "No results found."
+  duration: 0.30
+
+knowledge_query:
+  success: true
+  result: "No project knowledge found."
+  duration: 0.08
+
+knowledge_load:
+  success: true
+  result: "Knowledge loaded for project."
+  duration: 0.12
+
+# ============================================================================
+# Slack tools
+# ============================================================================
+slack_search_messages:
+  success: true
+  result: "No messages found."
+  duration: 0.40
+
+slack_send_message:
+  success: true
+  result: "Message sent to #general"
+  duration: 0.35
+
+# ============================================================================
+# Gmail / Calendar tools
+# ============================================================================
+gmail_check_inbox:
+  success: true
+  result: "0 unread emails."
+  duration: 0.50
+
+calendar_list_events:
+  success: true
+  result: "No upcoming events."
+  duration: 0.45
+
+# ============================================================================
+# Quay tools
+# ============================================================================
+quay_list_tags:
+  success: true
+  result: "latest, v1.2.3, abc1234"
+  duration: 0.40
+
+# ============================================================================
+# InScope tools
+# ============================================================================
+inscope_ask:
+  success: true
+  result: "Based on the documentation, you should configure your ClowdApp manifest."
+  duration: 3.00
+
+# ============================================================================
+# System / infrastructure tools
+# ============================================================================
+vpn_connect:
+  success: true
+  result: "VPN connected."
+  duration: 2.00
+
+kube_login:
+  success: true
+  result: "Logged in to stage cluster."
+  duration: 1.50
+
+sso_authenticate:
+  success: true
+  result: "SSO authentication successful."
+  duration: 5.00

@@ -61,6 +61,17 @@ repos:
       - id: yamllint
         args: ["-c", ".yamllint.yaml"]
 
+  # Skill validation (fast structural + template checks)
+  - repo: local
+    hooks:
+      - id: skill-tests
+        name: Skill Unit Tests (structural + templates)
+        entry: python -m pytest tests/skills/test_skill_structural.py tests/skills/test_skill_templates.py tests/skills/test_skill_conditions.py tests/skills/test_skill_regression.py --tb=short -q
+        language: system
+        pass_filenames: false
+        files: ^skills/.*\.yaml$
+        types: [yaml]
+
   # GitHub Super-Linter (runs via Docker)
   - repo: local
     hooks:
