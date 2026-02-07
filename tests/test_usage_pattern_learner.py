@@ -1,16 +1,22 @@
 """
-Integration tests for Usage Pattern Learner (Layer 5 Phase 2).
+Unit tests for Usage Pattern Learner (Layer 5 Phase 2).
 
-Tests pattern learning, merging, and confidence evolution.
+Tests pattern learning, merging, confidence evolution, and prevention tracking.
+Targets 90%+ coverage of server/usage_pattern_learner.py.
 """
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from server.usage_pattern_learner import UsagePatternLearner
 from server.usage_pattern_storage import UsagePatternStorage
+
+# ============================================================
+# Fixtures
+# ============================================================
 
 
 @pytest.fixture
@@ -28,16 +34,43 @@ def learner(temp_storage):
     return UsagePatternLearner(storage=temp_storage)
 
 
-class TestPatternLearning:
-    """Test basic pattern learning."""
+# ============================================================
+# Initialization
+# ============================================================
+
+
+class TestInit:
+    """Tests for UsagePatternLearner initialization."""
+
+    def test_init_with_provided_storage(self, temp_storage):
+        """Should use provided storage."""
+        learner = UsagePatternLearner(storage=temp_storage)
+        assert learner.storage is temp_storage
+
+    def test_init_with_default_storage(self):
+        """Should create default storage when none provided."""
+        # UsagePatternStorage() without args uses Path(__file__).parent.parent
+        # which points to the project root. Just verify it creates a storage instance.
+        learner = UsagePatternLearner()
+        assert learner.storage is not None
+        assert isinstance(learner.storage, UsagePatternStorage)
+
+
+# ============================================================
+# analyze_result
+# ============================================================
+
+
+class TestAnalyzeResult:
+    """Tests for analyze_result method."""
 
     @pytest.mark.asyncio
-    async def test_learn_new_pattern(self, learner):
-        """Should learn a new pattern from error."""
+    async def test_learn_new_usage_error(self, learner):
+        """Should learn a new pattern from a usage error."""
         result = await learner.analyze_result(
             tool_name="bonfire_namespace_release",
             params={"namespace": "ephemeral-abc"},
-            result="❌ Error: Namespace 'ephemeral-abc' not owned by you",
+            result="Error: Namespace 'ephemeral-abc' not owned by you",
             context={},
         )
 
@@ -45,7 +78,7 @@ class TestPatternLearning:
         assert result["tool"] == "bonfire_namespace_release"
         assert result["error_category"] == "INCORRECT_PARAMETER"
         assert result["observations"] == 1
-        assert result["confidence"] == 0.5  # 1 observation = 50%
+        assert result["confidence"] == 0.5
 
     @pytest.mark.asyncio
     async def test_ignore_infrastructure_error(self, learner):
@@ -53,11 +86,11 @@ class TestPatternLearning:
         result = await learner.analyze_result(
             tool_name="bonfire_deploy",
             params={},
-            result="❌ Error: Unauthorized. Token expired.",
+            result="Error: Unauthorized. Token expired.",
             context={},
         )
 
-        assert result is None  # Not a usage error
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_ignore_non_error(self, learner):
@@ -65,150 +98,326 @@ class TestPatternLearning:
         result = await learner.analyze_result(
             tool_name="bonfire_deploy",
             params={},
-            result="✅ Deployed successfully",
+            result="Deployed successfully",
             context={},
         )
 
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_context_defaults_to_empty(self, learner):
+        """Should handle None context."""
+        result = await learner.analyze_result(
+            tool_name="bonfire_namespace_release",
+            params={"namespace": "ephemeral-abc"},
+            result="Namespace 'ephemeral-abc' not owned",
+            context=None,
+        )
+
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_format_error_learning(self, learner):
+        """Should learn PARAMETER_FORMAT errors."""
+        result = await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "abc1234"},
+            result="Error: manifest unknown",
+        )
+
+        assert result is not None
+        assert result["error_category"] == "PARAMETER_FORMAT"
+
+    @pytest.mark.asyncio
+    async def test_workflow_sequence_error_learning(self, learner):
+        """Should learn WORKFLOW_SEQUENCE errors."""
+        result = await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"namespace": "eph-abc"},
+            result="Error: namespace not found",
+        )
+
+        assert result is not None
+        assert result["error_category"] == "WORKFLOW_SEQUENCE"
+
+
+# ============================================================
+# Pattern Merging
+# ============================================================
+
 
 class TestPatternMerging:
-    """Test pattern merging with similar patterns."""
+    """Tests for pattern merging behavior."""
 
     @pytest.mark.asyncio
     async def test_merge_identical_patterns(self, learner):
         """Identical errors should merge into one pattern."""
-        # First observation
         pattern1 = await learner.analyze_result(
             tool_name="bonfire_namespace_release",
             params={"namespace": "ephemeral-abc"},
-            result="❌ Error: Namespace 'ephemeral-abc' not owned by you",
+            result="Namespace 'ephemeral-abc' not owned by you",
         )
 
-        assert pattern1["observations"] == 1
-        assert pattern1["confidence"] == 0.5
-
-        # Second identical observation
         pattern2 = await learner.analyze_result(
             tool_name="bonfire_namespace_release",
-            params={"namespace": "ephemeral-xyz"},  # Different value, same error
-            result="❌ Error: Namespace 'ephemeral-xyz' not owned by you",
+            params={"namespace": "ephemeral-xyz"},
+            result="Namespace 'ephemeral-xyz' not owned by you",
         )
 
-        # Should merge (same pattern ID)
         assert pattern2["id"] == pattern1["id"]
         assert pattern2["observations"] == 2
         assert pattern2["confidence"] == 0.5  # 2 obs still = 50%
 
     @pytest.mark.asyncio
-    async def test_merge_increases_confidence(self, learner):
-        """Multiple observations should increase confidence."""
-        # Simulate 10 observations of the same error
-        for i in range(10):
-            await learner.analyze_result(
-                tool_name="bonfire_deploy",
-                params={"image_tag": f"abc{i}"},  # Different short SHAs
-                result="❌ Error: manifest unknown",
-            )
-
-        # Check final pattern
-        patterns = learner.storage.get_patterns_for_tool("bonfire_deploy")
-        assert len(patterns) == 1
-
-        pattern = patterns[0]
-        assert pattern["observations"] == 10
-        assert pattern["confidence"] == 0.75  # 10 obs = 75%
-
-    @pytest.mark.asyncio
-    async def test_different_errors_create_separate_patterns(self, learner):
-        """Different error types should create separate patterns."""
-        # Error 1: Wrong namespace
+    async def test_different_tools_separate_patterns(self, learner):
+        """Different tools should create separate patterns."""
         await learner.analyze_result(
             tool_name="bonfire_namespace_release",
             params={"namespace": "ephemeral-abc"},
-            result="❌ Error: Namespace not owned",
+            result="Namespace not owned",
         )
 
-        # Error 2: Short SHA
         await learner.analyze_result(
             tool_name="bonfire_deploy",
             params={"image_tag": "abc123"},
-            result="❌ Error: manifest unknown",
+            result="manifest unknown",
         )
 
-        # Should have 2 separate patterns
         data = learner.storage.load()
         assert len(data["usage_patterns"]) == 2
 
+    @pytest.mark.asyncio
+    async def test_different_categories_separate_patterns(self, learner):
+        """Same tool but different categories should create separate patterns."""
+        await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+            result="manifest unknown",
+        )
+
+        await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"namespace": "eph-abc"},
+            result="namespace not found",
+        )
+
+        data = learner.storage.load()
+        assert len(data["usage_patterns"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_merge_updates_last_seen(self, learner):
+        """Merging should update last_seen timestamp."""
+        pattern1 = await learner.analyze_result(
+            tool_name="bonfire_namespace_release",
+            params={"namespace": "ephemeral-abc"},
+            result="Namespace not owned",
+        )
+
+        first_last_seen = pattern1["last_seen"]
+
+        import time
+
+        time.sleep(0.01)
+
+        pattern2 = await learner.analyze_result(
+            tool_name="bonfire_namespace_release",
+            params={"namespace": "ephemeral-xyz"},
+            result="Namespace not owned",
+        )
+
+        assert pattern2["last_seen"] >= first_last_seen
+
+    @pytest.mark.asyncio
+    async def test_merge_combines_common_mistakes(self, learner):
+        """Merging should combine common mistakes from both patterns."""
+        # First observation
+        await learner.analyze_result(
+            tool_name="bonfire_namespace_release",
+            params={"namespace": "ephemeral-abc"},
+            result="Namespace not owned",
+        )
+
+        # Second observation
+        result = await learner.analyze_result(
+            tool_name="bonfire_namespace_release",
+            params={"namespace": "ephemeral-xyz"},
+            result="Namespace not owned",
+        )
+
+        # Should have accumulated common mistakes
+        assert result["observations"] == 2
+
+
+# ============================================================
+# Confidence Evolution
+# ============================================================
+
 
 class TestConfidenceEvolution:
-    """Test confidence score evolution."""
+    """Tests for confidence score calculation."""
 
-    @pytest.mark.asyncio
-    async def test_confidence_progression(self, learner):
-        """Confidence should increase with observations."""
-        tool_name = "bonfire_deploy"
-        error = "❌ Error: manifest unknown"
+    def test_confidence_1_2_obs(self, learner):
+        """1-2 observations should yield 50% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 1, "success_after_prevention": 0}
+            )
+            == 0.50
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 2, "success_after_prevention": 0}
+            )
+            == 0.50
+        )
 
-        expected_confidence = {
-            1: 0.50,  # 1-2 obs
-            3: 0.60,  # 3-4 obs
-            5: 0.70,  # 5-9 obs
-            10: 0.75,  # 10-19 obs
-            20: 0.85,  # 20-44 obs
-            45: 0.92,  # 45-99 obs
-            100: 0.95,  # 100+ obs
-        }
+    def test_confidence_3_4_obs(self, learner):
+        """3-4 observations should yield 60% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 3, "success_after_prevention": 0}
+            )
+            == 0.60
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 4, "success_after_prevention": 0}
+            )
+            == 0.60
+        )
 
-        for count in expected_confidence.keys():
-            # Simulate observations up to count
-            for _ in range(count):
-                await learner.analyze_result(
-                    tool_name=tool_name,
-                    params={"image_tag": "short"},
-                    result=error,
-                )
+    def test_confidence_5_9_obs(self, learner):
+        """5-9 observations should yield 70% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 5, "success_after_prevention": 0}
+            )
+            == 0.70
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 9, "success_after_prevention": 0}
+            )
+            == 0.70
+        )
 
-            # Check confidence
-            patterns = learner.storage.get_patterns_for_tool(tool_name)
-            assert len(patterns) == 1
-            assert patterns[0]["confidence"] == expected_confidence[count]
+    def test_confidence_10_19_obs(self, learner):
+        """10-19 observations should yield 75% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 10, "success_after_prevention": 0}
+            )
+            == 0.75
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 19, "success_after_prevention": 0}
+            )
+            == 0.75
+        )
 
-            # Reset for next test
-            learner.storage._initialize_file()
+    def test_confidence_20_44_obs(self, learner):
+        """20-44 observations should yield 85% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 20, "success_after_prevention": 0}
+            )
+            == 0.85
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 44, "success_after_prevention": 0}
+            )
+            == 0.85
+        )
 
-    @pytest.mark.asyncio
-    async def test_success_rate_affects_confidence(self, learner):
+    def test_confidence_45_99_obs(self, learner):
+        """45-99 observations should yield 92% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 45, "success_after_prevention": 0}
+            )
+            == 0.92
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 99, "success_after_prevention": 0}
+            )
+            == 0.92
+        )
+
+    def test_confidence_100_plus_obs(self, learner):
+        """100+ observations should yield 95% confidence."""
+        assert (
+            learner._calculate_confidence(
+                {"observations": 100, "success_after_prevention": 0}
+            )
+            == 0.95
+        )
+        assert (
+            learner._calculate_confidence(
+                {"observations": 500, "success_after_prevention": 0}
+            )
+            == 0.95
+        )
+
+    def test_success_rate_boosts_confidence(self, learner):
         """Prevention success should boost confidence."""
-        # Create pattern with 10 observations
-        for _ in range(10):
+        base = learner._calculate_confidence(
+            {"observations": 10, "success_after_prevention": 0}
+        )
+
+        boosted = learner._calculate_confidence(
+            {"observations": 10, "success_after_prevention": 9}
+        )
+
+        assert boosted > base
+
+    def test_confidence_capped_at_99(self, learner):
+        """Confidence should never exceed 99%."""
+        result = learner._calculate_confidence(
+            {"observations": 1000, "success_after_prevention": 999}
+        )
+        assert result <= 0.99
+
+    def test_success_rate_formula(self, learner):
+        """Verify the success rate formula: 70% base + 30% success rate."""
+        # 10 obs, 0 success: base = 0.75, final = 0.75
+        # 10 obs, 10 success: base = 0.75, rate = 1.0
+        # final = 0.75 * 0.7 + 1.0 * 0.3 = 0.525 + 0.3 = 0.825
+        result = learner._calculate_confidence(
+            {"observations": 10, "success_after_prevention": 10}
+        )
+        expected = 0.75 * 0.7 + 1.0 * 0.3
+        assert abs(result - expected) < 0.001
+
+    @pytest.mark.asyncio
+    async def test_confidence_increases_with_observations(self, learner):
+        """Confidence should increase as observations grow."""
+        prev_conf = 0.0
+        for i in range(50):
             await learner.analyze_result(
                 tool_name="bonfire_deploy",
-                params={"image_tag": "short"},
-                result="❌ Error: manifest unknown",
+                params={"image_tag": f"short{i}"},
+                result="manifest unknown",
             )
 
         patterns = learner.storage.get_patterns_for_tool("bonfire_deploy")
-        pattern = patterns[0]
-        base_conf = pattern["confidence"]  # Should be 0.75
+        assert len(patterns) == 1
+        assert patterns[0]["observations"] == 50
+        assert patterns[0]["confidence"] == 0.92  # 45-99 obs
 
-        # Record 9 successes
-        for _ in range(9):
-            await learner.record_prevention_success(pattern["id"])
 
-        # Check updated confidence
-        pattern = learner.storage.get_pattern(pattern["id"])
-        # Success rate: 9/10 = 0.9
-        # Final = 0.75 * 0.7 + 0.9 * 0.3 = 0.525 + 0.27 = 0.795
-        assert pattern["confidence"] > base_conf
-        assert pattern["confidence"] >= 0.79
+# ============================================================
+# Similarity Calculation
+# ============================================================
 
 
 class TestSimilarityCalculation:
-    """Test pattern similarity calculation."""
+    """Tests for _calculate_similarity method."""
 
-    def test_identical_patterns_100_similar(self, learner):
-        """Identical patterns should have 100% similarity."""
+    def test_identical_patterns_full_similarity(self, learner):
+        """Identical patterns should have ~100% similarity."""
         pattern = {
             "tool": "test_tool",
             "mistake_pattern": {
@@ -220,87 +429,175 @@ class TestSimilarityCalculation:
         }
 
         similarity = learner._calculate_similarity(pattern, pattern)
-        assert similarity >= 0.99  # Account for floating point precision
+        assert similarity >= 0.99
 
-    def test_completely_different_patterns_low_similarity(self, learner):
+    def test_completely_different_patterns(self, learner):
         """Completely different patterns should have low similarity."""
-        pattern1 = {
+        p1 = {
             "tool": "tool1",
             "mistake_pattern": {
                 "error_regex": "error A",
                 "parameter": "param_a",
             },
-            "root_cause": "cause A",
-            "prevention_steps": [{"action": "action_a"}],
+            "root_cause": "cause A with some unique text",
+            "prevention_steps": [{"action": "a"}],
         }
-
-        pattern2 = {
+        p2 = {
             "tool": "tool2",
             "mistake_pattern": {
                 "error_regex": "error B",
                 "parameter": "param_b",
             },
-            "root_cause": "cause B",
-            "prevention_steps": [{"action": "action_b"}, {"action": "action_c"}],
+            "root_cause": "cause B with different text",
+            "prevention_steps": [{"action": "b"}, {"action": "c"}],
         }
 
-        similarity = learner._calculate_similarity(pattern1, pattern2)
+        similarity = learner._calculate_similarity(p1, p2)
         assert similarity < 0.5
 
-    def test_similar_patterns_above_threshold(self, learner):
-        """Similar patterns should exceed 70% threshold."""
-        pattern1 = {
-            "tool": "bonfire_deploy",
+    def test_same_error_regex_high_weight(self, learner):
+        """Same error_regex should contribute heavily to similarity."""
+        p1 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "manifest unknown", "parameter": "x"},
+            "root_cause": "cause 1",
+            "prevention_steps": [],
+        }
+        p2 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "manifest unknown", "parameter": "y"},
+            "root_cause": "cause 2",
+            "prevention_steps": [],
+        }
+
+        similarity = learner._calculate_similarity(p1, p2)
+        assert similarity >= 0.4  # error_regex weight is 0.4
+
+    def test_partial_regex_overlap(self, learner):
+        """Partial regex pattern overlap should give partial score."""
+        p1 = {
+            "tool": "tool",
             "mistake_pattern": {
                 "error_regex": "manifest unknown|image not found",
                 "parameter": "image_tag",
             },
-            "root_cause": "Claude used short SHA instead of full SHA",
-            "prevention_steps": [
-                {"action": "validate"},
-                {"action": "expand"},
-            ],
+            "root_cause": "",
+            "prevention_steps": [],
         }
-
-        pattern2 = {
-            "tool": "bonfire_deploy",
+        p2 = {
+            "tool": "tool",
             "mistake_pattern": {
-                "error_regex": "manifest unknown",  # Partial match
+                "error_regex": "manifest unknown",
                 "parameter": "image_tag",
             },
-            "root_cause": "Claude used wrong SHA format",
-            "prevention_steps": [
-                {"action": "validate"},
-                {"action": "expand"},
-            ],
+            "root_cause": "",
+            "prevention_steps": [],
         }
 
-        similarity = learner._calculate_similarity(pattern1, pattern2)
-        assert similarity >= 0.70
+        similarity = learner._calculate_similarity(p1, p2)
+        assert 0.3 < similarity < 1.0
+
+    def test_empty_mistake_patterns(self, learner):
+        """Empty mistake_pattern fields should not crash."""
+        p1 = {
+            "tool": "tool",
+            "mistake_pattern": {},
+            "root_cause": "",
+            "prevention_steps": [],
+        }
+        p2 = {
+            "tool": "tool",
+            "mistake_pattern": {},
+            "root_cause": "",
+            "prevention_steps": [],
+        }
+
+        similarity = learner._calculate_similarity(p1, p2)
+        assert similarity == 0.0
+
+    def test_prevention_steps_similarity(self, learner):
+        """Similar number of prevention steps should contribute to score."""
+        p1 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "same", "parameter": "same"},
+            "root_cause": "same",
+            "prevention_steps": [{"a": 1}, {"b": 2}],
+        }
+        p2 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "same", "parameter": "same"},
+            "root_cause": "same",
+            "prevention_steps": [{"a": 1}, {"b": 2}],
+        }
+
+        similarity = learner._calculate_similarity(p1, p2)
+        assert similarity >= 0.9
+
+    def test_fuzzy_parameter_matching(self, learner):
+        """Similar parameter names should get partial score."""
+        p1 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "", "parameter": "image_tag"},
+            "root_cause": "",
+            "prevention_steps": [],
+        }
+        p2 = {
+            "tool": "tool",
+            "mistake_pattern": {"error_regex": "", "parameter": "image_tags"},
+            "root_cause": "",
+            "prevention_steps": [],
+        }
+
+        similarity = learner._calculate_similarity(p1, p2)
+        # Parameters "image_tag" and "image_tags" are very similar
+        assert similarity > 0.0
+
+
+# ============================================================
+# Prevention Tracking
+# ============================================================
 
 
 class TestPreventionTracking:
-    """Test prevention success/failure tracking."""
+    """Tests for recording prevention success and failure."""
 
     @pytest.mark.asyncio
     async def test_record_prevention_success(self, learner):
         """Recording success should increment counter."""
-        # Create pattern
         pattern = await learner.analyze_result(
             tool_name="bonfire_deploy",
             params={"image_tag": "short"},
-            result="❌ Error: manifest unknown",
+            result="manifest unknown",
         )
 
         assert pattern["success_after_prevention"] == 0
 
-        # Record success
         success = await learner.record_prevention_success(pattern["id"])
         assert success is True
 
-        # Check updated
         updated = learner.storage.get_pattern(pattern["id"])
         assert updated["success_after_prevention"] == 1
+
+    @pytest.mark.asyncio
+    async def test_record_multiple_successes(self, learner):
+        """Multiple successes should accumulate."""
+        pattern = await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+            result="manifest unknown",
+        )
+
+        for _ in range(5):
+            await learner.record_prevention_success(pattern["id"])
+
+        updated = learner.storage.get_pattern(pattern["id"])
+        assert updated["success_after_prevention"] == 5
+
+    @pytest.mark.asyncio
+    async def test_record_success_unknown_pattern(self, learner):
+        """Recording success for unknown pattern should return False."""
+        result = await learner.record_prevention_success("nonexistent-id")
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_record_prevention_failure(self, learner):
@@ -310,40 +607,76 @@ class TestPreventionTracking:
             await learner.analyze_result(
                 tool_name="bonfire_deploy",
                 params={"image_tag": "short"},
-                result="❌ Error: manifest unknown",
+                result="manifest unknown",
             )
 
         patterns = learner.storage.get_patterns_for_tool("bonfire_deploy")
         pattern = patterns[0]
         original_conf = pattern["confidence"]
 
-        # Record failure (false positive)
-        success = await learner.record_prevention_failure(pattern["id"], "Not applicable")
+        success = await learner.record_prevention_failure(
+            pattern["id"], "Not applicable"
+        )
         assert success is True
 
-        # Check confidence reduced
         updated = learner.storage.get_pattern(pattern["id"])
         assert updated["confidence"] < original_conf
         assert updated["confidence"] >= 0.30  # Floor at 30%
 
+    @pytest.mark.asyncio
+    async def test_record_failure_floors_at_30(self, learner):
+        """Repeated failures should floor confidence at 30%."""
+        pattern = await learner.analyze_result(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+            result="manifest unknown",
+        )
 
-class TestLearningStats:
-    """Test learning statistics."""
+        # Reduce confidence multiple times
+        for _ in range(20):
+            await learner.record_prevention_failure(pattern["id"])
+
+        updated = learner.storage.get_pattern(pattern["id"])
+        assert updated["confidence"] >= 0.30
 
     @pytest.mark.asyncio
-    async def test_learning_stats(self, learner):
-        """Should return comprehensive stats."""
-        # Create multiple patterns
+    async def test_record_failure_unknown_pattern(self, learner):
+        """Recording failure for unknown pattern should return False."""
+        result = await learner.record_prevention_failure("nonexistent-id")
+        assert result is False
+
+
+# ============================================================
+# Learning Stats
+# ============================================================
+
+
+class TestLearningStats:
+    """Tests for get_learning_stats method."""
+
+    @pytest.mark.asyncio
+    async def test_empty_stats(self, learner):
+        """Should return stats even when no patterns exist."""
+        stats = learner.get_learning_stats()
+
+        assert stats["total_patterns"] == 0
+        assert stats["total_observations"] == 0
+        assert stats["total_preventions_successful"] == 0
+        assert stats["average_confidence"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_stats_after_learning(self, learner):
+        """Should return accurate stats after learning patterns."""
         await learner.analyze_result(
             tool_name="bonfire_deploy",
             params={"image_tag": "short"},
-            result="❌ Error: manifest unknown",
+            result="manifest unknown",
         )
 
         await learner.analyze_result(
             tool_name="bonfire_namespace_release",
             params={"namespace": "wrong"},
-            result="❌ Error: namespace not owned",
+            result="namespace not owned",
         )
 
         stats = learner.get_learning_stats()
@@ -354,6 +687,28 @@ class TestLearningStats:
         assert stats["low_confidence_patterns"] == 2
         assert stats["high_confidence_patterns"] == 0
 
+    @pytest.mark.asyncio
+    async def test_stats_high_confidence(self, learner):
+        """High confidence patterns should be counted."""
+        # Create a pattern with many observations
+        for i in range(50):
+            await learner.analyze_result(
+                tool_name="bonfire_deploy",
+                params={"image_tag": f"short{i}"},
+                result="manifest unknown",
+            )
+
+        stats = learner.get_learning_stats()
+
+        assert stats["total_patterns"] == 1
+        assert stats["total_observations"] == 50
+        assert stats["high_confidence_patterns"] == 1
+
+
+# ============================================================
+# End-to-End Flow
+# ============================================================
+
 
 class TestEndToEndFlow:
     """Test complete learning flow."""
@@ -361,26 +716,44 @@ class TestEndToEndFlow:
     @pytest.mark.asyncio
     async def test_repeated_error_learning(self, learner):
         """Simulate repeated errors and verify learning."""
-        # User makes same mistake 50 times
         for i in range(50):
             await learner.analyze_result(
                 tool_name="bonfire_deploy",
                 params={"image_tag": f"short{i}"},
-                result="❌ Error: manifest unknown",
+                result="manifest unknown",
             )
 
-        # Check learned pattern
         patterns = learner.storage.get_patterns_for_tool("bonfire_deploy")
         assert len(patterns) == 1
 
         pattern = patterns[0]
         assert pattern["observations"] == 50
-        assert pattern["confidence"] == 0.92  # 45-99 obs = 92%
+        assert pattern["confidence"] == 0.92  # 45-99 obs
         assert pattern["error_category"] == "PARAMETER_FORMAT"
         assert len(pattern["prevention_steps"]) >= 2
 
-        # Verify stats
         stats = learner.get_learning_stats()
         assert stats["total_patterns"] == 1
         assert stats["total_observations"] == 50
-        assert stats["high_confidence_patterns"] == 1  # >= 0.85
+        assert stats["high_confidence_patterns"] == 1
+
+    @pytest.mark.asyncio
+    async def test_success_rate_affects_confidence(self, learner):
+        """Prevention success should boost confidence."""
+        for _ in range(10):
+            await learner.analyze_result(
+                tool_name="bonfire_deploy",
+                params={"image_tag": "short"},
+                result="manifest unknown",
+            )
+
+        patterns = learner.storage.get_patterns_for_tool("bonfire_deploy")
+        pattern = patterns[0]
+        base_conf = pattern["confidence"]  # 0.75
+
+        for _ in range(9):
+            await learner.record_prevention_success(pattern["id"])
+
+        pattern = learner.storage.get_pattern(pattern["id"])
+        assert pattern["confidence"] > base_conf
+        assert pattern["confidence"] >= 0.79

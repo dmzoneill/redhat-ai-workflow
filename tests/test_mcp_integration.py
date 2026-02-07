@@ -34,7 +34,12 @@ class TestMCPServerCreation:
 
     def test_utils_import(self):
         """Common utils should import."""
-        from server.utils import get_kubeconfig, get_project_root, load_config, resolve_repo_path
+        from server.utils import (
+            get_kubeconfig,
+            get_project_root,
+            load_config,
+            resolve_repo_path,
+        )
 
         assert callable(load_config)
         assert callable(get_project_root)
@@ -57,7 +62,9 @@ class TestToolModuleLoading:
             pytest.skip(f"Module aa_{module_name} not found")
 
         # Add server to path for imports
-        spec = importlib.util.spec_from_file_location(f"aa_{module_name}_tools", tools_file)
+        spec = importlib.util.spec_from_file_location(
+            f"aa_{module_name}_tools", tools_file
+        )
         if spec is None or spec.loader is None:
             pytest.fail(f"Could not create spec for {module_name}")
 
@@ -213,7 +220,7 @@ class TestConfigLoading:
         """Config should have repositories section."""
         from server.utils import load_config
 
-        config = load_config()
+        config = load_config(reload=True)
         assert "repositories" in config or isinstance(config.get("repositories"), dict)
 
     def test_get_section_config(self):
@@ -223,7 +230,9 @@ class TestConfigLoading:
         result = get_section_config("nonexistent_section_xyz")
         assert result == {}
 
-        result_with_default = get_section_config("nonexistent_section_xyz", {"default": "value"})
+        result_with_default = get_section_config(
+            "nonexistent_section_xyz", {"default": "value"}
+        )
         assert result_with_default == {"default": "value"}
 
 
@@ -249,4 +258,8 @@ class TestKubeconfig:
         from server.utils import get_kubeconfig
 
         path = get_kubeconfig("ephemeral")
-        assert path.endswith(".e") or "ephemeral" in path.lower() or path.endswith("config")
+        assert (
+            path.endswith(".e")
+            or "ephemeral" in path.lower()
+            or path.endswith("config")
+        )

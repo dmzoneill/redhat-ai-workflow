@@ -68,15 +68,14 @@ class TestGetConfigSection:
         result = get_config_section("not_a_section_xyz", None)
         assert result == {}
 
-    @patch("scripts.common.config_loader.load_config")
-    def test_get_config_section_existing(self, mock_load):
+    def test_get_config_section_existing(self):
         """get_config_section should return existing section."""
-        mock_load.return_value = {"jira": {"url": "https://jira.example.com"}}
-
         from scripts.common.config_loader import get_config_section
 
-        result = get_config_section("jira")
-        assert result == {"url": "https://jira.example.com"}
+        with patch("server.config_manager.config") as mock_cm:
+            mock_cm.get.return_value = {"url": "https://jira.example.com"}
+            result = get_config_section("jira")
+            assert result == {"url": "https://jira.example.com"}
 
 
 class TestGetUserConfig:
@@ -92,7 +91,9 @@ class TestGetUserConfig:
     @patch("scripts.common.config_loader.load_config")
     def test_get_user_config_from_config(self, mock_load):
         """get_user_config should return user section from config."""
-        mock_load.return_value = {"user": {"username": "testuser", "email": "test@example.com"}}
+        mock_load.return_value = {
+            "user": {"username": "testuser", "email": "test@example.com"}
+        }
 
         from scripts.common.config_loader import get_user_config
 
@@ -202,7 +203,11 @@ class TestGetRepoConfig:
     @patch("scripts.common.config_loader.load_config")
     def test_get_repo_config_existing(self, mock_load):
         """get_repo_config should return config for existing repo."""
-        mock_load.return_value = {"repositories": {"backend": {"path": "/home/user/backend", "gitlab": "org/backend"}}}
+        mock_load.return_value = {
+            "repositories": {
+                "backend": {"path": "/home/user/backend", "gitlab": "org/backend"}
+            }
+        }
 
         from scripts.common.config_loader import get_repo_config
 
@@ -325,7 +330,9 @@ class TestResolveRepo:
         """resolve_repo should use explicit cwd parameter."""
         mock_load.return_value = {
             "jira": {"url": "https://jira.example.com"},
-            "repositories": {"myrepo": {"path": "/explicit/path", "gitlab": "org/myrepo"}},
+            "repositories": {
+                "myrepo": {"path": "/explicit/path", "gitlab": "org/myrepo"}
+            },
         }
 
         from scripts.common.config_loader import resolve_repo
@@ -338,7 +345,9 @@ class TestResolveRepo:
         """resolve_repo should handle lowercase issue keys."""
         mock_load.return_value = {
             "jira": {"url": "https://jira.example.com"},
-            "repositories": {"backend": {"path": "/path", "gitlab": "org/b", "jira_project": "AAP"}},
+            "repositories": {
+                "backend": {"path": "/path", "gitlab": "org/b", "jira_project": "AAP"}
+            },
         }
 
         from scripts.common.config_loader import resolve_repo

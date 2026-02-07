@@ -60,8 +60,10 @@ class TestCoreAgents:
             content = developer.read_text()
             data = yaml.safe_load(content)
             tools = data.get("tools", [])
-            # Check for git_basic (preferred) or git (legacy)
-            assert "git_basic" in tools or "git" in tools, "Developer should have git tools"
+            # Check for git_core (preferred), git_basic, or git (legacy)
+            assert any(
+                t in tools for t in ("git_core", "git_basic", "git")
+            ), "Developer should have git tools"
 
     def test_devops_has_k8s_tools(self, personas_dir):
         """DevOps agent should include k8s tools."""
@@ -70,5 +72,7 @@ class TestCoreAgents:
             content = devops.read_text()
             data = yaml.safe_load(content)
             tools = data.get("tools", [])
-            # Check for k8s_basic (preferred) or k8s (legacy)
-            assert "k8s_basic" in tools or "k8s" in tools, "DevOps should have k8s tools"
+            # Check for k8s_core (preferred), k8s_basic, or k8s (legacy)
+            assert any(
+                t in tools for t in ("k8s_core", "k8s_basic", "k8s")
+            ), "DevOps should have k8s tools"

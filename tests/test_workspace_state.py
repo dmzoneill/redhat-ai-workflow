@@ -15,6 +15,7 @@ from server.workspace_state import (
     ChatSession,
     WorkspaceRegistry,
     WorkspaceState,
+    get_default_persona,
     get_workspace_state,
 )
 
@@ -31,7 +32,7 @@ class TestChatSession:
 
         assert session.session_id == "abc123"
         assert session.workspace_uri == "file:///test"
-        assert session.persona == "developer"
+        assert session.persona == get_default_persona()
         assert session.issue_key is None
         assert session.branch is None
         assert session.active_tools == set()
@@ -59,7 +60,9 @@ class TestChatSession:
         assert result["issue_key"] == "AAP-12345"
         assert result["branch"] == "feature-branch"
         assert result["name"] == "My Session"
-        assert set(result["active_tools"]) == {"git", "gitlab"}
+        # active_tools setter converts to static_tool_count
+        assert result["static_tool_count"] == 2
+        assert result["tool_count"] == 2
 
     def test_touch_updates_last_activity(self):
         """Test that touch updates last_activity."""
@@ -187,7 +190,7 @@ class TestWorkspaceState:
         state = WorkspaceState(workspace_uri="file:///test")
 
         # No session - should return defaults
-        assert state.persona == "developer"
+        assert state.persona == get_default_persona()
         assert state.issue_key is None
         assert state.branch is None
         assert state.active_tools == set()
@@ -202,7 +205,10 @@ class TestWorkspaceState:
         assert state.persona == "devops"
         assert state.issue_key == "AAP-123"
         assert state.branch == "feature"
-        assert state.active_tools == {"git", "k8s"}
+        # active_tools getter is deprecated and returns empty set;
+        # the setter converts to static_tool_count
+        assert state.active_tools == set()
+        assert session.static_tool_count == 2
 
         # Setting via properties should update session
         state.persona = "incident"
@@ -220,7 +226,7 @@ class TestWorkspaceState:
 
         assert result["workspace_uri"] == "file:///test"
         assert result["project"] == "test-project"
-        assert result["session_count"] == 1
+        assert len(result["sessions"]) == 1
         assert result["active_session_id"] == session.session_id
         assert session.session_id in result["sessions"]
 
@@ -329,13 +335,15 @@ class TestWorkspaceRegistry:
 
     def test_auto_session_creation_sync(self):
         """Test that ensure_session=True auto-creates a session."""
-        state = WorkspaceRegistry.get_or_create("file:///auto-session-test", ensure_session=True)
+        state = WorkspaceRegistry.get_or_create(
+            "file:///auto-session-test", ensure_session=True
+        )
 
         # Session should be auto-created
         assert state.session_count() == 1
         assert state.get_active_session() is not None
         assert state.get_active_session().name == "Auto-created"
-        assert state.get_active_session().persona == "developer"
+        assert state.get_active_session().persona == get_default_persona()
 
     @pytest.mark.asyncio
     async def test_auto_session_creation_async(self):
@@ -467,7 +475,9 @@ class TestProjectDetection:
         }
 
         with patch("server.utils.load_config", return_value=mock_config):
-            result = WorkspaceRegistry._detect_project("file:///home/user/src/test-project")
+            result = WorkspaceRegistry._detect_project(
+                "file:///home/user/src/test-project"
+            )
 
         assert result == "test-project"
 
@@ -481,7 +491,9 @@ class TestProjectDetection:
         }
 
         with patch("server.utils.load_config", return_value=mock_config):
-            result = WorkspaceRegistry._detect_project("file:///home/user/src/test-project/src/module")
+            result = WorkspaceRegistry._detect_project(
+                "file:///home/user/src/test-project/src/module"
+            )
 
         assert result == "test-project"
 
@@ -578,9 +590,15 @@ class TestMultiWorkspaceIntegration:
         ctx_infra = self._create_mock_ctx("file:///home/user/src/infrastructure")
 
         # Initialize all workspaces (ensure_session=False to avoid auto-session)
-        state_backend = await WorkspaceRegistry.get_for_ctx(ctx_backend, ensure_session=False)
-        state_frontend = await WorkspaceRegistry.get_for_ctx(ctx_frontend, ensure_session=False)
-        state_infra = await WorkspaceRegistry.get_for_ctx(ctx_infra, ensure_session=False)
+        state_backend = await WorkspaceRegistry.get_for_ctx(
+            ctx_backend, ensure_session=False
+        )
+        state_frontend = await WorkspaceRegistry.get_for_ctx(
+            ctx_frontend, ensure_session=False
+        )
+        state_infra = await WorkspaceRegistry.get_for_ctx(
+            ctx_infra, ensure_session=False
+        )
 
         # Create sessions with different contexts
         session_backend = state_backend.create_session(persona="developer")
@@ -706,12 +724,12 @@ class TestMultiWorkspaceIntegration:
         # Verify exported data includes sessions
         ws1_export = exported["file:///home/user/project1"]
         assert ws1_export["project"] == "project1"
-        assert ws1_export["session_count"] == 1
+        assert len(ws1_export["sessions"]) == 1
         assert session1.session_id in ws1_export["sessions"]
 
         ws2_export = exported["file:///home/user/project2"]
         assert ws2_export["project"] == "project2"
-        assert ws2_export["session_count"] == 1
+        assert len(ws2_export["sessions"]) == 1
 
     @pytest.mark.asyncio
     async def test_workspace_cleanup(self):
@@ -796,16 +814,23 @@ class TestWorkspaceRegistryPersistence:
         # Use temp path for persistence
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with (
+            patch.object(ws_module, "PERSIST_DIR", tmp_path),
+            patch.object(ws_module, "PERSIST_FILE", persist_file),
+        ):
 
             # Create workspaces with sessions (ensure_session=False to avoid auto-create)
-            ws1 = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
+            ws1 = WorkspaceRegistry.get_or_create(
+                "file:///workspace1", ensure_session=False
+            )
             ws1.project = "project1"
             session1 = ws1.create_session(persona="developer", name="Dev Session")
             session1.issue_key = "AAP-12345"
             session1.branch = "feature-branch"
 
-            ws2 = WorkspaceRegistry.get_or_create("file:///workspace2", ensure_session=False)
+            ws2 = WorkspaceRegistry.get_or_create(
+                "file:///workspace2", ensure_session=False
+            )
             ws2.project = "project2"
             ws2.create_session(persona="devops", name="DevOps Session")
 
@@ -854,10 +879,15 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with (
+            patch.object(ws_module, "PERSIST_DIR", tmp_path),
+            patch.object(ws_module, "PERSIST_FILE", persist_file),
+        ):
 
             # Create a workspace (ensure_session=False to avoid auto-create)
-            ws = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
+            ws = WorkspaceRegistry.get_or_create(
+                "file:///workspace1", ensure_session=False
+            )
             ws.create_session()
 
             # Try to restore - should do nothing since registry is not empty
@@ -876,7 +906,10 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with (
+            patch.object(ws_module, "PERSIST_DIR", tmp_path),
+            patch.object(ws_module, "PERSIST_FILE", persist_file),
+        ):
 
             # File doesn't exist
             assert not persist_file.exists()
@@ -890,7 +923,10 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with (
+            patch.object(ws_module, "PERSIST_DIR", tmp_path),
+            patch.object(ws_module, "PERSIST_FILE", persist_file),
+        ):
 
             # Write invalid JSON
             with open(persist_file, "w") as f:
@@ -907,7 +943,10 @@ class TestWorkspaceRegistryPersistence:
 
         persist_file = tmp_path / "workspace_states.json"
 
-        with patch.object(ws_module, "PERSIST_DIR", tmp_path), patch.object(ws_module, "PERSIST_FILE", persist_file):
+        with (
+            patch.object(ws_module, "PERSIST_DIR", tmp_path),
+            patch.object(ws_module, "PERSIST_FILE", persist_file),
+        ):
 
             # Write old version format
             with open(persist_file, "w") as f:
