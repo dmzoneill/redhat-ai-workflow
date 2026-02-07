@@ -187,6 +187,70 @@ async def _get_bootstrap_context(project: str | None, session_name: str | None) 
             ],
         }
 
+        # Map intents to suggested skills for direct execution
+        skill_map = {
+            "code_lookup": [
+                "explain_code",
+                "find_similar_code",
+                "gather_context",
+            ],
+            "troubleshooting": [
+                "debug_prod",
+                "investigate_alert",
+                "check_ci_health",
+            ],
+            "status_check": [
+                "environment_overview",
+                "check_my_prs",
+                "konflux_status",
+            ],
+            "issue_context": [
+                "start_work",
+                "jira_hygiene",
+                "close_issue",
+            ],
+            "documentation": [
+                "learn_architecture",
+                "explain_code",
+                "update_docs",
+            ],
+            "deployment": [
+                "deploy_to_ephemeral",
+                "test_mr_ephemeral",
+                "environment_overview",
+            ],
+            "gitlab": [
+                "check_ci_health",
+                "review_pr",
+                "check_my_prs",
+                "create_mr",
+            ],
+            "calendar": [
+                "schedule_meeting",
+                "sync_pto_calendar",
+            ],
+            "planning": [
+                "sprint_planning",
+                "plan_implementation",
+                "work_analysis",
+            ],
+            "review": [
+                "review_pr",
+                "review_local_changes",
+                "check_mr_feedback",
+            ],
+            "release": [
+                "release_to_prod",
+                "release_aa_backend_prod",
+                "konflux_status",
+            ],
+            "alert": [
+                "investigate_alert",
+                "investigate_slack_alert",
+                "silence_alert",
+            ],
+        }
+
         bootstrap["recommended_actions"] = action_map.get(
             intent,
             [
@@ -194,6 +258,10 @@ async def _get_bootstrap_context(project: str | None, session_name: str | None) 
                 "Slow sources available: inscope, jira, gitlab, github, calendar, gmail, gdrive",
             ],
         )
+
+        # Add suggested skills to bootstrap context
+        if intent in skill_map:
+            bootstrap["suggested_skills"] = skill_map[intent]
 
         return bootstrap
 
@@ -1024,6 +1092,12 @@ async def _session_start_impl(  # noqa: C901
             lines.append("**Recommended Actions:**")
             for action in actions[:3]:
                 lines.append(f"  - {action}")
+
+        # Show suggested skills for direct execution
+        suggested_skills = bootstrap_context.get("suggested_skills", [])
+        if suggested_skills:
+            skill_list_str = ", ".join(f"`{s}`" for s in suggested_skills)
+            lines.append(f"**Suggested Skills:** {skill_list_str}")
 
         # Show related Slack discussions if any
         related_slack = bootstrap_context.get("related_slack", [])
