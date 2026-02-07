@@ -18,12 +18,11 @@ Run specific test: pytest tests/test_meetbot_devices.py::TestDefaultSourcePreser
 """
 
 import asyncio
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -240,7 +239,7 @@ class TestDefaultSourcePreservation:
 
         manager = InstanceDeviceManager("test_priority")
         try:
-            devices = await manager.create_all()
+            await manager.create_all()
 
             # Check source properties
             success, output = await run_pactl("list", "sources")
@@ -250,7 +249,7 @@ class TestDefaultSourcePreservation:
             found_source = False
             in_our_source = False
             for line in output.split("\n"):
-                if f"meet_bot_test_priority_mic" in line:
+                if "meet_bot_test_priority_mic" in line:
                     in_our_source = True
                     found_source = True
                 elif in_our_source and line.strip().startswith("Name:"):
@@ -305,7 +304,7 @@ class TestDeviceCleanup:
         manager = InstanceDeviceManager("test_monitor_stop")
 
         # Create devices (this starts the monitor task)
-        devices = await manager.create_all()
+        await manager.create_all()
 
         # Verify monitor task is running
         assert manager._source_monitor_task is not None
@@ -330,7 +329,7 @@ class TestDeviceCleanup:
 
         # Create a device but don't clean it up properly
         manager = InstanceDeviceManager("test_orphan")
-        devices = await manager.create_all()
+        await manager.create_all()
 
         # Simulate orphan by clearing the manager's tracking
         manager._sink_module_id = None
@@ -369,7 +368,7 @@ class TestBrowserClosureCleanup:
 
         # Run one iteration of the poll loop
         # We need to patch the loop to run once
-        original_running = controller._caption_observer_running
+        _ = controller._caption_observer_running
 
         async def run_one_poll():
             try:
@@ -492,18 +491,6 @@ class TestVideoGeneratorStartupCheck:
     @pytest.mark.asyncio
     async def test_ensure_default_source_not_meetbot(self):
         """Startup check should restore default if it's a meetbot device."""
-        # Import the function we added
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            "video_generator",
-            PROJECT_ROOT
-            / "tool_modules"
-            / "aa_meet_bot"
-            / "src"
-            / "video_generator.py",
-        )
-
         # We can't easily test this without mocking, so verify the function exists
         # and has the right structure
         video_gen_path = (
@@ -549,8 +536,8 @@ class TestMultipleInstanceIsolation:
 
         try:
             # Create both
-            devices1 = await manager1.create_all()
-            devices2 = await manager2.create_all()
+            await manager1.create_all()
+            await manager2.create_all()
 
             # Verify both exist before cleanup
             sources_before = await list_sources()
@@ -613,7 +600,7 @@ class TestSourceMonitorTask:
         # Set the original default source
         manager._original_default_source = physical_mic
 
-        devices = await manager.create_all()
+        await manager.create_all()
 
         # Monitor task should be running
         assert manager._source_monitor_task is not None
@@ -640,7 +627,7 @@ class TestSourceMonitorTask:
         manager = InstanceDeviceManager("test_monitor_restore")
         self.managers_to_cleanup.append(manager)
 
-        devices = await manager.create_all()
+        await manager.create_all()
         await asyncio.sleep(0.5)
 
         # Manually change default to our meetbot source
@@ -866,7 +853,7 @@ class TestVideoDeviceCleanup:
         manager = InstanceDeviceManager("test_full_cleanup")
 
         # Create all devices
-        devices = await manager.create_all()
+        await manager.create_all()
 
         if manager._video_device:
             # Verify video device exists
