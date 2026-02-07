@@ -28,6 +28,7 @@ links:
   validated_by: []          # Extension is a utility, not validated by others
   chains_to:
     - environment_overview  # Check health of extended namespace
+    - notify_team           # Notify team about namespace extension
   provides_context_for:
     - beer                  # EOD shows expiring namespaces
     - coffee                # Morning shows namespace status

@@ -20,6 +20,7 @@ links:
   chains_to:
     - cleanup_branches      # Clean up feature branch after close
     - discovered_work_summary  # Summarize any discovered work
+    - notify_team           # Notify team about issue closure
   provides_context_for:
     - standup_summary       # Closed issues appear in standup
     - weekly_summary        # Closed issues appear in weekly report

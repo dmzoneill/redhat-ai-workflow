@@ -335,6 +335,24 @@ steps:
     output: shared_context_result
     on_error: continue
 
+  # ==================== CHAIN: AUTO-RETRY FAILED PIPELINES ====================
+
+  - name: call_ci_retry
+    description: "Auto-retry failed pipelines when failures are detected"
+    condition: "pipelines_info and pipelines_info.get('has_failures')"
+    tool: skill_run
+    args:
+      skill_name: ci_retry
+      inputs: '{"project": "{{ inputs.project }}"}'
+    on_error: continue
+
+  - name: restore_persona_after_ci_retry
+    description: "Restore developer persona after ci_retry"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_ci_health_failures

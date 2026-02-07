@@ -20,6 +20,7 @@ links:
   chains_to:
     - create_mr             # May create a replacement MR
     - cleanup_branches      # Clean up the abandoned branch
+    - notify_team           # Notify team about MR closure
   provides_context_for:
     - close_issue           # May need to update Jira status
   validated_by:

@@ -40,6 +40,7 @@ links:
     - jira_hygiene          # Run hygiene on the newly created issue
     - sprint_planning       # Add new issue to sprint
     - clone_jira_issue
+    - notify_team           # Notify team about new issue creation
   provides_context_for:
     - start_work            # Issue key for branch creation
     - clone_jira_issue      # Template for cloning

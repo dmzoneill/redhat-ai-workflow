@@ -22,6 +22,7 @@ links:
   chains_to:
     - environment_overview  # Check health after restart
     - check_secrets         # Verify config after restart
+    - notify_team           # Notify team about deployment restart
   provides_context_for:
     - debug_prod            # Restart context for investigation
     - investigate_alert     # Restart status for alert triage
@@ -279,6 +280,24 @@ steps:
   - name: restore_persona_after_notify
     description: "Restore devops persona after notify_team"
     condition: "restart_status and restart_status.success"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+    on_error: continue
+
+  # ==================== CHAIN: VERIFY ENVIRONMENT HEALTH ====================
+
+  - name: call_environment_overview
+    description: "Verify environment health after successful restart"
+    condition: "restart_status and restart_status.get('success')"
+    tool: skill_run
+    args:
+      skill_name: environment_overview
+      inputs: '{"environment": "{{ inputs.environment }}", "namespace": "{{ inputs.namespace }}"}'
+    on_error: continue
+
+  - name: restore_persona_after_environment_overview
+    description: "Restore devops persona after environment_overview"
     tool: persona_load
     args:
       persona_name: "devops"

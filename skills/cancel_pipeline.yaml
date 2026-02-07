@@ -26,6 +26,7 @@ links:
   chains_to:
     - ci_retry              # Retry the cancelled pipeline with fixes
     - konflux_status        # Check overall build status
+    - notify_team           # Notify team about pipeline cancellation
   provides_context_for:
     - ci_retry              # Cancellation reason informs retry
   validated_by:

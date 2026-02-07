@@ -343,6 +343,13 @@ steps:
     output: rebase_result
     on_error: continue
 
+  - name: restore_developer_after_rebase
+    description: "Restore developer persona after rebase_pr"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # Step 3: Process each MR (excluding my own)
   - name: process_mrs
     description: "Analyze each MR for review status"
@@ -499,6 +506,7 @@ steps:
     tool: persona_load
     args:
       persona_name: "developer"
+    on_error: continue
 
   # Step 8: Approve MR if author addressed feedback
   - name: auto_approve

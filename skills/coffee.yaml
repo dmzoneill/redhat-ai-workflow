@@ -36,6 +36,7 @@ links:
     - check_mr_feedback     # Check MR feedback surfaced in briefing
     - jira_hygiene          # Morning is ideal for fixing issue hygiene
     - konflux_status        # Check build system health
+    - standup_summary       # Generate standup from briefing data
   provides_context_for:
     - start_work            # Morning context for prioritizing work
     - standup_summary       # Morning data feeds standup
@@ -1669,6 +1670,23 @@ steps:
       memory.write_memory("state/shared_context", shared)
       result = "shared context saved"
     output: shared_context_result
+    on_error: continue
+
+  # ==================== CHAIN: MORNING STANDUP SUMMARY ====================
+
+  - name: call_standup_summary
+    description: "Generate standup summary as part of morning briefing"
+    tool: skill_run
+    args:
+      skill_name: standup_summary
+      inputs: '{}'
+    on_error: continue
+
+  - name: restore_persona_after_standup_summary
+    description: "Restore developer persona after standup_summary"
+    tool: persona_load
+    args:
+      persona_name: "developer"
     on_error: continue
 
   - name: learn_network_failure

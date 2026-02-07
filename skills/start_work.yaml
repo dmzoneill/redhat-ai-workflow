@@ -41,6 +41,7 @@ links:
     - close_issue
     - sync_branch
     - update_docs
+    - notify_team           # Notify team about work starting
   provides_context_for:
     - create_mr             # Branch name, issue context
     - close_issue           # Issue key, branch commits

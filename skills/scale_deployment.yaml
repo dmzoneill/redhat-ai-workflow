@@ -311,6 +311,24 @@ steps:
       persona_name: "devops"
     on_error: continue
 
+  # ==================== CHAIN: VERIFY ENVIRONMENT HEALTH ====================
+
+  - name: call_environment_overview
+    description: "Verify environment health after successful scaling"
+    condition: "scale_status and scale_status.get('success')"
+    tool: skill_run
+    args:
+      skill_name: environment_overview
+      inputs: '{"environment": "{{ inputs.environment }}", "namespace": "{{ inputs.namespace }}"}'
+    on_error: continue
+
+  - name: restore_persona_after_environment_overview
+    description: "Restore devops persona after environment_overview"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_scaling

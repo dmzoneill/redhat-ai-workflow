@@ -26,6 +26,7 @@ links:
   validated_by: []          # Silencing is a terminal mitigation action
   chains_to:
     - create_jira_issue     # Track underlying issue for proper fix
+    - notify_team           # Notify team about alert silence
   provides_context_for:
     - coffee                # Morning briefing shows silenced alerts
     - investigate_alert     # Existing silences inform future investigations

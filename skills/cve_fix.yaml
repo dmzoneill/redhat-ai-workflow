@@ -68,6 +68,7 @@ links:
     - review_pr             # Get review on the CVE fix
     - test_mr_ephemeral     # Test fix in ephemeral
     - notify_team           # Announce CVE fix
+    - scan_vulnerabilities  # Verify CVE is resolved after fix
   provides_context_for:
     - scan_vulnerabilities   # CVE fix informs next vulnerability scan
     - weekly_summary        # CVE fixes in weekly report

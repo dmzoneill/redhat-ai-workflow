@@ -826,6 +826,24 @@ steps:
     output: standup_save_result
     on_error: continue
 
+  # ==================== CHAIN: CLEANUP STALE BRANCHES ====================
+
+  - name: call_cleanup_branches
+    description: "Suggest cleaning up stale merged branches at end of day"
+    condition: "stale_branches and len(stale_branches) > 0"
+    tool: skill_run
+    args:
+      skill_name: cleanup_branches
+      inputs: '{"dry_run": true}'
+    on_error: continue
+
+  - name: restore_persona_after_cleanup_branches
+    description: "Restore developer persona after cleanup_branches"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_beer_failures

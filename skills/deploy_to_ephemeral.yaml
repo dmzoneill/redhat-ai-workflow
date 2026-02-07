@@ -27,6 +27,8 @@ links:
     - environment_overview  # Check deployment health
     - check_secrets         # Verify configuration
     - rollout_restart       # Restart if pods are unhealthy
+    - notify_team           # Notify team about deployment status
+    - scan_vulnerabilities  # Scan deployed image for vulnerabilities
   provides_context_for:
     - extend_ephemeral      # Namespace name for extension
     - environment_overview  # Namespace for health check
@@ -539,6 +541,13 @@ steps:
         }
       execute: true
     output: slack_deployment_failure_notification
+    on_error: continue
+
+  - name: restore_devops_after_notify
+    description: "Restore devops persona after notify_team"
+    tool: persona_load
+    args:
+      persona_name: "devops"
     on_error: continue
 
   # ==================== VULNERABILITY SCAN ====================

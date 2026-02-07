@@ -31,6 +31,8 @@ links:
   chains_to:
     - check_ci_health       # Verify pipeline after rebase
     - mark_mr_ready         # Mark ready after clean rebase
+    - ci_retry              # Retry CI pipeline after force push
+    - notify_team           # Notify team about rebase and force push
   provides_context_for:
     - create_mr             # Rebase cleans up commit history for MR
 

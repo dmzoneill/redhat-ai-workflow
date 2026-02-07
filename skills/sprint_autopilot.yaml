@@ -41,6 +41,7 @@ links:
     - create_mr             # Create MR after autopilot coding
     - test_mr_ephemeral     # Deploy for testing after autopilot
     - close_issue           # Close after MR merge
+    - start_work            # Set up branch via start_work skill
   provides_context_for:
     - standup_summary       # Autopilot activity for standup
     - weekly_summary        # Autopilot activity for weekly report
@@ -247,6 +248,13 @@ steps:
       inputs: '{"issue_key": "{{ issue_key }}", "auto_stash": false}'
     on_error: continue
 
+  - name: restore_developer_after_start_work
+    description: "Restore developer persona after start_work"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   - name: extract_branch_name
     description: Extract branch name from start_work result
     condition: "{{ start_work is defined }}"
@@ -360,6 +368,13 @@ steps:
     args:
       skill_name: create_mr
       inputs: '{"issue_key": "{{ issue_key }}", "draft": true}'
+    on_error: continue
+
+  - name: restore_developer_after_create_mr
+    description: "Restore developer persona after create_mr"
+    tool: persona_load
+    args:
+      persona_name: "developer"
     on_error: continue
 
   - name: extract_mr_info

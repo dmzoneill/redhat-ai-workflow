@@ -26,6 +26,7 @@ links:
   chains_to:
     - check_ci_health       # Check pipeline health after retry
     - konflux_status        # Check overall build status
+    - notify_team           # Notify team about CI pipeline retry
   provides_context_for:
     - check_ci_health       # Retry context for health check
     - create_mr             # Pipeline retry status for MR

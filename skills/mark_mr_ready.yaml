@@ -24,6 +24,7 @@ links:
     - review_pr             # Request review after marking ready
     - notify_mr             # Notify team about the ready MR
     - test_mr_ephemeral     # Deploy for testing
+    - update_docs           # Check and update documentation
   provides_context_for:
     - review_pr             # MR status informs review priority
     - check_my_prs          # Ready status appears in PR check
@@ -314,6 +315,13 @@ steps:
     output: docs_check_result
     on_error: continue
 
+  - name: restore_developer_after_update_docs
+    description: "Restore developer persona after update_docs"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   - name: parse_docs_result
     description: "Parse documentation check results"
     condition: "inputs.check_docs"
@@ -387,10 +395,10 @@ steps:
   # Restore developer persona after notify_mr (which loads slack persona)
   - name: restore_developer_persona
     description: "Restore developer persona for Jira tools"
-    condition: "inputs.update_jira and mr_info.jira_key"
     tool: persona_load
     args:
       persona_name: "developer"
+    on_error: continue
 
   # Step 7: Update Jira status
   - name: update_jira_status
