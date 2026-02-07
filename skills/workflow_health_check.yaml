@@ -1,0 +1,385 @@
+# Skill: Workflow Health Check
+# Comprehensive system health check
+
+name: workflow_health_check
+description: |
+  Perform a comprehensive system health check across all workflow services.
+
+  This skill checks:
+  - Systemd service status
+  - Journal logs for errors
+  - Ollama AI service health
+  - Cron job configuration
+  - Podman container status
+  - SQLite database integrity
+  - HTTP endpoint health
+  - SSH connectivity
+  - InScope authentication
+  - System time and hostname
+  - Local workflow checks
+
+  Uses: systemctl_status, systemctl_is_active, systemctl_list_units,
+        journalctl_unit, ollama_status, ollama_test, cron_list,
+        cron_status, podman_ps, sqlite_query, sqlite_tables, curl_get,
+        ssh_test, inscope_auth_status, timedatectl_status, hostnamectl_status,
+        workflow_run_local_checks
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to:
+    - remote_host_diagnostics
+  provides_context_for:
+    - remote_host_diagnostics
+
+inputs:
+  - name: fix_issues
+    type: boolean
+    required: false
+    default: false
+    description: "Attempt to fix detected issues automatically"
+
+  - name: verbose
+    type: boolean
+    required: false
+    default: false
+    description: "Show verbose output for all checks"
+
+  - name: check_remote
+    type: boolean
+    required: false
+    default: false
+    description: "Include remote host checks via SSH"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for system health tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_health_known_issues
+    description: "Check for known system health issues"
+    compute: |
+      systemctl_issues = memory.check_known_issues("systemctl", "") or {}
+      podman_issues = memory.check_known_issues("podman", "") or {}
+      ollama_issues = memory.check_known_issues("ollama", "") or {}
+
+      all_issues = []
+      for issues in [systemctl_issues, podman_issues, ollama_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: health_known_issues
+    on_error: continue
+
+  # ==================== SYSTEM INFO ====================
+
+  - name: check_hostname
+    description: "Get system hostname info"
+    tool: hostnamectl_status
+    args: {}
+    output: hostname_raw
+    on_error: continue
+
+  - name: check_time
+    description: "Check system time configuration"
+    tool: timedatectl_status
+    args: {}
+    output: time_raw
+    on_error: continue
+
+  # ==================== SYSTEMD SERVICES ====================
+
+  - name: list_failed_units
+    description: "List failed systemd units"
+    tool: systemctl_list_units
+    args:
+      state: "failed"
+    output: failed_units_raw
+    on_error: continue
+
+  - name: check_workflow_service
+    description: "Check aa-workflow service status"
+    tool: systemctl_status
+    args:
+      unit: "aa-workflow"
+    output: workflow_status_raw
+    on_error: continue
+
+  - name: check_workflow_active
+    description: "Check if aa-workflow service is active"
+    tool: systemctl_is_active
+    args:
+      unit: "aa-workflow"
+    output: workflow_active_raw
+    on_error: continue
+
+  - name: get_workflow_logs
+    description: "Get recent workflow service logs"
+    tool: journalctl_unit
+    args:
+      unit: "aa-workflow"
+      lines: 50
+    output: workflow_logs_raw
+    on_error: continue
+
+  # ==================== OLLAMA ====================
+
+  - name: check_ollama_status
+    description: "Check Ollama AI service status"
+    tool: ollama_status
+    args: {}
+    output: ollama_status_raw
+    on_error: continue
+
+  - name: list_ollama_models
+    description: "Test Ollama and list available models"
+    tool: ollama_test
+    args: {}
+    output: ollama_models_raw
+    on_error: continue
+
+  # ==================== CRON JOBS ====================
+
+  - name: list_cron_jobs
+    description: "List configured cron jobs"
+    tool: cron_list
+    args: {}
+    output: cron_list_raw
+    on_error: continue
+
+  - name: check_cron_status
+    description: "Check cron service status"
+    tool: cron_status
+    args: {}
+    output: cron_status_raw
+    on_error: continue
+
+  # ==================== PODMAN CONTAINERS ====================
+
+  - name: list_podman_containers
+    description: "List running Podman containers"
+    tool: podman_ps
+    args: {}
+    output: podman_ps_raw
+    on_error: continue
+
+  # ==================== DATABASE ====================
+
+  - name: check_sqlite_tables
+    description: "Check SQLite database tables"
+    tool: sqlite_tables
+    args:
+      database: "workflow.db"
+    output: sqlite_tables_raw
+    on_error: continue
+
+  - name: check_sqlite_health
+    description: "Run SQLite integrity check"
+    tool: sqlite_query
+    args:
+      database: "workflow.db"
+      query: "PRAGMA integrity_check"
+    output: sqlite_health_raw
+    on_error: continue
+
+  # ==================== HTTP HEALTH ====================
+
+  - name: check_http_health
+    description: "Check HTTP endpoint health"
+    tool: curl_get
+    args:
+      url: "http://localhost:8080/health"
+    output: http_health_raw
+    on_error: continue
+
+  # ==================== SSH ====================
+
+  - name: check_ssh
+    description: "Test SSH to localhost"
+    condition: "inputs.check_remote"
+    tool: ssh_test
+    args:
+      host: "localhost"
+    output: ssh_test_raw
+    on_error: continue
+
+  # ==================== AUTH ====================
+
+  - name: check_inscope_auth
+    description: "Check InScope authentication status"
+    tool: inscope_auth_status
+    args: {}
+    output: inscope_auth_raw
+    on_error: continue
+
+  # ==================== LOCAL CHECKS ====================
+
+  - name: run_local_checks
+    description: "Run local workflow health checks"
+    tool: workflow_run_local_checks
+    args: {}
+    output: local_checks_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_health_failures
+    description: "Detect failure patterns from health checks"
+    compute: |
+      errors_detected = []
+
+      workflow_text = str(workflow_status_raw) if 'workflow_status_raw' in dir() and workflow_status_raw else ""
+      ollama_text = str(ollama_status_raw) if 'ollama_status_raw' in dir() and ollama_status_raw else ""
+      podman_text = str(podman_ps_raw) if 'podman_ps_raw' in dir() and podman_ps_raw else ""
+
+      if "inactive" in workflow_text.lower() or "failed" in workflow_text.lower():
+          errors_detected.append({
+              "tool": "systemctl",
+              "pattern": "service inactive",
+              "cause": "aa-workflow service is not running",
+              "fix": "Start the service: systemctl --user start aa-workflow"
+          })
+      if "connection refused" in ollama_text.lower():
+          errors_detected.append({
+              "tool": "ollama",
+              "pattern": "connection refused",
+              "cause": "Ollama service is not running",
+              "fix": "Start Ollama: systemctl start ollama"
+          })
+      if "cannot connect" in podman_text.lower():
+          errors_detected.append({
+              "tool": "podman",
+              "pattern": "cannot connect",
+              "cause": "Podman socket is not available",
+              "fix": "Start Podman socket: systemctl --user start podman.socket"
+          })
+
+      result = errors_detected
+    output: health_errors_detected
+    on_error: continue
+
+  - name: learn_workflow_service_failure
+    description: "Learn from workflow service failures"
+    condition: "health_errors_detected and any(e.get('pattern') == 'service inactive' for e in health_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "systemctl"
+      error_pattern: "service inactive"
+      root_cause: "aa-workflow service is not running"
+      fix_description: "Start the service: systemctl --user start aa-workflow"
+    output: workflow_service_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Workflow health check"
+      details: "fix_issues={{ inputs.fix_issues }}, verbose={{ inputs.verbose }}, check_remote={{ inputs.check_remote }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Workflow Health Check
+
+      **Fix Issues:** {{ inputs.fix_issues }}
+      **Verbose:** {{ inputs.verbose }}
+
+      ---
+
+      ### System Info
+      - Hostname: {{ hostname_raw | string | truncate(200) if hostname_raw else "N/A" }}
+      - Time: {{ time_raw | string | truncate(200) if time_raw else "N/A" }}
+
+      ---
+
+      ### Systemd Services
+      **Failed Units:**
+      ```
+      {{ failed_units_raw | string | truncate(400) if failed_units_raw else "No failed units" }}
+      ```
+
+      **Workflow Service:**
+      - Status: {{ workflow_active_raw | string | truncate(100) if workflow_active_raw else "Unknown" }}
+      ```
+      {{ workflow_status_raw | string | truncate(400) if workflow_status_raw else "N/A" }}
+      ```
+
+      ---
+
+      ### Ollama AI
+      - Status: {{ ollama_status_raw | string | truncate(200) if ollama_status_raw else "Not available" }}
+      - Models: {{ ollama_models_raw | string | truncate(300) if ollama_models_raw else "N/A" }}
+
+      ---
+
+      ### Cron Jobs
+      ```
+      {{ cron_list_raw | string | truncate(400) if cron_list_raw else "No cron jobs" }}
+      ```
+      Status: {{ cron_status_raw | string | truncate(100) if cron_status_raw else "N/A" }}
+
+      ---
+
+      ### Podman Containers
+      ```
+      {{ podman_ps_raw | string | truncate(400) if podman_ps_raw else "No containers running" }}
+      ```
+
+      ---
+
+      ### Database
+      - Tables: {{ sqlite_tables_raw | string | truncate(200) if sqlite_tables_raw else "N/A" }}
+      - Integrity: {{ sqlite_health_raw | string | truncate(100) if sqlite_health_raw else "Not checked" }}
+
+      ---
+
+      ### HTTP Health
+      {{ http_health_raw | string | truncate(200) if http_health_raw else "Endpoint not reachable" }}
+
+      ### InScope Auth
+      {{ inscope_auth_raw | string | truncate(200) if inscope_auth_raw else "Not configured" }}
+
+      ### Local Checks
+      ```
+      {{ local_checks_raw | string | truncate(400) if local_checks_raw else "N/A" }}
+      ```
+
+      {% if workflow_logs_raw and inputs.verbose %}
+      ---
+
+      ### Recent Logs
+      ```
+      {{ workflow_logs_raw | string | truncate(800) }}
+      ```
+      {% endif %}
+
+      {% if health_known_issues and health_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in health_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      fix_issues: "{{ inputs.fix_issues }}"
+      verbose: "{{ inputs.verbose }}"

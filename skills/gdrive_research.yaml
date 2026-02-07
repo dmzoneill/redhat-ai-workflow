@@ -1,0 +1,303 @@
+# Skill: Google Drive Research
+# Search Google Drive for documents and download files
+
+name: gdrive_research
+description: |
+  Search Google Drive for documents related to a topic or issue.
+
+  Features:
+  - Full-text search across Google Drive
+  - Filter by file types (docs, sheets, slides, pdf)
+  - Browse recent files and folders
+  - Cross-reference with Gmail for related emails
+  - Get file metadata and sharing info
+
+  Uses: gdrive_search, gdrive_get_file_content, gdrive_get_file_info,
+        gdrive_list_recent, gdrive_list_files, gmail_search
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - create_jira_issue
+    - start_work
+    - create_slide_deck
+  provides_context_for:
+    - research_topic
+    - plan_implementation
+    - standup_summary
+  validated_by: []
+
+inputs:
+  - name: query
+    type: string
+    required: true
+    description: "Search query for Google Drive"
+
+  - name: issue_key
+    type: string
+    required: false
+    default: ""
+    description: "Jira issue key to find related docs"
+
+  - name: folder_id
+    type: string
+    required: false
+    default: ""
+    description: "Google Drive folder ID to browse"
+
+  - name: file_types
+    type: string
+    required: false
+    default: ""
+    description: "Comma-separated file types to filter (e.g., 'document,spreadsheet,presentation')"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Google Drive tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== SEARCH GOOGLE DRIVE ====================
+
+  - name: search_drive
+    description: "Search Google Drive for documents"
+    tool: gdrive_search
+    args:
+      query: "{{ inputs.query }}"
+      file_types: "{{ inputs.file_types }}"
+    output: search_results_raw
+    on_error: continue
+
+  - name: search_by_issue
+    description: "Search for documents mentioning the Jira issue"
+    condition: "inputs.issue_key"
+    tool: gdrive_search
+    args:
+      query: "{{ inputs.issue_key }}"
+    output: issue_docs_raw
+    on_error: continue
+
+  - name: list_recent
+    description: "List recently modified files"
+    tool: gdrive_list_recent
+    args:
+      limit: 20
+    output: recent_files_raw
+    on_error: continue
+
+  # ==================== BROWSE FOLDER ====================
+
+  - name: browse_folder
+    description: "List files in specific folder"
+    condition: "inputs.folder_id"
+    tool: gdrive_list_files
+    args:
+      folder_id: "{{ inputs.folder_id }}"
+    output: folder_contents_raw
+    on_error: continue
+
+  # ==================== READ TOP RESULTS ====================
+
+  - name: parse_search_results
+    description: "Parse search results and identify top documents"
+    compute: |
+      search_text = str(search_results_raw) if 'search_results_raw' in dir() and search_results_raw else ""
+      issue_text = str(issue_docs_raw) if 'issue_docs_raw' in dir() and issue_docs_raw else ""
+
+      import re
+
+      docs = []
+      for text in [search_text, issue_text]:
+          for line in text.split("\n"):
+              if line.strip() and ("id:" in line.lower() or "name:" in line.lower() or "title:" in line.lower()):
+                  docs.append(line.strip()[:150])
+
+      # Extract file IDs for reading
+      file_ids = re.findall(r'(?:id|fileId)[:\s]+([a-zA-Z0-9_-]{20,})', search_text)
+
+      result = {
+          "docs": docs[:15],
+          "doc_count": len(docs),
+          "file_ids": file_ids[:5],
+          "has_results": len(docs) > 0,
+      }
+    output: parsed_results
+
+  - name: get_first_doc_content
+    description: "Read content of the first search result"
+    condition: "parsed_results.file_ids"
+    tool: gdrive_get_file_content
+    args:
+      file_id: "{{ parsed_results.file_ids[0] if parsed_results.file_ids else '' }}"
+    output: first_doc_content_raw
+    on_error: continue
+
+  - name: get_first_doc_metadata
+    description: "Get metadata of the first search result"
+    condition: "parsed_results.file_ids"
+    tool: gdrive_get_file_info
+    args:
+      file_id: "{{ parsed_results.file_ids[0] if parsed_results.file_ids else '' }}"
+    output: first_doc_metadata_raw
+    on_error: continue
+
+  # ==================== CROSS-REFERENCE EMAIL ====================
+
+  - name: search_related_emails
+    description: "Search Gmail for related discussions"
+    tool: gmail_search
+    args:
+      query: "{{ inputs.query }} {{ inputs.issue_key or '' }}"
+      max_results: 5
+    output: related_emails_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: build_research_summary
+    description: "Build research summary from all sources"
+    compute: |
+      doc_content = str(first_doc_content_raw)[:1000] if 'first_doc_content_raw' in dir() and first_doc_content_raw else ""
+      doc_metadata = str(first_doc_metadata_raw) if 'first_doc_metadata_raw' in dir() and first_doc_metadata_raw else ""
+      emails_text = str(related_emails_raw) if 'related_emails_raw' in dir() and related_emails_raw else ""
+
+      email_count = len([l for l in emails_text.split("\n") if l.strip()]) if emails_text else 0
+
+      result = {
+          "doc_count": parsed_results.get("doc_count", 0),
+          "has_content": len(doc_content) > 20,
+          "doc_preview": doc_content[:800],
+          "doc_metadata": doc_metadata[:400],
+          "related_email_count": email_count,
+      }
+    output: research_summary
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_gdrive_failures
+    description: "Detect failure patterns from Google Drive operations"
+    compute: |
+      errors_detected = []
+
+      search_text = str(search_results_raw).lower() if 'search_results_raw' in dir() and search_results_raw else ""
+      if "unauthorized" in search_text or "invalid_grant" in search_text:
+          errors_detected.append({
+              "tool": "gdrive_search",
+              "pattern": "unauthorized",
+              "cause": "Google Drive OAuth token expired",
+              "fix": "Re-authenticate Google Drive OAuth credentials"
+          })
+
+      if "not found" in search_text or "404" in search_text:
+          errors_detected.append({
+              "tool": "gdrive_search",
+              "pattern": "not found",
+              "cause": "File or folder not found - may have been deleted or not shared",
+              "fix": "Verify file ID and sharing permissions"
+          })
+
+      result = errors_detected
+    output: gdrive_errors_detected
+    on_error: continue
+
+  - name: learn_gdrive_auth_failure
+    description: "Learn from Google Drive auth failures"
+    condition: "gdrive_errors_detected and any(e.get('pattern') == 'unauthorized' for e in gdrive_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gdrive_search"
+      error_pattern: "unauthorized"
+      root_cause: "Google Drive OAuth token expired"
+      fix_description: "Re-authenticate Google Drive OAuth credentials"
+    output: gdrive_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Google Drive research"
+      details: "Query: {{ inputs.query[:60] }}, Results: {{ research_summary.doc_count }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Google Drive Research
+
+      **Query:** {{ inputs.query }}
+      {% if inputs.issue_key %}**Issue:** {{ inputs.issue_key }}{% endif %}
+      **Documents Found:** {{ research_summary.doc_count }}
+
+      ---
+
+      ### Search Results
+
+      {% if parsed_results.has_results %}
+      {% for doc in parsed_results.docs[:10] %}
+      - {{ doc }}
+      {% endfor %}
+      {% else %}
+      No documents found matching query.
+      {% endif %}
+
+      {% if research_summary.has_content %}
+      ---
+
+      ### Top Document Preview
+
+      {% if research_summary.doc_metadata %}
+      **Metadata:**
+      ```
+      {{ research_summary.doc_metadata }}
+      ```
+      {% endif %}
+
+      **Content:**
+      ```
+      {{ research_summary.doc_preview }}
+      ```
+      {% endif %}
+
+      {% if issue_docs_raw %}
+      ---
+
+      ### Documents for {{ inputs.issue_key }}
+
+      ```
+      {{ issue_docs_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      {% if related_emails_raw %}
+      ---
+
+      ### Related Emails ({{ research_summary.related_email_count }})
+
+      ```
+      {{ related_emails_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      {% if folder_contents_raw %}
+      ---
+
+      ### Folder Contents
+
+      ```
+      {{ folder_contents_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Read file: `gdrive_get_file_content(file_id="<id>")`
+      - File info: `gdrive_get_file_info(file_id="<id>")`
+      - Browse folder: `gdrive_list_files(folder_id="<id>")`

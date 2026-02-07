@@ -1,0 +1,332 @@
+# Skill: S3 Data Operations
+# AWS S3 bucket and object management
+
+name: s3_data_ops
+description: |
+  Perform S3 data operations including listing, uploading, downloading,
+  syncing, and cleanup of S3 buckets and objects.
+
+  This skill supports:
+  - Listing buckets and objects
+  - Uploading and downloading files
+  - Syncing directories to/from S3
+  - Bucket creation and removal
+  - EC2 instance management for data processing
+  - Downloading files via HTTP
+
+  Uses: aws_sts_get_caller_identity, aws_s3_ls, aws_s3_cp, aws_s3_sync,
+        aws_s3_rm, aws_s3_mb, aws_s3_rb, aws_ec2_start_instances,
+        aws_ec2_stop_instances, aws_iam_get_user, curl_download
+version: "1.0"
+
+links:
+  depends_on:
+    - cloud_inventory
+  validates: []
+  chains_to:
+    - create_jira_issue
+    - cloud_inventory
+  provides_context_for:
+    - cloud_inventory
+  validated_by:
+    - cloud_inventory
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (ls, upload, download, sync, cleanup)"
+
+  - name: bucket
+    type: string
+    required: false
+    default: ""
+    description: "S3 bucket name (e.g., my-bucket)"
+
+  - name: path
+    type: string
+    required: false
+    default: ""
+    description: "S3 key path or local file path"
+
+  - name: pattern
+    type: string
+    required: false
+    default: ""
+    description: "File pattern for filtering (e.g., *.csv)"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for AWS tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_s3_known_issues
+    description: "Check for known S3 issues"
+    compute: |
+      s3_issues = memory.check_known_issues("s3", "") or {}
+      aws_issues = memory.check_known_issues("aws", "") or {}
+
+      all_issues = []
+      for issues in [s3_issues, aws_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: s3_known_issues
+    on_error: continue
+
+  # ==================== AWS IDENTITY ====================
+
+  - name: verify_identity
+    description: "Verify AWS identity before S3 operations"
+    tool: aws_sts_get_caller_identity
+    args: {}
+    output: aws_identity_raw
+    on_error: continue
+
+  - name: check_iam_user
+    description: "Check IAM user permissions"
+    tool: aws_iam_get_user
+    args: {}
+    output: iam_user_raw
+    on_error: continue
+
+  # ==================== LIST OPERATIONS ====================
+
+  - name: list_buckets
+    description: "List all S3 buckets"
+    condition: "inputs.action == 'ls' and not inputs.bucket"
+    tool: aws_s3_ls
+    args: {}
+    output: list_buckets_raw
+    on_error: continue
+
+  - name: list_objects
+    description: "List objects in bucket"
+    condition: "inputs.action == 'ls' and inputs.bucket"
+    tool: aws_s3_ls
+    args:
+      path: "s3://{{ inputs.bucket }}/{{ inputs.path }}"
+    output: list_objects_raw
+    on_error: continue
+
+  # ==================== UPLOAD OPERATIONS ====================
+
+  - name: upload_file
+    description: "Upload file to S3"
+    condition: "inputs.action == 'upload' and inputs.bucket and inputs.path"
+    tool: aws_s3_cp
+    args:
+      source: "{{ inputs.path }}"
+      destination: "s3://{{ inputs.bucket }}/"
+    output: upload_raw
+    on_error: continue
+
+  # ==================== DOWNLOAD OPERATIONS ====================
+
+  - name: download_file
+    description: "Download file from S3"
+    condition: "inputs.action == 'download' and inputs.bucket and inputs.path"
+    tool: aws_s3_cp
+    args:
+      source: "s3://{{ inputs.bucket }}/{{ inputs.path }}"
+      destination: "./"
+    output: download_raw
+    on_error: continue
+
+  - name: download_url
+    description: "Download file via HTTP URL"
+    condition: "inputs.action == 'download' and not inputs.bucket and inputs.path"
+    tool: curl_download
+    args:
+      url: "{{ inputs.path }}"
+    output: url_download_raw
+    on_error: continue
+
+  # ==================== SYNC OPERATIONS ====================
+
+  - name: sync_to_s3
+    description: "Sync local directory to S3"
+    condition: "inputs.action == 'sync' and inputs.bucket and inputs.path"
+    tool: aws_s3_sync
+    args:
+      source: "{{ inputs.path }}"
+      destination: "s3://{{ inputs.bucket }}/"
+    output: sync_raw
+    on_error: continue
+
+  # ==================== CLEANUP OPERATIONS ====================
+
+  - name: remove_objects
+    description: "Remove objects from S3"
+    condition: "inputs.action == 'cleanup' and inputs.bucket and inputs.path"
+    tool: aws_s3_rm
+    args:
+      path: "s3://{{ inputs.bucket }}/{{ inputs.path }}"
+    output: remove_raw
+    on_error: continue
+
+  # ==================== BUCKET MANAGEMENT ====================
+
+  - name: create_bucket
+    description: "Create a new S3 bucket"
+    condition: "inputs.action == 'create' and inputs.bucket"
+    tool: aws_s3_mb
+    args:
+      bucket: "s3://{{ inputs.bucket }}"
+    output: create_bucket_raw
+    on_error: continue
+
+  - name: remove_bucket
+    description: "Remove an S3 bucket"
+    condition: "inputs.action == 'remove' and inputs.bucket"
+    tool: aws_s3_rb
+    args:
+      bucket: "s3://{{ inputs.bucket }}"
+    output: remove_bucket_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_operation
+    description: "Analyze S3 operation results"
+    compute: |
+      results = {}
+
+      # Gather all results
+      for name, raw in [
+          ("list_buckets", list_buckets_raw if 'list_buckets_raw' in dir() else None),
+          ("list_objects", list_objects_raw if 'list_objects_raw' in dir() else None),
+          ("upload", upload_raw if 'upload_raw' in dir() else None),
+          ("download", download_raw if 'download_raw' in dir() else None),
+          ("sync", sync_raw if 'sync_raw' in dir() else None),
+          ("remove", remove_raw if 'remove_raw' in dir() else None),
+      ]:
+          if raw:
+              text = str(raw)
+              error = "error" in text.lower() or "denied" in text.lower()
+              results[name] = {"ok": not error, "preview": text[:300]}
+
+      success = all(r["ok"] for r in results.values()) if results else False
+
+      result = {
+          "operations": results,
+          "success": success,
+          "action": inputs.action,
+      }
+    output: operation_analysis
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_s3_failures
+    description: "Detect failure patterns from S3 operations"
+    compute: |
+      errors_detected = []
+
+      aws_text = str(aws_identity_raw) if 'aws_identity_raw' in dir() and aws_identity_raw else ""
+
+      for name, raw in [
+          ("list", list_buckets_raw if 'list_buckets_raw' in dir() else None),
+          ("upload", upload_raw if 'upload_raw' in dir() else None),
+          ("download", download_raw if 'download_raw' in dir() else None),
+      ]:
+          text = str(raw) if raw else ""
+          if "access denied" in text.lower():
+              errors_detected.append({
+                  "tool": "aws_s3_ls",
+                  "pattern": "access denied",
+                  "cause": "IAM permissions insufficient for S3 operation",
+                  "fix": "Check IAM policy allows the required S3 actions"
+              })
+          if "no such bucket" in text.lower():
+              errors_detected.append({
+                  "tool": "aws_s3_ls",
+                  "pattern": "no such bucket",
+                  "cause": "S3 bucket does not exist",
+                  "fix": "Verify bucket name or create with aws_s3_mb"
+              })
+
+      result = errors_detected
+    output: s3_errors_detected
+    on_error: continue
+
+  - name: learn_s3_access_failure
+    description: "Learn from S3 access denied failures"
+    condition: "s3_errors_detected and any(e.get('pattern') == 'access denied' for e in s3_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "aws_s3_ls"
+      error_pattern: "access denied"
+      root_cause: "IAM permissions insufficient for S3 operation"
+      fix_description: "Check IAM policy allows the required S3 actions"
+    output: s3_access_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log S3 operation to session"
+    tool: memory_session_log
+    args:
+      action: "S3 {{ inputs.action }} on {{ inputs.bucket if inputs.bucket else 'all buckets' }}"
+      details: "success={{ operation_analysis.success if operation_analysis else 'unknown' }}, path={{ inputs.path }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## S3 Data Operations
+
+      **Action:** {{ inputs.action }}
+      **Bucket:** {{ inputs.bucket if inputs.bucket else "all" }}
+      **Path:** {{ inputs.path if inputs.path else "/" }}
+
+      ---
+
+      ### AWS Identity
+
+      ```
+      {{ aws_identity_raw | string | truncate(200) if aws_identity_raw else "Not authenticated" }}
+      ```
+
+      ---
+
+      ### Operation Results
+
+      {% for name, op in operation_analysis.operations.items() %}
+      **{{ name }}:** {{ "OK" if op.ok else "FAILED" }}
+      ```
+      {{ op.preview }}
+      ```
+      {% endfor %}
+
+      {% if not operation_analysis.operations %}
+      No operation results captured.
+      {% endif %}
+
+      ---
+
+      ### Status
+
+      {% if operation_analysis.success %}
+      S3 operation completed successfully.
+      {% else %}
+      S3 operation encountered errors. Review output above.
+      {% endif %}
+
+      {% if s3_known_issues and s3_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in s3_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

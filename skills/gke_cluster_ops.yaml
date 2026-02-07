@@ -1,0 +1,343 @@
+# Skill: GKE Cluster Operations
+# Google Kubernetes Engine cluster management
+
+name: gke_cluster_ops
+description: |
+  Manage GKE clusters and GCP compute resources.
+
+  This skill supports:
+  - Listing clusters and compute instances
+  - Starting and stopping instances
+  - Inspecting instance details
+  - GCS storage operations
+  - Authentication and project management
+
+  Uses: gcloud_auth_list, gcloud_config_list, gcloud_config_set_project,
+        gcloud_projects_list, gcloud_compute_instances_list,
+        gcloud_compute_instances_start, gcloud_compute_instances_stop,
+        gcloud_compute_instances_describe, gcloud_container_clusters_list,
+        gcloud_storage_ls, gcloud_storage_cp, gcloud_storage_rm
+version: "1.0"
+
+links:
+  depends_on:
+    - cloud_inventory
+  validates: []
+  chains_to:
+    - cloud_inventory
+    - create_jira_issue
+  provides_context_for:
+    - cloud_inventory
+  validated_by:
+    - cloud_inventory
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (list, start, stop, credentials, storage)"
+
+  - name: project
+    type: string
+    required: false
+    default: ""
+    description: "GCP project ID"
+
+  - name: cluster
+    type: string
+    required: false
+    default: ""
+    description: "GKE cluster name"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for GCP tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_gke_known_issues
+    description: "Check for known GKE issues"
+    compute: |
+      gke_issues = memory.check_known_issues("gke", "") or {}
+      gcloud_issues = memory.check_known_issues("gcloud", "") or {}
+
+      all_issues = []
+      for issues in [gke_issues, gcloud_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: gke_known_issues
+    on_error: continue
+
+  # ==================== AUTH AND CONFIG ====================
+
+  - name: check_auth
+    description: "Check GCP authentication status"
+    tool: gcloud_auth_list
+    args: {}
+    output: auth_raw
+    on_error: continue
+
+  - name: check_config
+    description: "Check GCP configuration"
+    tool: gcloud_config_list
+    args: {}
+    output: config_raw
+    on_error: continue
+
+  - name: set_project
+    description: "Set GCP project if specified"
+    condition: "inputs.project"
+    tool: gcloud_config_set_project
+    args:
+      project: "{{ inputs.project }}"
+    output: set_project_raw
+    on_error: continue
+
+  - name: list_projects
+    description: "List available GCP projects"
+    tool: gcloud_projects_list
+    args: {}
+    output: projects_raw
+    on_error: continue
+
+  # ==================== CLUSTER OPERATIONS ====================
+
+  - name: list_clusters
+    description: "List GKE clusters"
+    tool: gcloud_container_clusters_list
+    args: {}
+    output: clusters_raw
+    on_error: continue
+
+  # ==================== COMPUTE OPERATIONS ====================
+
+  - name: list_instances
+    description: "List compute instances"
+    tool: gcloud_compute_instances_list
+    args: {}
+    output: instances_raw
+    on_error: continue
+
+  - name: start_instance
+    description: "Start a compute instance"
+    condition: "inputs.action == 'start' and inputs.cluster"
+    tool: gcloud_compute_instances_start
+    args:
+      instance: "{{ inputs.cluster }}"
+    output: start_raw
+    on_error: continue
+
+  - name: stop_instance
+    description: "Stop a compute instance"
+    condition: "inputs.action == 'stop' and inputs.cluster"
+    tool: gcloud_compute_instances_stop
+    args:
+      instance: "{{ inputs.cluster }}"
+    output: stop_raw
+    on_error: continue
+
+  - name: describe_instance
+    description: "Describe a compute instance"
+    condition: "inputs.cluster"
+    tool: gcloud_compute_instances_describe
+    args:
+      instance: "{{ inputs.cluster }}"
+    output: describe_raw
+    on_error: continue
+
+  # ==================== STORAGE OPERATIONS ====================
+
+  - name: list_storage
+    description: "List GCS storage buckets"
+    condition: "inputs.action == 'storage' or inputs.action == 'list'"
+    tool: gcloud_storage_ls
+    args: {}
+    output: storage_raw
+    on_error: continue
+
+  - name: copy_storage
+    description: "Copy to/from GCS"
+    condition: "inputs.action == 'storage' and inputs.cluster"
+    tool: gcloud_storage_cp
+    args:
+      source: "{{ inputs.cluster }}"
+    output: storage_cp_raw
+    on_error: continue
+
+  - name: remove_storage
+    description: "Remove from GCS"
+    condition: "inputs.action == 'cleanup' and inputs.cluster"
+    tool: gcloud_storage_rm
+    args:
+      path: "{{ inputs.cluster }}"
+    output: storage_rm_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_gke
+    description: "Analyze GKE cluster state"
+    compute: |
+      clusters_text = str(clusters_raw) if 'clusters_raw' in dir() and clusters_raw else ""
+      instances_text = str(instances_raw) if 'instances_raw' in dir() and instances_raw else ""
+
+      # Count clusters
+      cluster_count = clusters_text.count("RUNNING") if clusters_text else 0
+
+      # Count instances by state
+      running = instances_text.count("RUNNING") if instances_text else 0
+      stopped = instances_text.count("TERMINATED") + instances_text.count("STOPPED") if instances_text else 0
+
+      # Check action results
+      action_result = "N/A"
+      if inputs.action == "start" and 'start_raw' in dir() and start_raw:
+          action_result = "started" if "error" not in str(start_raw).lower() else "failed"
+      elif inputs.action == "stop" and 'stop_raw' in dir() and stop_raw:
+          action_result = "stopped" if "error" not in str(stop_raw).lower() else "failed"
+
+      result = {
+          "cluster_count": cluster_count,
+          "instances_running": running,
+          "instances_stopped": stopped,
+          "action_result": action_result,
+      }
+    output: gke_analysis
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_gke_failures
+    description: "Detect failure patterns from GKE operations"
+    compute: |
+      errors_detected = []
+
+      auth_text = str(auth_raw) if 'auth_raw' in dir() and auth_raw else ""
+      clusters_text = str(clusters_raw) if 'clusters_raw' in dir() and clusters_raw else ""
+      combined = auth_text + clusters_text
+
+      if "not logged in" in combined.lower() or "no active account" in combined.lower():
+          errors_detected.append({
+              "tool": "gcloud_auth_list",
+              "pattern": "not logged in",
+              "cause": "Not authenticated to GCP",
+              "fix": "Run: gcloud auth login"
+          })
+      if "permission denied" in combined.lower() or "forbidden" in combined.lower():
+          errors_detected.append({
+              "tool": "gcloud_container_clusters_list",
+              "pattern": "permission denied",
+              "cause": "Insufficient GCP permissions",
+              "fix": "Request container.clusters.list permission or correct project"
+          })
+
+      result = errors_detected
+    output: gke_errors_detected
+    on_error: continue
+
+  - name: learn_gke_auth_failure
+    description: "Learn from GCP auth failures"
+    condition: "gke_errors_detected and any(e.get('pattern') == 'not logged in' for e in gke_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gcloud_auth_list"
+      error_pattern: "not logged in"
+      root_cause: "Not authenticated to GCP"
+      fix_description: "Run: gcloud auth login"
+    output: gke_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log GKE cluster operation to session"
+    tool: memory_session_log
+    args:
+      action: "GKE {{ inputs.action }} (project={{ inputs.project if inputs.project else 'default' }})"
+      details: "clusters={{ gke_analysis.cluster_count if gke_analysis else 0 }}, instances_running={{ gke_analysis.instances_running if gke_analysis else 0 }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## GKE Cluster Operations
+
+      **Action:** {{ inputs.action }}
+      **Project:** {{ inputs.project if inputs.project else "default" }}
+      **Cluster/Target:** {{ inputs.cluster if inputs.cluster else "all" }}
+
+      ---
+
+      ### Authentication
+
+      ```
+      {{ auth_raw | string | truncate(300) if auth_raw else "Not authenticated" }}
+      ```
+
+      ---
+
+      ### GKE Clusters ({{ gke_analysis.cluster_count }})
+
+      ```
+      {{ clusters_raw | string | truncate(500) if clusters_raw else "No clusters found" }}
+      ```
+
+      ---
+
+      ### Compute Instances ({{ gke_analysis.instances_running }} running, {{ gke_analysis.instances_stopped }} stopped)
+
+      ```
+      {{ instances_raw | string | truncate(500) if instances_raw else "No instances found" }}
+      ```
+
+      {% if describe_raw %}
+      ---
+
+      ### Instance Details
+
+      ```
+      {{ describe_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if gke_analysis.action_result != 'N/A' %}
+      ---
+
+      ### Action Result
+
+      {{ inputs.action }}: **{{ gke_analysis.action_result }}**
+      {% endif %}
+
+      {% if storage_raw %}
+      ---
+
+      ### GCS Storage
+
+      ```
+      {{ storage_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Projects
+
+      ```
+      {{ projects_raw | string | truncate(400) if projects_raw else "No projects" }}
+      ```
+
+      {% if gke_known_issues and gke_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in gke_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

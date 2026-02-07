@@ -1,0 +1,242 @@
+# Skill: InScope Research
+# Query Red Hat InScope AI assistants for internal documentation
+
+name: inscope_research
+description: |
+  Query Red Hat InScope AI assistants for authoritative answers about
+  internal services and documentation.
+
+  InScope provides specialized assistants for:
+  - App Interface (RDS, namespaces, onboarding)
+  - Clowder (ClowdApps, config, deployment)
+  - Konflux (CI/CD pipelines, releases)
+  - And more
+
+  Features:
+  - Auto-selects best assistant based on question
+  - Query specific assistants
+  - Auto-refresh authentication if needed
+
+  Uses: inscope_ask, inscope_query, inscope_list_assistants,
+        inscope_auth_status, inscope_auto_login, inscope_save_token
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - create_jira_issue
+    - start_work
+  provides_context_for:
+    - deploy_to_ephemeral
+    - appinterface_check
+    - konflux_status
+  validated_by: []
+
+inputs:
+  - name: question
+    type: string
+    required: true
+    description: "Question to ask InScope"
+
+  - name: assistants
+    type: string
+    required: false
+    default: ""
+    description: "Comma-separated assistant names (e.g., 'app-interface,clowder'). Leave empty for auto-select."
+
+  - name: refresh_auth
+    type: boolean
+    required: false
+    default: false
+    description: "Force re-authentication before querying"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for InScope tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== CHECK AUTHENTICATION ====================
+
+  - name: check_auth
+    description: "Check InScope authentication status"
+    tool: inscope_auth_status
+    args: {}
+    output: auth_status_raw
+    on_error: continue
+
+  - name: parse_auth_status
+    description: "Parse auth status and determine if login needed"
+    compute: |
+      auth_text = str(auth_status_raw).lower() if 'auth_status_raw' in dir() and auth_status_raw else ""
+      is_authenticated = "authenticated" in auth_text or "valid" in auth_text or "ok" in auth_text
+      is_expired = "expired" in auth_text or "invalid" in auth_text
+
+      needs_login = inputs.refresh_auth or not is_authenticated or is_expired
+
+      result = {
+          "authenticated": is_authenticated,
+          "expired": is_expired,
+          "needs_login": needs_login,
+      }
+    output: auth_check
+
+  - name: auto_login
+    description: "Auto-login to InScope if needed"
+    condition: "auth_check.needs_login"
+    tool: inscope_auto_login
+    args:
+      headless: true
+    output: login_raw
+    on_error: continue
+
+  # ==================== LIST ASSISTANTS ====================
+
+  - name: list_assistants
+    description: "List available InScope assistants"
+    tool: inscope_list_assistants
+    args: {}
+    output: assistants_raw
+    on_error: continue
+
+  # ==================== QUERY INSCOPE ====================
+
+  - name: query_auto
+    description: "Ask InScope with auto-selected assistant"
+    condition: "not inputs.assistants"
+    tool: inscope_ask
+    args:
+      query: "{{ inputs.question }}"
+      include_sources: true
+    output: auto_answer_raw
+    on_error: continue
+
+  - name: query_specific
+    description: "Query specific InScope assistant"
+    condition: "inputs.assistants"
+    tool: inscope_query
+    args:
+      query: "{{ inputs.question }}"
+      assistant: "{{ inputs.assistants.split(',')[0].strip() if inputs.assistants else 'app-interface' }}"
+      include_sources: true
+    output: specific_answer_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: parse_results
+    description: "Parse InScope query results"
+    compute: |
+      auto_text = str(auto_answer_raw) if 'auto_answer_raw' in dir() and auto_answer_raw else ""
+      specific_text = str(specific_answer_raw) if 'specific_answer_raw' in dir() and specific_answer_raw else ""
+
+      answer = auto_text if auto_text else specific_text
+      has_answer = len(answer) > 20 and "error" not in answer.lower()[:50]
+
+      # Extract sources if present
+      import re
+      sources = re.findall(r'(?:source|reference|doc).*?:\s*(.*?)(?:\n|$)', answer, re.I)
+
+      result = {
+          "answer": answer[:3000] if answer else "No answer received",
+          "has_answer": has_answer,
+          "sources": sources[:5],
+          "assistant_used": inputs.assistants.split(',')[0].strip() if inputs.assistants else "auto",
+      }
+    output: inscope_result
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_inscope_failures
+    description: "Detect failure patterns from InScope queries"
+    compute: |
+      errors_detected = []
+
+      answer_text = str(auto_answer_raw if 'auto_answer_raw' in dir() and auto_answer_raw else specific_answer_raw if 'specific_answer_raw' in dir() and specific_answer_raw else "").lower()
+
+      if "unauthorized" in answer_text or "401" in answer_text:
+          errors_detected.append({
+              "tool": "inscope_ask",
+              "pattern": "unauthorized",
+              "cause": "InScope authentication token expired",
+              "fix": "Run inscope_auto_login() to refresh authentication"
+          })
+
+      if "timeout" in answer_text or "timed out" in answer_text:
+          errors_detected.append({
+              "tool": "inscope_ask",
+              "pattern": "timeout",
+              "cause": "InScope request timed out",
+              "fix": "Retry with a simpler question or increase timeout_secs"
+          })
+
+      result = errors_detected
+    output: inscope_errors_detected
+    on_error: continue
+
+  - name: learn_inscope_auth_failure
+    description: "Learn from InScope auth failures"
+    condition: "inscope_errors_detected and any(e.get('pattern') == 'unauthorized' for e in inscope_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "inscope_ask"
+      error_pattern: "unauthorized"
+      root_cause: "InScope authentication token expired"
+      fix_description: "Run inscope_auto_login() to refresh authentication"
+    output: inscope_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "InScope research query"
+      details: "Question: {{ inputs.question[:80] }}, Assistant: {{ inscope_result.assistant_used if inscope_result else 'unknown' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## InScope Research
+
+      **Question:** {{ inputs.question }}
+      **Assistant:** {{ inscope_result.assistant_used }}
+      **Auth:** {{ "Authenticated" if auth_check.authenticated else "Re-authenticated" }}
+
+      ---
+
+      ### Answer
+
+      {{ inscope_result.answer }}
+
+      {% if inscope_result.sources %}
+      ---
+
+      ### Sources
+
+      {% for source in inscope_result.sources %}
+      - {{ source }}
+      {% endfor %}
+      {% endif %}
+
+      {% if assistants_raw %}
+      ---
+
+      ### Available Assistants
+
+      ```
+      {{ assistants_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Follow-up Actions
+
+      - Ask another question: `skill_run("inscope_research", '{"question": "your question here"}')`
+      - Query specific assistant: `inscope_query(query="...", assistant="clowder")`
+      - Refresh auth: `inscope_auto_login()`

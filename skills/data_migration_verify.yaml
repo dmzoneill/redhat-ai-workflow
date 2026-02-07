@@ -1,0 +1,467 @@
+# Skill: Data Migration Verify
+# Verify database migration correctness
+
+name: data_migration_verify
+description: |
+  Verify database migration correctness across different database types.
+
+  This skill handles:
+  - Comparing source and target database schemas
+  - Verifying table structures match
+  - Running validation queries
+  - Checking row counts and data integrity
+  - Supporting PostgreSQL, MySQL, and SQLite
+  - Running queries inside Podman containers
+
+  Uses: psql_tables, psql_describe, psql_schemas, psql_query, psql_size,
+        mysql_tables, mysql_describe, mysql_show_create_table, mysql_query,
+        sqlite_tables, sqlite_schema, sqlite_describe, sqlite_query, podman_exec
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to:
+    - workflow_health_check
+  provides_context_for: []
+
+inputs:
+  - name: db_type
+    type: string
+    required: true
+    description: "Database type (postgres|mysql|sqlite)"
+
+  - name: source_db
+    type: string
+    required: true
+    description: "Source database connection string or path"
+
+  - name: target_db
+    type: string
+    required: true
+    description: "Target database connection string or path"
+
+  - name: tables
+    type: string
+    required: false
+    default: ""
+    description: "Comma-separated list of tables to verify (all if empty)"
+
+  - name: migration_name
+    type: string
+    required: false
+    default: ""
+    description: "Name of the migration being verified"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for database tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_db_known_issues
+    description: "Check for known database migration issues"
+    compute: |
+      psql_issues = memory.check_known_issues("psql", "") or {}
+      mysql_issues = memory.check_known_issues("mysql", "") or {}
+      sqlite_issues = memory.check_known_issues("sqlite", "") or {}
+
+      all_issues = []
+      for issues in [psql_issues, mysql_issues, sqlite_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: db_known_issues
+    on_error: continue
+
+  # ==================== POSTGRESQL ====================
+
+  - name: psql_source_schemas
+    description: "List PostgreSQL schemas on source"
+    condition: "inputs.db_type == 'postgres'"
+    tool: psql_schemas
+    args:
+      connection: "{{ inputs.source_db }}"
+    output: psql_src_schemas_raw
+    on_error: continue
+
+  - name: psql_source_tables
+    description: "List PostgreSQL tables on source"
+    condition: "inputs.db_type == 'postgres'"
+    tool: psql_tables
+    args:
+      connection: "{{ inputs.source_db }}"
+    output: psql_src_tables_raw
+    on_error: continue
+
+  - name: psql_target_tables
+    description: "List PostgreSQL tables on target"
+    condition: "inputs.db_type == 'postgres'"
+    tool: psql_tables
+    args:
+      connection: "{{ inputs.target_db }}"
+    output: psql_tgt_tables_raw
+    on_error: continue
+
+  - name: psql_source_describe
+    description: "Describe PostgreSQL source table"
+    condition: "inputs.db_type == 'postgres' and inputs.tables"
+    tool: psql_describe
+    args:
+      connection: "{{ inputs.source_db }}"
+      table: "{{ inputs.tables.split(',')[0] }}"
+    output: psql_src_desc_raw
+    on_error: continue
+
+  - name: psql_source_size
+    description: "Get PostgreSQL source database size"
+    condition: "inputs.db_type == 'postgres'"
+    tool: psql_size
+    args:
+      connection: "{{ inputs.source_db }}"
+    output: psql_src_size_raw
+    on_error: continue
+
+  - name: psql_source_count
+    description: "Count rows in PostgreSQL source"
+    condition: "inputs.db_type == 'postgres' and inputs.tables"
+    tool: psql_query
+    args:
+      connection: "{{ inputs.source_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: psql_src_count_raw
+    on_error: continue
+
+  - name: psql_target_count
+    description: "Count rows in PostgreSQL target"
+    condition: "inputs.db_type == 'postgres' and inputs.tables"
+    tool: psql_query
+    args:
+      connection: "{{ inputs.target_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: psql_tgt_count_raw
+    on_error: continue
+
+  # ==================== MYSQL ====================
+
+  - name: mysql_source_tables
+    description: "List MySQL tables on source"
+    condition: "inputs.db_type == 'mysql'"
+    tool: mysql_tables
+    args:
+      connection: "{{ inputs.source_db }}"
+    output: mysql_src_tables_raw
+    on_error: continue
+
+  - name: mysql_target_tables
+    description: "List MySQL tables on target"
+    condition: "inputs.db_type == 'mysql'"
+    tool: mysql_tables
+    args:
+      connection: "{{ inputs.target_db }}"
+    output: mysql_tgt_tables_raw
+    on_error: continue
+
+  - name: mysql_source_describe
+    description: "Describe MySQL source table"
+    condition: "inputs.db_type == 'mysql' and inputs.tables"
+    tool: mysql_describe
+    args:
+      connection: "{{ inputs.source_db }}"
+      table: "{{ inputs.tables.split(',')[0] }}"
+    output: mysql_src_desc_raw
+    on_error: continue
+
+  - name: mysql_source_create
+    description: "Show CREATE TABLE for MySQL source"
+    condition: "inputs.db_type == 'mysql' and inputs.tables"
+    tool: mysql_show_create_table
+    args:
+      connection: "{{ inputs.source_db }}"
+      table: "{{ inputs.tables.split(',')[0] }}"
+    output: mysql_src_create_raw
+    on_error: continue
+
+  - name: mysql_source_count
+    description: "Count rows in MySQL source"
+    condition: "inputs.db_type == 'mysql' and inputs.tables"
+    tool: mysql_query
+    args:
+      connection: "{{ inputs.source_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: mysql_src_count_raw
+    on_error: continue
+
+  - name: mysql_target_count
+    description: "Count rows in MySQL target"
+    condition: "inputs.db_type == 'mysql' and inputs.tables"
+    tool: mysql_query
+    args:
+      connection: "{{ inputs.target_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: mysql_tgt_count_raw
+    on_error: continue
+
+  # ==================== SQLITE ====================
+
+  - name: sqlite_source_tables
+    description: "List SQLite tables on source"
+    condition: "inputs.db_type == 'sqlite'"
+    tool: sqlite_tables
+    args:
+      database: "{{ inputs.source_db }}"
+    output: sqlite_src_tables_raw
+    on_error: continue
+
+  - name: sqlite_target_tables
+    description: "List SQLite tables on target"
+    condition: "inputs.db_type == 'sqlite'"
+    tool: sqlite_tables
+    args:
+      database: "{{ inputs.target_db }}"
+    output: sqlite_tgt_tables_raw
+    on_error: continue
+
+  - name: sqlite_source_schema
+    description: "Get SQLite source schema"
+    condition: "inputs.db_type == 'sqlite'"
+    tool: sqlite_schema
+    args:
+      database: "{{ inputs.source_db }}"
+    output: sqlite_src_schema_raw
+    on_error: continue
+
+  - name: sqlite_source_describe
+    description: "Describe SQLite source table"
+    condition: "inputs.db_type == 'sqlite' and inputs.tables"
+    tool: sqlite_describe
+    args:
+      database: "{{ inputs.source_db }}"
+      table: "{{ inputs.tables.split(',')[0] }}"
+    output: sqlite_src_desc_raw
+    on_error: continue
+
+  - name: sqlite_source_count
+    description: "Count rows in SQLite source"
+    condition: "inputs.db_type == 'sqlite' and inputs.tables"
+    tool: sqlite_query
+    args:
+      database: "{{ inputs.source_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: sqlite_src_count_raw
+    on_error: continue
+
+  - name: sqlite_target_count
+    description: "Count rows in SQLite target"
+    condition: "inputs.db_type == 'sqlite' and inputs.tables"
+    tool: sqlite_query
+    args:
+      database: "{{ inputs.target_db }}"
+      query: "SELECT COUNT(*) FROM {{ inputs.tables.split(',')[0] }}"
+    output: sqlite_tgt_count_raw
+    on_error: continue
+
+  # ==================== PODMAN ====================
+
+  - name: podman_db_check
+    description: "Run database check inside Podman container"
+    tool: podman_exec
+    args:
+      container: "{{ inputs.source_db }}"
+      command: "echo 'database container accessible'"
+    output: podman_check_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_migration_failures
+    description: "Detect failure patterns from migration verification"
+    compute: |
+      errors_detected = []
+
+      src_text = ""
+      tgt_text = ""
+      if inputs.db_type == 'postgres':
+          src_text = str(psql_src_tables_raw) if 'psql_src_tables_raw' in dir() and psql_src_tables_raw else ""
+          tgt_text = str(psql_tgt_tables_raw) if 'psql_tgt_tables_raw' in dir() and psql_tgt_tables_raw else ""
+      elif inputs.db_type == 'mysql':
+          src_text = str(mysql_src_tables_raw) if 'mysql_src_tables_raw' in dir() and mysql_src_tables_raw else ""
+          tgt_text = str(mysql_tgt_tables_raw) if 'mysql_tgt_tables_raw' in dir() and mysql_tgt_tables_raw else ""
+      elif inputs.db_type == 'sqlite':
+          src_text = str(sqlite_src_tables_raw) if 'sqlite_src_tables_raw' in dir() and sqlite_src_tables_raw else ""
+          tgt_text = str(sqlite_tgt_tables_raw) if 'sqlite_tgt_tables_raw' in dir() and sqlite_tgt_tables_raw else ""
+
+      combined = src_text + tgt_text
+
+      if "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": inputs.db_type,
+              "pattern": "connection refused",
+              "cause": "Database server is not running or not accessible",
+              "fix": "Start the database server or check connection parameters"
+          })
+      if "does not exist" in combined.lower():
+          errors_detected.append({
+              "tool": inputs.db_type,
+              "pattern": "database does not exist",
+              "cause": "Target database has not been created",
+              "fix": "Create the target database before running migration"
+          })
+
+      result = errors_detected
+    output: migration_errors_detected
+    on_error: continue
+
+  - name: learn_db_connection_failure
+    description: "Learn from database connection failures"
+    condition: "migration_errors_detected and any(e.get('pattern') == 'connection refused' for e in migration_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ inputs.db_type }}"
+      error_pattern: "connection refused"
+      root_cause: "Database server is not running or not accessible"
+      fix_description: "Start the database server or use Podman: podman start <container>"
+    output: db_connection_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Data migration verify"
+      details: "db_type={{ inputs.db_type }}, migration={{ inputs.migration_name }}, tables={{ inputs.tables }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Data Migration Verification
+
+      **Database Type:** {{ inputs.db_type }}
+      **Source:** {{ inputs.source_db }}
+      **Target:** {{ inputs.target_db }}
+      {% if inputs.migration_name %}
+      **Migration:** {{ inputs.migration_name }}
+      {% endif %}
+      {% if inputs.tables %}
+      **Tables:** {{ inputs.tables }}
+      {% endif %}
+
+      ---
+
+      {% if inputs.db_type == 'postgres' %}
+      ### PostgreSQL Schemas
+      ```
+      {{ psql_src_schemas_raw | string | truncate(300) if psql_src_schemas_raw else "N/A" }}
+      ```
+
+      ### Source Tables
+      ```
+      {{ psql_src_tables_raw | string | truncate(400) if psql_src_tables_raw else "N/A" }}
+      ```
+
+      ### Target Tables
+      ```
+      {{ psql_tgt_tables_raw | string | truncate(400) if psql_tgt_tables_raw else "N/A" }}
+      ```
+
+      ### Database Size
+      {{ psql_src_size_raw | string | truncate(200) if psql_src_size_raw else "N/A" }}
+
+      {% if inputs.tables %}
+      ### Table Description
+      ```
+      {{ psql_src_desc_raw | string | truncate(400) if psql_src_desc_raw else "N/A" }}
+      ```
+
+      ### Row Counts
+      - Source: {{ psql_src_count_raw | string | truncate(100) if psql_src_count_raw else "N/A" }}
+      - Target: {{ psql_tgt_count_raw | string | truncate(100) if psql_tgt_count_raw else "N/A" }}
+      {% endif %}
+      {% endif %}
+
+      {% if inputs.db_type == 'mysql' %}
+      ### Source Tables
+      ```
+      {{ mysql_src_tables_raw | string | truncate(400) if mysql_src_tables_raw else "N/A" }}
+      ```
+
+      ### Target Tables
+      ```
+      {{ mysql_tgt_tables_raw | string | truncate(400) if mysql_tgt_tables_raw else "N/A" }}
+      ```
+
+      {% if inputs.tables %}
+      ### Table Description
+      ```
+      {{ mysql_src_desc_raw | string | truncate(400) if mysql_src_desc_raw else "N/A" }}
+      ```
+
+      ### CREATE TABLE
+      ```
+      {{ mysql_src_create_raw | string | truncate(400) if mysql_src_create_raw else "N/A" }}
+      ```
+
+      ### Row Counts
+      - Source: {{ mysql_src_count_raw | string | truncate(100) if mysql_src_count_raw else "N/A" }}
+      - Target: {{ mysql_tgt_count_raw | string | truncate(100) if mysql_tgt_count_raw else "N/A" }}
+      {% endif %}
+      {% endif %}
+
+      {% if inputs.db_type == 'sqlite' %}
+      ### Source Schema
+      ```
+      {{ sqlite_src_schema_raw | string | truncate(400) if sqlite_src_schema_raw else "N/A" }}
+      ```
+
+      ### Source Tables
+      ```
+      {{ sqlite_src_tables_raw | string | truncate(400) if sqlite_src_tables_raw else "N/A" }}
+      ```
+
+      ### Target Tables
+      ```
+      {{ sqlite_tgt_tables_raw | string | truncate(400) if sqlite_tgt_tables_raw else "N/A" }}
+      ```
+
+      {% if inputs.tables %}
+      ### Table Description
+      ```
+      {{ sqlite_src_desc_raw | string | truncate(400) if sqlite_src_desc_raw else "N/A" }}
+      ```
+
+      ### Row Counts
+      - Source: {{ sqlite_src_count_raw | string | truncate(100) if sqlite_src_count_raw else "N/A" }}
+      - Target: {{ sqlite_tgt_count_raw | string | truncate(100) if sqlite_tgt_count_raw else "N/A" }}
+      {% endif %}
+      {% endif %}
+
+      ### Podman Container Check
+      {{ podman_check_raw | string | truncate(200) if podman_check_raw else "Not checked" }}
+
+      {% if db_known_issues and db_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in db_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      db_type: "{{ inputs.db_type }}"
+      migration_name: "{{ inputs.migration_name }}"

@@ -1,0 +1,377 @@
+# Skill: Local Build Test
+# Build container image locally with Podman and test
+
+name: local_build_test
+description: |
+  Build a container image locally using Podman and optionally run tests.
+
+  Features:
+  - Build container image with Podman (not Docker)
+  - Tag with custom or auto-generated tag
+  - Run the container and execute tests
+  - Check health endpoints
+  - Verify database connectivity
+  - Clean up containers after testing
+
+  Uses: podman_build, podman_images, podman_run, podman_exec, podman_logs,
+        podman_stop, podman_rm, podman_pull, curl_get, curl_timing, psql_tables
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - local_dev_environment
+    - create_mr
+  chains_to:
+    - create_mr
+    - deploy_to_ephemeral
+  provides_context_for:
+    - create_mr
+    - deploy_to_ephemeral
+  validated_by:
+    - deploy_to_ephemeral
+
+inputs:
+  - name: repo
+    type: string
+    required: true
+    description: "Path to repository with Containerfile/Dockerfile"
+
+  - name: tag
+    type: string
+    required: false
+    default: "local-test"
+    description: "Image tag (default: local-test)"
+
+  - name: dockerfile
+    type: string
+    required: false
+    default: "Containerfile"
+    description: "Containerfile/Dockerfile path relative to repo"
+
+  - name: run_tests
+    type: boolean
+    required: false
+    default: true
+    description: "Run tests inside the container after building"
+
+  - name: test_command
+    type: string
+    required: false
+    default: "python -m pytest tests/ -x --tb=short"
+    description: "Test command to run inside container"
+
+  - name: cleanup
+    type: boolean
+    required: false
+    default: true
+    description: "Remove container after testing"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for container tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== PRE-BUILD ====================
+
+  - name: check_existing_images
+    description: "List existing images for this repo"
+    tool: podman_images
+    args:
+      filter: "{{ inputs.repo | basename }}"
+    output: existing_images_raw
+    on_error: continue
+
+  - name: resolve_image_name
+    description: "Resolve full image name and tag"
+    compute: |
+      import os
+      repo_name = os.path.basename(inputs.repo.rstrip("/"))
+      tag = inputs.tag or "local-test"
+      image_name = f"localhost/{repo_name}:{tag}"
+      container_name = f"{repo_name}-test"
+
+      result = {
+          "image_name": image_name,
+          "repo_name": repo_name,
+          "tag": tag,
+          "container_name": container_name,
+      }
+    output: image_config
+
+  # ==================== BUILD ====================
+
+  - name: build_image
+    description: "Build container image with Podman"
+    tool: podman_build
+    args:
+      context: "{{ inputs.repo }}"
+      dockerfile: "{{ inputs.dockerfile }}"
+      tag: "{{ image_config.image_name }}"
+    output: build_raw
+    on_error: continue
+
+  - name: verify_build
+    description: "Verify the image was built successfully"
+    tool: podman_images
+    args:
+      filter: "{{ image_config.repo_name }}"
+    output: built_images_raw
+    on_error: continue
+
+  - name: parse_build_result
+    description: "Parse build result"
+    compute: |
+      build_text = str(build_raw).lower() if 'build_raw' in dir() and build_raw else ""
+      images_text = str(built_images_raw) if 'built_images_raw' in dir() and built_images_raw else ""
+
+      build_success = "successfully" in build_text or "complete" in build_text or image_config["tag"] in images_text
+      build_error = "error" in build_text[:200] or "failed" in build_text[:200]
+
+      result = {
+          "success": build_success and not build_error,
+          "image_exists": image_config["tag"] in images_text,
+          "build_output": str(build_raw)[:500] if build_raw else "",
+      }
+    output: build_result
+
+  # ==================== RUN CONTAINER ====================
+
+  - name: run_container
+    description: "Run the built container"
+    condition: "build_result.success or build_result.image_exists"
+    tool: podman_run
+    args:
+      image: "{{ image_config.image_name }}"
+      name: "{{ image_config.container_name }}"
+      detach: true
+      ports: "8080:8000"
+    output: run_raw
+    on_error: continue
+
+  # ==================== TEST ====================
+
+  - name: run_tests_in_container
+    description: "Run test suite inside the container"
+    condition: "inputs.run_tests and (build_result.success or build_result.image_exists)"
+    tool: podman_exec
+    args:
+      container: "{{ image_config.container_name }}"
+      command: "{{ inputs.test_command }}"
+    output: test_raw
+    on_error: continue
+
+  - name: get_container_logs
+    description: "Get container logs"
+    condition: "build_result.success or build_result.image_exists"
+    tool: podman_logs
+    args:
+      container: "{{ image_config.container_name }}"
+      tail: 50
+    output: container_logs_raw
+    on_error: continue
+
+  - name: health_check
+    description: "Check container health endpoint"
+    condition: "build_result.success or build_result.image_exists"
+    tool: curl_get
+    args:
+      url: "http://localhost:8080/api/v1/health/"
+    output: health_raw
+    on_error: continue
+
+  - name: health_timing
+    description: "Measure API response time"
+    condition: "build_result.success or build_result.image_exists"
+    tool: curl_timing
+    args:
+      url: "http://localhost:8080/api/v1/health/"
+    output: timing_raw
+    on_error: continue
+
+  - name: check_db
+    description: "Verify database tables if DB available"
+    condition: "build_result.success or build_result.image_exists"
+    tool: psql_tables
+    args: {}
+    output: db_tables_raw
+    on_error: continue
+
+  # ==================== PARSE TEST RESULTS ====================
+
+  - name: parse_test_results
+    description: "Parse test execution results"
+    compute: |
+      test_text = str(test_raw) if 'test_raw' in dir() and test_raw else ""
+      health_text = str(health_raw).lower() if 'health_raw' in dir() and health_raw else ""
+
+      tests_passed = "passed" in test_text.lower() or "ok" in test_text.lower()
+      tests_failed = "failed" in test_text.lower() or "error" in test_text.lower()
+      health_ok = "ok" in health_text or "healthy" in health_text or "200" in health_text
+
+      import re
+      pass_match = re.search(r'(\d+)\s*passed', test_text, re.I)
+      fail_match = re.search(r'(\d+)\s*failed', test_text, re.I)
+      passed_count = int(pass_match.group(1)) if pass_match else 0
+      failed_count = int(fail_match.group(1)) if fail_match else 0
+
+      result = {
+          "tests_ran": inputs.run_tests,
+          "tests_passed": tests_passed and not tests_failed,
+          "passed_count": passed_count,
+          "failed_count": failed_count,
+          "health_ok": health_ok,
+          "test_output": test_text[:800] if test_text else "",
+      }
+    output: test_results
+
+  # ==================== CLEANUP ====================
+
+  - name: stop_container
+    description: "Stop the test container"
+    condition: "inputs.cleanup"
+    tool: podman_stop
+    args:
+      container: "{{ image_config.container_name }}"
+    output: stop_raw
+    on_error: continue
+
+  - name: remove_container
+    description: "Remove the test container"
+    condition: "inputs.cleanup"
+    tool: podman_rm
+    args:
+      container: "{{ image_config.container_name }}"
+    output: rm_raw
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_build_failures
+    description: "Detect failure patterns from build and test"
+    compute: |
+      errors_detected = []
+
+      build_text = str(build_raw).lower() if 'build_raw' in dir() and build_raw else ""
+      if "no such file" in build_text and "containerfile" in build_text:
+          errors_detected.append({
+              "tool": "podman_build",
+              "pattern": "containerfile not found",
+              "cause": "Containerfile/Dockerfile not found at specified path",
+              "fix": "Check dockerfile input - try 'Dockerfile' instead of 'Containerfile'"
+          })
+      if "manifest unknown" in build_text:
+          errors_detected.append({
+              "tool": "podman_build",
+              "pattern": "manifest unknown",
+              "cause": "Base image not found in registry",
+              "fix": "Verify base image exists - run podman_pull for the base image"
+          })
+
+      run_text = str(run_raw).lower() if 'run_raw' in dir() and run_raw else ""
+      if "address already in use" in run_text:
+          errors_detected.append({
+              "tool": "podman_run",
+              "pattern": "address already in use",
+              "cause": "Port 8080 is already in use by another container or process",
+              "fix": "Stop the conflicting container or use a different port mapping"
+          })
+
+      result = errors_detected
+    output: build_errors_detected
+    on_error: continue
+
+  - name: learn_build_failure
+    description: "Learn from build failures"
+    condition: "build_errors_detected and len(build_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ build_errors_detected[0].tool if build_errors_detected else 'podman_build' }}"
+      error_pattern: "{{ build_errors_detected[0].pattern if build_errors_detected else 'unknown' }}"
+      root_cause: "{{ build_errors_detected[0].cause if build_errors_detected else 'Unknown' }}"
+      fix_description: "{{ build_errors_detected[0].fix if build_errors_detected else 'Check build logs' }}"
+    output: build_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Local build and test"
+      details: "image={{ image_config.image_name }}, build={{ build_result.success if build_result else 'unknown' }}, tests={{ test_results.tests_passed if test_results else 'skipped' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Local Build & Test
+
+      **Repository:** {{ inputs.repo }}
+      **Image:** {{ image_config.image_name }}
+
+      ---
+
+      ### Build Result
+
+      **Status:** {{ "Success" if build_result.success else "Failed" }}
+
+      ```
+      {{ build_result.build_output }}
+      ```
+
+      {% if test_results.tests_ran %}
+      ---
+
+      ### Test Results
+
+      **Status:** {{ "Passed" if test_results.tests_passed else "Failed" }}
+      **Passed:** {{ test_results.passed_count }} | **Failed:** {{ test_results.failed_count }}
+
+      ```
+      {{ test_results.test_output }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Health Check
+
+      **API:** {{ "Healthy" if test_results.health_ok else "Not responding" }}
+
+      {% if timing_raw %}
+      ```
+      {{ timing_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+
+      {% if container_logs_raw %}
+      ---
+
+      ### Container Logs
+
+      ```
+      {{ container_logs_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if inputs.cleanup %}
+      ---
+
+      Container cleaned up after testing.
+      {% endif %}
+
+      ---
+
+      ### Next Steps
+
+      {% if test_results.tests_passed %}
+      - Create MR: `skill_run("create_mr", '{"repo": "{{ inputs.repo }}"}')`
+      - Deploy to ephemeral: `skill_run("deploy_to_ephemeral", '{"repo": "{{ inputs.repo }}"}')`
+      {% else %}
+      - Fix failing tests and rebuild
+      - Check logs: `podman_logs(container="{{ image_config.container_name }}", tail=100)`
+      {% endif %}

@@ -1,0 +1,374 @@
+# Skill: AWS RDS Debug
+# Debug AWS RDS database issues
+
+name: aws_rds_debug
+description: |
+  Debug AWS RDS database issues by gathering infrastructure and
+  database-level diagnostics.
+
+  This skill inspects:
+  - AWS identity and configuration
+  - EC2 instances and security groups for RDS access
+  - PostgreSQL connection health, locks, and activity
+  - Database size and connection count
+  - InScope documentation for RDS configuration guidance
+
+  Uses: aws_sts_get_caller_identity, aws_configure_list,
+        aws_ec2_describe_instances, aws_ec2_describe_security_groups,
+        psql_query, psql_activity, psql_locks, psql_size,
+        psql_connections, curl_get, ssh_command, inscope_query
+version: "1.0"
+
+links:
+  depends_on:
+    - cloud_inventory
+  validates: []
+  chains_to:
+    - create_jira_issue
+    - learn_pattern
+    - debug_prod
+  provides_context_for:
+    - create_jira_issue
+    - debug_prod
+  validated_by:
+    - environment_overview
+
+inputs:
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment (stage, production)"
+
+  - name: issue_description
+    type: string
+    required: false
+    default: ""
+    description: "Description of the RDS issue to investigate"
+
+  - name: check_connections
+    type: boolean
+    required: false
+    default: true
+    description: "Include connection and lock analysis"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for AWS and database tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_rds_known_issues
+    description: "Check for known RDS issues"
+    compute: |
+      rds_issues = memory.check_known_issues("rds", "") or {}
+      aws_issues = memory.check_known_issues("aws", "") or {}
+      psql_issues = memory.check_known_issues("psql", "") or {}
+
+      all_issues = []
+      for issues in [rds_issues, aws_issues, psql_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: rds_known_issues
+    on_error: continue
+
+  # ==================== AWS INFRASTRUCTURE ====================
+
+  - name: check_aws_identity
+    description: "Verify AWS identity"
+    tool: aws_sts_get_caller_identity
+    args: {}
+    output: aws_identity_raw
+    on_error: continue
+
+  - name: check_aws_config
+    description: "Check AWS configuration"
+    tool: aws_configure_list
+    args: {}
+    output: aws_config_raw
+    on_error: continue
+
+  - name: list_ec2_instances
+    description: "List EC2 instances (bastion hosts, app servers)"
+    tool: aws_ec2_describe_instances
+    args: {}
+    output: ec2_instances_raw
+    on_error: continue
+
+  - name: list_security_groups
+    description: "List security groups for RDS access rules"
+    tool: aws_ec2_describe_security_groups
+    args: {}
+    output: security_groups_raw
+    on_error: continue
+
+  # ==================== DATABASE CHECKS ====================
+
+  - name: check_connections
+    description: "Check PostgreSQL connections"
+    condition: "inputs.check_connections"
+    tool: psql_connections
+    args: {}
+    output: connections_raw
+    on_error: continue
+
+  - name: check_activity
+    description: "Check current database activity"
+    condition: "inputs.check_connections"
+    tool: psql_activity
+    args: {}
+    output: activity_raw
+    on_error: continue
+
+  - name: check_locks
+    description: "Check for lock contention"
+    condition: "inputs.check_connections"
+    tool: psql_locks
+    args: {}
+    output: locks_raw
+    on_error: continue
+
+  - name: check_db_size
+    description: "Check database size"
+    tool: psql_size
+    args: {}
+    output: size_raw
+    on_error: continue
+
+  - name: run_rds_diagnostics
+    description: "Run RDS-specific diagnostic query"
+    tool: psql_query
+    args:
+      query: "SELECT datname, numbackends, xact_commit, xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched FROM pg_stat_database WHERE datname NOT IN ('template0', 'template1') ORDER BY numbackends DESC;"
+    output: rds_diagnostics_raw
+    on_error: continue
+
+  # ==================== CONNECTIVITY CHECK ====================
+
+  - name: check_rds_endpoint
+    description: "Check RDS endpoint connectivity"
+    tool: curl_get
+    args:
+      url: "https://rds.{{ inputs.environment }}.example.com"
+    output: rds_endpoint_raw
+    on_error: continue
+
+  - name: check_ssh_tunnel
+    description: "Check SSH tunnel to bastion"
+    tool: ssh_command
+    args:
+      host: "bastion.{{ inputs.environment }}.example.com"
+      command: "echo tunnel_ok"
+    output: ssh_tunnel_raw
+    on_error: continue
+
+  # ==================== DOCUMENTATION ====================
+
+  - name: lookup_rds_docs
+    description: "Look up RDS configuration docs from InScope"
+    tool: inscope_query
+    args:
+      query: "How do I configure and debug RDS databases in {{ inputs.environment }}?"
+      assistant: "app-interface"
+    output: rds_docs_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_rds_health
+    description: "Analyze RDS health from collected data"
+    compute: |
+      connections_text = str(connections_raw) if 'connections_raw' in dir() and connections_raw else ""
+      activity_text = str(activity_raw) if 'activity_raw' in dir() and activity_raw else ""
+      locks_text = str(locks_raw) if 'locks_raw' in dir() and locks_raw else ""
+      size_text = str(size_raw) if 'size_raw' in dir() and size_raw else ""
+      diagnostics_text = str(rds_diagnostics_raw) if 'rds_diagnostics_raw' in dir() and rds_diagnostics_raw else ""
+
+      issues = []
+
+      # Check lock contention
+      if locks_text and "granted" in locks_text.lower() and "f" in locks_text.lower():
+          issues.append("Lock contention detected on RDS")
+
+      # Check connection count
+      import re
+      conn_match = re.search(r'(\d+)', connections_text)
+      conn_count = int(conn_match.group(1)) if conn_match else 0
+      if conn_count > 80:
+          issues.append(f"High connection count on RDS: {conn_count}")
+
+      # Check rollbacks
+      if "xact_rollback" in diagnostics_text:
+          rollback_match = re.search(r'xact_rollback\s*\|\s*(\d+)', diagnostics_text)
+          if rollback_match and int(rollback_match.group(1)) > 1000:
+              issues.append("High transaction rollback count")
+
+      # Check security groups
+      sg_text = str(security_groups_raw) if 'security_groups_raw' in dir() and security_groups_raw else ""
+      if "0.0.0.0/0" in sg_text:
+          issues.append("Security group allows access from 0.0.0.0/0 - review ingress rules")
+
+      result = {
+          "issues": issues,
+          "issue_count": len(issues),
+          "healthy": len(issues) == 0,
+          "connection_count": conn_count,
+      }
+    output: rds_health
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_rds_debug_failures
+    description: "Detect failure patterns from RDS debugging"
+    compute: |
+      errors_detected = []
+
+      aws_text = str(aws_identity_raw) if 'aws_identity_raw' in dir() and aws_identity_raw else ""
+      conn_text = str(connections_raw) if 'connections_raw' in dir() and connections_raw else ""
+      combined = aws_text + conn_text
+
+      if "expired" in combined.lower() or "invalid" in combined.lower():
+          errors_detected.append({
+              "tool": "aws_sts_get_caller_identity",
+              "pattern": "credentials expired",
+              "cause": "AWS credentials expired",
+              "fix": "Refresh AWS credentials with: aws configure"
+          })
+      if "connection refused" in combined.lower() or "timeout" in combined.lower():
+          errors_detected.append({
+              "tool": "psql_connections",
+              "pattern": "connection refused",
+              "cause": "Cannot connect to RDS - check security groups and VPN",
+              "fix": "Verify security group rules and VPN connectivity"
+          })
+
+      result = errors_detected
+    output: rds_debug_errors_detected
+    on_error: continue
+
+  - name: learn_rds_auth_failure
+    description: "Learn from AWS auth failures during RDS debug"
+    condition: "rds_debug_errors_detected and any(e.get('pattern') == 'credentials expired' for e in rds_debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "aws_sts_get_caller_identity"
+      error_pattern: "credentials expired"
+      root_cause: "AWS credentials expired"
+      fix_description: "Refresh AWS credentials with: aws configure"
+    output: rds_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log RDS debug session"
+    tool: memory_session_log
+    args:
+      action: "AWS RDS debug ({{ inputs.environment }})"
+      details: "healthy={{ rds_health.healthy if rds_health else 'unknown' }}, issues={{ rds_health.issue_count if rds_health else 0 }}, connections={{ rds_health.connection_count if rds_health else 0 }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## AWS RDS Debug: {{ inputs.environment }}
+
+      {% if inputs.issue_description %}
+      **Issue:** {{ inputs.issue_description }}
+      {% endif %}
+
+      **Health:** {{ "Healthy" if rds_health.healthy else "Issues Detected" }}
+
+      ---
+
+      ### AWS Identity
+
+      ```
+      {{ aws_identity_raw | string | truncate(300) if aws_identity_raw else "Not authenticated" }}
+      ```
+
+      ---
+
+      ### Issues Found ({{ rds_health.issue_count }})
+
+      {% for issue in rds_health.issues %}
+      - {{ issue }}
+      {% endfor %}
+
+      {% if rds_health.issue_count == 0 %}
+      No issues detected.
+      {% endif %}
+
+      ---
+
+      ### Database Connections ({{ rds_health.connection_count }})
+
+      ```
+      {{ connections_raw | string | truncate(400) if connections_raw else "No connection data" }}
+      ```
+
+      ---
+
+      ### Activity
+
+      ```
+      {{ activity_raw | string | truncate(400) if activity_raw else "No activity data" }}
+      ```
+
+      ---
+
+      ### Locks
+
+      ```
+      {{ locks_raw | string | truncate(400) if locks_raw else "No lock data" }}
+      ```
+
+      ---
+
+      ### Database Size
+
+      ```
+      {{ size_raw | string | truncate(300) if size_raw else "No size data" }}
+      ```
+
+      ---
+
+      ### Database Statistics
+
+      ```
+      {{ rds_diagnostics_raw | string | truncate(500) if rds_diagnostics_raw else "No diagnostics data" }}
+      ```
+
+      ---
+
+      ### Security Groups
+
+      ```
+      {{ security_groups_raw | string | truncate(400) if security_groups_raw else "No security group data" }}
+      ```
+
+      {% if rds_docs_raw %}
+      ---
+
+      ### RDS Documentation
+
+      {{ rds_docs_raw | string | truncate(400) }}
+      {% endif %}
+
+      {% if rds_known_issues and rds_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in rds_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

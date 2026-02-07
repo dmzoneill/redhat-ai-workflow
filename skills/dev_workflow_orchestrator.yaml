@@ -1,0 +1,298 @@
+# Skill: Dev Workflow Orchestrator
+# High-level development workflow entry point
+
+name: dev_workflow_orchestrator
+description: |
+  High-level entry point for development workflows.
+
+  Orchestrates common developer tasks:
+  - Start work on an issue (branch, Jira, context)
+  - Check deploy readiness (lint, tests, CI)
+  - Prepare merge request
+  - Monitor CI/CD pipelines
+  - Generate standup summary
+  - Handle code review feedback
+
+  Uses: workflow_check_deploy_readiness, workflow_run_local_checks,
+        workflow_daily_standup, workflow_start_work, workflow_create_branch,
+        workflow_prepare_mr, workflow_monitor_pipelines,
+        workflow_handle_review, workflow_review_feedback
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - start_work
+    - create_mr
+    - review_local_changes
+    - deploy_to_ephemeral
+    - standup_summary
+  provides_context_for:
+    - start_work
+    - create_mr
+    - review_local_changes
+  validated_by:
+    - create_mr
+    - deploy_to_ephemeral
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    enum: ["start", "check", "prepare_mr", "monitor", "standup", "review"]
+    description: "Workflow action to perform"
+
+  - name: issue_key
+    type: string
+    required: false
+    default: ""
+    description: "Jira issue key (required for start, check, prepare_mr)"
+
+  - name: repo
+    type: string
+    required: false
+    default: ""
+    description: "Repository path"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for workflow tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== ROUTE ACTION ====================
+
+  - name: route_action
+    description: "Determine which workflow to execute"
+    compute: |
+      action = inputs.action.lower()
+      valid_actions = ["start", "check", "prepare_mr", "monitor", "standup", "review"]
+
+      if action not in valid_actions:
+          raise ValueError(f"Unknown action: {action}. Expected one of: {valid_actions}")
+
+      result = {
+          "action": action,
+          "needs_issue": action in ["start", "check", "prepare_mr", "review"],
+          "needs_repo": action in ["check", "prepare_mr"],
+      }
+    output: route
+
+  # ==================== START WORK ====================
+
+  - name: start_work_flow
+    description: "Start work on a Jira issue"
+    condition: "route.action == 'start' and inputs.issue_key"
+    tool: workflow_start_work
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      repo: "{{ inputs.repo }}"
+    output: start_result_raw
+    on_error: continue
+
+  - name: create_branch_flow
+    description: "Create feature branch for issue"
+    condition: "route.action == 'start' and inputs.issue_key"
+    tool: workflow_create_branch
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      repo: "{{ inputs.repo }}"
+    output: branch_result_raw
+    on_error: continue
+
+  # ==================== CHECK READINESS ====================
+
+  - name: run_local_checks
+    description: "Run local lint and test checks"
+    condition: "route.action == 'check'"
+    tool: workflow_run_local_checks
+    args:
+      repo: "{{ inputs.repo }}"
+    output: local_checks_raw
+    on_error: continue
+
+  - name: check_deploy_readiness
+    description: "Check overall deploy readiness"
+    condition: "route.action == 'check'"
+    tool: workflow_check_deploy_readiness
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      repo: "{{ inputs.repo }}"
+    output: readiness_raw
+    on_error: continue
+
+  # ==================== PREPARE MR ====================
+
+  - name: prepare_mr_flow
+    description: "Prepare merge request"
+    condition: "route.action == 'prepare_mr' and inputs.issue_key"
+    tool: workflow_prepare_mr
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      repo: "{{ inputs.repo }}"
+    output: mr_prep_raw
+    on_error: continue
+
+  # ==================== MONITOR PIPELINES ====================
+
+  - name: monitor_pipelines
+    description: "Monitor CI/CD pipelines"
+    condition: "route.action == 'monitor'"
+    tool: workflow_monitor_pipelines
+    args:
+      repo: "{{ inputs.repo }}"
+    output: pipelines_raw
+    on_error: continue
+
+  # ==================== STANDUP ====================
+
+  - name: daily_standup
+    description: "Generate daily standup summary"
+    condition: "route.action == 'standup'"
+    tool: workflow_daily_standup
+    args: {}
+    output: standup_raw
+    on_error: continue
+
+  # ==================== REVIEW ====================
+
+  - name: handle_review
+    description: "Handle code review"
+    condition: "route.action == 'review' and inputs.issue_key"
+    tool: workflow_handle_review
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      repo: "{{ inputs.repo }}"
+    output: review_raw
+    on_error: continue
+
+  - name: review_feedback
+    description: "Get review feedback"
+    condition: "route.action == 'review' and inputs.issue_key"
+    tool: workflow_review_feedback
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: feedback_raw
+    on_error: continue
+
+  # ==================== BUILD RESULT ====================
+
+  - name: build_result
+    description: "Compile action results"
+    compute: |
+      action = inputs.action
+      result_text = ""
+
+      if action == "start":
+          result_text = str(start_result_raw) if 'start_result_raw' in dir() and start_result_raw else "Start work result not available"
+      elif action == "check":
+          checks = str(local_checks_raw) if 'local_checks_raw' in dir() and local_checks_raw else ""
+          readiness = str(readiness_raw) if 'readiness_raw' in dir() and readiness_raw else ""
+          result_text = f"Local Checks:\n{checks}\n\nDeploy Readiness:\n{readiness}"
+      elif action == "prepare_mr":
+          result_text = str(mr_prep_raw) if 'mr_prep_raw' in dir() and mr_prep_raw else "MR preparation result not available"
+      elif action == "monitor":
+          result_text = str(pipelines_raw) if 'pipelines_raw' in dir() and pipelines_raw else "Pipeline status not available"
+      elif action == "standup":
+          result_text = str(standup_raw) if 'standup_raw' in dir() and standup_raw else "Standup data not available"
+      elif action == "review":
+          review = str(review_raw) if 'review_raw' in dir() and review_raw else ""
+          feedback = str(feedback_raw) if 'feedback_raw' in dir() and feedback_raw else ""
+          result_text = f"Review:\n{review}\n\nFeedback:\n{feedback}"
+
+      result = {
+          "action": action,
+          "output": result_text[:3000],
+          "success": len(result_text) > 20 and "error" not in result_text.lower()[:100],
+      }
+    output: workflow_result
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_workflow_failures
+    description: "Detect failure patterns from workflow operations"
+    compute: |
+      errors_detected = []
+
+      result_text = workflow_result.get("output", "").lower() if workflow_result else ""
+
+      if "no such host" in result_text or "connection refused" in result_text:
+          errors_detected.append({
+              "tool": f"workflow_{inputs.action}",
+              "pattern": "connection refused",
+              "cause": "Cannot connect to remote service - VPN or network issue",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+
+      if "unauthorized" in result_text or "forbidden" in result_text:
+          errors_detected.append({
+              "tool": f"workflow_{inputs.action}",
+              "pattern": "unauthorized",
+              "cause": "Authentication failed for workflow operation",
+              "fix": "Check credentials - may need to refresh Jira/GitLab tokens"
+          })
+
+      result = errors_detected
+    output: workflow_errors_detected
+    on_error: continue
+
+  - name: learn_workflow_failure
+    description: "Learn from workflow failures"
+    condition: "workflow_errors_detected and len(workflow_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ workflow_errors_detected[0].tool if workflow_errors_detected else 'workflow' }}"
+      error_pattern: "{{ workflow_errors_detected[0].pattern if workflow_errors_detected else 'unknown' }}"
+      root_cause: "{{ workflow_errors_detected[0].cause if workflow_errors_detected else 'Unknown' }}"
+      fix_description: "{{ workflow_errors_detected[0].fix if workflow_errors_detected else 'Check connectivity and credentials' }}"
+    output: workflow_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Dev workflow: {{ inputs.action }}"
+      details: "issue={{ inputs.issue_key or 'none' }}, success={{ workflow_result.success if workflow_result else 'unknown' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Dev Workflow: {{ inputs.action | upper }}
+
+      {% if inputs.issue_key %}**Issue:** {{ inputs.issue_key }}{% endif %}
+      {% if inputs.repo %}**Repository:** {{ inputs.repo }}{% endif %}
+      **Status:** {{ "Success" if workflow_result.success else "Issues detected" }}
+
+      ---
+
+      ### Result
+
+      {{ workflow_result.output }}
+
+      ---
+
+      ### Workflow Guide
+
+      {% if inputs.action == 'start' %}
+      **Next steps:**
+      1. Make your code changes
+      2. Check readiness: `skill_run("dev_workflow_orchestrator", '{"action": "check", "issue_key": "{{ inputs.issue_key }}"}')`
+      3. Prepare MR: `skill_run("dev_workflow_orchestrator", '{"action": "prepare_mr", "issue_key": "{{ inputs.issue_key }}"}')`
+      {% elif inputs.action == 'check' %}
+      **Next steps:**
+      - If checks pass: `skill_run("dev_workflow_orchestrator", '{"action": "prepare_mr", "issue_key": "{{ inputs.issue_key }}"}')`
+      - Fix issues and re-check
+      {% elif inputs.action == 'prepare_mr' %}
+      **Next steps:**
+      - Monitor pipeline: `skill_run("dev_workflow_orchestrator", '{"action": "monitor"}')`
+      - Handle review: `skill_run("dev_workflow_orchestrator", '{"action": "review", "issue_key": "{{ inputs.issue_key }}"}')`
+      {% elif inputs.action == 'standup' %}
+      **Available actions:**
+      - Start new work: `skill_run("dev_workflow_orchestrator", '{"action": "start", "issue_key": "AAP-XXXXX"}')`
+      {% endif %}

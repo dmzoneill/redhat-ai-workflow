@@ -1,0 +1,395 @@
+# Skill: Cloud Inventory
+# AWS and GCP resource inventory
+
+name: cloud_inventory
+description: |
+  Get a comprehensive inventory of cloud resources across AWS and GCP.
+
+  This skill discovers:
+  - AWS EC2 instances and security groups
+  - AWS S3 buckets
+  - AWS IAM users and roles
+  - GCP projects and compute instances
+  - GCP storage buckets
+  - GCP GKE clusters
+
+  Uses: aws_sts_get_caller_identity, aws_configure_list,
+        aws_ec2_describe_instances, aws_ec2_describe_security_groups,
+        aws_s3_ls, aws_iam_list_users, aws_iam_list_roles,
+        aws_regions_list, gcloud_auth_list, gcloud_config_list,
+        gcloud_projects_list, gcloud_compute_instances_list,
+        gcloud_storage_ls, gcloud_container_clusters_list
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - aws_rds_debug
+    - s3_data_ops
+    - gke_cluster_ops
+    - create_jira_issue
+  provides_context_for:
+    - aws_rds_debug
+    - s3_data_ops
+    - gke_cluster_ops
+  validated_by: []
+
+inputs:
+  - name: providers
+    type: string
+    required: false
+    default: "all"
+    description: "Cloud providers to inventory (aws, gcp, all)"
+
+  - name: include_iam
+    type: boolean
+    required: false
+    default: false
+    description: "Include IAM users and roles inventory"
+
+  - name: include_storage
+    type: boolean
+    required: false
+    default: true
+    description: "Include storage (S3/GCS) inventory"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for cloud tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_cloud_known_issues
+    description: "Check for known cloud issues"
+    compute: |
+      aws_issues = memory.check_known_issues("aws", "") or {}
+      gcloud_issues = memory.check_known_issues("gcloud", "") or {}
+
+      all_issues = []
+      for issues in [aws_issues, gcloud_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: cloud_known_issues
+    on_error: continue
+
+  # ==================== AWS IDENTITY ====================
+
+  - name: aws_identity
+    description: "Check AWS caller identity"
+    condition: "inputs.providers in ['aws', 'all']"
+    tool: aws_sts_get_caller_identity
+    args: {}
+    output: aws_identity_raw
+    on_error: continue
+
+  - name: aws_config
+    description: "Check AWS configuration"
+    condition: "inputs.providers in ['aws', 'all']"
+    tool: aws_configure_list
+    args: {}
+    output: aws_config_raw
+    on_error: continue
+
+  - name: aws_regions
+    description: "List available AWS regions"
+    condition: "inputs.providers in ['aws', 'all']"
+    tool: aws_regions_list
+    args: {}
+    output: aws_regions_raw
+    on_error: continue
+
+  # ==================== AWS COMPUTE ====================
+
+  - name: aws_ec2_instances
+    description: "List EC2 instances"
+    condition: "inputs.providers in ['aws', 'all']"
+    tool: aws_ec2_describe_instances
+    args: {}
+    output: ec2_instances_raw
+    on_error: continue
+
+  - name: aws_security_groups
+    description: "List EC2 security groups"
+    condition: "inputs.providers in ['aws', 'all']"
+    tool: aws_ec2_describe_security_groups
+    args: {}
+    output: security_groups_raw
+    on_error: continue
+
+  # ==================== AWS STORAGE ====================
+
+  - name: aws_s3_buckets
+    description: "List S3 buckets"
+    condition: "inputs.providers in ['aws', 'all'] and inputs.include_storage"
+    tool: aws_s3_ls
+    args: {}
+    output: s3_buckets_raw
+    on_error: continue
+
+  # ==================== AWS IAM ====================
+
+  - name: aws_iam_users
+    description: "List IAM users"
+    condition: "inputs.providers in ['aws', 'all'] and inputs.include_iam"
+    tool: aws_iam_list_users
+    args: {}
+    output: iam_users_raw
+    on_error: continue
+
+  - name: aws_iam_roles
+    description: "List IAM roles"
+    condition: "inputs.providers in ['aws', 'all'] and inputs.include_iam"
+    tool: aws_iam_list_roles
+    args: {}
+    output: iam_roles_raw
+    on_error: continue
+
+  # ==================== GCP IDENTITY ====================
+
+  - name: gcp_auth
+    description: "Check GCP auth status"
+    condition: "inputs.providers in ['gcp', 'all']"
+    tool: gcloud_auth_list
+    args: {}
+    output: gcp_auth_raw
+    on_error: continue
+
+  - name: gcp_config
+    description: "Check GCP configuration"
+    condition: "inputs.providers in ['gcp', 'all']"
+    tool: gcloud_config_list
+    args: {}
+    output: gcp_config_raw
+    on_error: continue
+
+  - name: gcp_projects
+    description: "List GCP projects"
+    condition: "inputs.providers in ['gcp', 'all']"
+    tool: gcloud_projects_list
+    args: {}
+    output: gcp_projects_raw
+    on_error: continue
+
+  # ==================== GCP COMPUTE ====================
+
+  - name: gcp_instances
+    description: "List GCP compute instances"
+    condition: "inputs.providers in ['gcp', 'all']"
+    tool: gcloud_compute_instances_list
+    args: {}
+    output: gcp_instances_raw
+    on_error: continue
+
+  # ==================== GCP STORAGE ====================
+
+  - name: gcp_storage
+    description: "List GCP storage buckets"
+    condition: "inputs.providers in ['gcp', 'all'] and inputs.include_storage"
+    tool: gcloud_storage_ls
+    args: {}
+    output: gcp_storage_raw
+    on_error: continue
+
+  # ==================== GCP KUBERNETES ====================
+
+  - name: gcp_clusters
+    description: "List GKE clusters"
+    condition: "inputs.providers in ['gcp', 'all']"
+    tool: gcloud_container_clusters_list
+    args: {}
+    output: gcp_clusters_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_inventory
+    description: "Analyze cloud resource inventory"
+    compute: |
+      ec2_text = str(ec2_instances_raw) if 'ec2_instances_raw' in dir() and ec2_instances_raw else ""
+      s3_text = str(s3_buckets_raw) if 's3_buckets_raw' in dir() and s3_buckets_raw else ""
+      gcp_inst_text = str(gcp_instances_raw) if 'gcp_instances_raw' in dir() and gcp_instances_raw else ""
+      gcp_storage_text = str(gcp_storage_raw) if 'gcp_storage_raw' in dir() and gcp_storage_raw else ""
+      gcp_clusters_text = str(gcp_clusters_raw) if 'gcp_clusters_raw' in dir() and gcp_clusters_raw else ""
+
+      # Count resources
+      ec2_count = ec2_text.count("InstanceId") if ec2_text else 0
+      s3_count = s3_text.count("s3://") if s3_text else s3_text.count("\n") if s3_text else 0
+      gcp_inst_count = gcp_inst_text.count("RUNNING") + gcp_inst_text.count("TERMINATED") + gcp_inst_text.count("STOPPED") if gcp_inst_text else 0
+      gcp_bucket_count = gcp_storage_text.count("gs://") if gcp_storage_text else 0
+      gke_count = gcp_clusters_text.count("RUNNING") if gcp_clusters_text else 0
+
+      result = {
+          "aws": {
+              "ec2_instances": ec2_count,
+              "s3_buckets": s3_count,
+              "configured": bool(ec2_text or s3_text),
+          },
+          "gcp": {
+              "compute_instances": gcp_inst_count,
+              "storage_buckets": gcp_bucket_count,
+              "gke_clusters": gke_count,
+              "configured": bool(gcp_inst_text or gcp_storage_text),
+          },
+          "total_resources": ec2_count + s3_count + gcp_inst_count + gcp_bucket_count + gke_count,
+      }
+    output: inventory_analysis
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_cloud_inventory_failures
+    description: "Detect failure patterns from cloud inventory"
+    compute: |
+      errors_detected = []
+
+      aws_text = str(aws_identity_raw) if 'aws_identity_raw' in dir() and aws_identity_raw else ""
+      gcp_text = str(gcp_auth_raw) if 'gcp_auth_raw' in dir() and gcp_auth_raw else ""
+      combined = aws_text + gcp_text
+
+      if "expired" in combined.lower() or "invalid" in combined.lower():
+          errors_detected.append({
+              "tool": "aws_sts_get_caller_identity",
+              "pattern": "credentials expired",
+              "cause": "Cloud credentials have expired",
+              "fix": "Refresh credentials with aws configure or gcloud auth login"
+          })
+      if "not configured" in combined.lower() or "not found" in combined.lower():
+          errors_detected.append({
+              "tool": "aws_configure_list",
+              "pattern": "not configured",
+              "cause": "Cloud CLI not configured",
+              "fix": "Run aws configure or gcloud init to set up credentials"
+          })
+
+      result = errors_detected
+    output: cloud_inventory_errors_detected
+    on_error: continue
+
+  - name: learn_cloud_auth_failure
+    description: "Learn from cloud auth failures"
+    condition: "cloud_inventory_errors_detected and any(e.get('pattern') == 'credentials expired' for e in cloud_inventory_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "aws_sts_get_caller_identity"
+      error_pattern: "credentials expired"
+      root_cause: "Cloud credentials have expired"
+      fix_description: "Refresh credentials with aws configure or gcloud auth login"
+    output: cloud_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log cloud inventory to session"
+    tool: memory_session_log
+    args:
+      action: "Cloud inventory ({{ inputs.providers }})"
+      details: "total_resources={{ inventory_analysis.total_resources if inventory_analysis else 0 }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Cloud Resource Inventory
+
+      **Providers:** {{ inputs.providers }}
+      **Include IAM:** {{ inputs.include_iam }}
+      **Include Storage:** {{ inputs.include_storage }}
+
+      ---
+
+      {% if inventory_analysis.aws.configured %}
+      ### AWS Resources
+
+      **Identity:**
+      ```
+      {{ aws_identity_raw | string | truncate(300) if aws_identity_raw else "Not authenticated" }}
+      ```
+
+      | Resource | Count |
+      |----------|-------|
+      | EC2 Instances | {{ inventory_analysis.aws.ec2_instances }} |
+      | S3 Buckets | {{ inventory_analysis.aws.s3_buckets }} |
+
+      **EC2 Instances:**
+      ```
+      {{ ec2_instances_raw | string | truncate(500) if ec2_instances_raw else "None" }}
+      ```
+
+      {% if s3_buckets_raw %}
+      **S3 Buckets:**
+      ```
+      {{ s3_buckets_raw | string | truncate(400) if s3_buckets_raw else "None" }}
+      ```
+      {% endif %}
+
+      {% if iam_users_raw %}
+      **IAM Users:**
+      ```
+      {{ iam_users_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      {% if iam_roles_raw %}
+      **IAM Roles:**
+      ```
+      {{ iam_roles_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      ---
+      {% endif %}
+
+      {% if inventory_analysis.gcp.configured %}
+      ### GCP Resources
+
+      **Auth:**
+      ```
+      {{ gcp_auth_raw | string | truncate(300) if gcp_auth_raw else "Not authenticated" }}
+      ```
+
+      | Resource | Count |
+      |----------|-------|
+      | Compute Instances | {{ inventory_analysis.gcp.compute_instances }} |
+      | Storage Buckets | {{ inventory_analysis.gcp.storage_buckets }} |
+      | GKE Clusters | {{ inventory_analysis.gcp.gke_clusters }} |
+
+      **Projects:**
+      ```
+      {{ gcp_projects_raw | string | truncate(400) if gcp_projects_raw else "None" }}
+      ```
+
+      **Compute Instances:**
+      ```
+      {{ gcp_instances_raw | string | truncate(400) if gcp_instances_raw else "None" }}
+      ```
+
+      **GKE Clusters:**
+      ```
+      {{ gcp_clusters_raw | string | truncate(400) if gcp_clusters_raw else "None" }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Summary
+
+      **Total Resources:** {{ inventory_analysis.total_resources }}
+
+      {% if cloud_known_issues and cloud_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in cloud_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

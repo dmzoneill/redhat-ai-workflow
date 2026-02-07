@@ -1,0 +1,408 @@
+# Skill: Investigate Service Issues
+# Debug systemd service failures
+
+name: investigate_service_issues
+description: |
+  Debug systemd service failures and investigate issues.
+
+  Features:
+  - Check service status and health
+  - Analyze journal logs for errors
+  - Check boot-level issues
+  - List all failed units
+  - Auto-restart failed services if enabled
+  - Check system info (hostname, time sync)
+
+  Uses: systemctl_status, systemctl_is_active, systemctl_is_enabled,
+        systemctl_list_units, systemctl_list_unit_files, journalctl_unit,
+        journalctl_logs, journalctl_boot, systemctl_daemon_reload,
+        systemctl_restart, hostnamectl_status, timedatectl_status, ollama_status
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - manage_local_services
+  chains_to:
+    - manage_local_services
+  provides_context_for:
+    - manage_local_services
+  validated_by:
+    - manage_local_services
+
+inputs:
+  - name: service_name
+    type: string
+    required: false
+    default: ""
+    description: "Specific service to investigate (e.g., aa-workflow-mcp). Leave empty to check all failed."
+
+  - name: since
+    type: string
+    required: false
+    default: "1h"
+    description: "Time window for log analysis (e.g., 1h, 30m, 1d)"
+
+  - name: auto_restart
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically restart failed services"
+
+  - name: check_all_failed
+    type: boolean
+    required: false
+    default: true
+    description: "Check all failed systemd units"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for systemd tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== SYSTEM INFO ====================
+
+  - name: get_hostname
+    description: "Get system hostname and OS info"
+    tool: hostnamectl_status
+    args: {}
+    output: hostname_raw
+    on_error: continue
+
+  - name: get_time_status
+    description: "Check time synchronization status"
+    tool: timedatectl_status
+    args: {}
+    output: time_status_raw
+    on_error: continue
+
+  # ==================== CHECK FAILED UNITS ====================
+
+  - name: list_failed_units
+    description: "List all failed systemd units"
+    condition: "inputs.check_all_failed"
+    tool: systemctl_list_units
+    args:
+      pattern: "--failed"
+    output: failed_units_raw
+    on_error: continue
+
+  - name: list_workflow_units
+    description: "List all aa-workflow unit files"
+    tool: systemctl_list_unit_files
+    args:
+      pattern: "aa-workflow-*"
+    output: workflow_unit_files_raw
+    on_error: continue
+
+  # ==================== SERVICE-SPECIFIC CHECKS ====================
+
+  - name: check_service_active
+    description: "Check if the target service is active"
+    condition: "inputs.service_name"
+    tool: systemctl_is_active
+    args:
+      unit: "{{ inputs.service_name }}.service"
+    output: service_active_raw
+    on_error: continue
+
+  - name: check_service_enabled
+    description: "Check if the target service is enabled"
+    condition: "inputs.service_name"
+    tool: systemctl_is_enabled
+    args:
+      unit: "{{ inputs.service_name }}.service"
+    output: service_enabled_raw
+    on_error: continue
+
+  - name: get_service_status
+    description: "Get detailed service status"
+    condition: "inputs.service_name"
+    tool: systemctl_status
+    args:
+      unit: "{{ inputs.service_name }}.service"
+    output: service_status_raw
+    on_error: continue
+
+  - name: get_service_logs
+    description: "Get service journal logs"
+    condition: "inputs.service_name"
+    tool: journalctl_unit
+    args:
+      unit: "{{ inputs.service_name }}.service"
+      lines: 50
+    output: service_logs_raw
+    on_error: continue
+
+  # ==================== BROAD LOG ANALYSIS ====================
+
+  - name: get_system_logs
+    description: "Get recent system-wide error logs"
+    tool: journalctl_logs
+    args:
+      priority: "err"
+      since: "{{ inputs.since }}"
+      lines: 30
+    output: system_logs_raw
+    on_error: continue
+
+  - name: get_boot_logs
+    description: "Get current boot journal entries"
+    tool: journalctl_boot
+    args:
+      boot: "0"
+      priority: "warning"
+      lines: 20
+    output: boot_logs_raw
+    on_error: continue
+
+  # ==================== CHECK OLLAMA ====================
+
+  - name: check_ollama
+    description: "Check Ollama inference server status"
+    tool: ollama_status
+    args: {}
+    output: ollama_status_raw
+    on_error: continue
+
+  # ==================== AUTO-RESTART ====================
+
+  - name: daemon_reload
+    description: "Reload systemd daemon before restart"
+    condition: "inputs.auto_restart and inputs.service_name"
+    tool: systemctl_daemon_reload
+    args: {}
+    output: reload_raw
+    on_error: continue
+
+  - name: restart_service
+    description: "Restart the failed service"
+    condition: "inputs.auto_restart and inputs.service_name"
+    tool: systemctl_restart
+    args:
+      unit: "{{ inputs.service_name }}.service"
+    output: restart_raw
+    on_error: continue
+
+  - name: post_restart_status
+    description: "Check service status after restart"
+    condition: "inputs.auto_restart and inputs.service_name"
+    tool: systemctl_status
+    args:
+      unit: "{{ inputs.service_name }}.service"
+    output: post_restart_status_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: analyze_issues
+    description: "Analyze all gathered data for issues"
+    compute: |
+      issues = []
+      recommendations = []
+
+      # Parse service status
+      if inputs.service_name:
+          active_text = str(service_active_raw).strip().lower() if 'service_active_raw' in dir() and service_active_raw else ""
+          is_active = "active" in active_text and "inactive" not in active_text
+
+          enabled_text = str(service_enabled_raw).strip().lower() if 'service_enabled_raw' in dir() and service_enabled_raw else ""
+          is_enabled = "enabled" in enabled_text and "disabled" not in enabled_text
+
+          if not is_active:
+              issues.append(f"Service {inputs.service_name} is not active")
+              recommendations.append(f"Start service: systemctl_start(unit='{inputs.service_name}.service')")
+          if not is_enabled:
+              issues.append(f"Service {inputs.service_name} is not enabled (won't start on boot)")
+              recommendations.append(f"Enable service: systemctl_enable(unit='{inputs.service_name}.service')")
+
+      # Parse failed units
+      failed_text = str(failed_units_raw) if 'failed_units_raw' in dir() and failed_units_raw else ""
+      failed_count = failed_text.lower().count("failed")
+
+      if failed_count > 0:
+          issues.append(f"Found {failed_count} failed systemd unit(s)")
+
+      # Parse logs for common errors
+      logs_text = str(service_logs_raw) if 'service_logs_raw' in dir() and service_logs_raw else ""
+      logs_lower = logs_text.lower()
+
+      if "out of memory" in logs_lower or "oom" in logs_lower:
+          issues.append("Out of memory detected in logs")
+          recommendations.append("Increase memory limits or check for memory leaks")
+      if "permission denied" in logs_lower:
+          issues.append("Permission denied errors in logs")
+          recommendations.append("Check file permissions and service user")
+      if "connection refused" in logs_lower:
+          issues.append("Connection refused errors - dependency service may be down")
+          recommendations.append("Check dependent services are running")
+
+      # Check time sync
+      time_text = str(time_status_raw).lower() if 'time_status_raw' in dir() and time_status_raw else ""
+      if "not synchronized" in time_text or "no" in time_text and "ntp" in time_text:
+          issues.append("System time is not synchronized")
+          recommendations.append("Enable NTP: timedatectl set-ntp true")
+
+      # Restart result
+      restart_ok = False
+      if inputs.auto_restart and 'restart_raw' in dir():
+          post_text = str(post_restart_status_raw).lower() if 'post_restart_status_raw' in dir() and post_restart_status_raw else ""
+          restart_ok = "active (running)" in post_text
+
+      result = {
+          "issues": issues,
+          "recommendations": recommendations,
+          "issue_count": len(issues),
+          "failed_units": failed_count,
+          "restart_attempted": inputs.auto_restart and bool(inputs.service_name),
+          "restart_success": restart_ok,
+      }
+    output: analysis
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_investigation_failures
+    description: "Detect failure patterns from service investigation"
+    compute: |
+      errors_detected = []
+
+      logs_text = str(service_logs_raw).lower() if 'service_logs_raw' in dir() and service_logs_raw else ""
+      if "segfault" in logs_text or "core dumped" in logs_text:
+          errors_detected.append({
+              "tool": "systemctl_status",
+              "pattern": "segfault or core dump",
+              "cause": "Service crashed with segmentation fault",
+              "fix": "Check for binary compatibility issues or corrupted installation"
+          })
+      if "too many open files" in logs_text:
+          errors_detected.append({
+              "tool": "systemctl_status",
+              "pattern": "too many open files",
+              "cause": "File descriptor limit exceeded",
+              "fix": "Increase ulimit or check for file descriptor leaks in LimitNOFILE"
+          })
+
+      result = errors_detected
+    output: investigation_errors_detected
+    on_error: continue
+
+  - name: learn_service_crash
+    description: "Learn from service crash patterns"
+    condition: "investigation_errors_detected and len(investigation_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ investigation_errors_detected[0].tool if investigation_errors_detected else 'systemctl_status' }}"
+      error_pattern: "{{ investigation_errors_detected[0].pattern if investigation_errors_detected else 'unknown' }}"
+      root_cause: "{{ investigation_errors_detected[0].cause if investigation_errors_detected else 'Unknown' }}"
+      fix_description: "{{ investigation_errors_detected[0].fix if investigation_errors_detected else 'Check service logs' }}"
+    output: crash_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Investigated service issues"
+      details: "service={{ inputs.service_name or 'all' }}, issues={{ analysis.issue_count }}, auto_restart={{ inputs.auto_restart }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Service Investigation
+
+      {% if inputs.service_name %}
+      **Service:** {{ inputs.service_name }}
+      {% else %}
+      **Scope:** All failed services
+      {% endif %}
+      **Time Window:** {{ inputs.since }}
+      **Issues Found:** {{ analysis.issue_count }}
+
+      ---
+
+      ### Issues
+
+      {% if analysis.issues %}
+      {% for issue in analysis.issues %}
+      - {{ issue }}
+      {% endfor %}
+      {% else %}
+      No issues detected.
+      {% endif %}
+
+      {% if analysis.recommendations %}
+      ---
+
+      ### Recommendations
+
+      {% for rec in analysis.recommendations %}
+      - {{ rec }}
+      {% endfor %}
+      {% endif %}
+
+      {% if service_status_raw %}
+      ---
+
+      ### Service Status
+
+      ```
+      {{ service_status_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if service_logs_raw %}
+      ---
+
+      ### Recent Logs
+
+      ```
+      {{ service_logs_raw | string | truncate(600) }}
+      ```
+      {% endif %}
+
+      {% if failed_units_raw %}
+      ---
+
+      ### Failed Units
+
+      ```
+      {{ failed_units_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      {% if analysis.restart_attempted %}
+      ---
+
+      ### Restart Result
+
+      **Status:** {{ "Success" if analysis.restart_success else "Failed" }}
+
+      {% if post_restart_status_raw %}
+      ```
+      {{ post_restart_status_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### System Info
+
+      {% if hostname_raw %}
+      ```
+      {{ hostname_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Restart service: `systemctl_restart(unit="{{ inputs.service_name or 'aa-workflow-mcp' }}.service")`
+      - View full logs: `journalctl_unit(unit="{{ inputs.service_name or 'aa-workflow-mcp' }}.service", lines=100)`
+      - Manage services: `skill_run("manage_local_services", '{"action": "status"}')`

@@ -1,0 +1,424 @@
+# Skill: Security Audit
+# Network and TLS security scanning
+
+name: security_audit
+description: |
+  Run a comprehensive network and TLS security audit against a target.
+
+  This skill performs:
+  - Port scanning and service detection
+  - Vulnerability scanning with nmap scripts
+  - TLS/SSL certificate inspection
+  - Cipher suite analysis
+  - HTTP security header checks
+  - SSH host key fingerprinting
+
+  Uses: nmap_scan, nmap_quick_scan, nmap_service_scan, nmap_vuln_scan,
+        nmap_script, openssl_s_client, openssl_s_client_cert,
+        openssl_x509_info, openssl_x509_verify, openssl_ciphers,
+        curl_headers, curl_timing, ssh_keyscan
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - cert_check
+    - network_connectivity_check
+  chains_to:
+    - cert_check
+    - network_connectivity_check
+    - create_jira_issue
+    - learn_pattern
+  provides_context_for:
+    - cert_check
+    - create_jira_issue
+  validated_by:
+    - cert_check
+
+inputs:
+  - name: target
+    type: string
+    required: true
+    description: "Target host or IP to audit"
+
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment (stage, production, ephemeral)"
+
+  - name: full_scan
+    type: boolean
+    required: false
+    default: false
+    description: "Run full port scan (slower but thorough)"
+
+  - name: check_certs
+    type: boolean
+    required: false
+    default: true
+    description: "Include TLS certificate checks"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for network security tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_security_known_issues
+    description: "Check for known security scanning issues"
+    compute: |
+      nmap_issues = memory.check_known_issues("nmap", "") or {}
+      openssl_issues = memory.check_known_issues("openssl", "") or {}
+      security_issues = memory.check_known_issues("security", "") or {}
+
+      all_issues = []
+      for issues in [nmap_issues, openssl_issues, security_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: security_known_issues
+    on_error: continue
+
+  # ==================== PORT SCANNING ====================
+
+  - name: run_quick_scan
+    description: "Quick port scan to identify open ports"
+    tool: nmap_quick_scan
+    args:
+      target: "{{ inputs.target }}"
+    output: quick_scan_raw
+    on_error: continue
+
+  - name: run_service_scan
+    description: "Service and version detection on open ports"
+    tool: nmap_service_scan
+    args:
+      target: "{{ inputs.target }}"
+    output: service_scan_raw
+    on_error: continue
+
+  - name: run_full_scan
+    description: "Full port scan if requested"
+    condition: "inputs.full_scan"
+    tool: nmap_scan
+    args:
+      target: "{{ inputs.target }}"
+    output: full_scan_raw
+    on_error: continue
+
+  - name: run_vuln_scan
+    description: "Vulnerability scan using nmap scripts"
+    tool: nmap_vuln_scan
+    args:
+      target: "{{ inputs.target }}"
+    output: vuln_scan_raw
+    on_error: continue
+
+  - name: run_nmap_script
+    description: "Run nmap default scripts for additional info"
+    tool: nmap_script
+    args:
+      target: "{{ inputs.target }}"
+    output: nmap_script_raw
+    on_error: continue
+
+  - name: parse_port_scan
+    description: "Parse port scan results"
+    compute: |
+      quick_text = str(quick_scan_raw) if 'quick_scan_raw' in dir() and quick_scan_raw else ""
+      service_text = str(service_scan_raw) if 'service_scan_raw' in dir() and service_scan_raw else ""
+      combined = quick_text + "\n" + service_text
+
+      open_ports = []
+      for line in combined.split("\n"):
+          if "/tcp" in line.lower() and "open" in line.lower():
+              open_ports.append(line.strip()[:120])
+
+      result = {
+          "open_ports": open_ports[:30],
+          "port_count": len(open_ports),
+          "has_ssh": any("22/tcp" in p for p in open_ports),
+          "has_http": any("80/tcp" in p or "443/tcp" in p or "8080/tcp" in p for p in open_ports),
+      }
+    output: port_analysis
+
+  # ==================== TLS/SSL CHECKS ====================
+
+  - name: check_tls_connection
+    description: "Check TLS connection details"
+    condition: "inputs.check_certs"
+    tool: openssl_s_client
+    args:
+      host: "{{ inputs.target }}"
+    output: tls_connection_raw
+    on_error: continue
+
+  - name: check_tls_cert
+    description: "Get TLS certificate details"
+    condition: "inputs.check_certs"
+    tool: openssl_s_client_cert
+    args:
+      host: "{{ inputs.target }}"
+    output: tls_cert_raw
+    on_error: continue
+
+  - name: check_x509_info
+    description: "Get X.509 certificate information"
+    condition: "inputs.check_certs"
+    tool: openssl_x509_info
+    args:
+      host: "{{ inputs.target }}"
+    output: x509_info_raw
+    on_error: continue
+
+  - name: verify_cert_chain
+    description: "Verify certificate chain"
+    condition: "inputs.check_certs"
+    tool: openssl_x509_verify
+    args:
+      host: "{{ inputs.target }}"
+    output: cert_verify_raw
+    on_error: continue
+
+  - name: check_ciphers
+    description: "Check supported cipher suites"
+    condition: "inputs.check_certs"
+    tool: openssl_ciphers
+    args:
+      host: "{{ inputs.target }}"
+    output: ciphers_raw
+    on_error: continue
+
+  - name: parse_tls_results
+    description: "Parse TLS check results"
+    condition: "inputs.check_certs"
+    compute: |
+      tls_text = str(tls_connection_raw) if 'tls_connection_raw' in dir() and tls_connection_raw else ""
+      cert_text = str(tls_cert_raw) if 'tls_cert_raw' in dir() and tls_cert_raw else ""
+      x509_text = str(x509_info_raw) if 'x509_info_raw' in dir() and x509_info_raw else ""
+      verify_text = str(cert_verify_raw) if 'cert_verify_raw' in dir() and cert_verify_raw else ""
+      cipher_text = str(ciphers_raw) if 'ciphers_raw' in dir() and ciphers_raw else ""
+
+      import re
+
+      # Extract TLS version
+      tls_version = "unknown"
+      tls_match = re.search(r'(TLSv[\d.]+)', tls_text)
+      if tls_match:
+          tls_version = tls_match.group(1)
+
+      # Check for weak ciphers
+      weak_ciphers = []
+      for kw in ['RC4', 'DES', 'MD5', 'NULL', 'EXPORT']:
+          if kw.lower() in cipher_text.lower():
+              weak_ciphers.append(kw)
+
+      # Check cert validity
+      cert_valid = "verify return code: 0" in verify_text.lower() or "ok" in verify_text.lower()
+
+      # Extract expiry
+      expiry_match = re.search(r'Not After\s*:\s*(.+)', x509_text)
+      expiry = expiry_match.group(1).strip() if expiry_match else "unknown"
+
+      result = {
+          "tls_version": tls_version,
+          "weak_ciphers": weak_ciphers,
+          "cert_valid": cert_valid,
+          "expiry": expiry,
+          "preview": x509_text[:500] if x509_text else "",
+      }
+    output: tls_analysis
+    on_error: continue
+
+  # ==================== HTTP SECURITY HEADERS ====================
+
+  - name: check_http_headers
+    description: "Check HTTP security headers"
+    tool: curl_headers
+    args:
+      url: "https://{{ inputs.target }}"
+    output: http_headers_raw
+    on_error: continue
+
+  - name: check_http_timing
+    description: "Check HTTP response timing"
+    tool: curl_timing
+    args:
+      url: "https://{{ inputs.target }}"
+    output: http_timing_raw
+    on_error: continue
+
+  - name: parse_http_headers
+    description: "Parse HTTP security headers"
+    compute: |
+      headers_text = str(http_headers_raw) if 'http_headers_raw' in dir() and http_headers_raw else ""
+      headers_lower = headers_text.lower()
+
+      missing_headers = []
+      security_headers = {
+          "strict-transport-security": "HSTS",
+          "content-security-policy": "CSP",
+          "x-content-type-options": "X-Content-Type-Options",
+          "x-frame-options": "X-Frame-Options",
+          "x-xss-protection": "X-XSS-Protection",
+      }
+
+      for header, label in security_headers.items():
+          if header not in headers_lower:
+              missing_headers.append(label)
+
+      result = {
+          "missing_headers": missing_headers,
+          "missing_count": len(missing_headers),
+          "preview": headers_text[:500] if headers_text else "",
+      }
+    output: header_analysis
+    on_error: continue
+
+  # ==================== SSH HOST KEY ====================
+
+  - name: scan_ssh_keys
+    description: "Scan SSH host keys"
+    tool: ssh_keyscan
+    args:
+      host: "{{ inputs.target }}"
+    output: ssh_keyscan_raw
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_security_audit_failures
+    description: "Detect failure patterns from security audit"
+    compute: |
+      errors_detected = []
+
+      scan_text = str(quick_scan_raw) if 'quick_scan_raw' in dir() and quick_scan_raw else ""
+      tls_text = str(tls_connection_raw) if 'tls_connection_raw' in dir() and tls_connection_raw else ""
+      combined = scan_text + tls_text
+
+      if "no route to host" in combined.lower() or "host seems down" in combined.lower():
+          errors_detected.append({
+              "tool": "nmap_quick_scan",
+              "pattern": "no route to host",
+              "cause": "Target unreachable - VPN may be required or host is down",
+              "fix": "Run vpn_connect() or verify target hostname"
+          })
+      if "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": "openssl_s_client",
+              "pattern": "connection refused",
+              "cause": "TLS port not open on target",
+              "fix": "Verify port 443 is open and TLS is configured"
+          })
+
+      result = errors_detected
+    output: security_audit_errors_detected
+    on_error: continue
+
+  - name: learn_security_audit_network_failure
+    description: "Learn from network failures during audit"
+    condition: "security_audit_errors_detected and any(e.get('pattern') == 'no route to host' for e in security_audit_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "nmap_quick_scan"
+      error_pattern: "no route to host"
+      root_cause: "Target unreachable - VPN may be required or host is down"
+      fix_description: "Run vpn_connect() or verify target hostname"
+    output: security_audit_network_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log security audit to session"
+    tool: memory_session_log
+    args:
+      action: "Security audit on {{ inputs.target }}"
+      details: "environment={{ inputs.environment }}, ports={{ port_analysis.port_count if port_analysis else 0 }}, full_scan={{ inputs.full_scan }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Security Audit: {{ inputs.target }}
+
+      **Environment:** {{ inputs.environment }}
+      **Scan Type:** {{ "Full" if inputs.full_scan else "Quick" }}
+
+      ---
+
+      ### Port Scan Results ({{ port_analysis.port_count }} open)
+
+      {% for port in port_analysis.open_ports[:15] %}
+      - `{{ port }}`
+      {% endfor %}
+
+      {% if port_analysis.port_count > 15 %}
+      ... and {{ port_analysis.port_count - 15 }} more
+      {% endif %}
+
+      ---
+
+      ### Vulnerability Scan
+
+      ```
+      {{ vuln_scan_raw | string | truncate(800) if vuln_scan_raw else "No results" }}
+      ```
+
+      ---
+
+      {% if tls_analysis is defined and tls_analysis %}
+      ### TLS/SSL Analysis
+
+      | Property | Value |
+      |----------|-------|
+      | TLS Version | {{ tls_analysis.tls_version }} |
+      | Certificate Valid | {{ tls_analysis.cert_valid }} |
+      | Expiry | {{ tls_analysis.expiry }} |
+      | Weak Ciphers | {{ tls_analysis.weak_ciphers | join(', ') if tls_analysis.weak_ciphers else "None" }} |
+
+      {% if tls_analysis.weak_ciphers %}
+      **WARNING:** Weak cipher suites detected: {{ tls_analysis.weak_ciphers | join(', ') }}
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### HTTP Security Headers
+
+      {% if header_analysis is defined and header_analysis %}
+      {% if header_analysis.missing_headers %}
+      **Missing headers ({{ header_analysis.missing_count }}):**
+      {% for h in header_analysis.missing_headers %}
+      - {{ h }}
+      {% endfor %}
+      {% else %}
+      All recommended security headers present.
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### SSH Host Keys
+
+      ```
+      {{ ssh_keyscan_raw | string | truncate(400) if ssh_keyscan_raw else "No SSH service or scan failed" }}
+      ```
+
+      {% if security_known_issues and security_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in security_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

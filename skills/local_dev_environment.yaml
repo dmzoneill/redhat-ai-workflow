@@ -1,0 +1,358 @@
+# Skill: Local Dev Environment
+# Start/stop local development environment using Podman
+
+name: local_dev_environment
+description: |
+  Start, stop, or check status of local development environment.
+
+  Uses Podman Compose to manage containers for:
+  - Database (PostgreSQL)
+  - Application services
+  - Supporting infrastructure
+
+  Features:
+  - Start/stop/restart via Podman Compose
+  - Run database migrations
+  - Health check endpoints
+  - View container logs
+
+  Uses: podman_compose_up, podman_compose_down, podman_compose_status,
+        podman_ps, podman_logs, podman_exec, psql_query, psql_tables,
+        systemctl_is_active, curl_get, curl_timing
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - local_build_test
+  chains_to:
+    - local_build_test
+    - start_work
+  provides_context_for:
+    - local_build_test
+    - review_local_changes
+  validated_by:
+    - local_build_test
+
+inputs:
+  - name: repo
+    type: string
+    required: true
+    description: "Path to repository with podman-compose.yaml"
+
+  - name: action
+    type: string
+    required: false
+    default: "status"
+    enum: ["start", "stop", "status", "restart"]
+    description: "Action to perform"
+
+  - name: run_migrations
+    type: boolean
+    required: false
+    default: false
+    description: "Run database migrations after starting"
+
+  - name: health_check
+    type: boolean
+    required: false
+    default: true
+    description: "Run health check after starting"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for container tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== CHECK PREREQUISITES ====================
+
+  - name: check_podman_active
+    description: "Check if Podman socket is active"
+    tool: systemctl_is_active
+    args:
+      unit: "podman.socket"
+    output: podman_socket_raw
+    on_error: continue
+
+  - name: parse_podman_prereq
+    description: "Parse Podman prerequisite check"
+    compute: |
+      podman_text = str(podman_socket_raw).lower() if 'podman_socket_raw' in dir() and podman_socket_raw else ""
+      podman_ok = "active" in podman_text and "inactive" not in podman_text
+
+      result = {
+          "podman_ready": podman_ok,
+          "message": "Podman socket active" if podman_ok else "Podman socket not active - run: systemctl --user start podman.socket",
+      }
+    output: prereq_check
+
+  # ==================== CURRENT STATUS ====================
+
+  - name: get_compose_status
+    description: "Get Podman Compose service status"
+    tool: podman_compose_status
+    args:
+      project_dir: "{{ inputs.repo }}"
+    output: compose_status_raw
+    on_error: continue
+
+  - name: get_running_containers
+    description: "List running Podman containers"
+    tool: podman_ps
+    args: {}
+    output: containers_raw
+    on_error: continue
+
+  # ==================== PERFORM ACTION ====================
+
+  - name: compose_down
+    description: "Stop all services with Podman Compose"
+    condition: "inputs.action in ['stop', 'restart']"
+    tool: podman_compose_down
+    args:
+      project_dir: "{{ inputs.repo }}"
+    output: compose_down_raw
+    on_error: continue
+
+  - name: compose_up
+    description: "Start all services with Podman Compose"
+    condition: "inputs.action in ['start', 'restart']"
+    tool: podman_compose_up
+    args:
+      project_dir: "{{ inputs.repo }}"
+      detach: true
+    output: compose_up_raw
+    on_error: continue
+
+  # ==================== POST-START CHECKS ====================
+
+  - name: get_post_status
+    description: "Get status after action"
+    condition: "inputs.action != 'status'"
+    tool: podman_compose_status
+    args:
+      project_dir: "{{ inputs.repo }}"
+    output: post_status_raw
+    on_error: continue
+
+  - name: get_container_logs
+    description: "Get recent container logs"
+    condition: "inputs.action in ['start', 'restart']"
+    tool: podman_logs
+    args:
+      container: "{{ inputs.repo | basename }}-app-1"
+      tail: 30
+    output: container_logs_raw
+    on_error: continue
+
+  # ==================== DATABASE ====================
+
+  - name: run_db_migrations
+    description: "Run database migrations"
+    condition: "inputs.run_migrations and inputs.action in ['start', 'restart']"
+    tool: podman_exec
+    args:
+      container: "{{ inputs.repo | basename }}-app-1"
+      command: "python manage.py migrate"
+    output: migration_raw
+    on_error: continue
+
+  - name: check_db_tables
+    description: "List database tables to verify DB is ready"
+    condition: "inputs.action in ['start', 'restart', 'status']"
+    tool: psql_tables
+    args: {}
+    output: db_tables_raw
+    on_error: continue
+
+  - name: check_db_connectivity
+    description: "Run a simple DB query to verify connectivity"
+    condition: "inputs.action in ['start', 'restart', 'status']"
+    tool: psql_query
+    args:
+      query: "SELECT 1 as health_check;"
+    output: db_health_raw
+    on_error: continue
+
+  # ==================== HEALTH CHECK ====================
+
+  - name: health_check_api
+    description: "Check API health endpoint"
+    condition: "inputs.health_check and inputs.action in ['start', 'restart', 'status']"
+    tool: curl_get
+    args:
+      url: "http://localhost:8000/api/v1/health/"
+    output: health_api_raw
+    on_error: continue
+
+  - name: health_check_timing
+    description: "Measure API response time"
+    condition: "inputs.health_check and inputs.action in ['start', 'restart', 'status']"
+    tool: curl_timing
+    args:
+      url: "http://localhost:8000/api/v1/health/"
+    output: health_timing_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: parse_environment_status
+    description: "Parse overall environment status"
+    compute: |
+      compose_text = str(post_status_raw if 'post_status_raw' in dir() and post_status_raw else compose_status_raw if 'compose_status_raw' in dir() and compose_status_raw else "")
+      containers_text = str(containers_raw).lower() if 'containers_raw' in dir() and containers_raw else ""
+
+      running = compose_text.lower().count("running") + compose_text.lower().count("up")
+      exited = compose_text.lower().count("exited") + compose_text.lower().count("exit")
+
+      # Health check
+      health_text = str(health_api_raw).lower() if 'health_api_raw' in dir() and health_api_raw else ""
+      api_healthy = "ok" in health_text or "healthy" in health_text or "200" in health_text
+
+      # DB check
+      db_text = str(db_health_raw) if 'db_health_raw' in dir() and db_health_raw else ""
+      db_healthy = "1" in db_text or "health_check" in db_text
+
+      # Migration check
+      migration_text = str(migration_raw) if 'migration_raw' in dir() and migration_raw else ""
+      migration_ok = "no migrations" in migration_text.lower() or "ok" in migration_text.lower() or "applying" in migration_text.lower()
+
+      result = {
+          "containers_running": running,
+          "containers_exited": exited,
+          "api_healthy": api_healthy,
+          "db_healthy": db_healthy,
+          "migration_ok": migration_ok if inputs.run_migrations else None,
+          "all_healthy": running > 0 and exited == 0 and api_healthy,
+          "compose_preview": compose_text[:500] if compose_text else "",
+      }
+    output: env_status
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_dev_env_failures
+    description: "Detect failure patterns from dev environment management"
+    compute: |
+      errors_detected = []
+
+      compose_text = str(compose_up_raw).lower() if 'compose_up_raw' in dir() and compose_up_raw else ""
+      if "error" in compose_text or "failed" in compose_text:
+          if "port" in compose_text and "already" in compose_text:
+              errors_detected.append({
+                  "tool": "podman_compose_up",
+                  "pattern": "port already in use",
+                  "cause": "Another process is using the required port",
+                  "fix": "Stop conflicting process or use podman_compose_down first"
+              })
+          else:
+              errors_detected.append({
+                  "tool": "podman_compose_up",
+                  "pattern": "compose up failed",
+                  "cause": "Podman Compose failed to start services",
+                  "fix": "Check podman_logs for the failing container"
+              })
+
+      health_text = str(health_api_raw).lower() if 'health_api_raw' in dir() and health_api_raw else ""
+      if "connection refused" in health_text:
+          errors_detected.append({
+              "tool": "curl_get",
+              "pattern": "connection refused",
+              "cause": "API server not listening - container may still be starting",
+              "fix": "Wait a few seconds and retry, or check podman_logs"
+          })
+
+      result = errors_detected
+    output: dev_env_errors_detected
+    on_error: continue
+
+  - name: learn_compose_failure
+    description: "Learn from Podman Compose failures"
+    condition: "dev_env_errors_detected and len(dev_env_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ dev_env_errors_detected[0].tool if dev_env_errors_detected else 'podman_compose_up' }}"
+      error_pattern: "{{ dev_env_errors_detected[0].pattern if dev_env_errors_detected else 'unknown' }}"
+      root_cause: "{{ dev_env_errors_detected[0].cause if dev_env_errors_detected else 'Unknown' }}"
+      fix_description: "{{ dev_env_errors_detected[0].fix if dev_env_errors_detected else 'Check container logs' }}"
+    output: compose_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Local dev environment: {{ inputs.action }}"
+      details: "repo={{ inputs.repo }}, healthy={{ env_status.all_healthy if env_status else 'unknown' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Local Dev Environment: {{ inputs.action | upper }}
+
+      **Repository:** {{ inputs.repo }}
+      **Overall:** {{ "Healthy" if env_status.all_healthy else "Issues detected" }}
+
+      ---
+
+      ### Container Status
+
+      - Running: {{ env_status.containers_running }}
+      - Exited: {{ env_status.containers_exited }}
+
+      {% if env_status.compose_preview %}
+      ```
+      {{ env_status.compose_preview }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Health Checks
+
+      | Check | Status |
+      |-------|--------|
+      | API | {{ "Healthy" if env_status.api_healthy else "Down" }} |
+      | Database | {{ "Connected" if env_status.db_healthy else "Not connected" }} |
+      {% if env_status.migration_ok is not none %}
+      | Migrations | {{ "OK" if env_status.migration_ok else "Failed" }} |
+      {% endif %}
+
+      {% if health_timing_raw %}
+      **API Response Time:**
+      ```
+      {{ health_timing_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+
+      {% if db_tables_raw %}
+      ---
+
+      ### Database Tables
+
+      ```
+      {{ db_tables_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      {% if container_logs_raw %}
+      ---
+
+      ### Recent Logs
+
+      ```
+      {{ container_logs_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - View logs: `podman_logs(container="<name>", tail=50)`
+      - Run migrations: `skill_run("local_dev_environment", '{"repo": "{{ inputs.repo }}", "action": "start", "run_migrations": true}')`
+      - Restart: `skill_run("local_dev_environment", '{"repo": "{{ inputs.repo }}", "action": "restart"}')`

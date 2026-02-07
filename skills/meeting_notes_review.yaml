@@ -1,0 +1,307 @@
+# Skill: Meeting Notes Review
+# Review meeting transcripts and extract action items
+
+name: meeting_notes_review
+description: |
+  Review meeting transcripts and extract action items.
+
+  This skill handles:
+  - Listing recent meetings
+  - Retrieving full transcripts
+  - Searching across meeting history
+  - AI-powered summary and action item extraction
+  - Exporting notes to various formats
+  - Searching Google Drive for related documents
+
+  Uses: meet_notes_list_meetings, meet_notes_get_transcript, meet_notes_search,
+        meet_notes_stats, meet_notes_export_state, meet_notes_active,
+        meet_notes_scheduler_status, ollama_generate, ollama_classify, gdrive_search
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to:
+    - create_jira_issue
+    - notify_team
+  provides_context_for:
+    - standup_summary
+    - weekly_summary
+
+inputs:
+  - name: meeting_id
+    type: string
+    required: false
+    default: ""
+    description: "Specific meeting ID to review"
+
+  - name: create_jira_issues
+    type: boolean
+    required: false
+    default: false
+    description: "Create Jira issues from action items"
+
+  - name: search_query
+    type: string
+    required: false
+    default: ""
+    description: "Search query across meeting transcripts"
+
+  - name: export_format
+    type: string
+    required: false
+    default: "markdown"
+    description: "Export format (markdown|json|text)"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for meeting tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_meeting_known_issues
+    description: "Check for known meeting notes issues"
+    compute: |
+      meet_issues = memory.check_known_issues("meet_notes", "") or {}
+      ollama_issues = memory.check_known_issues("ollama", "") or {}
+
+      all_issues = []
+      for issues in [meet_issues, ollama_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: meeting_known_issues
+    on_error: continue
+
+  # ==================== SERVICE STATUS ====================
+
+  - name: check_service_status
+    description: "Check meeting notes service status"
+    tool: meet_notes_scheduler_status
+    args: {}
+    output: service_status_raw
+    on_error: continue
+
+  - name: check_active_meetings
+    description: "Check for active meeting recordings"
+    tool: meet_notes_active
+    args: {}
+    output: active_meetings_raw
+    on_error: continue
+
+  - name: get_db_stats
+    description: "Get meeting database statistics"
+    tool: meet_notes_stats
+    args: {}
+    output: db_stats_raw
+    on_error: continue
+
+  # ==================== MEETING LIST & SEARCH ====================
+
+  - name: list_meetings
+    description: "List recent meetings"
+    tool: meet_notes_list_meetings
+    args: {}
+    output: meetings_list_raw
+    on_error: continue
+
+  - name: search_meetings
+    description: "Search across meeting transcripts"
+    condition: "inputs.search_query"
+    tool: meet_notes_search
+    args:
+      query: "{{ inputs.search_query }}"
+    output: search_results_raw
+    on_error: continue
+
+  # ==================== TRANSCRIPT RETRIEVAL ====================
+
+  - name: get_transcript
+    description: "Get transcript for specified meeting"
+    condition: "inputs.meeting_id"
+    tool: meet_notes_get_transcript
+    args:
+      meeting_id: "{{ inputs.meeting_id }}"
+    output: transcript_raw
+    on_error: continue
+
+  # ==================== AI ANALYSIS ====================
+
+  - name: summarize_transcript
+    description: "Generate AI summary of the transcript"
+    condition: "inputs.meeting_id and transcript_raw"
+    tool: ollama_generate
+    args:
+      prompt: "Summarize this meeting transcript. Extract key decisions, action items, and owners:\n\n{{ transcript_raw | string | truncate(3000) }}"
+      model: "llama3.2"
+    output: summary_raw
+    on_error: continue
+
+  - name: classify_action_items
+    description: "Classify and prioritize action items"
+    condition: "inputs.meeting_id and summary_raw"
+    tool: ollama_classify
+    args:
+      text: "{{ summary_raw | string | truncate(2000) }}"
+      labels: "critical,high,medium,low"
+    output: classification_raw
+    on_error: continue
+
+  # ==================== EXPORT ====================
+
+  - name: export_notes
+    description: "Export meeting notes"
+    condition: "inputs.meeting_id"
+    tool: meet_notes_export_state
+    args:
+      meeting_id: "{{ inputs.meeting_id }}"
+      format: "{{ inputs.export_format }}"
+    output: export_raw
+    on_error: continue
+
+  # ==================== GOOGLE DRIVE SEARCH ====================
+
+  - name: search_gdrive
+    description: "Search Google Drive for related documents"
+    condition: "inputs.search_query"
+    tool: gdrive_search
+    args:
+      query: "{{ inputs.search_query }}"
+    output: gdrive_results_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_meeting_failures
+    description: "Detect failure patterns from meeting operations"
+    compute: |
+      errors_detected = []
+
+      status_text = str(service_status_raw) if 'service_status_raw' in dir() and service_status_raw else ""
+      transcript_text = str(transcript_raw) if 'transcript_raw' in dir() and transcript_raw else ""
+      combined = status_text + transcript_text
+
+      if "not running" in combined.lower() or "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": "meet_notes",
+              "pattern": "service not running",
+              "cause": "Meeting notes service is not running",
+              "fix": "Start the meeting notes service"
+          })
+      if "not found" in combined.lower() and "meeting" in combined.lower():
+          errors_detected.append({
+              "tool": "meet_notes",
+              "pattern": "meeting not found",
+              "cause": "Meeting ID does not exist in database",
+              "fix": "List meetings first to find valid meeting IDs"
+          })
+
+      result = errors_detected
+    output: meeting_errors_detected
+    on_error: continue
+
+  - name: learn_meeting_service_failure
+    description: "Learn from meeting service failures"
+    condition: "meeting_errors_detected and any(e.get('pattern') == 'service not running' for e in meeting_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "meet_notes"
+      error_pattern: "service not running"
+      root_cause: "Meeting notes service is not running"
+      fix_description: "Start the meeting notes service or check its systemd unit"
+    output: meeting_service_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Meeting notes review"
+      details: "meeting_id={{ inputs.meeting_id }}, search={{ inputs.search_query }}, export={{ inputs.export_format }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Meeting Notes Review
+
+      {% if inputs.meeting_id %}
+      **Meeting ID:** {{ inputs.meeting_id }}
+      {% endif %}
+      {% if inputs.search_query %}
+      **Search Query:** {{ inputs.search_query }}
+      {% endif %}
+
+      ---
+
+      ### Service Status
+      {{ service_status_raw | string | truncate(200) if service_status_raw else "Unknown" }}
+
+      ### Database Stats
+      {{ db_stats_raw | string | truncate(200) if db_stats_raw else "N/A" }}
+
+      ### Active Meetings
+      {{ active_meetings_raw | string | truncate(200) if active_meetings_raw else "None active" }}
+
+      ---
+
+      ### Recent Meetings
+      ```
+      {{ meetings_list_raw | string | truncate(600) if meetings_list_raw else "No meetings found" }}
+      ```
+
+      {% if inputs.search_query %}
+      ### Search Results
+      ```
+      {{ search_results_raw | string | truncate(600) if search_results_raw else "No results" }}
+      ```
+      {% endif %}
+
+      {% if transcript_raw %}
+      ### Transcript
+      ```
+      {{ transcript_raw | string | truncate(1000) }}
+      ```
+      {% endif %}
+
+      {% if summary_raw %}
+      ---
+
+      ### AI Summary
+      {{ summary_raw | string | truncate(1000) }}
+
+      ### Priority Classification
+      {{ classification_raw | string | truncate(300) if classification_raw else "N/A" }}
+      {% endif %}
+
+      {% if gdrive_results_raw %}
+      ### Related Google Drive Documents
+      {{ gdrive_results_raw | string | truncate(400) }}
+      {% endif %}
+
+      {% if meeting_known_issues and meeting_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in meeting_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      meeting_id: "{{ inputs.meeting_id }}"
+      search_query: "{{ inputs.search_query }}"

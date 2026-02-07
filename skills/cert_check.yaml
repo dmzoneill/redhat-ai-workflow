@@ -1,0 +1,326 @@
+# Skill: Certificate Check
+# TLS certificate health check
+
+name: cert_check
+description: |
+  Check TLS certificate health for one or more endpoints.
+
+  This skill performs:
+  - Certificate expiry monitoring
+  - Certificate chain verification
+  - TLS version and cipher inspection
+  - HTTP header validation
+  - Port-level TLS service detection
+  - InScope documentation lookup for cert management
+
+  Uses: openssl_s_client, openssl_s_client_cert, openssl_x509_info,
+        openssl_x509_verify, curl_headers, nmap_scan, nmap_script,
+        inscope_ask
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - security_audit
+  chains_to:
+    - security_audit
+    - create_jira_issue
+    - investigate_alert
+  provides_context_for:
+    - security_audit
+    - create_jira_issue
+  validated_by:
+    - security_audit
+
+inputs:
+  - name: endpoints
+    type: string
+    required: true
+    description: "Comma-separated list of host:port endpoints to check"
+
+  - name: warn_days
+    type: string
+    required: false
+    default: "30"
+    description: "Warn if certificate expires within this many days"
+
+  - name: environment
+    type: string
+    required: false
+    default: "stage"
+    description: "Environment (stage, production, ephemeral)"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for TLS and network tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_cert_known_issues
+    description: "Check for known certificate issues"
+    compute: |
+      openssl_issues = memory.check_known_issues("openssl", "") or {}
+      cert_issues = memory.check_known_issues("certificate", "") or {}
+      tls_issues = memory.check_known_issues("tls", "") or {}
+
+      all_issues = []
+      for issues in [openssl_issues, cert_issues, tls_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: cert_known_issues
+    on_error: continue
+
+  # ==================== CERTIFICATE CHECKS ====================
+
+  - name: check_tls_connection
+    description: "Check TLS connection to primary endpoint"
+    tool: openssl_s_client
+    args:
+      host: "{{ inputs.endpoints.split(',')[0].strip() }}"
+    output: tls_connection_raw
+    on_error: continue
+
+  - name: check_tls_cert
+    description: "Get certificate details"
+    tool: openssl_s_client_cert
+    args:
+      host: "{{ inputs.endpoints.split(',')[0].strip() }}"
+    output: tls_cert_raw
+    on_error: continue
+
+  - name: get_x509_info
+    description: "Get X.509 certificate information"
+    tool: openssl_x509_info
+    args:
+      host: "{{ inputs.endpoints.split(',')[0].strip() }}"
+    output: x509_info_raw
+    on_error: continue
+
+  - name: verify_cert_chain
+    description: "Verify certificate chain"
+    tool: openssl_x509_verify
+    args:
+      host: "{{ inputs.endpoints.split(',')[0].strip() }}"
+    output: cert_verify_raw
+    on_error: continue
+
+  - name: check_http_headers
+    description: "Check HSTS and other security headers"
+    tool: curl_headers
+    args:
+      url: "https://{{ inputs.endpoints.split(',')[0].strip() }}"
+    output: headers_raw
+    on_error: continue
+
+  - name: scan_tls_port
+    description: "Scan TLS port with nmap"
+    tool: nmap_scan
+    args:
+      target: "{{ inputs.endpoints.split(',')[0].strip().split(':')[0] }}"
+    output: nmap_scan_raw
+    on_error: continue
+
+  - name: run_ssl_scripts
+    description: "Run nmap SSL scripts for detailed analysis"
+    tool: nmap_script
+    args:
+      target: "{{ inputs.endpoints.split(',')[0].strip().split(':')[0] }}"
+    output: nmap_script_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: parse_cert_info
+    description: "Parse certificate details"
+    compute: |
+      x509_text = str(x509_info_raw) if 'x509_info_raw' in dir() and x509_info_raw else ""
+      verify_text = str(cert_verify_raw) if 'cert_verify_raw' in dir() and cert_verify_raw else ""
+      tls_text = str(tls_connection_raw) if 'tls_connection_raw' in dir() and tls_connection_raw else ""
+
+      import re
+      from datetime import datetime
+
+      # Extract subject
+      subject_match = re.search(r'Subject:\s*(.+)', x509_text)
+      subject = subject_match.group(1).strip() if subject_match else "unknown"
+
+      # Extract issuer
+      issuer_match = re.search(r'Issuer:\s*(.+)', x509_text)
+      issuer = issuer_match.group(1).strip() if issuer_match else "unknown"
+
+      # Extract expiry
+      expiry_match = re.search(r'Not After\s*:\s*(.+)', x509_text)
+      expiry_str = expiry_match.group(1).strip() if expiry_match else ""
+      expiry_warning = False
+
+      if expiry_str:
+          try:
+              for fmt in ['%b %d %H:%M:%S %Y %Z', '%b  %d %H:%M:%S %Y %Z']:
+                  try:
+                      expiry_date = datetime.strptime(expiry_str, fmt)
+                      days_left = (expiry_date - datetime.now()).days
+                      expiry_warning = days_left < int(inputs.warn_days)
+                      break
+                  except ValueError:
+                      days_left = -1
+          except Exception:
+              days_left = -1
+      else:
+          days_left = -1
+
+      # Extract TLS version
+      tls_match = re.search(r'(TLSv[\d.]+)', tls_text)
+      tls_version = tls_match.group(1) if tls_match else "unknown"
+
+      # Verify chain
+      chain_valid = "verify return code: 0" in verify_text.lower() or "ok" in verify_text.lower()
+
+      # Check HSTS
+      headers_text = str(headers_raw) if 'headers_raw' in dir() and headers_raw else ""
+      has_hsts = "strict-transport-security" in headers_text.lower()
+
+      result = {
+          "subject": subject,
+          "issuer": issuer,
+          "expiry": expiry_str,
+          "days_left": days_left,
+          "expiry_warning": expiry_warning,
+          "tls_version": tls_version,
+          "chain_valid": chain_valid,
+          "has_hsts": has_hsts,
+          "healthy": chain_valid and not expiry_warning and days_left > 0,
+      }
+    output: cert_analysis
+
+  # ==================== INSCOPE LOOKUP ====================
+
+  - name: lookup_cert_docs
+    description: "Look up certificate management docs"
+    tool: inscope_ask
+    args:
+      query: "How do I manage TLS certificates for {{ inputs.environment }} environment?"
+    output: cert_docs_raw
+    on_error: continue
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_cert_check_failures
+    description: "Detect failure patterns from certificate checks"
+    compute: |
+      errors_detected = []
+
+      tls_text = str(tls_connection_raw) if 'tls_connection_raw' in dir() and tls_connection_raw else ""
+      verify_text = str(cert_verify_raw) if 'cert_verify_raw' in dir() and cert_verify_raw else ""
+      combined = tls_text + verify_text
+
+      if "unable to get local issuer" in combined.lower():
+          errors_detected.append({
+              "tool": "openssl_x509_verify",
+              "pattern": "unable to get local issuer certificate",
+              "cause": "Missing CA bundle or intermediate certificate",
+              "fix": "Ensure system CA certificates are up to date"
+          })
+      if "certificate has expired" in combined.lower():
+          errors_detected.append({
+              "tool": "openssl_s_client",
+              "pattern": "certificate has expired",
+              "cause": "TLS certificate is expired",
+              "fix": "Renew the certificate through cert-manager or manual process"
+          })
+
+      result = errors_detected
+    output: cert_check_errors_detected
+    on_error: continue
+
+  - name: learn_cert_expiry_failure
+    description: "Learn from certificate expiry failures"
+    condition: "cert_check_errors_detected and any(e.get('pattern') == 'certificate has expired' for e in cert_check_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "openssl_s_client"
+      error_pattern: "certificate has expired"
+      root_cause: "TLS certificate is expired"
+      fix_description: "Renew the certificate through cert-manager or manual process"
+    output: cert_expiry_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log certificate check to session"
+    tool: memory_session_log
+    args:
+      action: "Certificate check on {{ inputs.endpoints }}"
+      details: "environment={{ inputs.environment }}, healthy={{ cert_analysis.healthy if cert_analysis else 'unknown' }}, days_left={{ cert_analysis.days_left if cert_analysis else 'unknown' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Certificate Health Check
+
+      **Endpoints:** {{ inputs.endpoints }}
+      **Environment:** {{ inputs.environment }}
+      **Warn Threshold:** {{ inputs.warn_days }} days
+
+      ---
+
+      ### Certificate Details
+
+      | Property | Value |
+      |----------|-------|
+      | Subject | {{ cert_analysis.subject }} |
+      | Issuer | {{ cert_analysis.issuer }} |
+      | Expiry | {{ cert_analysis.expiry }} |
+      | Days Remaining | {{ cert_analysis.days_left }} |
+      | TLS Version | {{ cert_analysis.tls_version }} |
+      | Chain Valid | {{ "YES" if cert_analysis.chain_valid else "NO" }} |
+      | HSTS Enabled | {{ "YES" if cert_analysis.has_hsts else "NO" }} |
+
+      ---
+
+      ### Health Status
+
+      {% if cert_analysis.healthy %}
+      Certificate is healthy. {{ cert_analysis.days_left }} days until expiry.
+      {% elif cert_analysis.expiry_warning %}
+      **WARNING:** Certificate expires in {{ cert_analysis.days_left }} days (threshold: {{ inputs.warn_days }}).
+      {% elif not cert_analysis.chain_valid %}
+      **ERROR:** Certificate chain validation failed.
+      {% else %}
+      **ERROR:** Certificate status unknown.
+      {% endif %}
+
+      ---
+
+      ### Nmap SSL Analysis
+
+      ```
+      {{ nmap_script_raw | string | truncate(500) if nmap_script_raw else "No nmap SSL data" }}
+      ```
+
+      {% if cert_docs_raw %}
+      ---
+
+      ### Documentation
+
+      {{ cert_docs_raw | string | truncate(400) }}
+      {% endif %}
+
+      {% if cert_known_issues and cert_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in cert_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

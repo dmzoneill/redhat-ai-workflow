@@ -1,0 +1,258 @@
+# Skill: Meeting Scheduler Manage
+# Manage automated meeting bot scheduling
+
+name: meeting_scheduler_manage
+description: |
+  Manage the automated meeting recording and transcription bot.
+
+  This skill handles:
+  - Listing scheduled meeting recordings
+  - Adding and removing meeting schedules
+  - Enabling/disabling scheduled recordings
+  - Starting and stopping all scheduled recordings
+  - Cleaning up expired recordings
+  - Managing meeting approval workflows
+  - Archiving old meeting data
+
+  Uses: meet_notes_list_calendars, meet_notes_add_calendar, meet_notes_remove_calendar,
+        meet_notes_start_scheduler, meet_notes_stop_scheduler, meet_notes_cleanup,
+        meet_notes_scheduler_status, meet_bot_approve_meeting
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to:
+    - meeting_notes_review
+  provides_context_for:
+    - meeting_notes_review
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (list|add|remove|enable|start_all|stop_all|cleanup|status)"
+
+  - name: meeting_url
+    type: string
+    required: false
+    default: ""
+    description: "Meeting URL to add/remove from schedule"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for meeting management tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_scheduler_known_issues
+    description: "Check for known scheduler issues"
+    compute: |
+      meet_issues = memory.check_known_issues("meet_notes", "") or {}
+      scheduler_issues = memory.check_known_issues("meet_notes_schedule", "") or {}
+
+      all_issues = []
+      for issues in [meet_issues, scheduler_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: scheduler_known_issues
+    on_error: continue
+
+  # ==================== SERVICE STATUS ====================
+
+  - name: check_service_status
+    description: "Check meeting notes service status"
+    tool: meet_notes_scheduler_status
+    args: {}
+    output: service_status_raw
+    on_error: continue
+
+  # ==================== SCHEDULE MANAGEMENT ====================
+
+  - name: list_schedules
+    description: "List all scheduled meeting recordings"
+    tool: meet_notes_list_calendars
+    args: {}
+    output: schedule_list_raw
+    on_error: continue
+
+  - name: add_schedule
+    description: "Add a new meeting to the schedule"
+    condition: "inputs.action == 'add' and inputs.meeting_url"
+    tool: meet_notes_add_calendar
+    args:
+      meeting_url: "{{ inputs.meeting_url }}"
+    output: schedule_add_raw
+    on_error: continue
+
+  - name: remove_schedule
+    description: "Remove a meeting from the schedule"
+    condition: "inputs.action == 'remove' and inputs.meeting_url"
+    tool: meet_notes_remove_calendar
+    args:
+      meeting_url: "{{ inputs.meeting_url }}"
+    output: schedule_remove_raw
+    on_error: continue
+
+  # ==================== BATCH OPERATIONS ====================
+
+  - name: start_all_scheduled
+    description: "Start the meeting notes scheduler"
+    condition: "inputs.action == 'start_all'"
+    tool: meet_notes_start_scheduler
+    args: {}
+    output: start_all_raw
+    on_error: continue
+
+  - name: stop_all_recordings
+    description: "Stop the meeting notes scheduler"
+    condition: "inputs.action == 'stop_all'"
+    tool: meet_notes_stop_scheduler
+    args: {}
+    output: stop_all_raw
+    on_error: continue
+
+  - name: cleanup_expired
+    description: "Clean up meeting recordings"
+    condition: "inputs.action == 'cleanup'"
+    tool: meet_notes_cleanup
+    args: {}
+    output: cleanup_raw
+    on_error: continue
+
+  # ==================== APPROVAL WORKFLOW ====================
+
+  - name: approve_meeting
+    description: "Approve a specific meeting"
+    condition: "inputs.action == 'add' and inputs.meeting_url"
+    tool: meet_bot_approve_meeting
+    args:
+      meeting_url: "{{ inputs.meeting_url }}"
+    output: approve_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_scheduler_failures
+    description: "Detect failure patterns from scheduler operations"
+    compute: |
+      errors_detected = []
+
+      status_text = str(service_status_raw) if 'service_status_raw' in dir() and service_status_raw else ""
+      start_text = str(start_all_raw) if 'start_all_raw' in dir() and start_all_raw else ""
+      combined = status_text + start_text
+
+      if "not running" in combined.lower() or "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": "meet_notes_schedule",
+              "pattern": "service not running",
+              "cause": "Meeting notes scheduler service is not running",
+              "fix": "Start the meeting notes scheduler service"
+          })
+      if "browser" in combined.lower() and "error" in combined.lower():
+          errors_detected.append({
+              "tool": "meet_notes_schedule",
+              "pattern": "browser error",
+              "cause": "Browser automation failed for meeting bot",
+              "fix": "Check Podman container for browser instance and restart if needed"
+          })
+
+      result = errors_detected
+    output: scheduler_errors_detected
+    on_error: continue
+
+  - name: learn_scheduler_service_failure
+    description: "Learn from scheduler service failures"
+    condition: "scheduler_errors_detected and any(e.get('pattern') == 'service not running' for e in scheduler_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "meet_notes_schedule"
+      error_pattern: "service not running"
+      root_cause: "Meeting notes scheduler service is not running"
+      fix_description: "Start the meeting notes scheduler: systemctl --user start meet-notes-scheduler"
+    output: scheduler_service_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Meeting scheduler manage: {{ inputs.action }}"
+      details: "action={{ inputs.action }}, meeting_url={{ inputs.meeting_url }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Meeting Scheduler Management
+
+      **Action:** {{ inputs.action }}
+      {% if inputs.meeting_url %}
+      **Meeting URL:** {{ inputs.meeting_url }}
+      {% endif %}
+
+      ---
+
+      ### Service Status
+      {{ service_status_raw | string | truncate(200) if service_status_raw else "Unknown" }}
+
+      ---
+
+      ### Scheduled Recordings
+      ```
+      {{ schedule_list_raw | string | truncate(600) if schedule_list_raw else "No schedules configured" }}
+      ```
+
+      {% if inputs.action == 'add' %}
+      ### Add Result
+      {{ schedule_add_raw | string | truncate(200) if schedule_add_raw else "N/A" }}
+      {{ approve_raw | string | truncate(200) if approve_raw else "" }}
+      {% endif %}
+
+      {% if inputs.action == 'remove' %}
+      ### Remove Result
+      {{ schedule_remove_raw | string | truncate(200) if schedule_remove_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'start_all' %}
+      ### Start All Result
+      {{ start_all_raw | string | truncate(200) if start_all_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'stop_all' %}
+      ### Stop All Result
+      {{ stop_all_raw | string | truncate(200) if stop_all_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'cleanup' %}
+      ### Cleanup Result
+      {{ cleanup_raw | string | truncate(200) if cleanup_raw else "N/A" }}
+      {% endif %}
+
+      {% if scheduler_known_issues and scheduler_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in scheduler_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      action: "{{ inputs.action }}"
+      meeting_url: "{{ inputs.meeting_url }}"

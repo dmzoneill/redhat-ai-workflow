@@ -1,0 +1,465 @@
+# Skill: Manage Local Services
+# Manage workflow daemon services (MCP, SLOP, Slack, Ollama, Scheduler)
+
+name: manage_local_services
+description: |
+  Manage workflow daemon services running locally.
+
+  Supports start, stop, restart, and status actions for:
+  - MCP server (aa-workflow-mcp)
+  - SLOP API gateway (aa-workflow-slop)
+  - Slack daemon (aa-workflow-slack)
+  - Ollama inference server
+  - Scheduler (cron jobs)
+  - All services at once
+
+  Uses: systemctl_status, systemctl_start, systemctl_stop, systemctl_restart,
+        systemctl_is_active, systemctl_list_units, systemctl_enable, systemctl_disable,
+        journalctl_unit, journalctl_logs, systemctl_daemon_reload, ollama_status,
+        cron_list, cron_status
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - investigate_service_issues
+  chains_to:
+    - investigate_service_issues
+    - ollama_inference_test
+  provides_context_for:
+    - investigate_service_issues
+  validated_by:
+    - investigate_service_issues
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    enum: ["start", "stop", "restart", "status"]
+    description: "Action to perform on services"
+
+  - name: service
+    type: string
+    required: false
+    default: "all"
+    enum: ["all", "mcp", "slop", "slack", "ollama", "scheduler"]
+    description: "Service to manage (default: all)"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for systemd tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== RESOLVE SERVICE UNITS ====================
+
+  - name: resolve_service_units
+    description: "Map service names to systemd unit names"
+    compute: |
+      service_map = {
+          "mcp": "aa-workflow-mcp.service",
+          "slop": "aa-workflow-slop.service",
+          "slack": "aa-workflow-slack.service",
+          "ollama": "ollama.service",
+          "scheduler": "aa-workflow-scheduler.service",
+      }
+
+      target = inputs.service.lower() if inputs.service else "all"
+      if target == "all":
+          units = list(service_map.values())
+      elif target in service_map:
+          units = [service_map[target]]
+      else:
+          raise ValueError(f"Unknown service: {target}. Expected one of: {list(service_map.keys())}")
+
+      result = {
+          "units": units,
+          "service_map": service_map,
+          "target": target,
+      }
+    output: service_config
+
+  # ==================== CHECK CURRENT STATUS ====================
+
+  - name: list_workflow_units
+    description: "List all aa-workflow systemd units"
+    tool: systemctl_list_units
+    args:
+      pattern: "aa-workflow-*"
+    output: workflow_units_raw
+    on_error: continue
+
+  - name: check_mcp_active
+    description: "Check if MCP service is active"
+    tool: systemctl_is_active
+    args:
+      unit: "aa-workflow-mcp.service"
+    output: mcp_active_raw
+    on_error: continue
+
+  - name: check_slop_active
+    description: "Check if SLOP service is active"
+    tool: systemctl_is_active
+    args:
+      unit: "aa-workflow-slop.service"
+    output: slop_active_raw
+    on_error: continue
+
+  - name: check_slack_active
+    description: "Check if Slack daemon is active"
+    tool: systemctl_is_active
+    args:
+      unit: "aa-workflow-slack.service"
+    output: slack_active_raw
+    on_error: continue
+
+  - name: check_ollama_status
+    description: "Check Ollama inference server status"
+    tool: ollama_status
+    args: {}
+    output: ollama_status_raw
+    on_error: continue
+
+  - name: check_scheduler_status
+    description: "Check scheduler/cron status"
+    tool: cron_status
+    args: {}
+    output: scheduler_status_raw
+    on_error: continue
+
+  - name: check_cron_jobs
+    description: "List configured cron jobs"
+    tool: cron_list
+    args: {}
+    output: cron_jobs_raw
+    on_error: continue
+
+  # ==================== PERFORM ACTION ====================
+
+  - name: perform_daemon_reload
+    description: "Reload systemd daemon before start/restart"
+    condition: "inputs.action in ['start', 'restart']"
+    tool: systemctl_daemon_reload
+    args: {}
+    output: daemon_reload_raw
+    on_error: continue
+
+  # --- START actions ---
+  - name: start_mcp
+    description: "Start MCP service"
+    condition: "inputs.action == 'start' and (service_config.target == 'all' or service_config.target == 'mcp')"
+    tool: systemctl_start
+    args:
+      unit: "aa-workflow-mcp.service"
+    output: action_mcp_raw
+    on_error: continue
+
+  - name: start_slop
+    description: "Start SLOP service"
+    condition: "inputs.action == 'start' and (service_config.target == 'all' or service_config.target == 'slop')"
+    tool: systemctl_start
+    args:
+      unit: "aa-workflow-slop.service"
+    output: action_slop_raw
+    on_error: continue
+
+  - name: start_slack
+    description: "Start Slack daemon"
+    condition: "inputs.action == 'start' and (service_config.target == 'all' or service_config.target == 'slack')"
+    tool: systemctl_start
+    args:
+      unit: "aa-workflow-slack.service"
+    output: action_slack_raw
+    on_error: continue
+
+  - name: start_ollama
+    description: "Start Ollama service"
+    condition: "inputs.action == 'start' and (service_config.target == 'all' or service_config.target == 'ollama')"
+    tool: systemctl_start
+    args:
+      unit: "ollama.service"
+    output: action_ollama_raw
+    on_error: continue
+
+  - name: start_scheduler
+    description: "Start scheduler service"
+    condition: "inputs.action == 'start' and (service_config.target == 'all' or service_config.target == 'scheduler')"
+    tool: systemctl_start
+    args:
+      unit: "aa-workflow-scheduler.service"
+    output: action_scheduler_raw
+    on_error: continue
+
+  # --- STOP actions ---
+  - name: stop_mcp
+    description: "Stop MCP service"
+    condition: "inputs.action == 'stop' and (service_config.target == 'all' or service_config.target == 'mcp')"
+    tool: systemctl_stop
+    args:
+      unit: "aa-workflow-mcp.service"
+    output: action_mcp_raw
+    on_error: continue
+
+  - name: stop_slop
+    description: "Stop SLOP service"
+    condition: "inputs.action == 'stop' and (service_config.target == 'all' or service_config.target == 'slop')"
+    tool: systemctl_stop
+    args:
+      unit: "aa-workflow-slop.service"
+    output: action_slop_raw
+    on_error: continue
+
+  - name: stop_slack
+    description: "Stop Slack daemon"
+    condition: "inputs.action == 'stop' and (service_config.target == 'all' or service_config.target == 'slack')"
+    tool: systemctl_stop
+    args:
+      unit: "aa-workflow-slack.service"
+    output: action_slack_raw
+    on_error: continue
+
+  - name: stop_ollama
+    description: "Stop Ollama service"
+    condition: "inputs.action == 'stop' and (service_config.target == 'all' or service_config.target == 'ollama')"
+    tool: systemctl_stop
+    args:
+      unit: "ollama.service"
+    output: action_ollama_raw
+    on_error: continue
+
+  - name: stop_scheduler
+    description: "Stop scheduler service"
+    condition: "inputs.action == 'stop' and (service_config.target == 'all' or service_config.target == 'scheduler')"
+    tool: systemctl_stop
+    args:
+      unit: "aa-workflow-scheduler.service"
+    output: action_scheduler_raw
+    on_error: continue
+
+  # --- RESTART actions ---
+  - name: restart_mcp
+    description: "Restart MCP service"
+    condition: "inputs.action == 'restart' and (service_config.target == 'all' or service_config.target == 'mcp')"
+    tool: systemctl_restart
+    args:
+      unit: "aa-workflow-mcp.service"
+    output: action_mcp_raw
+    on_error: continue
+
+  - name: restart_slop
+    description: "Restart SLOP service"
+    condition: "inputs.action == 'restart' and (service_config.target == 'all' or service_config.target == 'slop')"
+    tool: systemctl_restart
+    args:
+      unit: "aa-workflow-slop.service"
+    output: action_slop_raw
+    on_error: continue
+
+  - name: restart_slack
+    description: "Restart Slack daemon"
+    condition: "inputs.action == 'restart' and (service_config.target == 'all' or service_config.target == 'slack')"
+    tool: systemctl_restart
+    args:
+      unit: "aa-workflow-slack.service"
+    output: action_slack_raw
+    on_error: continue
+
+  - name: restart_ollama
+    description: "Restart Ollama service"
+    condition: "inputs.action == 'restart' and (service_config.target == 'all' or service_config.target == 'ollama')"
+    tool: systemctl_restart
+    args:
+      unit: "ollama.service"
+    output: action_ollama_raw
+    on_error: continue
+
+  - name: restart_scheduler
+    description: "Restart scheduler service"
+    condition: "inputs.action == 'restart' and (service_config.target == 'all' or service_config.target == 'scheduler')"
+    tool: systemctl_restart
+    args:
+      unit: "aa-workflow-scheduler.service"
+    output: action_scheduler_raw
+    on_error: continue
+
+  # ==================== POST-ACTION STATUS ====================
+
+  - name: get_mcp_status
+    description: "Get MCP service status after action"
+    tool: systemctl_status
+    args:
+      unit: "aa-workflow-mcp.service"
+    output: mcp_status_raw
+    on_error: continue
+
+  - name: get_slop_status
+    description: "Get SLOP service status after action"
+    tool: systemctl_status
+    args:
+      unit: "aa-workflow-slop.service"
+    output: slop_status_raw
+    on_error: continue
+
+  - name: get_slack_status
+    description: "Get Slack daemon status after action"
+    tool: systemctl_status
+    args:
+      unit: "aa-workflow-slack.service"
+    output: slack_status_raw
+    on_error: continue
+
+  - name: get_mcp_logs
+    description: "Get recent MCP logs"
+    condition: "service_config.target in ['all', 'mcp']"
+    tool: journalctl_unit
+    args:
+      unit: "aa-workflow-mcp.service"
+      lines: 10
+    output: mcp_logs_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: parse_service_status
+    description: "Parse all service statuses into summary"
+    compute: |
+      services = []
+
+      for name, active_raw, status_raw in [
+          ("MCP", mcp_active_raw if 'mcp_active_raw' in dir() else None, mcp_status_raw if 'mcp_status_raw' in dir() else None),
+          ("SLOP", slop_active_raw if 'slop_active_raw' in dir() else None, slop_status_raw if 'slop_status_raw' in dir() else None),
+          ("Slack", slack_active_raw if 'slack_active_raw' in dir() else None, slack_status_raw if 'slack_status_raw' in dir() else None),
+      ]:
+          active_text = str(active_raw).strip().lower() if active_raw else "unknown"
+          is_active = "active" in active_text and "inactive" not in active_text
+          services.append({
+              "name": name,
+              "active": is_active,
+              "status": "running" if is_active else "stopped",
+          })
+
+      # Ollama
+      ollama_text = str(ollama_status_raw).lower() if 'ollama_status_raw' in dir() and ollama_status_raw else ""
+      ollama_running = "running" in ollama_text or "ok" in ollama_text
+      services.append({
+          "name": "Ollama",
+          "active": ollama_running,
+          "status": "running" if ollama_running else "stopped",
+      })
+
+      # Scheduler
+      sched_text = str(scheduler_status_raw).lower() if 'scheduler_status_raw' in dir() and scheduler_status_raw else ""
+      sched_running = "active" in sched_text or "running" in sched_text
+      services.append({
+          "name": "Scheduler",
+          "active": sched_running,
+          "status": "running" if sched_running else "stopped",
+      })
+
+      all_healthy = all(s["active"] for s in services)
+      running_count = sum(1 for s in services if s["active"])
+
+      result = {
+          "services": services,
+          "all_healthy": all_healthy,
+          "running_count": running_count,
+          "total_count": len(services),
+      }
+    output: service_summary
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_service_failures
+    description: "Detect failure patterns from service management"
+    compute: |
+      errors_detected = []
+
+      for name, raw in [
+          ("mcp", action_mcp_raw if 'action_mcp_raw' in dir() else None),
+          ("slop", action_slop_raw if 'action_slop_raw' in dir() else None),
+          ("slack", action_slack_raw if 'action_slack_raw' in dir() else None),
+          ("ollama", action_ollama_raw if 'action_ollama_raw' in dir() else None),
+      ]:
+          text = str(raw).lower() if raw else ""
+          if "failed" in text or "error" in text:
+              errors_detected.append({
+                  "tool": f"systemctl_{inputs.action}",
+                  "pattern": f"{name} service failed",
+                  "cause": f"Service {name} failed to {inputs.action}",
+                  "fix": f"Check journalctl_unit for {name} service logs"
+              })
+
+      result = errors_detected
+    output: service_errors_detected
+    on_error: continue
+
+  - name: learn_service_failure
+    description: "Learn from service action failures"
+    condition: "service_errors_detected and len(service_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "systemctl_{{ inputs.action }}"
+      error_pattern: "service failed to {{ inputs.action }}"
+      root_cause: "{{ service_errors_detected[0].cause if service_errors_detected else 'Unknown' }}"
+      fix_description: "{{ service_errors_detected[0].fix if service_errors_detected else 'Check service logs' }}"
+    output: service_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Managed local services: {{ inputs.action }} {{ inputs.service }}"
+      details: "Running: {{ service_summary.running_count }}/{{ service_summary.total_count }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Local Services: {{ inputs.action | upper }}
+
+      **Target:** {{ inputs.service }}
+      **Overall:** {{ "All healthy" if service_summary.all_healthy else "Some services have issues" }}
+
+      ---
+
+      ### Service Status
+
+      | Service | Status |
+      |---------|--------|
+      {% for svc in service_summary.services %}
+      | {{ svc.name }} | {{ "Running" if svc.active else "Stopped" }} |
+      {% endfor %}
+
+      **Running:** {{ service_summary.running_count }}/{{ service_summary.total_count }}
+
+      {% if cron_jobs_raw %}
+      ---
+
+      ### Scheduled Jobs
+
+      ```
+      {{ cron_jobs_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if mcp_logs_raw %}
+      ---
+
+      ### Recent MCP Logs
+
+      ```
+      {{ mcp_logs_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Check logs: `journalctl_unit(unit="aa-workflow-mcp.service", lines=50)`
+      - Restart all: `skill_run("manage_local_services", '{"action": "restart", "service": "all"}')`
+      - Investigate issues: `skill_run("investigate_service_issues", '{"service_name": "aa-workflow-mcp"}')`

@@ -1,0 +1,336 @@
+# Skill: Remote Host Diagnostics
+# Diagnose remote hosts via SSH and network scanning
+
+name: remote_host_diagnostics
+description: |
+  Diagnose remote host health via SSH, Ansible, and network scanning.
+
+  This skill handles:
+  - SSH connectivity testing
+  - Remote command execution
+  - Ansible fact gathering
+  - Network scanning and service discovery
+  - SSH configuration review
+  - Log retrieval from remote hosts
+
+  Uses: ssh_test, ssh_command, ssh_config_list, ssh_known_hosts_list,
+        ssh_add_list, ssh_fingerprint, ansible_setup, ansible_command,
+        ansible_shell, ansible_fetch, nmap_ping_scan, nmap_service_scan
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - vm_lab_setup
+    - ansible_configure_vm
+  validated_by: []
+  chains_to:
+    - ansible_configure_vm
+    - vm_lab_setup
+  provides_context_for:
+    - ansible_configure_vm
+
+inputs:
+  - name: host
+    type: string
+    required: true
+    description: "Target host to diagnose"
+
+  - name: user
+    type: string
+    required: false
+    default: ""
+    description: "SSH username"
+
+  - name: commands
+    type: string
+    required: false
+    default: "hostname && uptime && free -h && df -h"
+    description: "Commands to run on the remote host"
+
+  - name: gather_facts
+    type: boolean
+    required: false
+    default: true
+    description: "Gather Ansible facts from the host"
+
+  - name: fetch_logs
+    type: boolean
+    required: false
+    default: false
+    description: "Fetch system logs from remote host"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for SSH and diagnostic tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_ssh_known_issues
+    description: "Check for known SSH issues"
+    compute: |
+      ssh_issues = memory.check_known_issues("ssh", "") or {}
+      nmap_issues = memory.check_known_issues("nmap", "") or {}
+
+      all_issues = []
+      for issues in [ssh_issues, nmap_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: ssh_known_issues
+    on_error: continue
+
+  # ==================== SSH CONFIGURATION ====================
+
+  - name: list_ssh_config
+    description: "List SSH configuration entries"
+    tool: ssh_config_list
+    args: {}
+    output: ssh_config_raw
+    on_error: continue
+
+  - name: list_known_hosts
+    description: "List SSH known hosts"
+    tool: ssh_known_hosts_list
+    args: {}
+    output: known_hosts_raw
+    on_error: continue
+
+  - name: list_ssh_agent
+    description: "List SSH agent keys"
+    tool: ssh_add_list
+    args: {}
+    output: ssh_agent_raw
+    on_error: continue
+
+  - name: get_host_fingerprint
+    description: "Get SSH fingerprint for target host"
+    tool: ssh_fingerprint
+    args:
+      host: "{{ inputs.host }}"
+    output: fingerprint_raw
+    on_error: continue
+
+  # ==================== CONNECTIVITY ====================
+
+  - name: test_ssh
+    description: "Test SSH connectivity to host"
+    tool: ssh_test
+    args:
+      host: "{{ inputs.host }}"
+    output: ssh_test_raw
+    on_error: continue
+
+  - name: run_ssh_commands
+    description: "Execute diagnostic commands via SSH"
+    tool: ssh_command
+    args:
+      host: "{{ inputs.host }}"
+      command: "{{ inputs.commands }}"
+    output: ssh_cmd_raw
+    on_error: continue
+
+  # ==================== ANSIBLE DIAGNOSTICS ====================
+
+  - name: gather_ansible_facts
+    description: "Gather system facts via Ansible"
+    condition: "inputs.gather_facts"
+    tool: ansible_setup
+    args:
+      host: "{{ inputs.host }}"
+    output: ansible_facts_raw
+    on_error: continue
+
+  - name: run_ansible_command
+    description: "Run diagnostic command via Ansible"
+    tool: ansible_command
+    args:
+      host: "{{ inputs.host }}"
+      command: "uname -a"
+    output: ansible_cmd_raw
+    on_error: continue
+
+  - name: run_ansible_shell
+    description: "Run shell diagnostics via Ansible"
+    tool: ansible_shell
+    args:
+      host: "{{ inputs.host }}"
+      command: "systemctl list-units --failed --no-pager; journalctl -p err --since '1 hour ago' --no-pager | tail -20"
+    output: ansible_shell_raw
+    on_error: continue
+
+  - name: fetch_remote_logs
+    description: "Fetch system logs from remote host"
+    condition: "inputs.fetch_logs"
+    tool: ansible_fetch
+    args:
+      host: "{{ inputs.host }}"
+      src: "/var/log/syslog"
+      dest: "/tmp/remote_logs/"
+    output: fetch_logs_raw
+    on_error: continue
+
+  # ==================== NETWORK SCANNING ====================
+
+  - name: ping_scan
+    description: "Ping scan the host subnet"
+    tool: nmap_ping_scan
+    args:
+      target: "{{ inputs.host }}"
+    output: ping_scan_raw
+    on_error: continue
+
+  - name: service_scan
+    description: "Scan for running services on host"
+    tool: nmap_service_scan
+    args:
+      target: "{{ inputs.host }}"
+    output: service_scan_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_ssh_failures
+    description: "Detect failure patterns from SSH operations"
+    compute: |
+      errors_detected = []
+
+      test_text = str(ssh_test_raw) if 'ssh_test_raw' in dir() and ssh_test_raw else ""
+      cmd_text = str(ssh_cmd_raw) if 'ssh_cmd_raw' in dir() and ssh_cmd_raw else ""
+      combined = test_text + cmd_text
+
+      if "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": "ssh_test",
+              "pattern": "connection refused",
+              "cause": "SSH service not running on target host",
+              "fix": "Ensure sshd is running on the target host"
+          })
+      if "no route to host" in combined.lower():
+          errors_detected.append({
+              "tool": "ssh_test",
+              "pattern": "no route to host",
+              "cause": "Host is unreachable - network issue or host is down",
+              "fix": "Check network connectivity and verify host is powered on"
+          })
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "ssh_command",
+              "pattern": "permission denied",
+              "cause": "SSH authentication failed",
+              "fix": "Check SSH key is authorized or provide correct credentials"
+          })
+      if "host key verification failed" in combined.lower():
+          errors_detected.append({
+              "tool": "ssh_test",
+              "pattern": "host key verification",
+              "cause": "Host key has changed or is not in known_hosts",
+              "fix": "Remove old host key: ssh-keygen -R <host> and re-scan"
+          })
+
+      result = errors_detected
+    output: ssh_errors_detected
+    on_error: continue
+
+  - name: learn_ssh_connection_failure
+    description: "Learn from SSH connection failures"
+    condition: "ssh_errors_detected and any(e.get('pattern') == 'connection refused' for e in ssh_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "ssh_test"
+      error_pattern: "connection refused"
+      root_cause: "SSH service not running on target host"
+      fix_description: "Ensure sshd is running on the target: sudo systemctl start sshd"
+    output: ssh_connection_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Remote host diagnostics"
+      details: "host={{ inputs.host }}, user={{ inputs.user }}, gather_facts={{ inputs.gather_facts }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Remote Host Diagnostics: {{ inputs.host }}
+
+      {% if inputs.user %}
+      **User:** {{ inputs.user }}
+      {% endif %}
+
+      ---
+
+      ### SSH Connectivity
+      {{ ssh_test_raw | string | truncate(200) if ssh_test_raw else "SSH test failed" }}
+
+      ### SSH Fingerprint
+      ```
+      {{ fingerprint_raw | string | truncate(200) if fingerprint_raw else "N/A" }}
+      ```
+
+      ### SSH Agent Keys
+      ```
+      {{ ssh_agent_raw | string | truncate(200) if ssh_agent_raw else "No keys loaded" }}
+      ```
+
+      ---
+
+      ### Remote Command Output
+      ```
+      {{ ssh_cmd_raw | string | truncate(800) if ssh_cmd_raw else "Could not execute commands" }}
+      ```
+
+      ---
+
+      ### Ansible Diagnostics
+      - Command: {{ ansible_cmd_raw | string | truncate(200) if ansible_cmd_raw else "N/A" }}
+      - Shell: {{ ansible_shell_raw | string | truncate(400) if ansible_shell_raw else "N/A" }}
+
+      {% if ansible_facts_raw %}
+      ### System Facts
+      ```
+      {{ ansible_facts_raw | string | truncate(600) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Network Scan
+      **Ping:**
+      ```
+      {{ ping_scan_raw | string | truncate(300) if ping_scan_raw else "N/A" }}
+      ```
+
+      **Services:**
+      ```
+      {{ service_scan_raw | string | truncate(400) if service_scan_raw else "N/A" }}
+      ```
+
+      {% if ssh_known_issues and ssh_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in ssh_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      host: "{{ inputs.host }}"
+      ssh_reachable: "{{ 'success' in (ssh_test_raw | string | lower) if ssh_test_raw else false }}"

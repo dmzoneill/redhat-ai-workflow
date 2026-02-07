@@ -1,0 +1,423 @@
+# Skill: Ansible Configure VM
+# Configure VMs with Ansible playbooks
+
+name: ansible_configure_vm
+description: |
+  Configure virtual machines using Ansible playbooks and ad-hoc commands.
+
+  This skill handles:
+  - Running Ansible playbooks against VMs
+  - Installing Galaxy roles/collections
+  - Ad-hoc module execution
+  - Inventory and host management
+  - Dry-run with check mode
+
+  Uses: ansible_inventory_list, ansible_inventory_graph, ansible_inventory_host,
+        ansible_ping, ansible_setup, ansible_playbook_check, ansible_playbook_run,
+        ansible_playbook_list_tasks, ansible_playbook_list_tags,
+        ansible_galaxy_search, ansible_galaxy_install, ansible_galaxy_list,
+        ansible_galaxy_remove, ansible_config_dump, ansible_version,
+        ansible_command, ansible_shell, ansible_copy, ansible_fetch, ssh_test
+version: "1.0"
+
+links:
+  depends_on:
+    - vm_lab_setup
+  validates:
+    - vm_lab_setup
+  validated_by:
+    - remote_host_diagnostics
+  chains_to:
+    - remote_host_diagnostics
+    - manage_secrets
+  provides_context_for:
+    - remote_host_diagnostics
+
+inputs:
+  - name: playbook
+    type: string
+    required: false
+    default: ""
+    description: "Path to Ansible playbook to run"
+
+  - name: inventory
+    type: string
+    required: false
+    default: "inventory.yaml"
+    description: "Path to inventory file"
+
+  - name: hosts
+    type: string
+    required: false
+    default: "all"
+    description: "Target hosts or group pattern"
+
+  - name: tags
+    type: string
+    required: false
+    default: ""
+    description: "Ansible tags to run"
+
+  - name: check_mode
+    type: boolean
+    required: false
+    default: false
+    description: "Run in check (dry-run) mode"
+
+  - name: install_requirements
+    type: boolean
+    required: false
+    default: false
+    description: "Install Galaxy requirements before running"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for Ansible tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_ansible_known_issues
+    description: "Check for known Ansible issues"
+    compute: |
+      ansible_issues = memory.check_known_issues("ansible", "") or {}
+      playbook_issues = memory.check_known_issues("ansible_playbook", "") or {}
+
+      all_issues = []
+      for issues in [ansible_issues, playbook_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: ansible_known_issues
+    on_error: continue
+
+  # ==================== ENVIRONMENT CHECK ====================
+
+  - name: get_ansible_version
+    description: "Check Ansible version"
+    tool: ansible_version
+    args: {}
+    output: ansible_version_raw
+    on_error: continue
+
+  - name: get_ansible_config
+    description: "Dump Ansible configuration"
+    tool: ansible_config_dump
+    args: {}
+    output: ansible_config_raw
+    on_error: continue
+
+  # ==================== INVENTORY ====================
+
+  - name: list_inventory
+    description: "List inventory hosts"
+    tool: ansible_inventory_list
+    args:
+      inventory: "{{ inputs.inventory }}"
+    output: inventory_list_raw
+    on_error: continue
+
+  - name: graph_inventory
+    description: "Show inventory graph"
+    tool: ansible_inventory_graph
+    args:
+      inventory: "{{ inputs.inventory }}"
+    output: inventory_graph_raw
+    on_error: continue
+
+  - name: get_host_vars
+    description: "Get host variables for target"
+    tool: ansible_inventory_host
+    args:
+      inventory: "{{ inputs.inventory }}"
+      host: "{{ inputs.hosts }}"
+    output: host_vars_raw
+    on_error: continue
+
+  # ==================== CONNECTIVITY ====================
+
+  - name: ssh_test_hosts
+    description: "Test SSH connectivity to target hosts"
+    tool: ssh_test
+    args:
+      host: "{{ inputs.hosts }}"
+    output: ssh_test_raw
+    on_error: continue
+
+  - name: ansible_ping_hosts
+    description: "Ping target hosts with Ansible"
+    tool: ansible_ping
+    args:
+      host: "{{ inputs.hosts }}"
+      inventory: "{{ inputs.inventory }}"
+    output: ping_result_raw
+    on_error: continue
+
+  - name: gather_facts
+    description: "Gather facts from target hosts"
+    tool: ansible_setup
+    args:
+      host: "{{ inputs.hosts }}"
+      inventory: "{{ inputs.inventory }}"
+    output: facts_raw
+    on_error: continue
+
+  # ==================== GALAXY REQUIREMENTS ====================
+
+  - name: list_galaxy_roles
+    description: "List installed Galaxy roles"
+    tool: ansible_galaxy_list
+    args: {}
+    output: galaxy_list_raw
+    on_error: continue
+
+  - name: search_galaxy
+    description: "Search Galaxy for relevant roles"
+    condition: "inputs.install_requirements"
+    tool: ansible_galaxy_search
+    args:
+      query: "{{ inputs.playbook }}"
+    output: galaxy_search_raw
+    on_error: continue
+
+  - name: install_galaxy_requirements
+    description: "Install Galaxy requirements"
+    condition: "inputs.install_requirements"
+    tool: ansible_galaxy_install
+    args:
+      requirements: "requirements.yaml"
+    output: galaxy_install_raw
+    on_error: continue
+
+  - name: remove_galaxy_role
+    description: "Remove Galaxy role (placeholder for cleanup)"
+    condition: "false"
+    tool: ansible_galaxy_remove
+    args:
+      role: "placeholder"
+    output: galaxy_remove_raw
+    on_error: continue
+
+  # ==================== PLAYBOOK OPERATIONS ====================
+
+  - name: list_playbook_tasks
+    description: "List tasks in the playbook"
+    condition: "inputs.playbook"
+    tool: ansible_playbook_list_tasks
+    args:
+      playbook: "{{ inputs.playbook }}"
+      inventory: "{{ inputs.inventory }}"
+    output: tasks_list_raw
+    on_error: continue
+
+  - name: list_playbook_tags
+    description: "List tags in the playbook"
+    condition: "inputs.playbook"
+    tool: ansible_playbook_list_tags
+    args:
+      playbook: "{{ inputs.playbook }}"
+      inventory: "{{ inputs.inventory }}"
+    output: tags_list_raw
+    on_error: continue
+
+  - name: check_playbook
+    description: "Dry-run playbook in check mode"
+    condition: "inputs.playbook and inputs.check_mode"
+    tool: ansible_playbook_check
+    args:
+      playbook: "{{ inputs.playbook }}"
+      inventory: "{{ inputs.inventory }}"
+      limit: "{{ inputs.hosts }}"
+      tags: "{{ inputs.tags }}"
+    output: check_result_raw
+    on_error: continue
+
+  - name: run_playbook
+    description: "Execute playbook"
+    condition: "inputs.playbook and not inputs.check_mode"
+    tool: ansible_playbook_run
+    args:
+      playbook: "{{ inputs.playbook }}"
+      inventory: "{{ inputs.inventory }}"
+      limit: "{{ inputs.hosts }}"
+      tags: "{{ inputs.tags }}"
+    output: run_result_raw
+    on_error: continue
+
+  # ==================== AD-HOC MODULES ====================
+
+  - name: run_command
+    description: "Run ad-hoc command module"
+    condition: "not inputs.playbook"
+    tool: ansible_command
+    args:
+      host: "{{ inputs.hosts }}"
+      inventory: "{{ inputs.inventory }}"
+      command: "hostname"
+    output: command_result_raw
+    on_error: continue
+
+  - name: run_shell
+    description: "Run ad-hoc shell module"
+    condition: "not inputs.playbook"
+    tool: ansible_shell
+    args:
+      host: "{{ inputs.hosts }}"
+      inventory: "{{ inputs.inventory }}"
+      command: "uptime && free -h"
+    output: shell_result_raw
+    on_error: continue
+
+  - name: copy_file
+    description: "Copy file to remote (placeholder)"
+    condition: "false"
+    tool: ansible_copy
+    args:
+      host: "{{ inputs.hosts }}"
+      src: "/tmp/placeholder"
+      dest: "/tmp/placeholder"
+    output: copy_result_raw
+    on_error: continue
+
+  - name: fetch_file
+    description: "Fetch file from remote (placeholder)"
+    condition: "false"
+    tool: ansible_fetch
+    args:
+      host: "{{ inputs.hosts }}"
+      src: "/tmp/placeholder"
+      dest: "/tmp/placeholder"
+    output: fetch_result_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_ansible_failures
+    description: "Detect failure patterns from Ansible operations"
+    compute: |
+      errors_detected = []
+
+      ping_text = str(ping_result_raw) if 'ping_result_raw' in dir() and ping_result_raw else ""
+      run_text = str(run_result_raw) if 'run_result_raw' in dir() and run_result_raw else ""
+      combined = ping_text + run_text
+
+      if "unreachable" in combined.lower():
+          errors_detected.append({
+              "tool": "ansible_ping",
+              "pattern": "unreachable",
+              "cause": "Host is not reachable via SSH",
+              "fix": "Check SSH connectivity and ensure host is running"
+          })
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "ansible_playbook",
+              "pattern": "permission denied",
+              "cause": "SSH key or sudo password not configured",
+              "fix": "Ensure SSH key is authorized or provide become password"
+          })
+      if "no such file" in combined.lower() and "playbook" in combined.lower():
+          errors_detected.append({
+              "tool": "ansible_playbook",
+              "pattern": "playbook not found",
+              "cause": "Playbook file path is incorrect",
+              "fix": "Verify the playbook path exists"
+          })
+
+      result = errors_detected
+    output: ansible_errors_detected
+    on_error: continue
+
+  - name: learn_ansible_unreachable
+    description: "Learn from Ansible unreachable failures"
+    condition: "ansible_errors_detected and any(e.get('pattern') == 'unreachable' for e in ansible_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "ansible_ping"
+      error_pattern: "unreachable"
+      root_cause: "Host is not reachable via SSH"
+      fix_description: "Check SSH connectivity, ensure host is running, and verify inventory"
+    output: ansible_unreachable_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Ansible configure VM"
+      details: "playbook={{ inputs.playbook }}, hosts={{ inputs.hosts }}, check_mode={{ inputs.check_mode }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Ansible Configure VM
+
+      **Playbook:** {{ inputs.playbook if inputs.playbook else "Ad-hoc commands" }}
+      **Hosts:** {{ inputs.hosts }}
+      **Inventory:** {{ inputs.inventory }}
+      **Check Mode:** {{ inputs.check_mode }}
+
+      ---
+
+      ### Ansible Version
+      ```
+      {{ ansible_version_raw | string | truncate(200) if ansible_version_raw else "N/A" }}
+      ```
+
+      ### Inventory
+      ```
+      {{ inventory_graph_raw | string | truncate(400) if inventory_graph_raw else "N/A" }}
+      ```
+
+      ### Connectivity
+      - SSH: {{ ssh_test_raw | string | truncate(100) if ssh_test_raw else "Not tested" }}
+      - Ping: {{ ping_result_raw | string | truncate(100) if ping_result_raw else "Not tested" }}
+
+      ### Galaxy Roles
+      ```
+      {{ galaxy_list_raw | string | truncate(300) if galaxy_list_raw else "N/A" }}
+      ```
+
+      {% if inputs.playbook %}
+      ### Playbook Tasks
+      ```
+      {{ tasks_list_raw | string | truncate(500) if tasks_list_raw else "N/A" }}
+      ```
+
+      ### Execution Result
+      ```
+      {{ (check_result_raw if inputs.check_mode else run_result_raw) | string | truncate(800) if (check_result_raw if inputs.check_mode else run_result_raw) else "Not executed" }}
+      ```
+      {% else %}
+      ### Ad-hoc Results
+      ```
+      {{ command_result_raw | string | truncate(400) if command_result_raw else "N/A" }}
+      {{ shell_result_raw | string | truncate(400) if shell_result_raw else "N/A" }}
+      ```
+      {% endif %}
+
+      {% if ansible_known_issues and ansible_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in ansible_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      playbook: "{{ inputs.playbook }}"
+      hosts: "{{ inputs.hosts }}"
+      check_mode: "{{ inputs.check_mode }}"

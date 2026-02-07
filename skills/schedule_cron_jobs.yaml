@@ -1,0 +1,300 @@
+# Skill: Schedule Cron Jobs
+# Manage scheduled automation jobs
+
+name: schedule_cron_jobs
+description: |
+  Manage scheduled automation jobs for the workflow system.
+
+  Supports:
+  - List all scheduled jobs
+  - Add new cron jobs (skill-based or command-based)
+  - Remove existing jobs
+  - Enable/disable jobs
+  - Run jobs immediately
+  - View job history and status
+
+  Uses: cron_list, cron_add, cron_remove, cron_enable, cron_run_now,
+        cron_status, cron_notifications, systemctl_status, systemctl_restart,
+        journalctl_unit
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - manage_local_services
+  provides_context_for:
+    - manage_local_services
+    - standup_summary
+  validated_by:
+    - manage_local_services
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    enum: ["list", "add", "remove", "enable", "disable", "run", "status"]
+    description: "Action to perform"
+
+  - name: job_name
+    type: string
+    required: false
+    default: ""
+    description: "Name of the cron job (required for add/remove/enable/disable/run)"
+
+  - name: schedule
+    type: string
+    required: false
+    default: ""
+    description: "Cron schedule expression (required for add, e.g., '0 9 * * *' for 9am daily)"
+
+  - name: skill_name
+    type: string
+    required: false
+    default: ""
+    description: "Skill to run on schedule (required for add)"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for cron tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== CHECK SCHEDULER STATUS ====================
+
+  - name: get_scheduler_status
+    description: "Check scheduler service status"
+    tool: systemctl_status
+    args:
+      unit: "aa-workflow-scheduler.service"
+    output: scheduler_status_raw
+    on_error: continue
+
+  - name: get_cron_status
+    description: "Get overall cron system status"
+    tool: cron_status
+    args: {}
+    output: cron_status_raw
+    on_error: continue
+
+  # ==================== LIST JOBS ====================
+
+  - name: list_all_jobs
+    description: "List all scheduled cron jobs"
+    tool: cron_list
+    args: {}
+    output: cron_list_raw
+    on_error: continue
+
+  # ==================== PERFORM ACTION ====================
+
+  - name: add_job
+    description: "Add a new cron job"
+    condition: "inputs.action == 'add' and inputs.job_name and inputs.schedule"
+    tool: cron_add
+    args:
+      name: "{{ inputs.job_name }}"
+      schedule: "{{ inputs.schedule }}"
+      skill: "{{ inputs.skill_name }}"
+    output: add_result_raw
+    on_error: continue
+
+  - name: remove_job
+    description: "Remove a cron job"
+    condition: "inputs.action == 'remove' and inputs.job_name"
+    tool: cron_remove
+    args:
+      name: "{{ inputs.job_name }}"
+    output: remove_result_raw
+    on_error: continue
+
+  - name: enable_job
+    description: "Enable a cron job"
+    condition: "inputs.action == 'enable' and inputs.job_name"
+    tool: cron_enable
+    args:
+      name: "{{ inputs.job_name }}"
+      enabled: true
+    output: enable_result_raw
+    on_error: continue
+
+  - name: disable_job
+    description: "Disable a cron job"
+    condition: "inputs.action == 'disable' and inputs.job_name"
+    tool: cron_enable
+    args:
+      name: "{{ inputs.job_name }}"
+      enabled: false
+    output: disable_result_raw
+    on_error: continue
+
+  - name: run_job_now
+    description: "Run a cron job immediately"
+    condition: "inputs.action == 'run' and inputs.job_name"
+    tool: cron_run_now
+    args:
+      name: "{{ inputs.job_name }}"
+    output: run_result_raw
+    on_error: continue
+
+  # ==================== GET JOB HISTORY ====================
+
+  - name: get_job_notifications
+    description: "Get recent job notification history"
+    condition: "inputs.action in ['status', 'run']"
+    tool: cron_notifications
+    args: {}
+    output: history_raw
+    on_error: continue
+
+  - name: get_scheduler_logs
+    description: "Get recent scheduler logs"
+    condition: "inputs.action == 'status'"
+    tool: journalctl_unit
+    args:
+      unit: "aa-workflow-scheduler.service"
+      lines: 20
+    output: scheduler_logs_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: parse_cron_results
+    description: "Parse cron operation results"
+    compute: |
+      list_text = str(cron_list_raw) if 'cron_list_raw' in dir() and cron_list_raw else ""
+      status_text = str(cron_status_raw) if 'cron_status_raw' in dir() and cron_status_raw else ""
+
+      # Count jobs
+      import re
+      job_lines = [l for l in list_text.split("\n") if l.strip() and not l.strip().startswith("#")]
+      job_count = len(job_lines)
+
+      # Action result
+      action_result = ""
+      if inputs.action == "add":
+          action_result = str(add_result_raw) if 'add_result_raw' in dir() and add_result_raw else "No result"
+      elif inputs.action == "remove":
+          action_result = str(remove_result_raw) if 'remove_result_raw' in dir() and remove_result_raw else "No result"
+      elif inputs.action == "enable":
+          action_result = str(enable_result_raw) if 'enable_result_raw' in dir() and enable_result_raw else "No result"
+      elif inputs.action == "disable":
+          action_result = str(disable_result_raw) if 'disable_result_raw' in dir() and disable_result_raw else "No result"
+      elif inputs.action == "run":
+          action_result = str(run_result_raw) if 'run_result_raw' in dir() and run_result_raw else "No result"
+
+      scheduler_active = "active" in status_text.lower() and "inactive" not in status_text.lower()
+
+      result = {
+          "job_count": job_count,
+          "scheduler_active": scheduler_active,
+          "action_result": action_result[:500],
+          "jobs_preview": list_text[:800] if list_text else "",
+      }
+    output: cron_summary
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_cron_failures
+    description: "Detect failure patterns from cron operations"
+    compute: |
+      errors_detected = []
+
+      for name, raw in [
+          ("cron_add", add_result_raw if 'add_result_raw' in dir() else None),
+          ("cron_remove", remove_result_raw if 'remove_result_raw' in dir() else None),
+          ("cron_run_now", run_result_raw if 'run_result_raw' in dir() else None),
+      ]:
+          text = str(raw).lower() if raw else ""
+          if "error" in text or "failed" in text or "not found" in text:
+              errors_detected.append({
+                  "tool": name,
+                  "pattern": "cron operation failed",
+                  "cause": f"Cron {name} operation failed",
+                  "fix": "Check scheduler status and logs with journalctl_unit"
+              })
+
+      result = errors_detected
+    output: cron_errors_detected
+    on_error: continue
+
+  - name: learn_cron_failure
+    description: "Learn from cron operation failures"
+    condition: "cron_errors_detected and len(cron_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ cron_errors_detected[0].tool if cron_errors_detected else 'cron_add' }}"
+      error_pattern: "cron operation failed"
+      root_cause: "{{ cron_errors_detected[0].cause if cron_errors_detected else 'Unknown' }}"
+      fix_description: "{{ cron_errors_detected[0].fix if cron_errors_detected else 'Check scheduler logs' }}"
+    output: cron_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Managed cron jobs: {{ inputs.action }}"
+      details: "Job: {{ inputs.job_name or 'all' }}, Total jobs: {{ cron_summary.job_count }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Cron Job Management: {{ inputs.action | upper }}
+
+      **Scheduler:** {{ "Active" if cron_summary.scheduler_active else "Inactive" }}
+      **Total Jobs:** {{ cron_summary.job_count }}
+
+      {% if inputs.action != 'list' and inputs.action != 'status' %}
+      ---
+
+      ### Action Result
+
+      **Action:** {{ inputs.action }} {{ inputs.job_name }}
+      {% if inputs.schedule %}**Schedule:** {{ inputs.schedule }}{% endif %}
+      {% if inputs.skill_name %}**Skill:** {{ inputs.skill_name }}{% endif %}
+
+      ```
+      {{ cron_summary.action_result }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Scheduled Jobs
+
+      ```
+      {{ cron_summary.jobs_preview if cron_summary.jobs_preview else "No jobs configured" }}
+      ```
+
+      {% if history_raw %}
+      ---
+
+      ### Recent Execution History
+
+      ```
+      {{ history_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if scheduler_logs_raw %}
+      ---
+
+      ### Scheduler Logs
+
+      ```
+      {{ scheduler_logs_raw | string | truncate(400) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Add job: `skill_run("schedule_cron_jobs", '{"action": "add", "job_name": "my-job", "schedule": "0 9 * * *", "skill_name": "standup_summary"}')`
+      - Run now: `skill_run("schedule_cron_jobs", '{"action": "run", "job_name": "my-job"}')`
+      - Remove: `skill_run("schedule_cron_jobs", '{"action": "remove", "job_name": "my-job"}')`

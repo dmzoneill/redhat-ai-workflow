@@ -1,0 +1,348 @@
+# Skill: VM Snapshot Workflow
+# VM snapshot lifecycle management
+
+name: vm_snapshot_workflow
+description: |
+  Manage VM snapshot lifecycle including creation, revert, and cleanup.
+
+  This skill handles:
+  - Creating named snapshots of running VMs
+  - Listing and inspecting existing snapshots
+  - Reverting VMs to previous snapshots
+  - Cleaning up old snapshots
+  - Suspending/resuming VMs for consistent snapshots
+  - Managing storage volumes
+
+  Uses: virsh_list, virsh_domstate, virsh_dominfo, virsh_snapshot_create,
+        virsh_snapshot_list, virsh_snapshot_revert, virsh_snapshot_delete,
+        virsh_suspend, virsh_resume, virsh_vol_list, virsh_vol_resize,
+        virsh_vol_delete, virsh_pool_info, virsh_vcpuinfo, virsh_memtune
+version: "1.0"
+
+links:
+  depends_on:
+    - vm_lab_setup
+  validates:
+    - vm_lab_setup
+  validated_by: []
+  chains_to:
+    - vm_lab_setup
+    - ansible_configure_vm
+  provides_context_for:
+    - vm_lab_setup
+
+inputs:
+  - name: vm_name
+    type: string
+    required: true
+    description: "Name of the virtual machine"
+
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (create|revert|commit|list|cleanup)"
+
+  - name: snapshot_name
+    type: string
+    required: false
+    default: ""
+    description: "Name of the snapshot"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for VM snapshot tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_snapshot_known_issues
+    description: "Check for known snapshot issues"
+    compute: |
+      virsh_issues = memory.check_known_issues("virsh_snapshot", "") or {}
+      vol_issues = memory.check_known_issues("virsh_vol", "") or {}
+
+      all_issues = []
+      for issues in [virsh_issues, vol_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: snapshot_known_issues
+    on_error: continue
+
+  # ==================== VM STATUS ====================
+
+  - name: list_vms
+    description: "List all VMs"
+    tool: virsh_list
+    args: {}
+    output: vm_list_raw
+    on_error: continue
+
+  - name: get_vm_state
+    description: "Get current VM state"
+    tool: virsh_domstate
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_state_raw
+    on_error: continue
+
+  - name: get_vm_info
+    description: "Get VM details"
+    tool: virsh_dominfo
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_info_raw
+    on_error: continue
+
+  - name: get_vm_vcpu
+    description: "Get VM vCPU info"
+    tool: virsh_vcpuinfo
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_vcpu_raw
+    on_error: continue
+
+  - name: get_vm_memory
+    description: "Get VM memory tuning"
+    tool: virsh_memtune
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_memtune_raw
+    on_error: continue
+
+  # ==================== SNAPSHOT OPERATIONS ====================
+
+  - name: list_snapshots
+    description: "List existing snapshots"
+    tool: virsh_snapshot_list
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: snapshot_list_raw
+    on_error: continue
+
+  - name: suspend_for_snapshot
+    description: "Suspend VM for consistent snapshot"
+    condition: "inputs.action == 'create'"
+    tool: virsh_suspend
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: suspend_raw
+    on_error: continue
+
+  - name: create_snapshot
+    description: "Create a new snapshot"
+    condition: "inputs.action == 'create'"
+    tool: virsh_snapshot_create
+    args:
+      domain: "{{ inputs.vm_name }}"
+      name: "{{ inputs.snapshot_name }}"
+    output: snapshot_create_raw
+    on_error: continue
+
+  - name: resume_after_snapshot
+    description: "Resume VM after snapshot"
+    condition: "inputs.action == 'create'"
+    tool: virsh_resume
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: resume_raw
+    on_error: continue
+
+  - name: revert_snapshot
+    description: "Revert to a snapshot"
+    condition: "inputs.action == 'revert' and inputs.snapshot_name"
+    tool: virsh_snapshot_revert
+    args:
+      domain: "{{ inputs.vm_name }}"
+      snapshot: "{{ inputs.snapshot_name }}"
+    output: snapshot_revert_raw
+    on_error: continue
+
+  - name: delete_snapshot
+    description: "Delete a snapshot"
+    condition: "inputs.action == 'cleanup' and inputs.snapshot_name"
+    tool: virsh_snapshot_delete
+    args:
+      domain: "{{ inputs.vm_name }}"
+      snapshot: "{{ inputs.snapshot_name }}"
+    output: snapshot_delete_raw
+    on_error: continue
+
+  # ==================== STORAGE ====================
+
+  - name: get_pool_info
+    description: "Get storage pool info"
+    tool: virsh_pool_info
+    args:
+      pool: "default"
+    output: pool_info_raw
+    on_error: continue
+
+  - name: list_volumes
+    description: "List storage volumes"
+    tool: virsh_vol_list
+    args:
+      pool: "default"
+    output: vol_list_raw
+    on_error: continue
+
+  - name: resize_volume
+    description: "Resize a storage volume"
+    condition: "inputs.action == 'commit'"
+    tool: virsh_vol_resize
+    args:
+      pool: "default"
+      volume: "{{ inputs.vm_name }}.qcow2"
+    output: vol_resize_raw
+    on_error: continue
+
+  - name: delete_old_volume
+    description: "Delete old volume during cleanup"
+    condition: "inputs.action == 'cleanup'"
+    tool: virsh_vol_delete
+    args:
+      pool: "default"
+      volume: "{{ inputs.vm_name }}-old.qcow2"
+    output: vol_delete_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_snapshot_failures
+    description: "Detect failure patterns from snapshot operations"
+    compute: |
+      errors_detected = []
+
+      create_text = str(snapshot_create_raw) if 'snapshot_create_raw' in dir() and snapshot_create_raw else ""
+      revert_text = str(snapshot_revert_raw) if 'snapshot_revert_raw' in dir() and snapshot_revert_raw else ""
+      combined = create_text + revert_text
+
+      if "no space" in combined.lower() or "disk full" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_snapshot",
+              "pattern": "no space",
+              "cause": "Storage pool is out of space",
+              "fix": "Free up space in the storage pool or expand the pool"
+          })
+      if "not found" in combined.lower() and "snapshot" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_snapshot",
+              "pattern": "snapshot not found",
+              "cause": "Specified snapshot does not exist",
+              "fix": "List snapshots first to find valid snapshot names"
+          })
+      if "domain is not running" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_snapshot",
+              "pattern": "domain not running",
+              "cause": "VM must be running to create a snapshot",
+              "fix": "Start the VM first: virsh start <domain>"
+          })
+
+      result = errors_detected
+    output: snapshot_errors_detected
+    on_error: continue
+
+  - name: learn_snapshot_space_failure
+    description: "Learn from storage space failures"
+    condition: "snapshot_errors_detected and any(e.get('pattern') == 'no space' for e in snapshot_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "virsh_snapshot"
+      error_pattern: "no space"
+      root_cause: "Storage pool is out of space"
+      fix_description: "Free up space in the storage pool or expand with virsh pool-resize"
+    output: snapshot_space_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "VM snapshot workflow: {{ inputs.action }}"
+      details: "vm={{ inputs.vm_name }}, action={{ inputs.action }}, snapshot={{ inputs.snapshot_name }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## VM Snapshot Workflow: {{ inputs.vm_name }}
+
+      **Action:** {{ inputs.action }}
+      {% if inputs.snapshot_name %}
+      **Snapshot:** {{ inputs.snapshot_name }}
+      {% endif %}
+
+      ---
+
+      ### VM State
+      {{ vm_state_raw | string | truncate(100) if vm_state_raw else "Unknown" }}
+
+      ### VM Info
+      ```
+      {{ vm_info_raw | string | truncate(400) if vm_info_raw else "N/A" }}
+      ```
+
+      ---
+
+      ### Snapshots
+      ```
+      {{ snapshot_list_raw | string | truncate(400) if snapshot_list_raw else "No snapshots" }}
+      ```
+
+      {% if inputs.action == 'create' %}
+      ### Create Result
+      {{ snapshot_create_raw | string | truncate(200) if snapshot_create_raw else "N/A" }}
+      - Suspend: {{ suspend_raw | string | truncate(100) if suspend_raw else "N/A" }}
+      - Resume: {{ resume_raw | string | truncate(100) if resume_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'revert' %}
+      ### Revert Result
+      {{ snapshot_revert_raw | string | truncate(200) if snapshot_revert_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'cleanup' %}
+      ### Cleanup Result
+      - Snapshot Delete: {{ snapshot_delete_raw | string | truncate(200) if snapshot_delete_raw else "N/A" }}
+      - Volume Delete: {{ vol_delete_raw | string | truncate(200) if vol_delete_raw else "N/A" }}
+      {% endif %}
+
+      ---
+
+      ### Storage
+      **Pool Info:**
+      ```
+      {{ pool_info_raw | string | truncate(300) if pool_info_raw else "N/A" }}
+      ```
+
+      **Volumes:**
+      ```
+      {{ vol_list_raw | string | truncate(300) if vol_list_raw else "N/A" }}
+      ```
+
+      {% if snapshot_known_issues and snapshot_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in snapshot_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      vm_name: "{{ inputs.vm_name }}"
+      action: "{{ inputs.action }}"
+      snapshot_name: "{{ inputs.snapshot_name }}"

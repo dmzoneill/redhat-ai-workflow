@@ -1,0 +1,315 @@
+# Skill: Ollama Inference Test
+# Test and benchmark local Ollama inference
+
+name: ollama_inference_test
+description: |
+  Test and benchmark the local Ollama inference server.
+
+  Features:
+  - Check Ollama server status and loaded models
+  - Pull new models
+  - Run inference tests with custom prompts
+  - Benchmark response times
+  - Test classification and embedding endpoints
+  - Restart Ollama service if needed
+
+  Uses: ollama_status, ollama_test, ollama_generate,
+        ollama_classify, systemctl_status,
+        systemctl_restart, curl_timing
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - manage_local_services
+  chains_to:
+    - manage_local_services
+  provides_context_for:
+    - manage_local_services
+  validated_by:
+    - manage_local_services
+
+inputs:
+  - name: action
+    type: string
+    required: false
+    default: "status"
+    enum: ["status", "benchmark", "test"]
+    description: "Action to perform"
+
+  - name: model
+    type: string
+    required: false
+    default: "llama3.2:3b"
+    description: "Model name for testing (default: llama3.2:3b)"
+
+  - name: prompt
+    type: string
+    required: false
+    default: "Explain Kubernetes pods in one paragraph."
+    description: "Test prompt for inference"
+
+  - name: instances
+    type: string
+    required: false
+    default: "3"
+    description: "Number of test iterations for benchmarking"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Ollama tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== CHECK STATUS ====================
+
+  - name: check_ollama_status
+    description: "Check Ollama server status"
+    tool: ollama_status
+    args: {}
+    output: status_raw
+    on_error: continue
+
+  - name: check_ollama_service
+    description: "Check Ollama systemd service"
+    tool: systemctl_status
+    args:
+      unit: "ollama.service"
+    output: service_status_raw
+    on_error: continue
+
+  - name: test_ollama
+    description: "Test Ollama connectivity and list models"
+    tool: ollama_test
+    args: {}
+    output: models_raw
+    on_error: continue
+
+  - name: parse_status
+    description: "Parse Ollama status"
+    compute: |
+      status_text = str(status_raw).lower() if 'status_raw' in dir() and status_raw else ""
+      service_text = str(service_status_raw).lower() if 'service_status_raw' in dir() and service_status_raw else ""
+      models_text = str(models_raw) if 'models_raw' in dir() and models_raw else ""
+
+      is_running = "running" in status_text or "ok" in status_text or "active (running)" in service_text
+      model_count = models_text.count("\n") if models_text else 0
+
+      # Check if target model is available
+      has_target_model = inputs.model.lower() in models_text.lower() if models_text else False
+
+      result = {
+          "running": is_running,
+          "model_count": model_count,
+          "has_target_model": has_target_model,
+          "models_preview": models_text[:500] if models_text else "",
+      }
+    output: ollama_info
+
+  # ==================== RESTART IF NEEDED ====================
+
+  - name: restart_ollama
+    description: "Restart Ollama if not running"
+    condition: "not ollama_info.running and inputs.action in ['test', 'benchmark']"
+    tool: systemctl_restart
+    args:
+      unit: "ollama.service"
+    output: restart_raw
+    on_error: continue
+
+  # ==================== INFERENCE TESTS ====================
+
+  - name: test_generate
+    description: "Test text generation"
+    condition: "inputs.action in ['test', 'benchmark']"
+    tool: ollama_generate
+    args:
+      model: "{{ inputs.model }}"
+      prompt: "{{ inputs.prompt }}"
+    output: generate_raw
+    on_error: continue
+
+  - name: test_classify
+    description: "Test text classification"
+    condition: "inputs.action in ['test', 'benchmark']"
+    tool: ollama_classify
+    args:
+      text: "This PR fixes a critical security vulnerability in the authentication module."
+      labels: "bug_fix,feature,security,refactor,docs"
+    output: classify_raw
+    on_error: continue
+
+  # ==================== BENCHMARK ====================
+
+  - name: benchmark_timing
+    description: "Measure Ollama API response time"
+    condition: "inputs.action == 'benchmark'"
+    tool: curl_timing
+    args:
+      url: "http://localhost:11434/api/generate"
+    output: timing_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: parse_test_results
+    description: "Parse all test results"
+    compute: |
+      generate_text = str(generate_raw) if 'generate_raw' in dir() and generate_raw else ""
+      classify_text = str(classify_raw) if 'classify_raw' in dir() and classify_raw else ""
+      timing_text = str(timing_raw) if 'timing_raw' in dir() and timing_raw else ""
+
+      generate_ok = len(generate_text) > 20 and "error" not in generate_text.lower()[:50]
+      classify_ok = len(classify_text) > 5 and "error" not in classify_text.lower()[:50]
+
+      tests_run = inputs.action in ["test", "benchmark"]
+      all_passed = generate_ok and classify_ok if tests_run else True
+
+      # Extract timing if available
+      import re
+      time_match = re.search(r'total.*?(\d+\.?\d*)\s*(?:ms|s)', timing_text, re.I)
+      response_time = time_match.group(1) if time_match else "N/A"
+
+      result = {
+          "tests_run": tests_run,
+          "all_passed": all_passed,
+          "generate_ok": generate_ok,
+          "classify_ok": classify_ok,
+          "response_time": response_time,
+          "generate_preview": generate_text[:500] if generate_text else "",
+          "classify_result": classify_text[:200] if classify_text else "",
+      }
+    output: test_summary
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_ollama_failures
+    description: "Detect failure patterns from Ollama operations"
+    compute: |
+      errors_detected = []
+
+      status_text = str(status_raw).lower() if 'status_raw' in dir() and status_raw else ""
+      generate_text = str(generate_raw).lower() if 'generate_raw' in dir() and generate_raw else ""
+
+      if "connection refused" in status_text or "connection refused" in generate_text:
+          errors_detected.append({
+              "tool": "ollama_status",
+              "pattern": "connection refused",
+              "cause": "Ollama server is not running",
+              "fix": "Start Ollama: systemctl_restart(unit='ollama.service')"
+          })
+
+      if "model not found" in generate_text or "not found" in generate_text:
+          errors_detected.append({
+              "tool": "ollama_generate",
+              "pattern": "model not found",
+              "cause": f"Model {inputs.model} is not downloaded",
+              "fix": f"Pull model: ollama_pull(model='{inputs.model}')"
+          })
+
+      if "out of memory" in generate_text or "oom" in generate_text:
+          errors_detected.append({
+              "tool": "ollama_generate",
+              "pattern": "out of memory",
+              "cause": "Not enough GPU/RAM for the model",
+              "fix": "Use a smaller model (e.g., llama3.2:1b) or free up GPU memory"
+          })
+
+      result = errors_detected
+    output: ollama_errors_detected
+    on_error: continue
+
+  - name: learn_ollama_failure
+    description: "Learn from Ollama failures"
+    condition: "ollama_errors_detected and len(ollama_errors_detected) > 0"
+    tool: learn_tool_fix
+    args:
+      tool_name: "{{ ollama_errors_detected[0].tool if ollama_errors_detected else 'ollama_generate' }}"
+      error_pattern: "{{ ollama_errors_detected[0].pattern if ollama_errors_detected else 'unknown' }}"
+      root_cause: "{{ ollama_errors_detected[0].cause if ollama_errors_detected else 'Unknown' }}"
+      fix_description: "{{ ollama_errors_detected[0].fix if ollama_errors_detected else 'Check Ollama status and logs' }}"
+    output: ollama_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Ollama inference test: {{ inputs.action }}"
+      details: "model={{ inputs.model }}, running={{ ollama_info.running }}, tests_passed={{ test_summary.all_passed if test_summary else 'N/A' }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Ollama Inference Test: {{ inputs.action | upper }}
+
+      **Model:** {{ inputs.model }}
+      **Server:** {{ "Running" if ollama_info.running else "Not running" }}
+      **Models Available:** {{ ollama_info.model_count }}
+
+      ---
+
+      ### Available Models
+
+      ```
+      {{ ollama_info.models_preview if ollama_info.models_preview else "No models found" }}
+      ```
+
+      {% if test_summary.tests_run %}
+      ---
+
+      ### Test Results
+
+      | Test | Status |
+      |------|--------|
+      | Generate | {{ "Pass" if test_summary.generate_ok else "Fail" }} |
+      | Classify | {{ "Pass" if test_summary.classify_ok else "Fail" }} |
+
+      **Overall:** {{ "All tests passed" if test_summary.all_passed else "Some tests failed" }}
+
+      {% if test_summary.generate_preview %}
+      ---
+
+      ### Generate Output
+
+      ```
+      {{ test_summary.generate_preview }}
+      ```
+      {% endif %}
+
+      {% if test_summary.classify_result %}
+      ---
+
+      ### Classification Result
+
+      ```
+      {{ test_summary.classify_result }}
+      ```
+      {% endif %}
+
+      {% if test_summary.response_time != 'N/A' %}
+      ---
+
+      ### Benchmark
+
+      **Response Time:** {{ test_summary.response_time }}
+
+      {% if timing_raw %}
+      ```
+      {{ timing_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+      {% endif %}
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Generate: `ollama_generate(model="{{ inputs.model }}", prompt="your prompt")`
+      - Restart: `systemctl_restart(unit="ollama.service")`
+      - Benchmark: `skill_run("ollama_inference_test", '{"action": "benchmark", "model": "{{ inputs.model }}"}')`

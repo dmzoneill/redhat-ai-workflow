@@ -1,0 +1,329 @@
+# Skill: VM Network Setup
+# Configure virtual networking for VMs
+
+name: vm_network_setup
+description: |
+  Configure and manage virtual networking for libvirt VMs.
+
+  This skill handles:
+  - Listing virtual networks and their status
+  - Creating and starting virtual networks
+  - Stopping and destroying virtual networks
+  - Inspecting network configurations
+  - Scanning for active hosts on networks
+  - Managing VM network interfaces
+  - Defining network XML configurations
+
+  Uses: virsh_net_list, virsh_net_info, virsh_net_start, virsh_net_destroy,
+        virsh_domiflist, virsh_list, virsh_dumpxml, virsh_define,
+        nmap_ping_scan, ssh_test
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - vm_lab_setup
+  validated_by: []
+  chains_to:
+    - vm_lab_setup
+    - remote_host_diagnostics
+  provides_context_for:
+    - vm_lab_setup
+    - remote_host_diagnostics
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (list|create|start|stop|scan)"
+
+  - name: network_name
+    type: string
+    required: false
+    default: "default"
+    description: "Name of the virtual network"
+
+  - name: bridge
+    type: string
+    required: false
+    default: ""
+    description: "Bridge interface name"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for network management tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_network_known_issues
+    description: "Check for known network issues"
+    compute: |
+      virsh_issues = memory.check_known_issues("virsh_net", "") or {}
+      nmap_issues = memory.check_known_issues("nmap", "") or {}
+
+      all_issues = []
+      for issues in [virsh_issues, nmap_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: network_known_issues
+    on_error: continue
+
+  # ==================== NETWORK STATUS ====================
+
+  - name: list_networks
+    description: "List all virtual networks"
+    tool: virsh_net_list
+    args: {}
+    output: net_list_raw
+    on_error: continue
+
+  - name: get_network_info
+    description: "Get network details"
+    tool: virsh_net_info
+    args:
+      network: "{{ inputs.network_name }}"
+    output: net_info_raw
+    on_error: continue
+
+  # ==================== NETWORK LIFECYCLE ====================
+
+  - name: start_network
+    description: "Start a virtual network"
+    condition: "inputs.action == 'start'"
+    tool: virsh_net_start
+    args:
+      network: "{{ inputs.network_name }}"
+    output: net_start_raw
+    on_error: continue
+
+  - name: destroy_network
+    description: "Stop and destroy a virtual network"
+    condition: "inputs.action == 'stop'"
+    tool: virsh_net_destroy
+    args:
+      network: "{{ inputs.network_name }}"
+    output: net_destroy_raw
+    on_error: continue
+
+  - name: define_network
+    description: "Define a new virtual network from XML"
+    condition: "inputs.action == 'create'"
+    tool: virsh_define
+    args:
+      xml_file: "/tmp/{{ inputs.network_name }}-net.xml"
+    output: net_define_raw
+    on_error: continue
+
+  # ==================== VM INTERFACES ====================
+
+  - name: list_vms
+    description: "List all VMs to check interfaces"
+    tool: virsh_list
+    args: {}
+    output: vm_list_raw
+    on_error: continue
+
+  - name: get_vm_interfaces
+    description: "Get VM network interfaces"
+    condition: "inputs.action == 'list' or inputs.action == 'scan'"
+    tool: virsh_domiflist
+    args:
+      domain: "{{ inputs.network_name }}"
+    output: vm_ifaces_raw
+    on_error: continue
+
+  - name: get_vm_xml
+    description: "Dump VM XML for network inspection"
+    condition: "inputs.action == 'scan'"
+    tool: virsh_dumpxml
+    args:
+      domain: "{{ inputs.network_name }}"
+    output: vm_xml_raw
+    on_error: continue
+
+  # ==================== NETWORK SCANNING ====================
+
+  - name: arp_scan_network
+    description: "Ping scan to discover hosts on network"
+    condition: "inputs.action == 'scan'"
+    tool: nmap_ping_scan
+    args:
+      target: "192.168.122.0/24"
+    output: arp_scan_raw
+    on_error: continue
+
+  - name: ping_scan_network
+    description: "Ping scan to find alive hosts"
+    condition: "inputs.action == 'scan'"
+    tool: nmap_ping_scan
+    args:
+      target: "192.168.122.0/24"
+    output: ping_scan_raw
+    on_error: continue
+
+  # ==================== CONNECTIVITY ====================
+
+  - name: test_ssh_to_vm
+    description: "Test SSH connectivity to VM on network"
+    condition: "inputs.action == 'scan'"
+    tool: ssh_test
+    args:
+      host: "{{ inputs.network_name }}"
+    output: ssh_test_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_network_failures
+    description: "Detect failure patterns from network operations"
+    compute: |
+      errors_detected = []
+
+      net_text = str(net_list_raw) if 'net_list_raw' in dir() and net_list_raw else ""
+      start_text = str(net_start_raw) if 'net_start_raw' in dir() and net_start_raw else ""
+      combined = net_text + start_text
+
+      if "network is already active" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_net",
+              "pattern": "already active",
+              "cause": "Network is already running",
+              "fix": "Network is already started, no action needed"
+          })
+      if "network not found" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_net",
+              "pattern": "network not found",
+              "cause": "Virtual network does not exist",
+              "fix": "Create the network first: virsh net-define <xml-file>"
+          })
+      if "internal error" in combined.lower() and "bridge" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh_net",
+              "pattern": "bridge conflict",
+              "cause": "Bridge interface name conflict",
+              "fix": "Use a different bridge name or remove the conflicting bridge"
+          })
+
+      result = errors_detected
+    output: network_errors_detected
+    on_error: continue
+
+  - name: learn_network_not_found
+    description: "Learn from network not found failures"
+    condition: "network_errors_detected and any(e.get('pattern') == 'network not found' for e in network_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "virsh_net"
+      error_pattern: "network not found"
+      root_cause: "Virtual network does not exist"
+      fix_description: "Define the network first: virsh net-define <xml-file> && virsh net-start <name>"
+    output: network_not_found_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "VM network setup: {{ inputs.action }}"
+      details: "network={{ inputs.network_name }}, action={{ inputs.action }}, bridge={{ inputs.bridge }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## VM Network Setup
+
+      **Action:** {{ inputs.action }}
+      **Network:** {{ inputs.network_name }}
+      {% if inputs.bridge %}
+      **Bridge:** {{ inputs.bridge }}
+      {% endif %}
+
+      ---
+
+      ### Virtual Networks
+      ```
+      {{ net_list_raw | string | truncate(400) if net_list_raw else "No networks found" }}
+      ```
+
+      ### Network Info: {{ inputs.network_name }}
+      ```
+      {{ net_info_raw | string | truncate(400) if net_info_raw else "N/A" }}
+      ```
+
+      ---
+
+      ### VMs
+      ```
+      {{ vm_list_raw | string | truncate(300) if vm_list_raw else "No VMs" }}
+      ```
+
+      {% if vm_ifaces_raw %}
+      ### VM Interfaces
+      ```
+      {{ vm_ifaces_raw | string | truncate(300) }}
+      ```
+      {% endif %}
+
+      {% if inputs.action == 'start' %}
+      ### Start Result
+      {{ net_start_raw | string | truncate(200) if net_start_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'stop' %}
+      ### Stop Result
+      {{ net_destroy_raw | string | truncate(200) if net_destroy_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'create' %}
+      ### Create Result
+      {{ net_define_raw | string | truncate(200) if net_define_raw else "N/A" }}
+      {% endif %}
+
+      {% if inputs.action == 'scan' %}
+      ---
+
+      ### Network Scan
+
+      **ARP Scan:**
+      ```
+      {{ arp_scan_raw | string | truncate(400) if arp_scan_raw else "N/A" }}
+      ```
+
+      **Ping Scan:**
+      ```
+      {{ ping_scan_raw | string | truncate(400) if ping_scan_raw else "N/A" }}
+      ```
+
+      **SSH Test:**
+      {{ ssh_test_raw | string | truncate(200) if ssh_test_raw else "N/A" }}
+      {% endif %}
+
+      {% if network_known_issues and network_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in network_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      action: "{{ inputs.action }}"
+      network_name: "{{ inputs.network_name }}"
+      bridge: "{{ inputs.bridge }}"

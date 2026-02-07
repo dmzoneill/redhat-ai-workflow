@@ -57,7 +57,7 @@ def get_all_valid_tools() -> set[str]:
 
 
 def _add_tools_from_nonstandard_files(tools: set[str]) -> None:
-    """Scan non-standard tool files (tools_style.py, etc.) for additional tools."""
+    """Scan ALL tool files for function defs to catch tools missed by manifest."""
     import ast as _ast
 
     tool_modules_dir = PROJECT_ROOT / "tool_modules"
@@ -68,13 +68,13 @@ def _add_tools_from_nonstandard_files(tools: set[str]) -> None:
         if not src_dir.exists():
             continue
         for py_file in src_dir.glob("tools_*.py"):
-            if py_file.name in ("tools_core.py", "tools_basic.py", "tools_extra.py"):
-                continue  # Already scanned by build_full_manifest
             try:
                 tree = _ast.parse(py_file.read_text())
                 for node in _ast.walk(tree):
                     if isinstance(node, (_ast.AsyncFunctionDef, _ast.FunctionDef)):
-                        tools.add(node.name)
+                        name = node.name
+                        if not name.startswith("_"):
+                            tools.add(name)
             except Exception:
                 pass
 

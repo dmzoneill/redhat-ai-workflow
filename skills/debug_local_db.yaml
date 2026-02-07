@@ -1,0 +1,380 @@
+# Skill: Debug Local Database
+# Debug database issues locally using Podman containers
+
+name: debug_local_db
+description: |
+  Debug database issues in local or ephemeral environments.
+
+  This skill inspects:
+  - PostgreSQL connections, locks, and activity
+  - Database size and table structure
+  - SQLite database health
+  - Podman container logs for database services
+  - Schema dumps for analysis
+
+  Uses Podman for container operations (not Docker).
+
+  Uses: psql_query, psql_activity, psql_locks, psql_size, psql_connections,
+        psql_tables, psql_describe, psql_schemas, pg_dump, sqlite_query,
+        sqlite_tables, sqlite_schema, sqlite_vacuum, podman_exec, podman_logs
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - deploy_to_ephemeral
+  chains_to:
+    - create_jira_issue
+    - learn_pattern
+    - debug_prod
+  provides_context_for:
+    - create_jira_issue
+    - debug_prod
+  validated_by:
+    - environment_overview
+
+inputs:
+  - name: database
+    type: string
+    required: false
+    default: "local"
+    description: "Database target (local, ephemeral, workflow)"
+
+  - name: issue_description
+    type: string
+    required: false
+    default: ""
+    description: "Description of the database issue to investigate"
+
+  - name: dump_schema
+    type: boolean
+    required: false
+    default: false
+    description: "Dump full database schema for analysis"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for database and Podman tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_db_known_issues
+    description: "Check for known database issues"
+    compute: |
+      psql_issues = memory.check_known_issues("psql", "") or {}
+      podman_issues = memory.check_known_issues("podman", "") or {}
+      db_issues = memory.check_known_issues("database", "") or {}
+
+      all_issues = []
+      for issues in [psql_issues, podman_issues, db_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: db_known_issues
+    on_error: continue
+
+  # ==================== PODMAN CONTAINER CHECKS ====================
+
+  - name: check_podman_db_logs
+    description: "Check Podman container logs for database service"
+    tool: podman_logs
+    args:
+      container: "postgres"
+    output: podman_logs_raw
+    on_error: continue
+
+  - name: exec_podman_version
+    description: "Check PostgreSQL version in Podman container"
+    tool: podman_exec
+    args:
+      container: "postgres"
+      command: "psql --version"
+    output: podman_version_raw
+    on_error: continue
+
+  # ==================== POSTGRESQL CHECKS ====================
+
+  - name: check_connections
+    description: "Check active PostgreSQL connections"
+    tool: psql_connections
+    args: {}
+    output: connections_raw
+    on_error: continue
+
+  - name: check_activity
+    description: "Check current PostgreSQL activity"
+    tool: psql_activity
+    args: {}
+    output: activity_raw
+    on_error: continue
+
+  - name: check_locks
+    description: "Check for lock contention"
+    tool: psql_locks
+    args: {}
+    output: locks_raw
+    on_error: continue
+
+  - name: check_db_size
+    description: "Check database size"
+    tool: psql_size
+    args: {}
+    output: size_raw
+    on_error: continue
+
+  - name: list_tables
+    description: "List database tables"
+    tool: psql_tables
+    args: {}
+    output: tables_raw
+    on_error: continue
+
+  - name: list_schemas
+    description: "List database schemas"
+    tool: psql_schemas
+    args: {}
+    output: schemas_raw
+    on_error: continue
+
+  - name: run_diagnostic_query
+    description: "Run diagnostic query for long-running queries"
+    tool: psql_query
+    args:
+      query: "SELECT pid, now() - pg_stat_activity.query_start AS duration, query, state FROM pg_stat_activity WHERE (now() - pg_stat_activity.query_start) > interval '5 seconds' ORDER BY duration DESC LIMIT 10;"
+    output: long_queries_raw
+    on_error: continue
+
+  - name: describe_key_tables
+    description: "Describe key tables in the database"
+    tool: psql_describe
+    args:
+      table: "pg_stat_user_tables"
+    output: describe_raw
+    on_error: continue
+
+  - name: dump_schema
+    description: "Dump database schema"
+    condition: "inputs.dump_schema"
+    tool: pg_dump
+    args: {}
+    output: schema_dump_raw
+    on_error: continue
+
+  # ==================== SQLITE CHECKS ====================
+
+  - name: check_sqlite_tables
+    description: "Check SQLite tables if workflow database"
+    condition: "inputs.database == 'workflow'"
+    tool: sqlite_tables
+    args: {}
+    output: sqlite_tables_raw
+    on_error: continue
+
+  - name: check_sqlite_schema
+    description: "Check SQLite schema"
+    condition: "inputs.database == 'workflow'"
+    tool: sqlite_schema
+    args: {}
+    output: sqlite_schema_raw
+    on_error: continue
+
+  - name: query_sqlite
+    description: "Query SQLite for basic stats"
+    condition: "inputs.database == 'workflow'"
+    tool: sqlite_query
+    args:
+      query: "SELECT name, type FROM sqlite_master WHERE type='table' ORDER BY name;"
+    output: sqlite_query_raw
+    on_error: continue
+
+  - name: vacuum_sqlite
+    description: "Vacuum SQLite database"
+    condition: "inputs.database == 'workflow'"
+    tool: sqlite_vacuum
+    args: {}
+    output: sqlite_vacuum_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_db_health
+    description: "Analyze database health from collected data"
+    compute: |
+      connections_text = str(connections_raw) if 'connections_raw' in dir() and connections_raw else ""
+      activity_text = str(activity_raw) if 'activity_raw' in dir() and activity_raw else ""
+      locks_text = str(locks_raw) if 'locks_raw' in dir() and locks_raw else ""
+      size_text = str(size_raw) if 'size_raw' in dir() and size_raw else ""
+      long_queries_text = str(long_queries_raw) if 'long_queries_raw' in dir() and long_queries_raw else ""
+      logs_text = str(podman_logs_raw) if 'podman_logs_raw' in dir() and podman_logs_raw else ""
+
+      issues = []
+
+      # Check for lock contention
+      if locks_text and "granted" in locks_text.lower() and "f" in locks_text.lower():
+          issues.append("Lock contention detected - queries may be blocking each other")
+
+      # Check for long-running queries
+      if long_queries_text and long_queries_text.strip() and "0 rows" not in long_queries_text:
+          issues.append("Long-running queries detected (>5 seconds)")
+
+      # Check container logs for errors
+      logs_lower = logs_text.lower()
+      if "fatal" in logs_lower or "error" in logs_lower:
+          issues.append("Database container logs contain errors")
+
+      # Check connection count
+      import re
+      conn_match = re.search(r'(\d+)', connections_text)
+      conn_count = int(conn_match.group(1)) if conn_match else 0
+      if conn_count > 50:
+          issues.append(f"High connection count: {conn_count}")
+
+      result = {
+          "issues": issues,
+          "issue_count": len(issues),
+          "healthy": len(issues) == 0,
+          "connection_count": conn_count,
+      }
+    output: db_health
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_db_debug_failures
+    description: "Detect failure patterns from database debugging"
+    compute: |
+      errors_detected = []
+
+      conn_text = str(connections_raw) if 'connections_raw' in dir() and connections_raw else ""
+      logs_text = str(podman_logs_raw) if 'podman_logs_raw' in dir() and podman_logs_raw else ""
+      combined = conn_text + logs_text
+
+      if "connection refused" in combined.lower():
+          errors_detected.append({
+              "tool": "psql_connections",
+              "pattern": "connection refused",
+              "cause": "PostgreSQL not running or not accepting connections",
+              "fix": "Start the database with: podman start postgres"
+          })
+      if "no such container" in combined.lower():
+          errors_detected.append({
+              "tool": "podman_logs",
+              "pattern": "no such container",
+              "cause": "Database Podman container does not exist",
+              "fix": "Create the container with: podman run -d --name postgres postgres:latest"
+          })
+
+      result = errors_detected
+    output: db_debug_errors_detected
+    on_error: continue
+
+  - name: learn_db_connection_failure
+    description: "Learn from database connection failures"
+    condition: "db_debug_errors_detected and any(e.get('pattern') == 'connection refused' for e in db_debug_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "psql_connections"
+      error_pattern: "connection refused"
+      root_cause: "PostgreSQL not running or not accepting connections"
+      fix_description: "Start the database with: podman start postgres"
+    output: db_connection_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log database debug session"
+    tool: memory_session_log
+    args:
+      action: "Debug local database ({{ inputs.database }})"
+      details: "healthy={{ db_health.healthy if db_health else 'unknown' }}, issues={{ db_health.issue_count if db_health else 0 }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Database Debug: {{ inputs.database }}
+
+      {% if inputs.issue_description %}
+      **Issue:** {{ inputs.issue_description }}
+      {% endif %}
+
+      **Health:** {{ "Healthy" if db_health.healthy else "Issues Detected" }}
+
+      ---
+
+      ### Issues Found ({{ db_health.issue_count }})
+
+      {% for issue in db_health.issues %}
+      - {{ issue }}
+      {% endfor %}
+
+      {% if db_health.issue_count == 0 %}
+      No issues detected.
+      {% endif %}
+
+      ---
+
+      ### Connections
+
+      Active connections: {{ db_health.connection_count }}
+
+      ```
+      {{ connections_raw | string | truncate(500) if connections_raw else "No connection data" }}
+      ```
+
+      ---
+
+      ### Activity
+
+      ```
+      {{ activity_raw | string | truncate(500) if activity_raw else "No activity data" }}
+      ```
+
+      ---
+
+      ### Lock Contention
+
+      ```
+      {{ locks_raw | string | truncate(500) if locks_raw else "No lock data" }}
+      ```
+
+      ---
+
+      ### Long Running Queries
+
+      ```
+      {{ long_queries_raw | string | truncate(500) if long_queries_raw else "None" }}
+      ```
+
+      ---
+
+      ### Database Size
+
+      ```
+      {{ size_raw | string | truncate(300) if size_raw else "No size data" }}
+      ```
+
+      ---
+
+      ### Podman Container Logs
+
+      ```
+      {{ podman_logs_raw | string | truncate(500) if podman_logs_raw else "No container logs" }}
+      ```
+
+      {% if db_known_issues and db_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in db_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

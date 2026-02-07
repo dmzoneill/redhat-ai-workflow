@@ -1,0 +1,457 @@
+# Skill: VM Lab Setup
+# Create/manage local VMs for testing
+
+name: vm_lab_setup
+description: |
+  Create and manage local virtual machines for testing environments.
+
+  This skill handles:
+  - Creating new VMs from base images
+  - Cloning existing VMs
+  - Creating and reverting snapshots
+  - Destroying VMs
+  - Checking VM status and resource info
+
+  Uses: virsh_list, virsh_start, virsh_shutdown, virsh_destroy, virsh_reboot,
+        virt_install, virsh_clone, virsh_dominfo, virsh_domstate, virsh_domblklist,
+        virsh_domiflist, virsh_dumpxml, virsh_vcpuinfo, virsh_memtune,
+        virsh_snapshot_create, virsh_snapshot_list, virsh_snapshot_revert,
+        virsh_snapshot_delete, virsh_pool_list, virsh_pool_info, virsh_vol_list,
+        virsh_net_list, virsh_net_info, ssh_test, ssh_command, ssh_keyscan,
+        ansible_ping
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - remote_host_diagnostics
+  chains_to:
+    - ansible_configure_vm
+    - vm_snapshot_workflow
+    - vm_network_setup
+    - remote_host_diagnostics
+  provides_context_for:
+    - ansible_configure_vm
+    - vm_snapshot_workflow
+
+inputs:
+  - name: action
+    type: string
+    required: true
+    description: "Action to perform (create|clone|snapshot|revert|destroy|status)"
+
+  - name: vm_name
+    type: string
+    required: true
+    description: "Name of the virtual machine"
+
+  - name: base_image
+    type: string
+    required: false
+    default: ""
+    description: "Path to base image for VM creation"
+
+  - name: memory_mb
+    type: integer
+    required: false
+    default: 2048
+    description: "Memory allocation in MB"
+
+  - name: vcpus
+    type: integer
+    required: false
+    default: 2
+    description: "Number of virtual CPUs"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for VM management tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_vm_known_issues
+    description: "Check for known VM management issues"
+    compute: |
+      virsh_issues = memory.check_known_issues("virsh", "") or {}
+      virt_issues = memory.check_known_issues("virt_install", "") or {}
+
+      all_issues = []
+      for issues in [virsh_issues, virt_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: vm_known_issues
+    on_error: continue
+
+  # ==================== VM STATUS CHECK ====================
+
+  - name: list_all_vms
+    description: "List all virtual machines"
+    tool: virsh_list
+    args: {}
+    output: vm_list_raw
+    on_error: continue
+
+  - name: get_vm_state
+    description: "Get state of specified VM"
+    tool: virsh_domstate
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_state_raw
+    on_error: continue
+
+  - name: get_vm_info
+    description: "Get detailed VM info"
+    tool: virsh_dominfo
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_info_raw
+    on_error: continue
+
+  - name: get_vm_vcpu_info
+    description: "Get VM vCPU information"
+    tool: virsh_vcpuinfo
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_vcpu_raw
+    on_error: continue
+
+  - name: get_vm_memtune
+    description: "Get VM memory tuning parameters"
+    tool: virsh_memtune
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_memtune_raw
+    on_error: continue
+
+  - name: get_vm_block_devices
+    description: "Get VM block device list"
+    tool: virsh_domblklist
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_blocks_raw
+    on_error: continue
+
+  - name: get_vm_interfaces
+    description: "Get VM network interfaces"
+    tool: virsh_domiflist
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_ifaces_raw
+    on_error: continue
+
+  - name: get_vm_xml
+    description: "Dump VM XML definition"
+    tool: virsh_dumpxml
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: vm_xml_raw
+    on_error: continue
+
+  # ==================== STORAGE & NETWORK ====================
+
+  - name: list_storage_pools
+    description: "List storage pools"
+    tool: virsh_pool_list
+    args: {}
+    output: pool_list_raw
+    on_error: continue
+
+  - name: get_pool_info
+    description: "Get default pool info"
+    tool: virsh_pool_info
+    args:
+      pool: "default"
+    output: pool_info_raw
+    on_error: continue
+
+  - name: list_volumes
+    description: "List volumes in default pool"
+    tool: virsh_vol_list
+    args:
+      pool: "default"
+    output: vol_list_raw
+    on_error: continue
+
+  - name: list_networks
+    description: "List virtual networks"
+    tool: virsh_net_list
+    args: {}
+    output: net_list_raw
+    on_error: continue
+
+  - name: get_default_net_info
+    description: "Get default network info"
+    tool: virsh_net_info
+    args:
+      network: "default"
+    output: net_info_raw
+    on_error: continue
+
+  # ==================== SNAPSHOT OPERATIONS ====================
+
+  - name: list_snapshots
+    description: "List VM snapshots"
+    tool: virsh_snapshot_list
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: snapshot_list_raw
+    on_error: continue
+
+  - name: create_snapshot
+    description: "Create a VM snapshot"
+    condition: "inputs.action == 'snapshot'"
+    tool: virsh_snapshot_create
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: snapshot_create_raw
+    on_error: continue
+
+  - name: revert_snapshot
+    description: "Revert to latest snapshot"
+    condition: "inputs.action == 'revert'"
+    tool: virsh_snapshot_revert
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: snapshot_revert_raw
+    on_error: continue
+
+  - name: delete_snapshot
+    description: "Delete a snapshot"
+    condition: "inputs.action == 'destroy'"
+    tool: virsh_snapshot_delete
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: snapshot_delete_raw
+    on_error: continue
+
+  # ==================== VM LIFECYCLE ====================
+
+  - name: create_vm
+    description: "Create a new VM with virt-install"
+    condition: "inputs.action == 'create' and inputs.base_image"
+    tool: virt_install
+    args:
+      name: "{{ inputs.vm_name }}"
+      memory: "{{ inputs.memory_mb }}"
+      vcpus: "{{ inputs.vcpus }}"
+      disk: "{{ inputs.base_image }}"
+    output: create_result_raw
+    on_error: continue
+
+  - name: clone_vm
+    description: "Clone an existing VM"
+    condition: "inputs.action == 'clone'"
+    tool: virsh_clone
+    args:
+      original: "{{ inputs.vm_name }}"
+    output: clone_result_raw
+    on_error: continue
+
+  - name: start_vm
+    description: "Start the VM"
+    condition: "inputs.action == 'create' or inputs.action == 'clone'"
+    tool: virsh_start
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: start_result_raw
+    on_error: continue
+
+  - name: shutdown_vm
+    description: "Gracefully shut down the VM"
+    condition: "inputs.action == 'destroy'"
+    tool: virsh_shutdown
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: shutdown_result_raw
+    on_error: continue
+
+  - name: reboot_vm
+    description: "Reboot the VM"
+    condition: "inputs.action == 'revert'"
+    tool: virsh_reboot
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: reboot_result_raw
+    on_error: continue
+
+  - name: destroy_vm
+    description: "Force destroy the VM"
+    condition: "inputs.action == 'destroy'"
+    tool: virsh_destroy
+    args:
+      domain: "{{ inputs.vm_name }}"
+    output: destroy_result_raw
+    on_error: continue
+
+  # ==================== CONNECTIVITY CHECK ====================
+
+  - name: ssh_keyscan_vm
+    description: "Scan SSH host keys for the VM"
+    condition: "inputs.action == 'create' or inputs.action == 'status'"
+    tool: ssh_keyscan
+    args:
+      host: "{{ inputs.vm_name }}"
+    output: keyscan_raw
+    on_error: continue
+
+  - name: ssh_test_vm
+    description: "Test SSH connectivity to the VM"
+    condition: "inputs.action == 'create' or inputs.action == 'status'"
+    tool: ssh_test
+    args:
+      host: "{{ inputs.vm_name }}"
+    output: ssh_test_raw
+    on_error: continue
+
+  - name: ssh_command_vm
+    description: "Run a basic command on the VM via SSH"
+    condition: "inputs.action == 'status'"
+    tool: ssh_command
+    args:
+      host: "{{ inputs.vm_name }}"
+      command: "hostname && uptime"
+    output: ssh_cmd_raw
+    on_error: continue
+
+  - name: ansible_ping_vm
+    description: "Ping the VM with Ansible"
+    condition: "inputs.action == 'create' or inputs.action == 'status'"
+    tool: ansible_ping
+    args:
+      host: "{{ inputs.vm_name }}"
+    output: ansible_ping_raw
+    on_error: continue
+
+  # ==================== FAILURE DETECTION ====================
+
+  - name: detect_vm_failures
+    description: "Detect failure patterns from VM operations"
+    compute: |
+      errors_detected = []
+
+      create_text = str(create_result_raw) if 'create_result_raw' in dir() and create_result_raw else ""
+      state_text = str(vm_state_raw) if 'vm_state_raw' in dir() and vm_state_raw else ""
+      combined = create_text + state_text
+
+      if "permission denied" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh",
+              "pattern": "permission denied",
+              "cause": "Insufficient privileges to manage VMs",
+              "fix": "Run with sudo or add user to libvirt group"
+          })
+      if "no connection" in combined.lower() or "failed to connect" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh",
+              "pattern": "connection failed",
+              "cause": "libvirtd service not running",
+              "fix": "Start libvirtd: sudo systemctl start libvirtd"
+          })
+      if "storage pool" in combined.lower() and "not found" in combined.lower():
+          errors_detected.append({
+              "tool": "virsh",
+              "pattern": "storage pool not found",
+              "cause": "Default storage pool not configured",
+              "fix": "Create default pool: virsh pool-define-as default dir --target /var/lib/libvirt/images"
+          })
+
+      result = errors_detected
+    output: vm_errors_detected
+    on_error: continue
+
+  - name: learn_vm_permission_failure
+    description: "Learn from VM permission failures"
+    condition: "vm_errors_detected and any(e.get('pattern') == 'permission denied' for e in vm_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "virsh"
+      error_pattern: "permission denied"
+      root_cause: "Insufficient privileges to manage VMs"
+      fix_description: "Run with sudo or add user to libvirt group: sudo usermod -aG libvirt $USER"
+    output: vm_permission_fix_learned
+    on_error: continue
+
+  # ==================== SESSION LOG ====================
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "VM lab setup: {{ inputs.action }}"
+      details: "vm={{ inputs.vm_name }}, action={{ inputs.action }}, memory={{ inputs.memory_mb }}MB, vcpus={{ inputs.vcpus }}"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## VM Lab Setup: {{ inputs.vm_name }}
+
+      **Action:** {{ inputs.action }}
+
+      ---
+
+      ### VM State
+      {{ vm_state_raw if vm_state_raw else "VM not found or not accessible" }}
+
+      ### VM Info
+      ```
+      {{ vm_info_raw | string | truncate(500) if vm_info_raw else "N/A" }}
+      ```
+
+      ### Block Devices
+      ```
+      {{ vm_blocks_raw | string | truncate(300) if vm_blocks_raw else "N/A" }}
+      ```
+
+      ### Network Interfaces
+      ```
+      {{ vm_ifaces_raw | string | truncate(300) if vm_ifaces_raw else "N/A" }}
+      ```
+
+      ### Snapshots
+      ```
+      {{ snapshot_list_raw | string | truncate(300) if snapshot_list_raw else "No snapshots" }}
+      ```
+
+      ### Storage Pools
+      ```
+      {{ pool_list_raw | string | truncate(300) if pool_list_raw else "N/A" }}
+      ```
+
+      ### Networks
+      ```
+      {{ net_list_raw | string | truncate(300) if net_list_raw else "N/A" }}
+      ```
+
+      ### SSH Connectivity
+      {{ ssh_test_raw | string | truncate(200) if ssh_test_raw else "Not tested" }}
+
+      ### Ansible Ping
+      {{ ansible_ping_raw | string | truncate(200) if ansible_ping_raw else "Not tested" }}
+
+      {% if vm_known_issues and vm_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in vm_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}
+
+  - name: context
+    value:
+      vm_name: "{{ inputs.vm_name }}"
+      action: "{{ inputs.action }}"
+      state: "{{ vm_state_raw | string | truncate(50) if vm_state_raw else 'unknown' }}"

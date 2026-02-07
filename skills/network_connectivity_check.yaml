@@ -1,0 +1,364 @@
+# Skill: Network Connectivity Check
+# Diagnose network connectivity issues
+
+name: network_connectivity_check
+description: |
+  Diagnose network connectivity issues to one or more targets.
+
+  This skill performs:
+  - Ping sweep and host discovery
+  - Port scanning and service detection
+  - ARP scan for local network discovery
+  - HTTP connectivity and timing checks
+  - SSH connectivity testing
+  - TLS connection verification
+  - System hostname and network identity check
+
+  Uses: nmap_ping_scan, nmap_quick_scan, nmap_list_scan,
+        curl_timing, curl_headers, curl_get, ssh_test, ssh_keyscan,
+        openssl_s_client, hostnamectl_status
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - deploy_to_ephemeral
+    - security_audit
+  chains_to:
+    - security_audit
+    - cert_check
+    - create_jira_issue
+    - investigate_alert
+  provides_context_for:
+    - security_audit
+    - debug_prod
+    - investigate_alert
+  validated_by:
+    - security_audit
+
+inputs:
+  - name: targets
+    type: string
+    required: true
+    description: "Comma-separated list of hosts or IPs to check"
+
+  - name: check_vpn
+    type: boolean
+    required: false
+    default: true
+    description: "Check VPN connectivity for internal targets"
+
+  - name: full_scan
+    type: boolean
+    required: false
+    default: false
+    description: "Run full port scan (slower)"
+
+steps:
+  # ==================== LOAD DEVOPS PERSONA ====================
+
+  - name: load_devops_persona
+    description: "Load devops persona for network tools"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+
+  # ==================== KNOWLEDGE INTEGRATION ====================
+
+  - name: check_network_known_issues
+    description: "Check for known network issues"
+    compute: |
+      nmap_issues = memory.check_known_issues("nmap", "") or {}
+      network_issues = memory.check_known_issues("network", "") or {}
+      vpn_issues = memory.check_known_issues("vpn", "") or {}
+
+      all_issues = []
+      for issues in [nmap_issues, network_issues, vpn_issues]:
+          if issues and issues.get("matches"):
+              all_issues.extend(issues.get("matches", [])[:2])
+
+      result = {
+          "has_known_issues": len(all_issues) > 0,
+          "issues": all_issues[:5],
+      }
+    output: network_known_issues
+    on_error: continue
+
+  # ==================== SYSTEM IDENTITY ====================
+
+  - name: check_hostname
+    description: "Check local system identity"
+    tool: hostnamectl_status
+    args: {}
+    output: hostname_raw
+    on_error: continue
+
+  # ==================== PING / DISCOVERY ====================
+
+  - name: ping_scan
+    description: "Ping scan to check host reachability"
+    tool: nmap_ping_scan
+    args:
+      target: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: ping_scan_raw
+    on_error: continue
+
+  - name: list_scan
+    description: "DNS list scan for target resolution"
+    tool: nmap_list_scan
+    args:
+      target: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: list_scan_raw
+    on_error: continue
+
+  - name: arp_scan
+    description: "Ping scan for local network discovery"
+    tool: nmap_ping_scan
+    args:
+      target: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: arp_scan_raw
+    on_error: continue
+
+  - name: quick_scan
+    description: "Quick port scan on target"
+    tool: nmap_quick_scan
+    args:
+      target: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: quick_scan_raw
+    on_error: continue
+
+  # ==================== HTTP CHECKS ====================
+
+  - name: check_http_get
+    description: "HTTP GET request to target"
+    tool: curl_get
+    args:
+      url: "https://{{ inputs.targets.split(',')[0].strip() }}"
+    output: http_get_raw
+    on_error: continue
+
+  - name: check_http_timing
+    description: "HTTP timing to measure latency"
+    tool: curl_timing
+    args:
+      url: "https://{{ inputs.targets.split(',')[0].strip() }}"
+    output: http_timing_raw
+    on_error: continue
+
+  - name: check_http_headers
+    description: "HTTP header inspection"
+    tool: curl_headers
+    args:
+      url: "https://{{ inputs.targets.split(',')[0].strip() }}"
+    output: http_headers_raw
+    on_error: continue
+
+  # ==================== SSH CHECK ====================
+
+  - name: test_ssh
+    description: "Test SSH connectivity"
+    tool: ssh_test
+    args:
+      host: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: ssh_test_raw
+    on_error: continue
+
+  - name: scan_ssh_keys
+    description: "Scan SSH host keys"
+    tool: ssh_keyscan
+    args:
+      host: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: ssh_keyscan_raw
+    on_error: continue
+
+  # ==================== TLS CHECK ====================
+
+  - name: check_tls
+    description: "Check TLS connection"
+    tool: openssl_s_client
+    args:
+      host: "{{ inputs.targets.split(',')[0].strip() }}"
+    output: tls_check_raw
+    on_error: continue
+
+  # ==================== ANALYSIS ====================
+
+  - name: analyze_connectivity
+    description: "Analyze connectivity results"
+    compute: |
+      ping_text = str(ping_scan_raw) if 'ping_scan_raw' in dir() and ping_scan_raw else ""
+      quick_text = str(quick_scan_raw) if 'quick_scan_raw' in dir() and quick_scan_raw else ""
+      http_text = str(http_get_raw) if 'http_get_raw' in dir() and http_get_raw else ""
+      ssh_text = str(ssh_test_raw) if 'ssh_test_raw' in dir() and ssh_test_raw else ""
+      tls_text = str(tls_check_raw) if 'tls_check_raw' in dir() and tls_check_raw else ""
+      timing_text = str(http_timing_raw) if 'http_timing_raw' in dir() and http_timing_raw else ""
+
+      checks = {}
+
+      # Ping reachability
+      ping_ok = "host is up" in ping_text.lower() or "1 host up" in ping_text.lower()
+      checks["ping"] = {"ok": ping_ok, "detail": "reachable" if ping_ok else "unreachable"}
+
+      # HTTP
+      import re
+      http_status_match = re.search(r'HTTP/[\d.]+\s+(\d{3})', http_text)
+      http_status = int(http_status_match.group(1)) if http_status_match else 0
+      http_ok = 200 <= http_status < 500 if http_status else False
+      checks["http"] = {"ok": http_ok, "detail": f"status {http_status}" if http_status else "no response"}
+
+      # SSH
+      ssh_ok = "connected" in ssh_text.lower() or ssh_text.strip() != ""
+      checks["ssh"] = {"ok": ssh_ok, "detail": "available" if ssh_ok else "unavailable"}
+
+      # TLS
+      tls_ok = "verify return code: 0" in tls_text.lower() or "tls" in tls_text.lower()
+      checks["tls"] = {"ok": tls_ok, "detail": "secure" if tls_ok else "failed"}
+
+      # Timing
+      total_match = re.search(r'total[:\s]+([\d.]+)', timing_text.lower())
+      latency = float(total_match.group(1)) if total_match else 0.0
+
+      passed = sum(1 for c in checks.values() if c["ok"])
+      total = len(checks)
+
+      issues = []
+      if not ping_ok:
+          issues.append("Host is unreachable - check VPN or firewall")
+      if not http_ok:
+          issues.append("HTTP connection failed")
+      if not tls_ok:
+          issues.append("TLS connection failed")
+
+      result = {
+          "checks": checks,
+          "passed": passed,
+          "total": total,
+          "healthy": passed >= 2,
+          "latency": latency,
+          "issues": issues,
+      }
+    output: connectivity_analysis
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_network_failures
+    description: "Detect network failure patterns"
+    compute: |
+      errors_detected = []
+
+      ping_text = str(ping_scan_raw) if 'ping_scan_raw' in dir() and ping_scan_raw else ""
+      http_text = str(http_get_raw) if 'http_get_raw' in dir() and http_get_raw else ""
+      combined = ping_text + http_text
+
+      if "no route to host" in combined.lower() or "host seems down" in combined.lower():
+          errors_detected.append({
+              "tool": "nmap_ping_scan",
+              "pattern": "no route to host",
+              "cause": "Target unreachable - VPN may be required",
+              "fix": "Run vpn_connect() to connect to Red Hat VPN"
+          })
+      if "could not resolve" in combined.lower():
+          errors_detected.append({
+              "tool": "curl_get",
+              "pattern": "could not resolve",
+              "cause": "DNS resolution failed",
+              "fix": "Check DNS settings and verify hostname"
+          })
+
+      result = errors_detected
+    output: network_errors_detected
+    on_error: continue
+
+  - name: learn_network_route_failure
+    description: "Learn from network route failures"
+    condition: "network_errors_detected and any(e.get('pattern') == 'no route to host' for e in network_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "nmap_ping_scan"
+      error_pattern: "no route to host"
+      root_cause: "Target unreachable - VPN may be required"
+      fix_description: "Run vpn_connect() to connect to Red Hat VPN"
+    output: network_route_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log network connectivity check to session"
+    tool: memory_session_log
+    args:
+      action: "Network connectivity check on {{ inputs.targets }}"
+      details: "passed={{ connectivity_analysis.passed if connectivity_analysis else 0 }}/{{ connectivity_analysis.total if connectivity_analysis else 0 }}, latency={{ connectivity_analysis.latency if connectivity_analysis else 0 }}s"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Network Connectivity Check
+
+      **Targets:** {{ inputs.targets }}
+      **VPN Check:** {{ inputs.check_vpn }}
+
+      ---
+
+      ### Connectivity Summary ({{ connectivity_analysis.passed }}/{{ connectivity_analysis.total }} passed)
+
+      | Check | Status | Detail |
+      |-------|--------|--------|
+      {% for name, check in connectivity_analysis.checks.items() %}
+      | {{ name | upper }} | {{ "PASS" if check.ok else "FAIL" }} | {{ check.detail }} |
+      {% endfor %}
+
+      **Latency:** {{ connectivity_analysis.latency }}s
+
+      ---
+
+      ### Issues
+
+      {% for issue in connectivity_analysis.issues %}
+      - {{ issue }}
+      {% endfor %}
+
+      {% if connectivity_analysis.issues | length == 0 %}
+      No issues detected.
+      {% endif %}
+
+      ---
+
+      ### Host Discovery
+
+      ```
+      {{ ping_scan_raw | string | truncate(400) if ping_scan_raw else "No ping data" }}
+      ```
+
+      ---
+
+      ### Port Scan
+
+      ```
+      {{ quick_scan_raw | string | truncate(500) if quick_scan_raw else "No port data" }}
+      ```
+
+      ---
+
+      ### SSH
+
+      ```
+      {{ ssh_keyscan_raw | string | truncate(300) if ssh_keyscan_raw else "No SSH data" }}
+      ```
+
+      ---
+
+      ### System Identity
+
+      ```
+      {{ hostname_raw | string | truncate(300) if hostname_raw else "No hostname data" }}
+      ```
+
+      {% if network_known_issues and network_known_issues.has_known_issues %}
+      ---
+
+      ### Known Issues
+
+      {% for issue in network_known_issues.issues[:3] %}
+      - {{ issue.pattern if issue.pattern else issue }}
+      {% endfor %}
+      {% endif %}

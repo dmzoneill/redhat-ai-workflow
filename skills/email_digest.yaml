@@ -1,0 +1,276 @@
+# Skill: Email Digest
+# Categorized email digest from Gmail
+
+name: email_digest
+description: |
+  Generate a categorized email digest from Gmail.
+
+  Features:
+  - Fetch unread emails from a configurable time window
+  - Categorize by labels and content type
+  - Search for specific emails
+  - Show actionable items requiring response
+
+  Uses: gmail_unread_count, gmail_list_emails, gmail_search,
+        gmail_read_email, gmail_get_thread, gmail_list_labels
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - schedule_meeting
+    - create_jira_issue
+  provides_context_for:
+    - standup_summary
+    - weekly_summary
+  validated_by: []
+
+inputs:
+  - name: since
+    type: string
+    required: false
+    default: "24"
+    description: "Hours back to look for emails (default: 24)"
+
+  - name: labels
+    type: string
+    required: false
+    default: ""
+    description: "Comma-separated labels to filter by"
+
+  - name: search_query
+    type: string
+    required: false
+    default: ""
+    description: "Optional Gmail search query"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Gmail tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== GATHER EMAIL DATA ====================
+
+  - name: get_unread_count
+    description: "Get total unread email count"
+    tool: gmail_unread_count
+    args: {}
+    output: unread_count_raw
+    on_error: continue
+
+  - name: list_labels
+    description: "List available Gmail labels"
+    tool: gmail_list_labels
+    args: {}
+    output: labels_raw
+    on_error: continue
+
+  - name: list_recent_emails
+    description: "List recent emails"
+    tool: gmail_list_emails
+    args:
+      max_results: 50
+      hours_back: "{{ inputs.since }}"
+    output: emails_raw
+    on_error: continue
+
+  - name: search_specific_emails
+    description: "Search for specific emails if query provided"
+    condition: "inputs.search_query"
+    tool: gmail_search
+    args:
+      query: "{{ inputs.search_query }}"
+      max_results: 20
+    output: search_results_raw
+    on_error: continue
+
+  # ==================== READ KEY EMAILS ====================
+
+  - name: parse_email_list
+    description: "Parse email list and identify important emails"
+    compute: |
+      emails_text = str(emails_raw) if 'emails_raw' in dir() and emails_raw else ""
+
+      import re
+
+      emails = []
+      newsletters = []
+      actionable = []
+
+      for line in emails_text.split("\n"):
+          if not line.strip():
+              continue
+          line_lower = line.lower()
+
+          email_entry = {"line": line.strip()[:150]}
+
+          # Categorize
+          if any(kw in line_lower for kw in ["newsletter", "digest", "weekly update", "unsubscribe", "noreply"]):
+              newsletters.append(email_entry)
+          elif any(kw in line_lower for kw in ["action required", "urgent", "please review", "approval", "deadline"]):
+              actionable.append(email_entry)
+              emails.append(email_entry)
+          else:
+              emails.append(email_entry)
+
+      result = {
+          "total": len(emails) + len(newsletters),
+          "emails": emails[:20],
+          "newsletters": newsletters[:10],
+          "actionable": actionable[:10],
+          "has_actionable": len(actionable) > 0,
+      }
+    output: email_categories
+
+  - name: read_first_actionable
+    description: "Read the first actionable email for details"
+    condition: "email_categories.has_actionable"
+    tool: gmail_read_email
+    args:
+      message_id: "latest"
+    output: actionable_email_raw
+    on_error: continue
+
+  - name: get_first_thread
+    description: "Get thread for first actionable email"
+    condition: "email_categories.has_actionable"
+    tool: gmail_get_thread
+    args:
+      thread_id: "latest"
+    output: thread_raw
+    on_error: continue
+
+  # ==================== PARSE RESULTS ====================
+
+  - name: build_digest
+    description: "Build email digest summary"
+    compute: |
+      unread_text = str(unread_count_raw) if 'unread_count_raw' in dir() and unread_count_raw else "0"
+
+      import re
+      unread_match = re.search(r'(\d+)', unread_text)
+      unread_count = int(unread_match.group(1)) if unread_match else 0
+
+      result = {
+          "unread_count": unread_count,
+          "total_emails": email_categories.get("total", 0),
+          "actionable_count": len(email_categories.get("actionable", [])),
+          "newsletter_count": len(email_categories.get("newsletters", [])),
+      }
+    output: digest_summary
+
+  # ==================== LEARNING FROM FAILURES ====================
+
+  - name: detect_email_failures
+    description: "Detect failure patterns from email operations"
+    compute: |
+      errors_detected = []
+
+      emails_text = str(emails_raw).lower() if 'emails_raw' in dir() and emails_raw else ""
+      if "unauthorized" in emails_text or "401" in emails_text or "invalid_grant" in emails_text:
+          errors_detected.append({
+              "tool": "gmail_list_emails",
+              "pattern": "unauthorized",
+              "cause": "Gmail OAuth token expired or revoked",
+              "fix": "Re-authenticate Gmail: run gmail_auth() or refresh OAuth token"
+          })
+
+      if "rate limit" in emails_text or "429" in emails_text:
+          errors_detected.append({
+              "tool": "gmail_list_emails",
+              "pattern": "rate limit exceeded",
+              "cause": "Gmail API rate limit hit",
+              "fix": "Wait a few minutes and retry, or reduce max_results"
+          })
+
+      result = errors_detected
+    output: email_errors_detected
+    on_error: continue
+
+  - name: learn_gmail_auth_failure
+    description: "Learn from Gmail auth failures"
+    condition: "email_errors_detected and any(e.get('pattern') == 'unauthorized' for e in email_errors_detected)"
+    tool: learn_tool_fix
+    args:
+      tool_name: "gmail_list_emails"
+      error_pattern: "unauthorized"
+      root_cause: "Gmail OAuth token expired or revoked"
+      fix_description: "Re-authenticate Gmail: run gmail_auth() or refresh OAuth token"
+    output: gmail_auth_fix_learned
+    on_error: continue
+
+  - name: log_session
+    description: "Log skill execution to session"
+    tool: memory_session_log
+    args:
+      action: "Generated email digest"
+      details: "Unread: {{ digest_summary.unread_count }}, Actionable: {{ digest_summary.actionable_count }}, Since: {{ inputs.since }}h"
+    on_error: continue
+
+outputs:
+  - name: report
+    value: |
+      ## Email Digest (Last {{ inputs.since }}h)
+
+      **Unread:** {{ digest_summary.unread_count }}
+      **Total Recent:** {{ digest_summary.total_emails }}
+
+      ---
+
+      ### Actionable Items ({{ digest_summary.actionable_count }})
+
+      {% if email_categories.actionable %}
+      {% for email in email_categories.actionable[:5] %}
+      - {{ email.line }}
+      {% endfor %}
+      {% else %}
+      No actionable items found.
+      {% endif %}
+
+      {% if actionable_email_raw %}
+      ---
+
+      ### Latest Actionable Email
+
+      ```
+      {{ actionable_email_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Regular Emails ({{ email_categories.emails | length }})
+
+      {% for email in email_categories.emails[:10] %}
+      - {{ email.line }}
+      {% endfor %}
+
+      ---
+
+      ### Newsletters ({{ digest_summary.newsletter_count }})
+
+      {% for nl in email_categories.newsletters[:5] %}
+      - {{ nl.line }}
+      {% endfor %}
+
+      {% if search_results_raw %}
+      ---
+
+      ### Search Results: "{{ inputs.search_query }}"
+
+      ```
+      {{ search_results_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      ---
+
+      ### Quick Actions
+
+      - Read email: `gmail_read_email(message_id="<id>")`
+      - Search: `gmail_search(query="from:someone subject:topic")`
