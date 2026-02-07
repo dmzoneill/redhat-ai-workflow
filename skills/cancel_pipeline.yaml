@@ -56,6 +56,17 @@ inputs:
     default: false
     description: "Just list running pipelines without cancelling"
 
+  - name: project
+    type: string
+    required: false
+    default: "automation-analytics/automation-analytics-backend"
+    description: "GitLab project path (for GitLab CI pipeline cancellation)"
+
+  - name: pipeline_id
+    type: integer
+    required: false
+    description: "GitLab CI pipeline ID to cancel"
+
 steps:
   # ==================== LOAD RELEASE PERSONA ====================
   # This skill requires konflux_basic/tkn tools which are only in release persona
@@ -108,6 +119,18 @@ steps:
       tool_name: "tkn_pipelinerun_cancel"
       error_text: ""
     output: konflux_known_issues
+    on_error: continue
+
+  # ==================== GITLAB CI CANCEL ====================
+
+  - name: cancel_gitlab_pipeline
+    description: "Cancel GitLab CI pipeline"
+    condition: "inputs.get('pipeline_id')"
+    tool: gitlab_ci_cancel
+    args:
+      project: "{{ inputs.project }}"
+      pipeline_id: "{{ inputs.pipeline_id }}"
+    output: gitlab_cancel_result
     on_error: continue
 
   # ==================== LIST PIPELINES ====================

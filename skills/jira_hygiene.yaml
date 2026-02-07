@@ -176,6 +176,16 @@ steps:
           "status_in_progress": "In Progress",
       }
     output: resolved
+  # ==================== AUTOMATED QUALITY CHECK ====================
+
+  - name: lint_issue
+    description: "Run automated quality checks on issue"
+    tool: jira_lint
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+    output: lint_result
+    on_error: continue
+
   # ==================== GET ISSUE DETAILS ====================
 
   # Step 1: Get full issue details
@@ -379,6 +389,18 @@ steps:
         "is_healthy": len(issues_found) == 0
       }
     output: validation
+
+  # ==================== FLAG BLOCKED ISSUES ====================
+
+  - name: flag_blocked_issue
+    description: "Flag issue as blocked if blockers are detected"
+    condition: "issue and issue.get('description') and 'block' in str(issue.get('description', '')).lower()"
+    tool: jira_block
+    args:
+      issue_key: "{{ inputs.issue_key }}"
+      reason: "Blocker detected during hygiene check"
+    output: block_result
+    on_error: continue
 
   # ==================== AUTO-FIX WHERE POSSIBLE ====================
 

@@ -47,6 +47,24 @@ inputs:
     default: 20
     description: "Max issues to show"
 
+  - name: sprint_id
+    type: string
+    required: false
+    default: ""
+    description: "Sprint ID to add issues to (for auto_add)"
+
+  - name: auto_add
+    type: boolean
+    required: false
+    default: false
+    description: "Automatically add top candidate to sprint"
+
+  - name: check_quality
+    type: boolean
+    required: false
+    default: true
+    description: "Run quality lint checks on backlog issues"
+
 steps:
   # ==================== LOAD DEVELOPER PERSONA ====================
   # This skill uses jira_basic tools
@@ -222,6 +240,15 @@ steps:
       }
     output: ready_info
 
+  - name: lint_backlog_issues
+    description: "Check backlog issue quality (descriptions, acceptance criteria)"
+    condition: "backlog_info and backlog_info.get('issues') and len(backlog_info.get('issues', [])) > 0 and inputs.get('check_quality', true)"
+    tool: jira_lint
+    args:
+      issue_key: "{{ backlog_info.issues[0].key if backlog_info and backlog_info.issues else '' }}"
+    output: issue_quality_raw
+    on_error: continue
+
   - name: analyze_sprint_candidates
     description: "Identify best candidates for sprint"
     compute: |
@@ -239,6 +266,16 @@ steps:
         "count": len(candidates),
       }
     output: sprint_candidates
+
+  - name: add_top_issue_to_sprint
+    description: "Add the highest priority unassigned issue to the sprint"
+    condition: "sprint_candidates and sprint_candidates.get('count', 0) > 0 and inputs.get('auto_add', false)"
+    tool: jira_add_to_sprint
+    args:
+      issue_key: "{{ sprint_candidates.candidates[0].key if sprint_candidates and sprint_candidates.candidates else '' }}"
+      sprint_id: "{{ inputs.get('sprint_id', '') }}"
+    output: sprint_add_result
+    on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================
 

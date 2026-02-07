@@ -190,6 +190,22 @@ steps:
     output: slack_activity
     on_error: continue
 
+  # ==================== ADDITIONAL CONTEXT ====================
+
+  - name: get_recent_docs
+    description: "Get recently modified Google Drive documents"
+    tool: gdrive_list_recent
+    args:
+      max_results: 5
+    output: recent_docs_raw
+    on_error: continue
+
+  - name: get_weekly_highlights
+    description: "Get performance highlights for the week"
+    tool: performance_highlights
+    output: weekly_perf_raw
+    on_error: continue
+
   # ==================== READ SESSION LOGS ====================
 
   - name: get_session_logs

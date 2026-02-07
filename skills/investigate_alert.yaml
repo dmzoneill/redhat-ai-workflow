@@ -390,6 +390,15 @@ steps:
     output: kibana_errors_raw
     on_error: auto_heal  # Kibana - may need auth
 
+  - name: get_kibana_error_summary
+    description: "Get aggregated error summary from Kibana"
+    tool: kibana_get_errors
+    args:
+      namespace: "{{ target.namespace }}"
+      environment: "{{ target.environment }}"
+    output: kibana_error_summary_raw
+    on_error: continue
+
   - name: parse_kibana_errors
     description: "Parse Kibana error results"
     compute: |
@@ -614,6 +623,14 @@ steps:
           "total_silences": silences_text.count("silence") // 2 if silences_text else 0,
       }
     output: silences_check
+    on_error: continue
+
+  - name: check_notification_routing
+    description: "Check which channels receive notifications for this alert"
+    tool: alertmanager_receivers
+    args:
+      environment: "{{ target.environment }}"
+    output: alert_receivers_raw
     on_error: continue
 
   - name: build_silence_info
@@ -956,6 +973,20 @@ outputs:
       {% endif %}
       {% if kibana_results.kibana_url %}
       🔗 [Open in Kibana]({{ kibana_results.kibana_url }})
+      {% endif %}
+
+      {% if kibana_error_summary_raw %}
+      ### 📊 Kibana Error Summary (Aggregated)
+      ```
+      {{ kibana_error_summary_raw | string | truncate(500) }}
+      ```
+      {% endif %}
+
+      {% if alert_receivers_raw %}
+      ### 📣 Alert Notification Routing
+      ```
+      {{ alert_receivers_raw | string | truncate(400) }}
+      ```
       {% endif %}
 
       {% if pattern_matches %}

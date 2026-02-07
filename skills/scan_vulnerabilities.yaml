@@ -65,6 +65,18 @@ inputs:
     default: false
     description: "Return error if high severity vulnerabilities found"
 
+  - name: scan_source
+    type: boolean
+    required: false
+    default: false
+    description: "Also run source code security scan (bandit/npm audit)"
+
+  - name: repo
+    type: string
+    required: false
+    default: "."
+    description: "Repository path for source code security scan"
+
 steps:
   # ==================== LOAD RELEASE PERSONA ====================
   # This skill requires quay tools which are in release (and devops) persona
@@ -249,6 +261,50 @@ steps:
           "size": size,
       }
     output: manifest_info
+    on_error: continue
+
+  # ==================== SOURCE CODE SECURITY SCAN ====================
+
+  - name: run_source_security_scan
+    description: "Run source code security scan (bandit/npm audit)"
+    condition: "inputs.get('scan_source', false)"
+    tool: security_scan
+    args:
+      repo: "{{ inputs.get('repo', '.') }}"
+    output: source_scan_raw
+    on_error: continue
+
+  - name: parse_source_scan
+    description: "Parse source code security scan results"
+    condition: "source_scan_raw"
+    compute: |
+      scan_text = str(source_scan_raw) if 'source_scan_raw' in dir() and source_scan_raw else ""
+
+      import re
+      findings = []
+      high_count = 0
+      medium_count = 0
+      low_count = 0
+
+      for line in scan_text.split('\n'):
+        line_lower = line.lower()
+        if 'high' in line_lower and ('severity' in line_lower or 'confidence' in line_lower):
+          high_count += 1
+          findings.append(line.strip()[:120])
+        elif 'medium' in line_lower and ('severity' in line_lower or 'confidence' in line_lower):
+          medium_count += 1
+        elif 'low' in line_lower and ('severity' in line_lower or 'confidence' in line_lower):
+          low_count += 1
+
+      result = {
+        "high": high_count,
+        "medium": medium_count,
+        "low": low_count,
+        "total": high_count + medium_count + low_count,
+        "findings": findings[:10],
+        "raw_preview": scan_text[:500] if scan_text else "",
+      }
+    output: source_scan_analysis
     on_error: continue
 
   # ==================== DETERMINE ACTION ====================
@@ -528,6 +584,26 @@ outputs:
       # Check specific CVE
       # web_search("CVE-XXXX-XXXXX mitigation")
       ```
+
+      {% if source_scan_analysis is defined and source_scan_analysis %}
+      ---
+
+      ### 🔍 Source Code Security Scan
+
+      | Severity | Count |
+      |----------|-------|
+      | 🟠 High | {{ source_scan_analysis.high }} |
+      | 🟡 Medium | {{ source_scan_analysis.medium }} |
+      | 🟢 Low | {{ source_scan_analysis.low }} |
+      | **Total** | **{{ source_scan_analysis.total }}** |
+
+      {% if source_scan_analysis.findings %}
+      **High severity findings:**
+      {% for finding in source_scan_analysis.findings[:5] %}
+      - `{{ finding }}`
+      {% endfor %}
+      {% endif %}
+      {% endif %}
 
       {% if scan_gotchas and scan_gotchas.has_gotchas %}
       ---

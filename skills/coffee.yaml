@@ -567,6 +567,14 @@ steps:
     output: email_summary
     on_error: continue
 
+  # ==================== ADDITIONAL MORNING CONTEXT ====================
+
+  - name: check_morning_email
+    description: "Check unread email count for morning briefing"
+    tool: gmail_unread_count
+    output: morning_email_raw
+    on_error: continue
+
   # ==================== EXTRACT GITLAB PROJECTS ====================
 
   - name: extract_gitlab_projects

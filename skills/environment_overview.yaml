@@ -204,6 +204,89 @@ steps:
     output: pods_raw
     on_error: auto_heal  # K8s cluster - may need kube_login
 
+  - name: check_resource_usage
+    description: "Check pod CPU and memory consumption"
+    tool: kubectl_top_pods
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: resource_usage_raw
+    on_error: continue
+
+  - name: parse_resource_usage
+    description: "Parse resource usage for high consumption"
+    compute: |
+      usage_text = str(resource_usage_raw) if 'resource_usage_raw' in dir() and resource_usage_raw else ""
+
+      high_cpu = []
+      high_memory = []
+
+      for line in usage_text.split("\n"):
+        parts = line.split()
+        if len(parts) >= 3 and parts[0] != "NAME":
+          pod_name = parts[0]
+          cpu = parts[1] if len(parts) > 1 else ""
+          mem = parts[2] if len(parts) > 2 else ""
+
+          if "m" in cpu:
+            try:
+              cpu_val = int(cpu.replace("m", ""))
+              if cpu_val > 500:
+                high_cpu.append({"pod": pod_name, "cpu": cpu})
+            except Exception:
+              pass
+          if "Gi" in mem:
+            try:
+              mem_val = float(mem.replace("Gi", ""))
+              if mem_val > 1.0:
+                high_memory.append({"pod": pod_name, "memory": mem})
+            except Exception:
+              pass
+
+      result = {
+        "high_cpu": high_cpu[:5],
+        "high_memory": high_memory[:5],
+        "raw_preview": usage_text[:500] if usage_text else "",
+      }
+    output: resource_analysis
+    on_error: continue
+
+  - name: get_warning_events
+    description: "Get recent warning events in namespace"
+    tool: kubectl_get_events
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: warning_events_raw
+    on_error: continue
+
+  - name: parse_warning_events
+    description: "Parse warning events"
+    compute: |
+      events_text = str(warning_events_raw) if 'warning_events_raw' in dir() and warning_events_raw else ""
+
+      warning_events = []
+      for line in events_text.split("\n"):
+        line_lower = line.lower()
+        if any(kw in line_lower for kw in ['warning', 'error', 'failed', 'backoff', 'unhealthy']):
+          warning_events.append(line.strip()[:120])
+
+      result = {
+        "events": warning_events[:10],
+        "count": len(warning_events),
+      }
+    output: warning_events_info
+    on_error: continue
+
+  - name: check_prometheus_health
+    description: "Verify Prometheus is reachable and healthy"
+    tool: prometheus_check_health
+    args:
+      namespace: "{{ inputs.namespace }}"
+      environment: "{{ inputs.environment }}"
+    output: prometheus_health_raw
+    on_error: continue
+
   - name: analyze_pods
     description: "Analyze pod health"
     compute: |
@@ -432,6 +515,49 @@ outputs:
       ```
       kubectl_get_pods(namespace='{{ inputs.namespace }}', environment='{{ inputs.environment }}')
       ```
+      {% endif %}
+
+      ---
+
+      ### 📊 Resource Usage
+      {% if resource_analysis and (resource_analysis.high_cpu or resource_analysis.high_memory) %}
+      {% if resource_analysis.high_cpu %}
+      **High CPU:**
+      {% for pod in resource_analysis.high_cpu %}
+      - `{{ pod.pod }}`: {{ pod.cpu }}
+      {% endfor %}
+      {% endif %}
+      {% if resource_analysis.high_memory %}
+      **High Memory:**
+      {% for pod in resource_analysis.high_memory %}
+      - `{{ pod.pod }}`: {{ pod.memory }}
+      {% endfor %}
+      {% endif %}
+      {% else %}
+      ✅ Resource usage normal
+      {% endif %}
+
+      ---
+
+      ### ⚡ Warning Events
+      {% if warning_events_info and warning_events_info.count > 0 %}
+      Found **{{ warning_events_info.count }}** warning events:
+      {% for event in warning_events_info.events[:5] %}
+      - {{ event }}
+      {% endfor %}
+      {% else %}
+      ✅ No warning events
+      {% endif %}
+
+      ---
+
+      ### 🔌 Prometheus Health
+      {% if prometheus_health_raw %}
+      ```
+      {{ prometheus_health_raw | string | truncate(300) }}
+      ```
+      {% else %}
+      ⚠️ Could not check Prometheus (tool may not be loaded)
       {% endif %}
 
       ---

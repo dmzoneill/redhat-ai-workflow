@@ -514,6 +514,26 @@ steps:
     output: kibana_errors_raw
     on_error: auto_heal  # Kibana - may need auth
 
+  - name: get_error_summary
+    description: "Get aggregated error summary from Kibana"
+    condition: "{{ ns_info.namespace }}"
+    tool: kibana_get_errors
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: error_summary_raw
+    on_error: continue
+
+  - name: trace_error_request
+    description: "Trace a specific error request across services"
+    condition: "error_summary_raw and 'request_id' in str(error_summary_raw)"
+    tool: kibana_trace_request
+    args:
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: request_trace_raw
+    on_error: continue
+
   - name: parse_kibana_errors_initial
     description: "Initial check for Kibana auth issues"
     compute: |
@@ -1092,6 +1112,19 @@ steps:
     output: deployed_code
     on_error: continue
 
+  # ==================== REMEDIATION ====================
+
+  - name: recycle_unhealthy_pod
+    description: "Recycle the most unhealthy pod as remediation"
+    condition: "pod_analysis and pod_analysis.get('unhealthy_pods') and inputs.get('auto_remediate')"
+    tool: kubectl_delete_pod
+    args:
+      pod_name: "{{ pod_analysis.unhealthy_pods[0] if pod_analysis.unhealthy_pods else '' }}"
+      namespace: "{{ ns_info.namespace }}"
+      environment: "production"
+    output: pod_recycle_result
+    on_error: continue
+
   # ==================== BUILD REPORT ====================
 
   # Step 16: Compile investigation report
@@ -1187,6 +1220,29 @@ steps:
       elif kibana_results and kibana_results.get('auth_issue'):
         lines.append("### 📋 Kibana Logs")
         lines.append("⚠️ Kibana auth required - open in browser first")
+        lines.append("")
+
+      # === KIBANA ERROR SUMMARY ===
+      if 'error_summary_raw' in dir() and error_summary_raw:
+        summary_text = str(error_summary_raw)
+        if summary_text and "error" not in summary_text[:20].lower():
+          lines.append("### 📊 Kibana Error Summary (Aggregated)")
+          lines.append(f"```\n{summary_text[:500]}\n```")
+          lines.append("")
+
+      # === REQUEST TRACE ===
+      if 'request_trace_raw' in dir() and request_trace_raw:
+        trace_text = str(request_trace_raw)
+        if trace_text:
+          lines.append("### 🔗 Request Trace")
+          lines.append(f"```\n{trace_text[:500]}\n```")
+          lines.append("")
+
+      # === POD RECYCLE RESULT ===
+      if 'pod_recycle_result' in dir() and pod_recycle_result:
+        recycle_text = str(pod_recycle_result)
+        lines.append("### ♻️ Pod Recycled")
+        lines.append(f"```\n{recycle_text[:300]}\n```")
         lines.append("")
 
       # === METRICS ===

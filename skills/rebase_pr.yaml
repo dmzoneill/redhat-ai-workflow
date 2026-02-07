@@ -815,6 +815,18 @@ steps:
     output: push_result
     on_error: continue
 
+  # ==================== RESOLVE NEW HEAD SHA ====================
+
+  - name: resolve_current_sha
+    description: "Resolve current HEAD SHA after rebase"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success')))"
+    tool: git_rev_parse
+    args:
+      repo: "{{ resolved_repo.path }}"
+      ref: "HEAD"
+    output: rebased_sha
+    on_error: continue
+
   # ==================== CI RETRY AFTER FORCE PUSH ====================
 
   - name: ci_retry_after_push

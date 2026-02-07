@@ -257,11 +257,16 @@ steps:
       # Find failed jobs
       import re
       failed_jobs = []
+      failed_job_id = None
       for line in status_text.split("\n"):
           if "failed" in line.lower() and "job" in line.lower():
               job_match = re.search(r'(\S+).*failed', line, re.I)
               if job_match:
                   failed_jobs.append(job_match.group(1))
+              # Try to extract numeric job ID
+              id_match = re.search(r'#(\d+)', line)
+              if id_match and not failed_job_id:
+                  failed_job_id = int(id_match.group(1))
 
       # Overall status
       status = "unknown"
@@ -275,9 +280,20 @@ steps:
       result = {
           "status": status,
           "failed_jobs": failed_jobs[:10],
+          "failed_job_id": failed_job_id,
           "can_retry": status == "failed",
       }
     output: gitlab_pipeline_status
+    on_error: continue
+
+  - name: retry_gitlab_job
+    description: "Retry failed GitLab CI job"
+    condition: "gitlab_pipeline_status and gitlab_pipeline_status.get('failed_job_id')"
+    tool: gitlab_ci_retry
+    args:
+      project: "{{ inputs.project }}"
+      job_id: "{{ gitlab_pipeline_status.failed_job_id }}"
+    output: gitlab_job_retry_result
     on_error: continue
 
   - name: wait_gitlab_pipeline

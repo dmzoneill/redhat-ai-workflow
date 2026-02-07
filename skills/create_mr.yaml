@@ -129,6 +129,12 @@ inputs:
     default: false
     description: "Skip documentation warnings (proceed even if docs need updating)"
 
+  - name: run_precommit
+    type: boolean
+    required: false
+    default: true
+    description: "Run pre-commit hooks before pushing"
+
 # jira_url loaded from config.json in load_config step
 
 steps:
@@ -797,6 +803,26 @@ steps:
         "message": lint_text[:200] if lint_text else "",
       }
     output: ci_lint_result
+    on_error: continue
+
+  # ==================== PRE-PUSH QUALITY CHECKS ====================
+
+  - name: resolve_head_sha
+    description: "Resolve HEAD to full SHA for image lookup"
+    tool: git_rev_parse
+    args:
+      repo: "{{ resolved_repo.path }}"
+      ref: "HEAD"
+    output: head_sha_raw
+    on_error: continue
+
+  - name: run_precommit_hooks
+    description: "Run pre-commit hooks on staged changes"
+    condition: "inputs.get('run_precommit', true)"
+    tool: precommit_run
+    args:
+      repo: "{{ resolved_repo.path }}"
+    output: precommit_result
     on_error: continue
 
   # ==================== CREATE MR ====================

@@ -67,6 +67,12 @@ inputs:
     default: "automation-analytics/automation-analytics-backend"
     description: "GitLab project to check for pending MRs"
 
+  - name: app_name
+    type: string
+    required: false
+    default: "automation-analytics"
+    description: "Application name for app-interface search"
+
 steps:
   # ==================== LOAD RELEASE PERSONA ====================
   # This skill requires appinterface tools which are only in release persona
@@ -129,6 +135,16 @@ steps:
           'has_gotchas': len(release_gotchas) > 0,
       }
     output: release_check_gotchas
+    on_error: continue
+
+  # ==================== SEARCH APP-INTERFACE ====================
+
+  - name: search_app_config
+    description: "Search app-interface for related configurations"
+    tool: appinterface_search
+    args:
+      query: "{{ inputs.get('app_name', 'automation-analytics') }}"
+    output: app_search_raw
     on_error: continue
 
   # ==================== GET SAAS FILES ====================

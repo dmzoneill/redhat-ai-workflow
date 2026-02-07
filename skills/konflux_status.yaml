@@ -102,6 +102,26 @@ steps:
     output: konflux_build_patterns
     on_error: continue
 
+  # ==================== APPLICATION DETAILS ====================
+
+  - name: get_app_details
+    description: "Get full Konflux application configuration"
+    condition: "inputs.get('application')"
+    tool: konflux_get_application
+    args:
+      name: "{{ inputs.application }}"
+      namespace: "{{ inputs.namespace }}"
+    output: app_details_raw
+    on_error: continue
+
+  - name: list_environments
+    description: "List Konflux deployment environments"
+    tool: konflux_list_environments
+    args:
+      namespace: "{{ inputs.namespace }}"
+    output: environments_raw
+    on_error: continue
+
   # ==================== KONFLUX QUERIES ====================
 
   - name: get_status

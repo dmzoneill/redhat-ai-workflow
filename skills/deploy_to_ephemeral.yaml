@@ -128,6 +128,14 @@ steps:
     output: deployment_gotchas
     on_error: continue
 
+  # ==================== PRE-DEPLOYMENT CONTEXT ====================
+
+  - name: list_active_namespaces
+    description: "List currently active ephemeral namespaces for context"
+    tool: k8s_list_ephemeral_namespaces
+    output: active_namespaces_raw
+    on_error: continue
+
   # ==================== CHECK POOLS ====================
 
   - name: list_pools

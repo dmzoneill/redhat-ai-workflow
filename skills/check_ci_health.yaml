@@ -53,6 +53,18 @@ inputs:
     default: 5
     description: "Number of pipelines to show"
 
+  - name: trigger_new
+    type: boolean
+    required: false
+    default: false
+    description: "Trigger a new CI pipeline run"
+
+  - name: branch
+    type: string
+    required: false
+    default: "main"
+    description: "Branch to trigger pipeline on (used with trigger_new)"
+
 steps:
   # ==================== LOAD DEVELOPER PERSONA ====================
   # This skill uses gitlab_basic tools
@@ -333,6 +345,18 @@ steps:
       memory.write_memory("state/shared_context", shared)
       result = "shared context saved"
     output: shared_context_result
+    on_error: continue
+
+  # ==================== TRIGGER NEW PIPELINE ====================
+
+  - name: trigger_new_pipeline
+    description: "Trigger a new CI pipeline run"
+    condition: "inputs.get('trigger_new', false)"
+    tool: gitlab_ci_run
+    args:
+      project: "{{ inputs.project }}"
+      branch: "{{ inputs.get('branch', 'main') }}"
+    output: triggered_pipeline
     on_error: continue
 
   # ==================== CHAIN: AUTO-RETRY FAILED PIPELINES ====================

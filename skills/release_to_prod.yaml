@@ -168,6 +168,25 @@ steps:
     output: release_code_context
     on_error: continue
 
+  # ==================== PRE-DEPLOY SAFETY CHECKS ====================
+
+  - name: get_app_config
+    description: "Get full Konflux application configuration"
+    tool: konflux_get_application
+    args:
+      name: "{{ inputs.application }}"
+      namespace: "{{ inputs.namespace }}"
+    output: app_config_raw
+    on_error: continue
+
+  - name: pre_deploy_alert_check
+    description: "Verify no firing alerts before deploying to production"
+    tool: prometheus_pre_deploy_check
+    args:
+      environment: "production"
+    output: pre_deploy_check_raw
+    on_error: continue
+
   # ==================== VALIDATE INPUT ====================
 
   - name: validate_sha

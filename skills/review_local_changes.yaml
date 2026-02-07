@@ -78,6 +78,18 @@ inputs:
     required: false
     description: "Specific files to review (comma-separated, optional)"
 
+  - name: run_tests
+    type: boolean
+    required: false
+    default: false
+    description: "Run test suite before review"
+
+  - name: run_precommit
+    type: boolean
+    required: false
+    default: false
+    description: "Run pre-commit hooks before review"
+
 steps:
   # ==================== GET LOCAL DIFF ====================
 
@@ -165,6 +177,26 @@ steps:
               "message": f"Found {local_diff.get('line_count')} lines of diff to review."
           }
     output: changes_check
+
+  # ==================== OPTIONAL QUALITY CHECKS ====================
+
+  - name: run_tests
+    description: "Run test suite on local changes"
+    condition: "not changes_check.abort and inputs.get('run_tests', false)"
+    tool: test_run
+    args:
+      repo: "{{ inputs.get('repo', '.') }}"
+    output: test_results
+    on_error: continue
+
+  - name: run_precommit
+    description: "Run pre-commit hooks"
+    condition: "not changes_check.abort and inputs.get('run_precommit', false)"
+    tool: precommit_run
+    args:
+      repo: "{{ inputs.get('repo', '.') }}"
+    output: precommit_results
+    on_error: continue
 
   # ==================== PARSE AGENTS ====================
 

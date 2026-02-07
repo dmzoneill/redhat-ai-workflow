@@ -410,6 +410,20 @@ steps:
     output: gitlab_activity
     on_error: continue
 
+  # ==================== ADDITIONAL CONTEXT ====================
+
+  - name: check_email_status
+    description: "Check unread email count for standup context"
+    tool: gmail_unread_count
+    output: email_count_raw
+    on_error: continue
+
+  - name: get_performance_highlights
+    description: "Get recent performance highlights for standup"
+    tool: performance_highlights
+    output: perf_highlights_raw
+    on_error: continue
+
   # ==================== BUILD SUMMARY ====================
 
   - name: build_summary
