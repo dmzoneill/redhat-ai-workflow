@@ -26,6 +26,8 @@ links:
   provides_context_for:
     - review_pr             # Code understanding for review
     - debug_prod            # Code understanding for debugging
+    - plan_implementation   # Code understanding helps planning
+    - start_work            # Understanding existing code before changes
 
 inputs:
   - name: file

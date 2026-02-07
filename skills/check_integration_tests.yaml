@@ -24,9 +24,11 @@ links:
   chains_to:
     - release_to_prod       # Release if tests pass
     - ci_retry              # Retry if tests failed transiently
+    - notify_team           # Notify team of test results
   provides_context_for:
     - release_to_prod       # Test results for release decision
     - create_mr             # Test status for MR description
+    - coffee                # Integration test status in morning briefing
 
 inputs:
   - name: namespace

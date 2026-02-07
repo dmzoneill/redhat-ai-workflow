@@ -32,10 +32,14 @@ links:
     - create_jira_issue     # Create tracking issue for the alert
     - hotfix                # Apply emergency fix
     - notify_team           # Notify team about findings
+    - rollout_restart       # Restart unhealthy deployments
+    - scale_deployment      # Scale up if resource-related
   provides_context_for:
     - debug_prod            # Alert context for deep debugging
     - create_jira_issue     # Alert details for issue creation
     - learn_pattern         # New error patterns discovered
+    - standup_summary       # Alert investigations for standup
+    - weekly_summary        # Alert activity for weekly report
 
 inputs:
   - name: environment

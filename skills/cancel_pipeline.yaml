@@ -282,6 +282,25 @@ steps:
     output: delete_status
     on_error: continue
 
+  # ==================== NOTIFY TEAM ====================
+
+  - name: notify_team_cancel
+    description: "Notify team about pipeline cancellation"
+    condition: "cancel_status and cancel_status.success"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: '{"message": "Pipeline {{ target_run.run_name }} cancelled in {{ inputs.namespace }}", "channel": "team"}'
+    on_error: continue
+
+  - name: restore_persona_after_notify
+    description: "Restore release persona after notify_team"
+    condition: "cancel_status and cancel_status.success"
+    tool: persona_load
+    args:
+      persona_name: "release"
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_cancel

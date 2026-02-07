@@ -43,6 +43,8 @@ links:
   provides_context_for:
     - start_work            # Issue key for branch creation
     - clone_jira_issue      # Template for cloning
+    - standup_summary       # New issues for standup
+    - weekly_summary        # New issues for weekly report
 
 inputs:
   - name: summary

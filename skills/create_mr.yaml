@@ -1009,6 +1009,26 @@ steps:
     output: mr_hook_result
     on_error: continue
 
+  # ==================== CI HEALTH CHECK ====================
+
+  - name: check_ci_after_mr
+    description: "Check CI pipeline health after MR creation"
+    condition: "mr"
+    tool: skill_run
+    args:
+      skill_name: check_ci_health
+      inputs: '{"project": "{{ resolved_repo.gitlab_project }}", "status": "all", "limit": 3}'
+    output: ci_health_after_mr
+    on_error: continue
+
+  - name: restore_developer_persona_after_ci
+    description: "Restore developer persona after check_ci_health"
+    condition: "mr"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # ==================== MEMORY INTEGRATION ====================
 
   - name: build_memory_context

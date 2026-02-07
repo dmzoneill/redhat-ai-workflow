@@ -32,6 +32,8 @@ links:
     - close_issue           # After documenting, may close issue
   provides_context_for:
     - close_issue           # Session context for closing
+    - standup_summary       # Session attachments tracked in standup
+    - weekly_summary        # Session documentation for weekly report
 
 inputs:
   - name: issue_key

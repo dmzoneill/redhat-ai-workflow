@@ -511,6 +511,15 @@ outputs:
       ⚠️ Review vulnerabilities before deploying.
       {% endif %}
 
+      {% if vuln_analysis.total > 0 %}
+      ### 🔧 Next Step
+
+      Run `/cve-fix` to auto-remediate fixable CVEs in Python dependencies.
+      ```python
+      skill_run(skill_name="cve_fix", inputs='{"downstream_component": "automation-analytics-backend"}')
+      ```
+      {% endif %}
+
       ### Commands
       ```python
       # Get full vulnerability details

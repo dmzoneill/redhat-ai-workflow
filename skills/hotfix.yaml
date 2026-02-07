@@ -28,6 +28,7 @@ links:
   chains_to:
     - release_to_prod       # Promote hotfix to production
     - notify_team           # Announce hotfix
+    - create_mr             # Hotfix may need a formal MR
     - test_mr_ephemeral     # Test hotfix in ephemeral
   provides_context_for:
     - release_to_prod       # Hotfix commit SHA for release
@@ -780,6 +781,10 @@ outputs:
 
       3. **Create MR if needed:** `skill_run("create_mr", '{"issue_key": "{{ inputs.jira_key or 'AAP-XXXXX' }}"}')`
       4. **Return to main branch:** `git checkout main`
+
+      {% if inputs.push and push_status and push_status.success %}
+      **Next step:** Run `/release-prod` to deploy the hotfix
+      {% endif %}
 
   - name: context
     value:

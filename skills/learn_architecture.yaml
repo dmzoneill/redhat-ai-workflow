@@ -25,6 +25,8 @@ links:
     - review_pr             # Architecture context for reviews
     - plan_implementation   # Architecture context for planning
     - debug_prod            # Architecture context for debugging
+    - start_work            # Architecture context helps developers
+    - create_mr             # Architecture knowledge for MR descriptions
 
 inputs:
   - name: project

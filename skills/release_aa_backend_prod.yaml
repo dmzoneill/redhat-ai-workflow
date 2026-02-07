@@ -24,6 +24,7 @@ links:
     - close_issue           # Close related issues
     - notify_team           # Announce release
     - environment_overview  # Verify production health
+    - check_integration_tests  # Verify integration tests pass post-release
   provides_context_for:
     - weekly_summary        # Release in weekly report
     - beer                  # EOD release activity

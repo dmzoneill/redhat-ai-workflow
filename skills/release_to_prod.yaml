@@ -32,6 +32,7 @@ links:
     - release_aa_backend_prod
   chains_to:
     - appinterface_check    # Verify app-interface after release
+    - environment_overview  # Verify production health after release
     - close_issue           # Close issues included in release
     - notify_team           # Announce release to team
   provides_context_for:

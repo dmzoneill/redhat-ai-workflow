@@ -813,6 +813,26 @@ steps:
     output: push_result
     on_error: continue
 
+  # ==================== CI RETRY AFTER FORCE PUSH ====================
+
+  - name: ci_retry_after_push
+    description: "Retry CI pipeline after force push to restart on rebased branch"
+    condition: "push_result and inputs.get('mr_id')"
+    tool: skill_run
+    args:
+      skill_name: ci_retry
+      inputs: '{"mr_id": "{{ inputs.mr_id }}", "project": "{{ resolved_repo.gitlab_project }}"}'
+    output: ci_retry_result
+    on_error: continue
+
+  - name: restore_developer_persona_after_ci_retry
+    description: "Restore developer persona after ci_retry"
+    condition: "push_result and inputs.get('mr_id')"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # ==================== BUILD SUMMARY ====================
 
   - name: build_summary
@@ -925,6 +945,25 @@ steps:
       else:
           result = "hook skipped: emit_event not available"
     output: rebase_hook_result
+    on_error: continue
+
+  # ==================== NOTIFY TEAM ====================
+
+  - name: notify_team_rebase
+    description: "Notify team about successful rebase and force push"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and push_result"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: '{"message": "Branch rebased and force-pushed for MR !{{ inputs.mr_id | default(\"unknown\", true) }}", "channel": "team"}'
+    on_error: continue
+
+  - name: restore_persona_after_notify
+    description: "Restore developer persona after notify_team"
+    condition: "(rebase_result.get('success') or (final_rebase_result and final_rebase_result.get('success'))) and push_result"
+    tool: persona_load
+    args:
+      persona_name: "developer"
     on_error: continue
 
   # ==================== MEMORY INTEGRATION ====================

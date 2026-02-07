@@ -33,6 +33,7 @@ links:
   chains_to: []             # No natural next step
   provides_context_for:
     - coffee                # PTO days affect meeting scheduling
+    - sprint_planning       # PTO affects sprint capacity
 
 inputs:
   - name: dry_run

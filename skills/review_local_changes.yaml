@@ -31,6 +31,7 @@ links:
   chains_to:
     - create_mr             # After local review passes, create MR
     - slop_fix              # Fix code quality issues found
+    - update_docs           # Update docs before MR
   provides_context_for:
     - create_mr             # Review findings inform MR description
   validated_by:

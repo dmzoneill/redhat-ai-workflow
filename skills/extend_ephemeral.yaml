@@ -246,6 +246,25 @@ steps:
     output: extension_status
     on_error: continue
 
+  # ==================== NOTIFY TEAM ====================
+
+  - name: notify_team_extend
+    description: "Notify team about namespace extension"
+    condition: "extension_status and extension_status.success"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: '{"message": "Ephemeral namespace {{ selected_ns.namespace }} extended by {{ inputs.duration }}", "channel": "team"}'
+    on_error: continue
+
+  - name: restore_persona_after_notify
+    description: "Restore devops persona after notify_team"
+    condition: "extension_status and extension_status.success"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+    on_error: continue
+
   # ==================== MEMORY ====================
 
   - name: log_extension

@@ -24,6 +24,7 @@ links:
   provides_context_for:
     - coffee                # Scheduled meetings appear in morning briefing
     - check_mr_feedback     # Meeting requests from MR feedback
+    - standup_summary       # Scheduled meetings for standup context
 
 inputs:
   - name: title

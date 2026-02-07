@@ -24,6 +24,8 @@ links:
     - learn_pattern         # Save suggested patterns
   provides_context_for:
     - learn_pattern         # Suggested patterns for saving
+    - coffee                # New patterns in morning briefing
+    - debug_prod            # Patterns help debugging
 
 inputs: []
 

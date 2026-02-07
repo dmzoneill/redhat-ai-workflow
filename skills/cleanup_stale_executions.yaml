@@ -20,8 +20,10 @@ links:
   depends_on: []            # Standalone maintenance skill
   validates: []             # Cleanup is housekeeping
   validated_by: []          # Not validated by other skills
-  chains_to: []             # No natural next step
-  provides_context_for: []  # Infrastructure maintenance
+  chains_to:
+    - memory_cleanup        # Follow up with memory maintenance
+  provides_context_for:
+    - beer                  # EOD shows cleanup activity
 
 inputs: []
 

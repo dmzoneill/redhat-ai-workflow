@@ -38,6 +38,7 @@ links:
   validated_by:
     - close_issue           # If issue closes, autopilot workflow was successful
   chains_to:
+    - create_mr             # Create MR after autopilot coding
     - test_mr_ephemeral     # Deploy for testing after autopilot
     - close_issue           # Close after MR merge
   provides_context_for:

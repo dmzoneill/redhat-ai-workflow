@@ -33,9 +33,13 @@ links:
     - start_work            # Pick up an issue after briefing
     - review_all_prs        # Review pending PRs identified in briefing
     - investigate_alert     # Investigate alerts shown in briefing
+    - check_mr_feedback     # Check MR feedback surfaced in briefing
+    - jira_hygiene          # Morning is ideal for fixing issue hygiene
+    - konflux_status        # Check build system health
   provides_context_for:
     - start_work            # Morning context for prioritizing work
     - standup_summary       # Morning data feeds standup
+    - beer                  # Morning context informs EOD wrap-up
 
 inputs:
   - name: full_email_scan

@@ -36,6 +36,7 @@ links:
   provides_context_for:
     - sprint_planning       # Audit results inform sprint health
     - weekly_summary        # Audit stats for weekly report
+    - coffee                # Morning briefing shows audit results
 
 inputs:
   - name: project

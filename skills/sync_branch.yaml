@@ -24,6 +24,7 @@ links:
   chains_to:
     - create_mr             # After syncing, ready to create MR
     - review_local_changes  # Review changes after sync
+    - check_ci_health       # Verify CI passes after sync
   provides_context_for:
     - create_mr             # Sync status informs MR readiness
 

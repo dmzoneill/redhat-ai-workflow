@@ -541,6 +541,25 @@ steps:
     output: slack_deployment_failure_notification
     on_error: continue
 
+  # ==================== VULNERABILITY SCAN ====================
+
+  - name: scan_deployed_image
+    description: "Scan deployed image for vulnerabilities"
+    condition: "deploy_status and deploy_status.get('success') and inputs.image_tag"
+    tool: skill_run
+    args:
+      skill_name: scan_vulnerabilities
+      inputs: '{"image_tag": "{{ inputs.image_tag }}", "repository": "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main", "namespace": "redhat-user-workloads"}'
+    output: vuln_scan_result
+    on_error: continue
+
+  - name: restore_persona_after_scan
+    description: "Restore devops persona after vulnerability scan"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+    on_error: continue
+
 outputs:
   - name: report
     value: |

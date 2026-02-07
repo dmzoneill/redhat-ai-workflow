@@ -19,6 +19,7 @@ links:
   provides_context_for:
     - slop_fix              # Scan findings for fix
     - review_local_changes  # Code quality context for review
+    - create_mr             # Code quality scan results for MR description
 
 inputs:
   - name: codebase_path

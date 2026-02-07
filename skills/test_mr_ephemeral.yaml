@@ -782,6 +782,26 @@ steps:
     output: deploy_result
     on_error: auto_heal
 
+  # ==================== VULNERABILITY SCAN ====================
+
+  - name: scan_deployed_image
+    description: "Scan deployed image for vulnerabilities before running tests"
+    condition: "{{ namespace_name and deploy_result and commit_sha }}"
+    tool: skill_run
+    args:
+      skill_name: scan_vulnerabilities
+      inputs: '{"image_tag": "{{ commit_sha }}", "repository": "{{ cfg.quay_pr_repo }}", "namespace": "{{ cfg.quay_pr_namespace }}"}'
+    output: vuln_scan_result
+    on_error: continue
+
+  - name: restore_persona_after_scan
+    description: "Restore devops persona after vulnerability scan"
+    condition: "{{ namespace_name and deploy_result }}"
+    tool: persona_load
+    args:
+      persona_name: "devops"
+    on_error: continue
+
   # Step 10: Wait for pods to be ready
   - name: wait_for_ready
     description: "Wait for deployment to be ready"
@@ -1224,6 +1244,26 @@ steps:
       else:
           result = "hook skipped: emit_event not available"
     output: ephemeral_hook_result
+    on_error: continue
+
+  # ==================== MARK MR READY (if tests pass) ====================
+
+  - name: mark_mr_ready_after_tests
+    description: "Mark MR as ready for review if tests passed and MR is still draft"
+    condition: "test_result and test_result.get('passed') and inputs.get('mr_id')"
+    tool: skill_run
+    args:
+      skill_name: mark_mr_ready
+      inputs: '{"mr_id": "{{ inputs.mr_id }}", "project": "{{ cfg.gitlab_project }}"}'
+    output: mark_ready_result
+    on_error: continue
+
+  - name: restore_devops_persona_after_mark_ready
+    description: "Restore devops persona after mark_mr_ready"
+    condition: "test_result and test_result.get('passed') and inputs.get('mr_id')"
+    tool: persona_load
+    args:
+      persona_name: "devops"
     on_error: continue
 
   # Step 18: Notify team about ephemeral deployment (skill chain)

@@ -27,10 +27,12 @@ links:
     - ci_retry              # Retry failed pipelines
     - test_mr_ephemeral     # Deploy if pipeline passes
     - mark_mr_ready         # Mark MR ready if pipeline passes
+    - notify_team           # Notify team if CI is broken
   provides_context_for:
     - create_mr             # CI status for MR description
     - coffee                # Morning briefing shows CI health
     - review_pr             # Pipeline status for code review
+    - standup_summary       # CI health for standup
 
 inputs:
   - name: project
@@ -461,6 +463,8 @@ outputs:
       ```
       gitlab_ci_cancel(project='{{ inputs.project }}', pipeline_id='{{ pipelines_info.pipelines[0].id }}')
       ```
+
+      **Next step:** Run `/ci-retry` to retry failed jobs
 
       {% if failing_code_analysis and failing_code_analysis.has_related_code %}
       ---

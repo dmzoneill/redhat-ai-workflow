@@ -54,7 +54,9 @@ links:
   validates: []             # Notification doesn't validate other skills
   validated_by: []          # Terminal communication action
   chains_to: []             # No natural next step after notification
-  provides_context_for: []  # Notification is one-way
+  provides_context_for:
+    - standup_summary       # Sent notifications appear in standup context
+    - weekly_summary        # Notification activity for weekly report
 
 inputs:
   - name: message

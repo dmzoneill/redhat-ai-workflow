@@ -27,6 +27,7 @@ links:
     - release_to_prod       # Build status for release decisions
     - test_mr_ephemeral     # Image availability for deployment
     - coffee                # Morning briefing shows build status
+    - standup_summary       # Build system status for standup
 
 inputs:
   - name: namespace

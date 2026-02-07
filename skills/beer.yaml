@@ -27,6 +27,8 @@ links:
     - cleanup_branches      # Clean up stale branches
     - memory_cleanup        # Clean up stale memory entries
     - extend_ephemeral      # Extend expiring namespaces
+    - standup_summary       # Generate standup notes for tomorrow
+    - discovered_work_summary  # Summarize discovered work items
   provides_context_for:
     - coffee                # EOD notes inform next morning's briefing
     - standup_summary       # EOD activity for standup

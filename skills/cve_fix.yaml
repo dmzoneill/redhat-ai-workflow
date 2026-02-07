@@ -64,6 +64,7 @@ links:
     - test_mr_ephemeral     # Deployment validates fix doesn't break app
     - scan_vulnerabilities   # Vuln scan validates CVE is actually fixed
   chains_to:
+    - create_mr             # Create MR with the CVE fix
     - review_pr             # Get review on the CVE fix
     - test_mr_ephemeral     # Test fix in ephemeral
     - notify_team           # Announce CVE fix
@@ -1201,6 +1202,42 @@ steps:
       issue_key: "{{ cve_info.issue_key }}"
       include_transcript: true
     output: session_context_attached
+    on_error: continue
+
+  # ==================== VERIFY FIX WITH VULNERABILITY SCAN ====================
+
+  - name: extract_commit_sha
+    description: "Extract commit SHA from git commit result for vulnerability scanning"
+    condition: "work_check.has_work and not inputs.dry_run and commit_result"
+    compute: |
+      import re
+
+      commit_text = str(commit_result) if commit_result else ""
+
+      # Extract SHA from git commit output (format: [branch SHA] message)
+      sha_match = re.search(r'([a-f0-9]{7,40})', commit_text)
+      fix_sha = sha_match.group(1) if sha_match else None
+
+      result = fix_sha
+    output: fix_commit_sha
+    on_error: continue
+
+  - name: scan_fixed_image
+    description: "Scan the new image to verify CVEs are resolved"
+    condition: "work_check.has_work and not inputs.dry_run and fix_commit_sha"
+    tool: skill_run
+    args:
+      skill_name: scan_vulnerabilities
+      inputs: '{"image_tag": "{{ fix_commit_sha }}", "repository": "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main", "namespace": "redhat-user-workloads"}'
+    output: vuln_scan_result
+    on_error: continue
+
+  - name: restore_persona_after_scan
+    description: "Restore developer persona after vulnerability scan"
+    condition: "work_check.has_work and not inputs.dry_run"
+    tool: persona_load
+    args:
+      persona_name: "developer"
     on_error: continue
 
 outputs:

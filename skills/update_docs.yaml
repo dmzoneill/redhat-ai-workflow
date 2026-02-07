@@ -23,6 +23,7 @@ links:
     - review_pr             # Review checks documentation quality
   chains_to:
     - create_mr             # Create MR after docs are updated
+    - review_local_changes  # Review doc changes locally before MR
   provides_context_for:
     - create_mr             # Doc update status for MR description
     - review_pr             # Documentation changes for review

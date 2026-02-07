@@ -588,6 +588,27 @@ steps:
     output: transition_fix_learned
     on_error: continue
 
+  # ==================== CLEANUP BRANCHES ====================
+
+  - name: cleanup_issue_branch
+    description: "Clean up the feature branch associated with this issue"
+    condition: "not status_check.already_done and branch_info and branch_info.found"
+    tool: skill_run
+    args:
+      skill_name: cleanup_branches
+      inputs: '{"repo": "{{ inputs.repo }}", "dry_run": false}'
+      execute: true
+    output: cleanup_branches_result
+    on_error: continue
+
+  - name: restore_persona_after_cleanup
+    description: "Restore developer persona after cleanup_branches (which may load its own persona)"
+    condition: "not status_check.already_done and branch_info and branch_info.found"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
 outputs:
   - name: summary
     value: |

@@ -32,6 +32,7 @@ links:
   provides_context_for:
     - start_work            # Implementation steps for work
     - create_jira_issue     # Sub-task details for issue creation
+    - create_mr             # Plan informs MR description and scope
 
 inputs:
   - name: goal

@@ -80,7 +80,7 @@ steps:
     on_error: auto_heal  # GitLab API - may need auth refresh
 
   - name: extract_jira_key
-    description: "Extract Jira key from MR"
+    description: "Extract Jira key, branch, and metadata from MR"
     compute: |
       mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
 
@@ -96,10 +96,15 @@ steps:
       author_match = re.search(r'author[:\s]+([^\n]+)', mr_text, re.I)
       author = author_match.group(1).strip() if author_match else "unknown"
 
+      # Extract source branch
+      branch_match = re.search(r'source[_\s]*branch[:\s]+([^\n]+)', mr_text, re.I)
+      source_branch = branch_match.group(1).strip() if branch_match else None
+
       result = {
         "jira_key": jira_key,
         "title": title,
         "author": author,
+        "source_branch": source_branch,
       }
     output: mr_info
 
@@ -198,6 +203,25 @@ steps:
     output: mr_removal_result
     on_error: continue
 
+  # ==================== NOTIFY TEAM ====================
+
+  - name: notify_team_mr_closed
+    description: "Notify team about MR closure"
+    condition: "close_status and close_status.success"
+    tool: skill_run
+    args:
+      skill_name: notify_team
+      inputs: '{"message": "MR !{{ inputs.mr_id }} closed for {{ inputs.project }}", "channel": "team"}'
+    on_error: continue
+
+  - name: restore_persona_after_notify
+    description: "Restore developer persona after notify_team"
+    condition: "close_status and close_status.success"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+    on_error: continue
+
   # ==================== LEARNING FROM FAILURES ====================
 
   - name: detect_close_failures
@@ -246,6 +270,46 @@ steps:
       root_cause: "VPN not connected - internal GitLab not reachable"
       fix_description: "Run vpn_connect() to connect to Red Hat VPN"
     output: close_vpn_fix_learned
+    on_error: continue
+
+  # ==================== CLEANUP BRANCHES ====================
+
+  - name: resolve_repo_for_cleanup
+    description: "Resolve repository path from project config for branch cleanup"
+    condition: "close_status and close_status.success and mr_info and mr_info.source_branch"
+    compute: |
+      from scripts.common.config_loader import load_config
+
+      config = load_config()
+      repos = config.get("repositories", {})
+
+      repo_path = "."
+      for name, repo_cfg in repos.items():
+          if repo_cfg.get("gitlab") == inputs.project:
+              repo_path = repo_cfg.get("path", ".")
+              break
+
+      result = {"repo_path": repo_path}
+    output: cleanup_repo
+    on_error: continue
+
+  - name: cleanup_closed_mr_branch
+    description: "Clean up the source branch from the closed MR"
+    condition: "close_status and close_status.success and mr_info and mr_info.source_branch and cleanup_repo"
+    tool: skill_run
+    args:
+      skill_name: cleanup_branches
+      inputs: '{"repo": "{{ cleanup_repo.repo_path }}", "dry_run": false}'
+      execute: true
+    output: cleanup_branches_result
+    on_error: continue
+
+  - name: restore_persona_after_cleanup
+    description: "Restore developer persona after cleanup_branches (which may load its own persona)"
+    condition: "close_status and close_status.success and mr_info and mr_info.source_branch"
+    tool: persona_load
+    args:
+      persona_name: "developer"
     on_error: continue
 
 outputs:

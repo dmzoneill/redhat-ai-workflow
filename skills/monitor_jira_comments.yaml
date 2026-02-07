@@ -30,6 +30,7 @@ links:
   provides_context_for:
     - coffee                # Morning briefing shows comment activity
     - standup_summary       # Comment responses appear in standup
+    - beer                  # EOD should include comment activity
 
 inputs:
   - name: jira_project

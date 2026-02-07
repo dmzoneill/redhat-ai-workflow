@@ -27,6 +27,8 @@ links:
     - review_pr             # Similar code for review context
     - start_work            # Existing patterns to follow
     - create_mr             # Related code for MR description
+    - plan_implementation   # Existing patterns inform implementation plan
+    - debug_prod            # Similar code helps understand failure points
 
 inputs:
   - name: query

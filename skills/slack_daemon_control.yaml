@@ -23,6 +23,8 @@ links:
   chains_to: []             # No natural next step
   provides_context_for:
     - notify_team           # Daemon status affects notification delivery
+    - investigate_slack_alert  # Daemon processes Slack alerts
+    - coffee                # Daemon status in morning briefing
 
 description: |
   Control the autonomous Slack daemon via D-Bus IPC.

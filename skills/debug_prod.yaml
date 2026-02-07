@@ -37,6 +37,8 @@ links:
     - hotfix                # Root cause informs fix
     - create_jira_issue     # Debug findings for issue description
     - learn_pattern         # Error pattern for future reference
+    - standup_summary       # Debugging activity for standup
+    - weekly_summary        # Debugging work for weekly report
 
 inputs:
   - name: namespace

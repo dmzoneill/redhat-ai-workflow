@@ -27,6 +27,8 @@ links:
   provides_context_for:
     - standup_summary       # Discovered work in daily standup
     - weekly_summary        # Discovered work in weekly report
+    - coffee                # Morning briefing shows discovered work
+    - beer                  # EOD shows discovered work items
 
 inputs:
   - name: period
