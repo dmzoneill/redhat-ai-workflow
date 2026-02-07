@@ -2,9 +2,7 @@
 
 import asyncio
 import json
-import time
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -113,106 +111,112 @@ class TestRetryConfig:
 
 
 class TestSchedulerConfig:
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_init_from_data(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
+    def test_init_from_data(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
 
-        config_data = {
-            "schedules": {
-                "timezone": "US/Eastern",
-                "jobs": [
-                    {"name": "job1", "cron": "0 8 * * *", "skill": "s1"},
-                    {"name": "job2", "trigger": "poll", "skill": "s2"},
-                ],
-                "poll_sources": {"gitlab": {}},
-                "execution_mode": "direct",
-                "default_retry": {"max_attempts": 5},
-            }
-        }
-        sc = SchedulerConfig(config_data)
-        assert sc.timezone == "US/Eastern"
-        assert len(sc.jobs) == 2
-        assert sc.execution_mode == "direct"
-        assert sc.default_retry["max_attempts"] == 5
+                config_data = {
+                    "schedules": {
+                        "timezone": "US/Eastern",
+                        "jobs": [
+                            {"name": "job1", "cron": "0 8 * * *", "skill": "s1"},
+                            {"name": "job2", "trigger": "poll", "skill": "s2"},
+                        ],
+                        "poll_sources": {"gitlab": {}},
+                        "execution_mode": "direct",
+                        "default_retry": {"max_attempts": 5},
+                    }
+                }
+                sc = SchedulerConfig(config_data)
+                assert sc.timezone == "US/Eastern"
+                assert len(sc.jobs) == 2
+                assert sc.execution_mode == "direct"
+                assert sc.default_retry["max_attempts"] == 5
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_cron_jobs(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
+    def test_get_cron_jobs(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
 
-        config_data = {
-            "schedules": {
-                "jobs": [
-                    {"name": "cron1", "cron": "0 * * * *", "skill": "s1"},
-                    {"name": "poll1", "trigger": "poll", "skill": "s2"},
-                    {"name": "cron2", "cron": "30 8 * * 1-5", "skill": "s3"},
-                ]
-            }
-        }
-        sc = SchedulerConfig(config_data)
-        cron_jobs = sc.get_cron_jobs()
-        assert len(cron_jobs) == 2
-        assert cron_jobs[0]["name"] == "cron1"
+                config_data = {
+                    "schedules": {
+                        "jobs": [
+                            {"name": "cron1", "cron": "0 * * * *", "skill": "s1"},
+                            {"name": "poll1", "trigger": "poll", "skill": "s2"},
+                            {"name": "cron2", "cron": "30 8 * * 1-5", "skill": "s3"},
+                        ]
+                    }
+                }
+                sc = SchedulerConfig(config_data)
+                cron_jobs = sc.get_cron_jobs()
+                assert len(cron_jobs) == 2
+                assert cron_jobs[0]["name"] == "cron1"
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_poll_jobs(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
+    def test_get_poll_jobs(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
 
-        config_data = {
-            "schedules": {
-                "jobs": [
-                    {"name": "cron1", "cron": "0 * * * *", "skill": "s1"},
-                    {"name": "poll1", "trigger": "poll", "skill": "s2"},
-                ]
-            }
-        }
-        sc = SchedulerConfig(config_data)
-        poll_jobs = sc.get_poll_jobs()
-        assert len(poll_jobs) == 1
-        assert poll_jobs[0]["name"] == "poll1"
+                config_data = {
+                    "schedules": {
+                        "jobs": [
+                            {"name": "cron1", "cron": "0 * * * *", "skill": "s1"},
+                            {"name": "poll1", "trigger": "poll", "skill": "s2"},
+                        ]
+                    }
+                }
+                sc = SchedulerConfig(config_data)
+                poll_jobs = sc.get_poll_jobs()
+                assert len(poll_jobs) == 1
+                assert poll_jobs[0]["name"] == "poll1"
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_retry_config(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        config_data = {"schedules": {"default_retry": {"max_attempts": 4}}}
-        sc = SchedulerConfig(config_data)
-        rc = sc.get_retry_config({"retry": {"max_attempts": 1}})
-        assert rc.max_attempts == 1
+    def test_get_retry_config(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                mock_sm.is_service_enabled.return_value = True
+                config_data = {"schedules": {"default_retry": {"max_attempts": 4}}}
+                sc = SchedulerConfig(config_data)
+                rc = sc.get_retry_config({"retry": {"max_attempts": 1}})
+                assert rc.max_attempts == 1
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_init_defaults(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = False
-        mock_cm.get_all.return_value = {}
-        sc = SchedulerConfig()
-        assert sc.timezone == "UTC"
-        assert sc.jobs == []
-        assert sc.execution_mode == "claude_cli"
+    def test_init_defaults(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = False
+                mock_cm.get_all.return_value = {}
+                sc = SchedulerConfig()
+                assert sc.timezone == "UTC"
+                assert sc.jobs == []
+                assert sc.execution_mode == "claude_cli"
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_disabled_job_filtered(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.side_effect = lambda name: name != "disabled_job"
+    def test_disabled_job_filtered(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.side_effect = lambda name: name != "disabled_job"
 
-        config_data = {
-            "schedules": {
-                "jobs": [
-                    {"name": "enabled_job", "cron": "0 * * * *", "skill": "s1"},
-                    {"name": "disabled_job", "cron": "0 * * * *", "skill": "s2"},
-                ]
-            }
-        }
-        sc = SchedulerConfig(config_data)
-        cron_jobs = sc.get_cron_jobs()
-        assert len(cron_jobs) == 1
-        assert cron_jobs[0]["name"] == "enabled_job"
+                config_data = {
+                    "schedules": {
+                        "jobs": [
+                            {"name": "enabled_job", "cron": "0 * * * *", "skill": "s1"},
+                            {
+                                "name": "disabled_job",
+                                "cron": "0 * * * *",
+                                "skill": "s2",
+                            },
+                        ]
+                    }
+                }
+                sc = SchedulerConfig(config_data)
+                cron_jobs = sc.get_cron_jobs()
+                assert len(cron_jobs) == 1
+                assert cron_jobs[0]["name"] == "enabled_job"
 
 
 # ==================== JobExecutionLog ====================
@@ -341,18 +345,20 @@ class TestJobExecutionLog:
 
 
 class TestCronScheduler:
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def _make_scheduler(self, mock_cm, mock_sm, enabled=False, jobs=None):
-        mock_sm.is_service_enabled.return_value = enabled
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": jobs or [],
-                "timezone": "UTC",
-            }
-        }
-        return CronScheduler()
+    def _make_scheduler(self, enabled=False, jobs=None):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = enabled
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": jobs or [],
+                        "timezone": "UTC",
+                    }
+                }
+                return CronScheduler()
 
     def test_init(self):
         sched = self._make_scheduler()
@@ -445,7 +451,7 @@ class TestCronScheduler:
 
     def test_log_to_file(self, tmp_path):
         sched = self._make_scheduler()
-        log_file = tmp_path / "scheduler.log"
+        tmp_path / "scheduler.log"
         with patch("pathlib.Path.home", return_value=tmp_path):
             sched._log_to_file("test message")
         # Verify log file was created
@@ -628,28 +634,30 @@ class TestCronScheduler:
 
     # ---------- reload_config ----------
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_reload_config(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [{"name": "new_job", "cron": "0 * * * *", "skill": "s"}]
-            }
-        }
+    def test_reload_config(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [{"name": "new_job", "cron": "0 * * * *", "skill": "s"}]
+                    }
+                }
 
-        sched = CronScheduler()
-        mock_job1 = MagicMock()
-        mock_job1.id = "old_job"
-        mock_job2 = MagicMock()
-        mock_job2.id = "_config_watcher"
-        sched.scheduler = MagicMock()
-        sched.scheduler.get_jobs.return_value = [mock_job1, mock_job2]
+                sched = CronScheduler()
+                mock_job1 = MagicMock()
+                mock_job1.id = "old_job"
+                mock_job2 = MagicMock()
+                mock_job2.id = "_config_watcher"
+                sched.scheduler = MagicMock()
+                sched.scheduler.get_jobs.return_value = [mock_job1, mock_job2]
 
-        sched.reload_config()
+                sched.reload_config()
 
-        sched.scheduler.remove_job.assert_called_once_with("old_job")
+                sched.scheduler.remove_job.assert_called_once_with("old_job")
 
     def test_reload_config_no_scheduler(self):
         sched = self._make_scheduler()
@@ -699,46 +707,54 @@ class TestCronScheduler:
         # Nothing should happen
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_check_config_disabled(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = False
-        mock_cm.get_all.return_value = {"schedules": {}}
+    async def test_check_config_disabled(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = False
+                mock_cm.get_all.return_value = {"schedules": {}}
 
-        sched = CronScheduler()
-        sched._running = True
-        sched.check_config_changed = MagicMock(return_value=True)
-        sched.config.enabled = True  # was enabled
-        sched.scheduler = MagicMock()
+                sched = CronScheduler()
+                sched._running = True
+                sched.check_config_changed = MagicMock(return_value=True)
+                sched.config.enabled = True  # was enabled
+                sched.scheduler = MagicMock()
 
-        mock_job = MagicMock()
-        mock_job.id = "some_job"
-        sched.scheduler.get_jobs.return_value = [mock_job]
+                mock_job = MagicMock()
+                mock_job.id = "some_job"
+                sched.scheduler.get_jobs.return_value = [mock_job]
 
-        with patch("tool_modules.aa_workflow.src.scheduler.CONFIG_FILE") as mock_cf:
-            mock_cf.exists.return_value = True
-            mock_cf.stat.return_value = MagicMock(st_mtime=999.0)
-            await sched._check_config_and_reload()
+                with patch(
+                    "tool_modules.aa_workflow.src.scheduler.CONFIG_FILE"
+                ) as mock_cf:
+                    mock_cf.exists.return_value = True
+                    mock_cf.stat.return_value = MagicMock(st_mtime=999.0)
+                    await sched._check_config_and_reload()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_check_config_enabled(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
+    async def test_check_config_enabled(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
 
-        sched = CronScheduler()
-        sched.check_config_changed = MagicMock(return_value=True)
-        sched.config.enabled = False  # was disabled
+                sched = CronScheduler()
+                sched.check_config_changed = MagicMock(return_value=True)
+                sched.config.enabled = False  # was disabled
 
-        sched.scheduler = MagicMock()
-        sched.scheduler.get_jobs.return_value = []
+                sched.scheduler = MagicMock()
+                sched.scheduler.get_jobs.return_value = []
 
-        with patch("tool_modules.aa_workflow.src.scheduler.CONFIG_FILE") as mock_cf:
-            mock_cf.exists.return_value = True
-            mock_cf.stat.return_value = MagicMock(st_mtime=999.0)
-            await sched._check_config_and_reload()
+                with patch(
+                    "tool_modules.aa_workflow.src.scheduler.CONFIG_FILE"
+                ) as mock_cf:
+                    mock_cf.exists.return_value = True
+                    mock_cf.stat.return_value = MagicMock(st_mtime=999.0)
+                    await sched._check_config_and_reload()
 
     # ---------- run_job_now ----------
 
@@ -750,36 +766,40 @@ class TestCronScheduler:
         assert "not found" in result["error"]
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_run_job_now_success(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [{"name": "job1", "skill": "s1", "cron": "0 * * * *"}]
-            }
-        }
-        sched = CronScheduler()
-        sched._execute_job = AsyncMock()
-        result = await sched.run_job_now("job1")
-        assert result["success"] is True
+    async def test_run_job_now_success(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [{"name": "job1", "skill": "s1", "cron": "0 * * * *"}]
+                    }
+                }
+                sched = CronScheduler()
+                sched._execute_job = AsyncMock()
+                result = await sched.run_job_now("job1")
+                assert result["success"] is True
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_run_job_now_error(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [{"name": "job1", "skill": "s1", "cron": "0 * * * *"}]
-            }
-        }
-        sched = CronScheduler()
-        sched._execute_job = AsyncMock(side_effect=RuntimeError("boom"))
-        result = await sched.run_job_now("job1")
-        assert result["success"] is False
+    async def test_run_job_now_error(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [{"name": "job1", "skill": "s1", "cron": "0 * * * *"}]
+                    }
+                }
+                sched = CronScheduler()
+                sched._execute_job = AsyncMock(side_effect=RuntimeError("boom"))
+                result = await sched.run_job_now("job1")
+                assert result["success"] is False
 
     # ---------- get_job_info ----------
 
@@ -787,125 +807,139 @@ class TestCronScheduler:
         sched = self._make_scheduler()
         assert sched.get_job_info("j1") is None
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_job_info_not_found(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
-        sched = CronScheduler()
-        sched.scheduler = MagicMock()
-        sched.scheduler.get_job.return_value = None
-        assert sched.get_job_info("j1") is None
+    def test_get_job_info_not_found(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
+                sched = CronScheduler()
+                sched.scheduler = MagicMock()
+                sched.scheduler.get_job.return_value = None
+                assert sched.get_job_info("j1") is None
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_job_info_found(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [
-                    {
-                        "name": "j1",
-                        "skill": "s1",
-                        "cron": "0 * * * *",
-                        "notify": ["slack"],
+    def test_get_job_info_found(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [
+                            {
+                                "name": "j1",
+                                "skill": "s1",
+                                "cron": "0 * * * *",
+                                "notify": ["slack"],
+                            }
+                        ]
                     }
-                ]
-            }
-        }
-        sched = CronScheduler()
-        sched.scheduler = MagicMock()
-        mock_job = MagicMock()
-        mock_job.next_run_time = datetime(2025, 1, 1, 8, 0)
-        sched.scheduler.get_job.return_value = mock_job
+                }
+                sched = CronScheduler()
+                sched.scheduler = MagicMock()
+                mock_job = MagicMock()
+                mock_job.next_run_time = datetime(2025, 1, 1, 8, 0)
+                sched.scheduler.get_job.return_value = mock_job
 
-        info = sched.get_job_info("j1")
-        assert info["name"] == "j1"
-        assert info["skill"] == "s1"
-        assert info["next_run"] is not None
-        assert info["notify"] == ["slack"]
-        assert "retry" in info
+                info = sched.get_job_info("j1")
+                assert info["name"] == "j1"
+                assert info["skill"] == "s1"
+                assert info["next_run"] is not None
+                assert info["notify"] == ["slack"]
+                assert "retry" in info
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_job_info_no_config_match(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
-        sched = CronScheduler()
-        sched.scheduler = MagicMock()
-        mock_job = MagicMock()
-        mock_job.next_run_time = None
-        sched.scheduler.get_job.return_value = mock_job
+    def test_get_job_info_no_config_match(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
+                sched = CronScheduler()
+                sched.scheduler = MagicMock()
+                mock_job = MagicMock()
+                mock_job.next_run_time = None
+                sched.scheduler.get_job.return_value = mock_job
 
-        info = sched.get_job_info("j1")
-        assert info["skill"] == "unknown"
-        assert info["next_run"] is None
+                info = sched.get_job_info("j1")
+                assert info["skill"] == "unknown"
+                assert info["next_run"] is None
 
     # ---------- get_all_jobs ----------
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_all_jobs(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [
-                    {"name": "cron1", "cron": "0 8 * * *", "skill": "s1"},
-                    {
-                        "name": "poll1",
-                        "trigger": "poll",
-                        "skill": "s2",
-                        "poll_interval": "2h",
-                        "condition": "new_issue",
-                    },
-                ]
-            }
-        }
-        sched = CronScheduler()
-        jobs = sched.get_all_jobs()
-        assert len(jobs) == 2
-        assert jobs[0]["type"] == "cron"
-        assert jobs[0]["next_run"] is not None
-        assert jobs[1]["type"] == "poll"
-        assert jobs[1]["poll_interval"] == "2h"
+    def test_get_all_jobs(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [
+                            {"name": "cron1", "cron": "0 8 * * *", "skill": "s1"},
+                            {
+                                "name": "poll1",
+                                "trigger": "poll",
+                                "skill": "s2",
+                                "poll_interval": "2h",
+                                "condition": "new_issue",
+                            },
+                        ]
+                    }
+                }
+                sched = CronScheduler()
+                jobs = sched.get_all_jobs()
+                assert len(jobs) == 2
+                assert jobs[0]["type"] == "cron"
+                assert jobs[0]["next_run"] is not None
+                assert jobs[1]["type"] == "poll"
+                assert jobs[1]["poll_interval"] == "2h"
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_all_jobs_bad_cron(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {"jobs": [{"name": "bad", "cron": "invalid", "skill": "s"}]}
-        }
-        sched = CronScheduler()
-        jobs = sched.get_all_jobs()
-        assert jobs[0]["next_run"] is None
+    def test_get_all_jobs_bad_cron(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [{"name": "bad", "cron": "invalid", "skill": "s"}]
+                    }
+                }
+                sched = CronScheduler()
+                jobs = sched.get_all_jobs()
+                assert jobs[0]["next_run"] is None
 
     # ---------- get_status ----------
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_get_status(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_sm.is_job_enabled.return_value = True
-        mock_cm.get_all.return_value = {
-            "schedules": {
-                "jobs": [
-                    {"name": "c1", "cron": "0 * * * *", "skill": "s1"},
-                    {"name": "p1", "trigger": "poll", "skill": "s2"},
-                ]
-            }
-        }
-        sched = CronScheduler()
-        sched._running = True
-        status = sched.get_status()
-        assert status["enabled"] is True
-        assert status["running"] is True
-        assert status["total_jobs"] == 2
-        assert status["cron_jobs"] == 1
-        assert status["poll_jobs"] == 1
+    def test_get_status(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_sm.is_job_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {
+                        "jobs": [
+                            {"name": "c1", "cron": "0 * * * *", "skill": "s1"},
+                            {"name": "p1", "trigger": "poll", "skill": "s2"},
+                        ]
+                    }
+                }
+                sched = CronScheduler()
+                sched._running = True
+                status = sched.get_status()
+                assert status["enabled"] is True
+                assert status["running"] is True
+                assert status["total_jobs"] == 2
+                assert status["cron_jobs"] == 1
+                assert status["poll_jobs"] == 1
 
     # ---------- is_running ----------
 
@@ -918,61 +952,73 @@ class TestCronScheduler:
     # ---------- _execute_job ----------
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_execute_job_direct_success(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"execution_mode": "direct"}}
-
-        sched = CronScheduler()
-        sched._run_skill = AsyncMock(return_value="done")
-        sched.execution_log = MagicMock()
-
-        with patch(
-            "tool_modules.aa_workflow.src.scheduler.notify_cron_job_started",
-            create=True,
-        ):
+    async def test_execute_job_direct_success(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
             with patch(
-                "tool_modules.aa_workflow.src.scheduler.notify_cron_job_completed",
-                create=True,
-            ):
-                await sched._execute_job("j1", "s1", {}, [])
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {"execution_mode": "direct"}
+                }
 
-        sched._run_skill.assert_called_once()
+                sched = CronScheduler()
+                sched._run_skill = AsyncMock(return_value="done")
+                sched.execution_log = MagicMock()
 
-    @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_execute_job_direct_failure_no_retry(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"execution_mode": "direct"}}
+                with patch(
+                    "tool_modules.aa_workflow.src.scheduler.notify_cron_job_started",
+                    create=True,
+                ):
+                    with patch(
+                        "tool_modules.aa_workflow.src.scheduler.notify_cron_job_completed",
+                        create=True,
+                    ):
+                        await sched._execute_job("j1", "s1", {}, [])
 
-        sched = CronScheduler()
-        sched._run_skill = AsyncMock(side_effect=RuntimeError("broken"))
-        sched.execution_log = MagicMock()
-
-        rc = RetryConfig(enabled=False)
-        await sched._execute_job("j1", "s1", {}, [], retry_config=rc)
-
-        sched.execution_log.log_execution.assert_called_once()
-        call_kwargs = sched.execution_log.log_execution.call_args[1]
-        assert call_kwargs["success"] is False
+                sched._run_skill.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    async def test_execute_job_with_notifications(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = True
-        mock_cm.get_all.return_value = {"schedules": {"execution_mode": "direct"}}
+    async def test_execute_job_direct_failure_no_retry(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {"execution_mode": "direct"}
+                }
 
-        callback = AsyncMock()
-        sched = CronScheduler(notification_callback=callback)
-        sched._run_skill = AsyncMock(return_value="done")
-        sched.execution_log = MagicMock()
+                sched = CronScheduler()
+                sched._run_skill = AsyncMock(side_effect=RuntimeError("broken"))
+                sched.execution_log = MagicMock()
 
-        await sched._execute_job("j1", "s1", {}, ["slack"])
+                rc = RetryConfig(enabled=False)
+                await sched._execute_job("j1", "s1", {}, [], retry_config=rc)
 
-        callback.assert_called_once()
+                sched.execution_log.log_execution.assert_called_once()
+                call_kwargs = sched.execution_log.log_execution.call_args[1]
+                assert call_kwargs["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_execute_job_with_notifications(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                mock_sm.is_service_enabled.return_value = True
+                mock_cm.get_all.return_value = {
+                    "schedules": {"execution_mode": "direct"}
+                }
+
+                callback = AsyncMock()
+                sched = CronScheduler(notification_callback=callback)
+                sched._run_skill = AsyncMock(return_value="done")
+                sched.execution_log = MagicMock()
+
+                await sched._execute_job("j1", "s1", {}, ["slack"])
+
+                callback.assert_called_once()
 
     # ---------- _send_notifications ----------
 
@@ -1124,44 +1170,45 @@ class TestCronScheduler:
 
 
 class TestModuleFunctions:
-    @patch("tool_modules.aa_workflow.src.scheduler._scheduler", None)
     def test_get_scheduler_none(self):
-        assert get_scheduler() is None
+        with patch("tool_modules.aa_workflow.src.scheduler._scheduler", None):
+            assert get_scheduler() is None
 
-    @patch("tool_modules.aa_workflow.src.scheduler._scheduler")
-    def test_get_scheduler_exists(self, mock_sched):
+    def test_get_scheduler_exists(self):
         mock_sched_instance = MagicMock()
         with patch(
             "tool_modules.aa_workflow.src.scheduler._scheduler", mock_sched_instance
         ):
             assert get_scheduler() is mock_sched_instance
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler._scheduler", None)
-    def test_init_scheduler_new(self, mock_cm, mock_sm):
-        mock_sm.is_service_enabled.return_value = False
-        mock_cm.get_all.return_value = {"schedules": {}}
+    def test_init_scheduler_new(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager") as mock_sm:
+            with patch(
+                "tool_modules.aa_workflow.src.scheduler.config_manager"
+            ) as mock_cm:
+                with patch("tool_modules.aa_workflow.src.scheduler._scheduler", None):
+                    mock_sm.is_service_enabled.return_value = False
+                    mock_cm.get_all.return_value = {"schedules": {}}
 
-        import tool_modules.aa_workflow.src.scheduler as smod
+                    import tool_modules.aa_workflow.src.scheduler as smod
 
-        smod._scheduler = None
+                    smod._scheduler = None
 
-        sched = init_scheduler()
-        assert sched is not None
-        smod._scheduler = None  # cleanup
+                    sched = init_scheduler()
+                    assert sched is not None
+                    smod._scheduler = None  # cleanup
 
-    @patch("tool_modules.aa_workflow.src.scheduler.state_manager")
-    @patch("tool_modules.aa_workflow.src.scheduler.config_manager")
-    def test_init_scheduler_already_exists(self, mock_cm, mock_sm):
-        import tool_modules.aa_workflow.src.scheduler as smod
+    def test_init_scheduler_already_exists(self):
+        with patch("tool_modules.aa_workflow.src.scheduler.state_manager"):
+            with patch("tool_modules.aa_workflow.src.scheduler.config_manager"):
+                import tool_modules.aa_workflow.src.scheduler as smod
 
-        existing = MagicMock()
-        smod._scheduler = existing
+                existing = MagicMock()
+                smod._scheduler = existing
 
-        result = init_scheduler()
-        assert result is existing
-        smod._scheduler = None  # cleanup
+                result = init_scheduler()
+                assert result is existing
+                smod._scheduler = None  # cleanup
 
     @pytest.mark.asyncio
     async def test_start_scheduler_no_instance(self):

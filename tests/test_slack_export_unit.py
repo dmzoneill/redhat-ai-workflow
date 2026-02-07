@@ -4,7 +4,6 @@ Named test_slack_export_unit.py to avoid conflict with existing test_slack_expor
 """
 
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

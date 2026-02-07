@@ -3,10 +3,8 @@
 Tests tool discovery, manifest management, and module-to-tool mapping.
 """
 
-import ast
 import textwrap
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

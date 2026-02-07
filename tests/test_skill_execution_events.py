@@ -5,7 +5,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -69,7 +69,7 @@ def test_generate_execution_id_unique():
 
     id1 = _generate_execution_id("ws", "s")
     time.sleep(0.001)
-    id2 = _generate_execution_id("ws", "s")
+    _generate_execution_id("ws", "s")
     # Should be unique due to timestamp micro
     # They might still be same if clock resolution is low, so just check format
     assert isinstance(id1, str)
@@ -206,7 +206,6 @@ def test_load_all_executions_with_lock(tmp_exec_file):
 
 def test_save_unlocked(tmp_exec_file):
     from tool_modules.aa_workflow.src.skill_execution_events import (
-        _load_all_executions_unlocked,
         _save_all_executions_unlocked,
     )
 

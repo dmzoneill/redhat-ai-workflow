@@ -363,7 +363,7 @@ class TestGetPrioritySummary:
             ),
         ]
         summary = get_priority_summary(issues)
-        lines = summary.split("\n")
+        summary.split("\n")
         text = summary
         # Should have different icons for different statuses
         assert "\U0001f534" in text  # red circle (blocked)

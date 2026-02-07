@@ -1,10 +1,9 @@
 """Tests for tool_modules.aa_workflow.src.infra_tools."""
 
-import json
 import sys
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -515,7 +514,7 @@ class TestKubeLoginImpl:
                     return_value=(True, "Logged in", ""),
                 ),
             ):
-                result = await infra_tools._kube_login_impl("s")
+                await infra_tools._kube_login_impl("s")
                 # Just verify no crash -- detailed error message check is fragile
 
     @pytest.mark.asyncio

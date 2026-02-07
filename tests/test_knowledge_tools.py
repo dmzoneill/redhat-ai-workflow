@@ -4,7 +4,6 @@ Tests the helper functions and async tool implementations in
 tool_modules/aa_workflow/src/knowledge_tools.py.
 """
 
-import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 

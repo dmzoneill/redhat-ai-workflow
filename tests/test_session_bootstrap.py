@@ -4,7 +4,7 @@ Tests the _get_bootstrap_context function that provides intelligent
 context gathering and persona suggestions when starting a session.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -18,7 +18,9 @@ class TestGetBootstrapContext:
         from tool_modules.aa_workflow.src.session_tools import _get_bootstrap_context
 
         # Test with project context - may return None if memory abstraction not available
-        result = await _get_bootstrap_context("automation-analytics-backend", "Fix billing bug")
+        result = await _get_bootstrap_context(
+            "automation-analytics-backend", "Fix billing bug"
+        )
 
         # Result can be None if memory abstraction isn't initialized
         if result is not None:
@@ -33,8 +35,6 @@ class TestGetBootstrapContext:
         """Test graceful fallback when memory abstraction is unavailable."""
         with patch.dict("sys.modules", {"services.memory_abstraction": None}):
             # Force reimport to trigger ImportError path
-            import importlib
-
             import tool_modules.aa_workflow.src.session_tools as session_tools
 
             # The function should handle ImportError gracefully
@@ -82,7 +82,13 @@ class TestPersonaSuggestionMapping:
         }
 
         # Verify all expected intents are mapped
-        expected_intents = ["code_lookup", "troubleshooting", "status_check", "documentation", "issue_context"]
+        expected_intents = [
+            "code_lookup",
+            "troubleshooting",
+            "status_check",
+            "documentation",
+            "issue_context",
+        ]
         for intent in expected_intents:
             assert intent in persona_map
             persona, confidence = persona_map[intent]
@@ -100,7 +106,7 @@ class TestPersonaSuggestionMapping:
         }
 
         # All confidences should be above 0.5 (better than random)
-        for intent, (persona, confidence) in persona_map.items():
+        for intent, (_persona, confidence) in persona_map.items():
             assert confidence >= 0.5, f"Confidence for {intent} too low: {confidence}"
 
         # Troubleshooting should have highest confidence (critical to get right)
@@ -113,11 +119,23 @@ class TestRecommendedActions:
     def test_action_map_coverage(self):
         """Test that action map covers expected intents."""
         action_map = {
-            "code_lookup": ["Use code_search to find relevant code", "Check memory for similar patterns"],
-            "troubleshooting": ["Check learned/patterns for known fixes", "Load incident persona for debugging tools"],
-            "status_check": ["Review active issues in current_work", "Check environment health"],
+            "code_lookup": [
+                "Use code_search to find relevant code",
+                "Check memory for similar patterns",
+            ],
+            "troubleshooting": [
+                "Check learned/patterns for known fixes",
+                "Load incident persona for debugging tools",
+            ],
+            "status_check": [
+                "Review active issues in current_work",
+                "Check environment health",
+            ],
             "issue_context": ["Query Jira for issue details", "Check for related MRs"],
-            "documentation": ["Query InScope for documentation", "Check knowledge base"],
+            "documentation": [
+                "Query InScope for documentation",
+                "Check knowledge base",
+            ],
         }
 
         # All intents should have at least one action
@@ -127,16 +145,28 @@ class TestRecommendedActions:
     def test_actions_are_actionable(self):
         """Test that recommended actions are specific and actionable."""
         action_map = {
-            "code_lookup": ["Use code_search to find relevant code", "Check memory for similar patterns"],
-            "troubleshooting": ["Check learned/patterns for known fixes", "Load incident persona for debugging tools"],
-            "status_check": ["Review active issues in current_work", "Check environment health"],
+            "code_lookup": [
+                "Use code_search to find relevant code",
+                "Check memory for similar patterns",
+            ],
+            "troubleshooting": [
+                "Check learned/patterns for known fixes",
+                "Load incident persona for debugging tools",
+            ],
+            "status_check": [
+                "Review active issues in current_work",
+                "Check environment health",
+            ],
             "issue_context": ["Query Jira for issue details", "Check for related MRs"],
-            "documentation": ["Query InScope for documentation", "Check knowledge base"],
+            "documentation": [
+                "Query InScope for documentation",
+                "Check knowledge base",
+            ],
         }
 
         # Actions should contain verbs (actionable)
         action_verbs = ["use", "check", "load", "review", "query"]
-        for intent, actions in action_map.items():
+        for _intent, actions in action_map.items():
             for action in actions:
                 action_lower = action.lower()
                 has_verb = any(verb in action_lower for verb in action_verbs)
@@ -149,7 +179,11 @@ class TestBootstrapIntegration:
     @pytest.mark.asyncio
     async def test_bootstrap_with_mocked_memory(self):
         """Test bootstrap context with fully mocked memory interface."""
-        from services.memory_abstraction.models import IntentClassification, MemoryItem, QueryResult
+        from services.memory_abstraction.models import (
+            IntentClassification,
+            MemoryItem,
+            QueryResult,
+        )
 
         # Create mock query result
         mock_intent = IntentClassification(
@@ -180,10 +214,16 @@ class TestBootstrapIntegration:
         mock_memory = AsyncMock()
         mock_memory.query = AsyncMock(return_value=mock_result)
 
-        with patch("services.memory_abstraction.get_memory_interface", return_value=mock_memory):
-            from tool_modules.aa_workflow.src.session_tools import _get_bootstrap_context
+        with patch(
+            "services.memory_abstraction.get_memory_interface", return_value=mock_memory
+        ):
+            from tool_modules.aa_workflow.src.session_tools import (
+                _get_bootstrap_context,
+            )
 
-            result = await _get_bootstrap_context("automation-analytics-backend", "Fix billing bug")
+            result = await _get_bootstrap_context(
+                "automation-analytics-backend", "Fix billing bug"
+            )
 
             if result is not None:
                 assert result["intent"]["intent"] == "code_lookup"
@@ -194,7 +234,11 @@ class TestBootstrapIntegration:
     @pytest.mark.asyncio
     async def test_bootstrap_extracts_active_issues(self):
         """Test that bootstrap correctly extracts active issues from memory."""
-        from services.memory_abstraction.models import IntentClassification, MemoryItem, QueryResult
+        from services.memory_abstraction.models import (
+            IntentClassification,
+            MemoryItem,
+            QueryResult,
+        )
 
         mock_intent = IntentClassification(
             intent="status_check",
@@ -224,15 +268,21 @@ class TestBootstrapIntegration:
         mock_memory = AsyncMock()
         mock_memory.query = AsyncMock(return_value=mock_result)
 
-        with patch("services.memory_abstraction.get_memory_interface", return_value=mock_memory):
-            from tool_modules.aa_workflow.src.session_tools import _get_bootstrap_context
+        with patch(
+            "services.memory_abstraction.get_memory_interface", return_value=mock_memory
+        ):
+            from tool_modules.aa_workflow.src.session_tools import (
+                _get_bootstrap_context,
+            )
 
             result = await _get_bootstrap_context("test-project", None)
 
             if result is not None:
                 active_issues = result.get("current_work", {}).get("active_issues", [])
                 # Should extract AAP and APPSRE issue keys
-                assert "AAP-12345" in active_issues or len(active_issues) == 0  # Depends on parsing
+                assert (
+                    "AAP-12345" in active_issues or len(active_issues) == 0
+                )  # Depends on parsing
 
 
 class TestBootstrapErrorHandling:
@@ -244,8 +294,12 @@ class TestBootstrapErrorHandling:
         mock_memory = AsyncMock()
         mock_memory.query = AsyncMock(side_effect=Exception("Memory query failed"))
 
-        with patch("services.memory_abstraction.get_memory_interface", return_value=mock_memory):
-            from tool_modules.aa_workflow.src.session_tools import _get_bootstrap_context
+        with patch(
+            "services.memory_abstraction.get_memory_interface", return_value=mock_memory
+        ):
+            from tool_modules.aa_workflow.src.session_tools import (
+                _get_bootstrap_context,
+            )
 
             # Should not raise, should return None
             result = await _get_bootstrap_context("test-project", "test session")
@@ -259,7 +313,9 @@ class TestBootstrapErrorHandling:
             "services.memory_abstraction.get_memory_interface",
             side_effect=ImportError("No module"),
         ):
-            from tool_modules.aa_workflow.src.session_tools import _get_bootstrap_context
+            from tool_modules.aa_workflow.src.session_tools import (
+                _get_bootstrap_context,
+            )
 
             # Should return None, not raise
             result = await _get_bootstrap_context("test", None)

@@ -1,11 +1,8 @@
 """Tests for persona_loader module."""
 
-import asyncio
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 # Ensure project root is on sys.path so `server` is importable as a package
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -20,7 +17,6 @@ from server.persona_loader import (  # noqa: E402
     PersonaLoader,
     discover_tool_modules,
     get_available_modules,
-    init_loader,
     is_valid_module,
 )
 
@@ -434,7 +430,7 @@ class TestLoadToolModule:
                             "server.persona_loader.validate_tool_module",
                             return_value=["warn: something"],
                         ):
-                            result = await loader._load_tool_module("warn_mod")
+                            await loader._load_tool_module("warn_mod")
 
         # Module loaded despite warnings
         assert "warn_mod" in loader.loaded_modules

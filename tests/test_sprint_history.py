@@ -12,7 +12,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from tool_modules.aa_workflow.src.sprint_history import (
-    ACTIONABLE_STATUSES,
     CompletedSprint,
     SprintIssue,
     SprintState,
@@ -685,7 +684,7 @@ class TestCompleteCurrentSprint:
         assert len(history["sprints"]) == 1
 
         # Verify state was cleared
-        new_state = json.loads(state_file.read_text())
+        json.loads(state_file.read_text())
         # The safety check preserves issues, so we check the sprint was archived
         assert history["sprints"][0]["id"] == "s1"
 

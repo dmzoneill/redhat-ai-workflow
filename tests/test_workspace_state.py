@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from server.workspace_state import (
-    DEFAULT_PROJECT,
     DEFAULT_WORKSPACE,
     MAX_FILTER_CACHE_SIZE,
     SESSION_STALE_HOURS,
@@ -149,8 +148,8 @@ class TestWorkspaceState:
         """Test creating multiple sessions in workspace."""
         state = WorkspaceState(workspace_uri="file:///test")
 
-        session1 = state.create_session(persona="developer")
-        session2 = state.create_session(persona="devops")
+        state.create_session(persona="developer")
+        state.create_session(persona="devops")
         session3 = state.create_session(persona="incident")
 
         assert state.session_count() == 3
@@ -1538,8 +1537,6 @@ class TestWorkspaceRegistryAdvanced:
     @pytest.mark.asyncio
     async def test_periodic_cleanup_on_access(self):
         """get_for_ctx triggers periodic cleanup after N accesses."""
-        import server.workspace_state as ws_module
-
         mock_ctx = MagicMock()
         mock_ctx.session = AsyncMock()
         mock_roots = MagicMock()
@@ -2724,7 +2721,7 @@ class TestSyncWithCursorDb:
                             with patch.object(
                                 state, "_get_loaded_tools", return_value=set()
                             ):
-                                result = state.sync_with_cursor_db(session_ids=["s1"])
+                                state.sync_with_cursor_db(session_ids=["s1"])
 
         # Content scanning functions should be called
         mock_issues.assert_called_once_with(["s1"])
@@ -3385,8 +3382,6 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_finds_issue_keys_in_chat(self):
         """Finds AAP-XXXXX patterns in chat content."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3420,8 +3415,6 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_handles_invalid_json_in_value(self):
         """Handles invalid JSON in database values."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3438,8 +3431,6 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_sorts_issue_keys_numerically(self):
         """Issue keys are sorted by numeric part."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3590,8 +3581,6 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_detects_persona_load_call(self):
         """Detects persona from persona_load('developer') call."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3609,8 +3598,6 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_detects_agent_parameter(self):
         """Detects persona from agent='devops' in session_start."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3628,8 +3615,6 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_returns_last_persona(self):
         """Returns the last persona loaded (highest bubble_id)."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3648,8 +3633,6 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_ignores_invalid_personas(self):
         """Ignores persona names not in VALID_PERSONAS."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3679,8 +3662,6 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_handles_empty_text(self):
         """Handles entries with empty text field."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3717,8 +3698,6 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_detects_project_from_session_start(self):
         """Detects project from session_start(project='backend') call."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3746,8 +3725,6 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_skips_redhat_ai_workflow(self):
         """Skips 'redhat-ai-workflow' as it's the default workspace."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -3783,8 +3760,6 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_config_load_failure_uses_fallback(self):
         """Falls back to hardcoded project list when config fails."""
-        import sqlite3
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
@@ -4211,9 +4186,7 @@ class TestSyncWithCursorDbAdvanced:
                                 with patch.object(
                                     state, "_get_loaded_tools", return_value=set()
                                 ):
-                                    result = state.sync_with_cursor_db(
-                                        session_ids=["c1"]
-                                    )
+                                    state.sync_with_cursor_db(session_ids=["c1"])
 
         session = state.get_session("c1")
         assert session.persona == "developer"

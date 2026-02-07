@@ -7,10 +7,9 @@ requiring full PulseAudio integration.
 Run with: pytest tests/test_meetbot_smoke.py -v
 """
 
-import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -111,13 +110,17 @@ class TestCleanupFunctionExists:
 
     def test_cleanup_orphaned_function_exists(self):
         """cleanup_orphaned_meetbot_devices should exist."""
-        from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            cleanup_orphaned_meetbot_devices,
+        )
 
         assert callable(cleanup_orphaned_meetbot_devices)
 
     def test_restore_default_audio_source_exists(self):
         """_restore_default_audio_source should exist."""
-        from tool_modules.aa_meet_bot.src.virtual_devices import _restore_default_audio_source
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            _restore_default_audio_source,
+        )
 
         assert callable(_restore_default_audio_source)
 
@@ -190,7 +193,9 @@ class TestSourcePriorityProperties:
         source_code = inspect.getsource(InstanceDeviceManager._create_source)
 
         # Should include priority properties
-        assert "priority" in source_code.lower(), "_create_source should set priority properties"
+        assert (
+            "priority" in source_code.lower()
+        ), "_create_source should set priority properties"
 
 
 class TestMonitorTaskManagement:
@@ -265,7 +270,9 @@ class TestVideoDeviceBasics:
 
     def test_orphaned_video_cleanup_function_exists(self):
         """_cleanup_orphaned_video_devices function should exist."""
-        from tool_modules.aa_meet_bot.src.virtual_devices import _cleanup_orphaned_video_devices
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            _cleanup_orphaned_video_devices,
+        )
 
         assert callable(_cleanup_orphaned_video_devices)
 
@@ -309,7 +316,9 @@ class TestMockedDeviceCreation:
             await manager.cleanup()
 
             # Should have called unload-module for both modules
-            unload_calls = [call for call in mock_run.call_args_list if "unload-module" in str(call)]
+            unload_calls = [
+                call for call in mock_run.call_args_list if "unload-module" in str(call)
+            ]
             assert len(unload_calls) >= 2, "Should unload both sink and source modules"
 
 

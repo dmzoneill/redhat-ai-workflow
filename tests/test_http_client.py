@@ -1,9 +1,8 @@
 """Tests for server.http_client module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import httpx
-import pytest
 
 from server.http_client import (
     APIClient,

@@ -1,10 +1,5 @@
 """Tests for server/errors.py - Standardized error handling for MCP tools."""
 
-import json
-from unittest.mock import patch
-
-import pytest
-
 from server.errors import (
     ErrorCodes,
     ToolResult,

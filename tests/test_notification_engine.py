@@ -1,8 +1,7 @@
 """Tests for tool_modules/aa_workflow/src/notification_engine.py - Multi-channel notifications."""
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml

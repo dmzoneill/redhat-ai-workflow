@@ -3,8 +3,6 @@
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from tool_modules.aa_workflow.src.claude_code_integration import (
     _check_subprocess_context,
     _try_import_strategy,
@@ -186,7 +184,7 @@ class TestCreateAskQuestionWrapper:
             "tool_modules.aa_workflow.src.claude_code_integration._try_server_strategy",
             return_value=lambda x: x,
         ) as mock_server:
-            result = create_ask_question_wrapper(server=server)
+            create_ask_question_wrapper(server=server)
             mock_server.assert_called_once_with(server)
 
     def test_falls_through_to_import_strategy(self):

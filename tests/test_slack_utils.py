@@ -2,8 +2,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from scripts.common.slack_utils import (
     build_alert_notification,
     build_mr_notification,
@@ -44,45 +42,66 @@ class TestBuildTeamMention:
 
 
 class TestBuildMrNotification:
-    @patch("scripts.common.slack_utils.get_jira_url", return_value="https://jira.test")
-    @patch("scripts.common.slack_utils.get_team_group_id", return_value="")
-    @patch("scripts.common.slack_utils.get_team_group_handle", return_value="team")
-    def test_basic_notification(self, mock_handle, mock_gid, mock_jira):
-        result = build_mr_notification(
-            mr_url="https://gitlab/mr/1",
-            mr_id=1,
-            mr_title="Fix bug",
-        )
-        assert "@team" in result
-        assert "Fix bug" in result
-        assert "https://gitlab/mr/1" in result
+    def test_basic_notification(self):
+        with (
+            patch(
+                "scripts.common.slack_utils.get_jira_url",
+                return_value="https://jira.test",
+            ),
+            patch("scripts.common.slack_utils.get_team_group_id", return_value=""),
+            patch(
+                "scripts.common.slack_utils.get_team_group_handle", return_value="team"
+            ),
+        ):
+            result = build_mr_notification(
+                mr_url="https://gitlab/mr/1",
+                mr_id=1,
+                mr_title="Fix bug",
+            )
+            assert "@team" in result
+            assert "Fix bug" in result
+            assert "https://gitlab/mr/1" in result
 
-    @patch("scripts.common.slack_utils.get_jira_url", return_value="https://jira.test")
-    @patch("scripts.common.slack_utils.get_team_group_id", return_value="")
-    @patch("scripts.common.slack_utils.get_team_group_handle", return_value="team")
-    def test_with_issue_key(self, mock_handle, mock_gid, mock_jira):
-        result = build_mr_notification(
-            mr_url="https://gitlab/mr/2",
-            mr_id=2,
-            mr_title="Feature",
-            issue_key="AAP-123",
-        )
-        assert "AAP-123" in result
-        assert "https://jira.test/browse/AAP-123" in result
+    def test_with_issue_key(self):
+        with (
+            patch(
+                "scripts.common.slack_utils.get_jira_url",
+                return_value="https://jira.test",
+            ),
+            patch("scripts.common.slack_utils.get_team_group_id", return_value=""),
+            patch(
+                "scripts.common.slack_utils.get_team_group_handle", return_value="team"
+            ),
+        ):
+            result = build_mr_notification(
+                mr_url="https://gitlab/mr/2",
+                mr_id=2,
+                mr_title="Feature",
+                issue_key="AAP-123",
+            )
+            assert "AAP-123" in result
+            assert "https://jira.test/browse/AAP-123" in result
 
-    @patch("scripts.common.slack_utils.get_jira_url", return_value="https://jira.test")
-    @patch("scripts.common.slack_utils.get_team_group_id", return_value="")
-    @patch("scripts.common.slack_utils.get_team_group_handle", return_value="team")
-    def test_title_truncation(self, mock_handle, mock_gid, mock_jira):
-        long_title = "A" * 100
-        result = build_mr_notification(
-            mr_url="https://gitlab/mr/3",
-            mr_id=3,
-            mr_title=long_title,
-        )
-        # Title should be truncated to 60 chars
-        assert "A" * 60 in result
-        assert "A" * 61 not in result
+    def test_title_truncation(self):
+        with (
+            patch(
+                "scripts.common.slack_utils.get_jira_url",
+                return_value="https://jira.test",
+            ),
+            patch("scripts.common.slack_utils.get_team_group_id", return_value=""),
+            patch(
+                "scripts.common.slack_utils.get_team_group_handle", return_value="team"
+            ),
+        ):
+            long_title = "A" * 100
+            result = build_mr_notification(
+                mr_url="https://gitlab/mr/3",
+                mr_id=3,
+                mr_title=long_title,
+            )
+            # Title should be truncated to 60 chars
+            assert "A" * 60 in result
+            assert "A" * 61 not in result
 
     def test_explicit_jira_url(self):
         result = build_mr_notification(

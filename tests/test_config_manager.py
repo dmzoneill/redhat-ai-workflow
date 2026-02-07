@@ -4,12 +4,9 @@ Tests thread safety, debouncing, file locking, and mtime-based cache invalidatio
 """
 
 import json
-import os
-import tempfile
 import threading
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -464,7 +461,7 @@ class TestValidateConfig:
 
     def test_spec_as_type_only(self):
         """validate_config handles spec that is just a type (not a tuple)."""
-        from server.config_manager import CONFIG_SCHEMA, validate_config
+        from server.config_manager import validate_config
 
         # The slack section has specs that are tuples, but let's test through
         # a normal config validation path

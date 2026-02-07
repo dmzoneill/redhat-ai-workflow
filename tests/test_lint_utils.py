@@ -2,8 +2,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 from scripts.common.lint_utils import LintResult, format_lint_error, run_lint_check
 
 # ---------------------------------------------------------------------------
@@ -47,147 +45,225 @@ class TestLintResult:
 
 
 class TestRunLintCheck:
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value="/usr/bin/black")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_both_pass(self, mock_len, mock_codes, mock_which, mock_cmd):
-        result = run_lint_check("/tmp/repo")
-        assert result.passed is True
-        assert result.black_ok is True
-        assert result.flake8_ok is True
-        assert result.message == "Lint passed"
+    def test_both_pass(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")):
+            with patch("shutil.which", return_value="/usr/bin/black"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        result = run_lint_check("/tmp/repo")
+                        assert result.passed is True
+                        assert result.black_ok is True
+                        assert result.flake8_ok is True
+                        assert result.message == "Lint passed"
 
-    @patch(
-        "scripts.common.lint_utils.run_cmd_sync", return_value=(False, "would reformat")
-    )
-    @patch("shutil.which", return_value="/usr/bin/black")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_black_fails(self, mock_len, mock_codes, mock_which, mock_cmd):
-        result = run_lint_check("/tmp/repo", check_flake8=False)
-        assert result.passed is False
-        assert result.black_ok is False
-        assert any("Black" in e for e in result.errors)
+    def test_black_fails(self):
+        with patch(
+            "scripts.common.lint_utils.run_cmd_sync",
+            return_value=(False, "would reformat"),
+        ):
+            with patch("shutil.which", return_value="/usr/bin/black"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        result = run_lint_check("/tmp/repo", check_flake8=False)
+                        assert result.passed is False
+                        assert result.black_ok is False
+                        assert any("Black" in e for e in result.errors)
 
-    @patch("scripts.common.lint_utils.run_cmd_sync")
-    @patch("shutil.which", return_value="/usr/bin/flake8")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_flake8_fails(self, mock_len, mock_codes, mock_which, mock_cmd):
-        # Black passes, flake8 fails
-        mock_cmd.side_effect = [
-            (True, ""),  # black
-            (
-                False,
-                "file.py:1:1: E302 expected 2 blank lines\nfile.py:2:1: W291 trailing ws",
-            ),  # flake8
-        ]
-        result = run_lint_check("/tmp/repo")
-        assert result.passed is False
-        assert result.flake8_ok is False
-        assert any("Flake8: 2 issue(s)" in e for e in result.errors)
+    def test_flake8_fails(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync") as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/flake8"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        # Black passes, flake8 fails
+                        mock_cmd.side_effect = [
+                            (True, ""),  # black
+                            (
+                                False,
+                                "file.py:1:1: E302 expected 2 blank lines\nfile.py:2:1: W291 trailing ws",
+                            ),  # flake8
+                        ]
+                        result = run_lint_check("/tmp/repo")
+                        assert result.passed is False
+                        assert result.flake8_ok is False
+                        assert any("Flake8: 2 issue(s)" in e for e in result.errors)
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value="/usr/bin/black")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_skip_black(self, mock_len, mock_codes, mock_which, mock_cmd):
-        result = run_lint_check("/tmp/repo", check_black=False)
-        assert result.black_ok is True  # Not checked = ok
+    def test_skip_black(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")):
+            with patch("shutil.which", return_value="/usr/bin/black"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        result = run_lint_check("/tmp/repo", check_black=False)
+                        assert result.black_ok is True  # Not checked = ok
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value="/usr/bin/flake8")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_skip_flake8(self, mock_len, mock_codes, mock_which, mock_cmd):
-        result = run_lint_check("/tmp/repo", check_flake8=False)
-        assert result.flake8_ok is True
+    def test_skip_flake8(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")):
+            with patch("shutil.which", return_value="/usr/bin/flake8"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        result = run_lint_check("/tmp/repo", check_flake8=False)
+                        assert result.flake8_ok is True
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value=None)
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_tools_not_installed(self, mock_len, mock_codes, mock_which, mock_cmd):
-        # which returns None -> tools not found -> skips checks
-        result = run_lint_check("/tmp/repo")
-        assert result.passed is True
+    def test_tools_not_installed(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")):
+            with patch("shutil.which", return_value=None):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        # which returns None -> tools not found -> skips checks
+                        result = run_lint_check("/tmp/repo")
+                        assert result.passed is True
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value="/usr/bin/black")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_specific_files(self, mock_len, mock_codes, mock_which, mock_cmd):
-        run_lint_check("/tmp/repo", files=["a.py", "b.py"], check_flake8=False)
-        cmd_args = mock_cmd.call_args[0][0]
-        assert "a.py" in cmd_args
-        assert "b.py" in cmd_args
+    def test_specific_files(self):
+        with patch(
+            "scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")
+        ) as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/black"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        run_lint_check(
+                            "/tmp/repo",
+                            files=["a.py", "b.py"],
+                            check_flake8=False,
+                        )
+                        cmd_args = mock_cmd.call_args[0][0]
+                        assert "a.py" in cmd_args
+                        assert "b.py" in cmd_args
 
-    @patch(
-        "scripts.common.lint_utils.run_cmd_sync",
-        return_value=(False, "timed out after 60s"),
-    )
-    @patch("shutil.which", return_value="/usr/bin/black")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_black_timeout(self, mock_len, mock_codes, mock_which, mock_cmd):
-        result = run_lint_check("/tmp/repo", check_flake8=False)
-        assert result.black_ok is False
-        assert any("timed out" in e for e in result.errors)
+    def test_black_timeout(self):
+        with patch(
+            "scripts.common.lint_utils.run_cmd_sync",
+            return_value=(False, "timed out after 60s"),
+        ):
+            with patch("shutil.which", return_value="/usr/bin/black"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        result = run_lint_check("/tmp/repo", check_flake8=False)
+                        assert result.black_ok is False
+                        assert any("timed out" in e for e in result.errors)
 
-    @patch("scripts.common.lint_utils.run_cmd_sync")
-    @patch("shutil.which", return_value="/usr/bin/flake8")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_flake8_timeout(self, mock_len, mock_codes, mock_which, mock_cmd):
-        mock_cmd.side_effect = [
-            (True, ""),  # black
-            (False, "Timed out waiting for output"),  # flake8
-        ]
-        result = run_lint_check("/tmp/repo")
-        assert result.flake8_ok is False
-        assert any("timed out" in e for e in result.errors)
+    def test_flake8_timeout(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync") as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/flake8"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        mock_cmd.side_effect = [
+                            (True, ""),  # black
+                            (False, "Timed out waiting for output"),  # flake8
+                        ]
+                        result = run_lint_check("/tmp/repo")
+                        assert result.flake8_ok is False
+                        assert any("timed out" in e for e in result.errors)
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(False, ""))
-    @patch("shutil.which", return_value="/usr/bin/flake8")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_flake8_fail_but_empty_output(
-        self, mock_len, mock_codes, mock_which, mock_cmd
-    ):
-        # flake8 returns failure but no output -> treated as OK
-        mock_cmd.side_effect = [
-            (True, ""),  # black
-            (False, ""),  # flake8 with empty output
-        ]
-        result = run_lint_check("/tmp/repo")
-        assert result.flake8_ok is True  # Empty output = no real issues
+    def test_flake8_fail_but_empty_output(self):
+        with patch(
+            "scripts.common.lint_utils.run_cmd_sync", return_value=(False, "")
+        ) as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/flake8"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        # flake8 returns failure but no output -> treated as OK
+                        mock_cmd.side_effect = [
+                            (True, ""),  # black
+                            (False, ""),  # flake8 with empty output
+                        ]
+                        result = run_lint_check("/tmp/repo")
+                        assert result.flake8_ok is True  # Empty output = no real issues
 
-    @patch("scripts.common.lint_utils.run_cmd_sync", return_value=(True, ""))
-    @patch("shutil.which", return_value="/usr/bin/flake8")
-    def test_custom_ignore_and_length(self, mock_which, mock_cmd):
-        run_lint_check(
-            "/tmp/repo", check_black=False, ignore_codes="W503", max_line_length=120
-        )
-        cmd_args = mock_cmd.call_args[0][0]
-        assert "--max-line-length=120" in cmd_args
-        assert "--ignore=W503" in cmd_args
+    def test_custom_ignore_and_length(self):
+        with patch(
+            "scripts.common.lint_utils.run_cmd_sync", return_value=(True, "")
+        ) as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/flake8"):
+                run_lint_check(
+                    "/tmp/repo",
+                    check_black=False,
+                    ignore_codes="W503",
+                    max_line_length=120,
+                )
+                cmd_args = mock_cmd.call_args[0][0]
+                assert "--max-line-length=120" in cmd_args
+                assert "--ignore=W503" in cmd_args
 
-    @patch("scripts.common.lint_utils.run_cmd_sync")
-    @patch("shutil.which", return_value="/usr/bin/tool")
-    @patch("scripts.common.lint_utils.get_flake8_ignore_codes", return_value="E501")
-    @patch("scripts.common.lint_utils.get_flake8_max_line_length", return_value=100)
-    def test_both_fail(self, mock_len, mock_codes, mock_which, mock_cmd):
-        mock_cmd.side_effect = [
-            (False, "would reformat"),  # black
-            (False, "file.py:1:1: E302"),  # flake8
-        ]
-        result = run_lint_check("/tmp/repo")
-        assert result.passed is False
-        assert result.black_ok is False
-        assert result.flake8_ok is False
-        assert len(result.errors) == 2
-        assert ";" in result.message  # errors joined with ";"
+    def test_both_fail(self):
+        with patch("scripts.common.lint_utils.run_cmd_sync") as mock_cmd:
+            with patch("shutil.which", return_value="/usr/bin/tool"):
+                with patch(
+                    "scripts.common.lint_utils.get_flake8_ignore_codes",
+                    return_value="E501",
+                ):
+                    with patch(
+                        "scripts.common.lint_utils.get_flake8_max_line_length",
+                        return_value=100,
+                    ):
+                        mock_cmd.side_effect = [
+                            (False, "would reformat"),  # black
+                            (False, "file.py:1:1: E302"),  # flake8
+                        ]
+                        result = run_lint_check("/tmp/repo")
+                        assert result.passed is False
+                        assert result.black_ok is False
+                        assert result.flake8_ok is False
+                        assert len(result.errors) == 2
+                        assert ";" in result.message  # errors joined with ";"
 
 
 # ---------------------------------------------------------------------------

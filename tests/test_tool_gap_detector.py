@@ -1,7 +1,5 @@
 """Tests for tool_modules/aa_workflow/src/tool_gap_detector.py"""
 
-from datetime import datetime
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

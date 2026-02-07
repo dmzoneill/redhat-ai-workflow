@@ -1,9 +1,6 @@
 """Tests for server/debuggable.py - Auto-debug infrastructure for MCP tools."""
 
-import os
-import re
 import textwrap
-from pathlib import Path
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 

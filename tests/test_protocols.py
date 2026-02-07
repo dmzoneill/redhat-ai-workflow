@@ -1,10 +1,7 @@
 """Tests for server/protocols.py - Protocol definitions and validation utilities."""
 
-import inspect
 from types import ModuleType
 from unittest.mock import MagicMock
-
-import pytest
 
 from server.protocols import (
     ConfigurableProtocol,

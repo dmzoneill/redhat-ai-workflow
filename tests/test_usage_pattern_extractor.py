@@ -6,9 +6,6 @@ Targets 90%+ coverage of server/usage_pattern_extractor.py.
 """
 
 from datetime import datetime
-from unittest.mock import patch
-
-import pytest
 
 from server.usage_pattern_extractor import (
     _extract_format_pattern,

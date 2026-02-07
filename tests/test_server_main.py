@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,7 +34,7 @@ class TestSetupLogging:
         assert logger.name == "server.main"
 
     def test_configures_handlers(self):
-        logger = setup_logging()
+        setup_logging()
         root = logging.getLogger()
         assert len(root.handlers) >= 1
 
@@ -306,7 +305,7 @@ class TestCreateMcpServer:
             patches["ws_restore"],
         ):
             mock_loader.return_value = MagicMock()
-            server = create_mcp_server(name="test", tools=None)
+            create_mcp_server(name="test", tools=None)
         assert mock_load.call_count == 2  # git + jira
 
     def test_warns_on_unknown_module(self):
@@ -530,8 +529,6 @@ class TestInitScheduler:
             clear=False,
         ):
             # Also need to ensure the import actually fails
-            import importlib
-
             # Remove from cache if present
             for key in list(__import__("sys").modules.keys()):
                 if "notification_engine" in key:

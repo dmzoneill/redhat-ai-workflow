@@ -1,9 +1,7 @@
 """Tests for scripts/common/auto_heal.py"""
 
 from datetime import datetime
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from scripts.common.auto_heal import (
     _guess_cluster,
@@ -277,7 +275,7 @@ class TestLogFailure:
 
     def test_with_memory_helper(self):
         helper = MagicMock()
-        entry = log_failure("tool", "err", memory_helper=helper, fixed=True)
+        log_failure("tool", "err", memory_helper=helper, fixed=True)
         helper.append_to_list.assert_called_once()
         # Two increment calls: total_failures + auto_fixed
         assert helper.increment_field.call_count == 2

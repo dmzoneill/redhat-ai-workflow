@@ -1,10 +1,9 @@
 """Tests for tool_modules.aa_workflow.src.memory_tools."""
 
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -481,7 +480,7 @@ class TestMemoryUpdateImpl:
     async def test_update_nested_field(self, temp_memory_dir):
         (temp_memory_dir / "state" / "test.yaml").write_text("a:\n  b: old")
         with patch("tool_modules.aa_workflow.src.agent_stats.record_memory_write"):
-            result = await memory_tools._memory_update_impl("state/test", "a.b", "new")
+            await memory_tools._memory_update_impl("state/test", "a.b", "new")
         data = yaml.safe_load((temp_memory_dir / "state" / "test.yaml").read_text())
         assert data["a"]["b"] == "new"
 
@@ -646,7 +645,7 @@ class TestMemorySessionLogImpl:
     @pytest.mark.asyncio
     async def test_logs_without_details(self, temp_memory_dir):
         with patch("tool_modules.aa_workflow.src.agent_stats.record_memory_write"):
-            result = await memory_tools._memory_session_log_impl("Just action")
+            await memory_tools._memory_session_log_impl("Just action")
         today = datetime.now().strftime("%Y-%m-%d")
         session_file = temp_memory_dir / "sessions" / f"{today}.yaml"
         data = yaml.safe_load(session_file.read_text())

@@ -1,6 +1,5 @@
 """Tests for scripts/common/repo_utils.py"""
 
-import os
 from unittest.mock import patch
 
 import pytest
@@ -189,64 +188,63 @@ class TestResolveRepo:
         }
     }
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_by_path(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_path="/home/user/backend")
-            assert r.name == "backend"
-            assert r.gitlab_project == "org/backend"
+    def test_by_path(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_path="/home/user/backend")
+                assert r.name == "backend"
+                assert r.gitlab_project == "org/backend"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_by_name(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_name="frontend")
-            assert r.name == "frontend"
-            assert r.default_branch == "develop"
+    def test_by_name(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_name="frontend")
+                assert r.name == "frontend"
+                assert r.default_branch == "develop"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_by_issue_key(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(issue_key="AAP-555")
-            assert r.name == "backend"
-            assert r.jira_project == "AAP"
+    def test_by_issue_key(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(issue_key="AAP-555")
+                assert r.name == "backend"
+                assert r.jira_project == "AAP"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_target_branch_overrides_default(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_name="backend", target_branch="feature-x")
-            assert r.default_branch == "feature-x"
+    def test_target_branch_overrides_default(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_name="backend", target_branch="feature-x")
+                assert r.default_branch == "feature-x"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_path_not_found_raises(self, mock_config):
-        mock_config.return_value = {"repositories": {}}
-        with (
-            patch("os.path.exists", return_value=False),
-            patch("os.getcwd", return_value="/nonexistent"),
-        ):
-            with pytest.raises(ValueError, match="not found"):
-                resolve_repo()
+    def test_path_not_found_raises(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = {"repositories": {}}
+            with (
+                patch("os.path.exists", return_value=False),
+                patch("os.getcwd", return_value="/nonexistent"),
+            ):
+                with pytest.raises(ValueError, match="not found"):
+                    resolve_repo()
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_empty_path_is_skipped(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        # Empty string or "." should fall through to name resolution
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_path="", repo_name="backend")
-            assert r.name == "backend"
+    def test_empty_path_is_skipped(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            # Empty string or "." should fall through to name resolution
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_path="", repo_name="backend")
+                assert r.name == "backend"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_dot_path_is_skipped(self, mock_config):
-        mock_config.return_value = self.MOCK_CONFIG
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_path=".", repo_name="backend")
-            assert r.name == "backend"
+    def test_dot_path_is_skipped(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = self.MOCK_CONFIG
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_path=".", repo_name="backend")
+                assert r.name == "backend"
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_fallback_to_cwd(self, mock_config, tmp_path):
+    def test_fallback_to_cwd(self, tmp_path):
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
         config = {
@@ -258,19 +256,20 @@ class TestResolveRepo:
                 },
             }
         }
-        mock_config.return_value = config
-        with (
-            patch("os.getcwd", return_value=str(tmp_path)),
-            patch("os.path.exists", return_value=True),
-        ):
-            r = resolve_repo()
-            assert r.path == str(tmp_path)
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = config
+            with (
+                patch("os.getcwd", return_value=str(tmp_path)),
+                patch("os.path.exists", return_value=True),
+            ):
+                r = resolve_repo()
+                assert r.path == str(tmp_path)
 
-    @patch("scripts.common.repo_utils.load_config")
-    def test_unknown_path_by_path_returns_empty_metadata(self, mock_config):
-        mock_config.return_value = {"repositories": {}}
-        with patch("os.path.exists", return_value=True):
-            r = resolve_repo(repo_path="/some/unknown/path")
-            assert r.path == "/some/unknown/path"
-            assert r.gitlab_project == ""
-            assert r.name == ""
+    def test_unknown_path_by_path_returns_empty_metadata(self):
+        with patch("scripts.common.repo_utils.load_config") as mock_config:
+            mock_config.return_value = {"repositories": {}}
+            with patch("os.path.exists", return_value=True):
+                r = resolve_repo(repo_path="/some/unknown/path")
+                assert r.path == "/some/unknown/path"
+                assert r.gitlab_project == ""
+                assert r.name == ""

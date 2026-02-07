@@ -431,7 +431,7 @@ class TestWriteMemoryValidation:
 
     def test_write_io_error(self, temp_memory_dir):
         """Test write_memory returns False on IOError."""
-        data = {"test": "data"}
+        _data = {"test": "data"}
         with patch("builtins.open", side_effect=IOError("disk full")):
             # get_memory_path needs to work, so only patch open for the write
             path = memory.get_memory_path("state/ioerror")
@@ -737,7 +737,7 @@ class TestIsDuplicateDiscoveredWork:
         memory.add_discovered_work(
             "Refactor duplicate validation logic api validators module handler code review"
         )
-        result = memory.is_duplicate_discovered_work(
+        memory.is_duplicate_discovered_work(
             "Refactor duplicate validation logic api validators module handler code check"
         )
         # 9/11 overlap -> 0.818, not enough for 0.9 threshold

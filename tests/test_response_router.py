@@ -2,8 +2,6 @@
 
 from unittest.mock import patch
 
-import pytest
-
 # Mock the config manager import that happens in ResponseRouter.__init__
 with patch("scripts.common.response_router.ResponseRouter._load_config"):
     from scripts.common.response_router import (
@@ -125,7 +123,7 @@ class TestResponseRouter:
 
     @patch("scripts.common.response_router.ResponseRouter._load_config")
     def test_init_loads_config_when_empty(self, mock_load):
-        router = ResponseRouter()
+        ResponseRouter()
         mock_load.assert_called_once()
 
     def test_dm_default_commands(self):

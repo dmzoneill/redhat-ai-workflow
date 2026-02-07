@@ -4,10 +4,8 @@ Targets 85%+ coverage with atomic mocks. No source modifications.
 Every test is independent - no shared state.
 """
 
-import asyncio
 import sys
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
@@ -1336,7 +1334,7 @@ class TestLoadChatContext:
             "tool_modules.aa_workflow.src.chat_context.get_chat_state",
             return_value=mock_state,
         ):
-            result = session_tools._load_chat_context(lines)
+            session_tools._load_chat_context(lines)
         joined = "\n".join(lines)
         assert "default" in joined
 
@@ -1621,7 +1619,7 @@ class TestSessionStartImpl:
     @pytest.mark.asyncio
     async def test_new_session_with_ctx(self):
         patches = _session_start_patches()
-        with _start_all_patches(patches) as mocks:
+        with _start_all_patches(patches):
             ctx = MagicMock()
             result = await session_tools._session_start_impl(
                 ctx=ctx,
@@ -1773,7 +1771,7 @@ class TestSessionStartImpl:
             sessions={"sess-pr": session},
         )
         patches = _session_start_patches(workspace=workspace)
-        with _start_all_patches(patches) as mocks:
+        with _start_all_patches(patches):
             with patch("server.workspace_state.WorkspaceRegistry.save_to_disk"):
                 ctx = MagicMock()
                 try:

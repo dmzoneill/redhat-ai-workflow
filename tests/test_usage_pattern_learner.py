@@ -7,7 +7,6 @@ Targets 90%+ coverage of server/usage_pattern_learner.py.
 
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -394,7 +393,7 @@ class TestConfidenceEvolution:
     @pytest.mark.asyncio
     async def test_confidence_increases_with_observations(self, learner):
         """Confidence should increase as observations grow."""
-        prev_conf = 0.0
+        _conf = 0.0
         for i in range(50):
             await learner.analyze_result(
                 tool_name="bonfire_deploy",

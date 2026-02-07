@@ -1,6 +1,5 @@
 """Tests for tool_modules.aa_workflow.src.tools_basic module."""
 
-import hashlib
 import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,12 +15,10 @@ from tool_modules.aa_workflow.src.tools_basic import (
     REPO_PATHS,
     _get_github_token,
     _issue_fingerprint,
-    _recent_issues,
     create_github_issue,
     format_github_issue_url,
     register_tools,
     resolve_path,
-    run_cmd,
 )
 
 # ---------------------------------------------------------------------------

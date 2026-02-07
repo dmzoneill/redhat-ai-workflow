@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -62,80 +62,80 @@ class TestDetectLanguage:
 
 
 class TestDetectDefaultBranch:
-    @patch("subprocess.run")
-    def test_from_symbolic_ref(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="refs/remotes/origin/main"
-        )
-        assert _detect_default_branch(Path("/repo")) == "main"
+    def test_from_symbolic_ref(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="refs/remotes/origin/main"
+            )
+            assert _detect_default_branch(Path("/repo")) == "main"
 
-    @patch("subprocess.run")
-    def test_fallback_main(self, mock_run):
-        mock_run.side_effect = [
-            MagicMock(returncode=1, stdout=""),  # symbolic-ref fails
-            MagicMock(returncode=0, stdout="  origin/main\n  origin/feature"),
-        ]
-        assert _detect_default_branch(Path("/repo")) == "main"
+    def test_fallback_main(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stdout=""),  # symbolic-ref fails
+                MagicMock(returncode=0, stdout="  origin/main\n  origin/feature"),
+            ]
+            assert _detect_default_branch(Path("/repo")) == "main"
 
-    @patch("subprocess.run")
-    def test_fallback_master(self, mock_run):
-        mock_run.side_effect = [
-            MagicMock(returncode=1, stdout=""),
-            MagicMock(returncode=0, stdout="  origin/master\n  origin/feature"),
-        ]
-        assert _detect_default_branch(Path("/repo")) == "master"
+    def test_fallback_master(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stdout=""),
+                MagicMock(returncode=0, stdout="  origin/master\n  origin/feature"),
+            ]
+            assert _detect_default_branch(Path("/repo")) == "master"
 
-    @patch("subprocess.run")
-    def test_all_fail_default_main(self, mock_run):
-        mock_run.side_effect = Exception("git not found")
-        assert _detect_default_branch(Path("/repo")) == "main"
+    def test_all_fail_default_main(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = Exception("git not found")
+            assert _detect_default_branch(Path("/repo")) == "main"
 
 
 # ==================== _detect_gitlab_remote ====================
 
 
 class TestDetectGitlabRemote:
-    @patch("subprocess.run")
-    def test_ssh_url(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="git@gitlab.cee.redhat.com:org/repo.git",
-        )
-        assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
+    def test_ssh_url(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="git@gitlab.cee.redhat.com:org/repo.git",
+            )
+            assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
 
-    @patch("subprocess.run")
-    def test_https_url(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="https://gitlab.cee.redhat.com/org/repo.git",
-        )
-        assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
+    def test_https_url(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://gitlab.cee.redhat.com/org/repo.git",
+            )
+            assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
 
-    @patch("subprocess.run")
-    def test_no_dot_git_suffix(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="git@gitlab.cee.redhat.com:org/repo",
-        )
-        assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
+    def test_no_dot_git_suffix(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="git@gitlab.cee.redhat.com:org/repo",
+            )
+            assert _detect_gitlab_remote(Path("/repo")) == "org/repo"
 
-    @patch("subprocess.run")
-    def test_non_gitlab(self, mock_run):
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="https://github.com/org/repo.git",
-        )
-        assert _detect_gitlab_remote(Path("/repo")) is None
+    def test_non_gitlab(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="https://github.com/org/repo.git",
+            )
+            assert _detect_gitlab_remote(Path("/repo")) is None
 
-    @patch("subprocess.run")
-    def test_command_fails(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=1, stdout="")
-        assert _detect_gitlab_remote(Path("/repo")) is None
+    def test_command_fails(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="")
+            assert _detect_gitlab_remote(Path("/repo")) is None
 
-    @patch("subprocess.run")
-    def test_exception(self, mock_run):
-        mock_run.side_effect = Exception("timeout")
-        assert _detect_gitlab_remote(Path("/repo")) is None
+    def test_exception(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = Exception("timeout")
+            assert _detect_gitlab_remote(Path("/repo")) is None
 
 
 # ==================== _detect_lint_command ====================
@@ -337,21 +337,27 @@ class TestValidateProjectEntry:
 
 
 class TestLoadSaveConfig:
-    @patch("tool_modules.aa_workflow.src.project_tools.config_manager")
-    def test_load_config(self, mock_cm):
-        mock_cm.get_all.return_value = {"repositories": {"x": {}}}
-        result = _load_config()
-        assert "repositories" in result
+    def test_load_config(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools.config_manager"
+        ) as mock_cm:
+            mock_cm.get_all.return_value = {"repositories": {"x": {}}}
+            result = _load_config()
+            assert "repositories" in result
 
-    @patch("tool_modules.aa_workflow.src.project_tools.config_manager")
-    def test_save_config_success(self, mock_cm):
-        assert _save_config({"repositories": {}}) is True
-        mock_cm.flush.assert_called_once()
+    def test_save_config_success(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools.config_manager"
+        ) as mock_cm:
+            assert _save_config({"repositories": {}}) is True
+            mock_cm.flush.assert_called_once()
 
-    @patch("tool_modules.aa_workflow.src.project_tools.config_manager")
-    def test_save_config_failure(self, mock_cm):
-        mock_cm.update_section.side_effect = Exception("disk full")
-        assert _save_config({"repositories": {}}) is False
+    def test_save_config_failure(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools.config_manager"
+        ) as mock_cm:
+            mock_cm.update_section.side_effect = Exception("disk full")
+            assert _save_config({"repositories": {}}) is False
 
 
 # ==================== _project_list_impl ====================
@@ -359,43 +365,49 @@ class TestLoadSaveConfig:
 
 class TestProjectListImpl:
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_empty_repos(self, mock_load):
-        mock_load.return_value = {"repositories": {}}
-        result = await _project_list_impl()
-        assert len(result) == 1
-        assert "No projects" in result[0].text
+    async def test_empty_repos(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {"repositories": {}}
+            result = await _project_list_impl()
+            assert len(result) == 1
+            assert "No projects" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_with_repos(self, mock_load):
-        mock_load.return_value = {
-            "repositories": {
-                "myproject": {
-                    "path": "/tmp/myproject",
-                    "gitlab": "org/myproject",
-                    "jira_project": "AAP",
-                    "default_branch": "main",
-                    "konflux_namespace": "tenant-ns",
-                    "scopes": ["api", "core"],
+    async def test_with_repos(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {
+                "repositories": {
+                    "myproject": {
+                        "path": "/tmp/myproject",
+                        "gitlab": "org/myproject",
+                        "jira_project": "AAP",
+                        "default_branch": "main",
+                        "konflux_namespace": "tenant-ns",
+                        "scopes": ["api", "core"],
+                    }
                 }
             }
-        }
-        with patch.object(Path, "exists", return_value=True):
-            result = await _project_list_impl()
-        text = result[0].text
-        assert "myproject" in text
-        assert "org/myproject" in text
-        assert "AAP" in text
-        assert "tenant-ns" in text
-        assert "api, core" in text
+            with patch.object(Path, "exists", return_value=True):
+                result = await _project_list_impl()
+            text = result[0].text
+            assert "myproject" in text
+            assert "org/myproject" in text
+            assert "AAP" in text
+            assert "tenant-ns" in text
+            assert "api, core" in text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_no_repositories_key(self, mock_load):
-        mock_load.return_value = {}
-        result = await _project_list_impl()
-        assert "No projects" in result[0].text
+    async def test_no_repositories_key(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {}
+            result = await _project_list_impl()
+            assert "No projects" in result[0].text
 
 
 # ==================== _project_detect_impl ====================
@@ -415,18 +427,24 @@ class TestProjectDetectImpl:
         assert "not a directory" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._detect_gitlab_remote")
-    @patch("tool_modules.aa_workflow.src.project_tools._detect_default_branch")
-    async def test_detect_success(self, mock_branch, mock_gitlab, tmp_path):
-        (tmp_path / "pyproject.toml").touch()
-        mock_branch.return_value = "main"
-        mock_gitlab.return_value = "org/myrepo"
+    async def test_detect_success(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._detect_gitlab_remote"
+            ) as mock_gitlab,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._detect_default_branch"
+            ) as mock_branch,
+        ):
+            (tmp_path / "pyproject.toml").touch()
+            mock_branch.return_value = "main"
+            mock_gitlab.return_value = "org/myrepo"
 
-        result = await _project_detect_impl(str(tmp_path))
-        text = result[0].text
-        assert "python" in text.lower()
-        assert "main" in text
-        assert "org/myrepo" in text
+            result = await _project_detect_impl(str(tmp_path))
+            text = result[0].text
+            assert "python" in text.lower()
+            assert "main" in text
+            assert "org/myrepo" in text
 
 
 # ==================== _project_add_impl ====================
@@ -434,101 +452,139 @@ class TestProjectDetectImpl:
 
 class TestProjectAddImpl:
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_project_already_exists(self, mock_load, mock_save):
-        mock_load.return_value = {"repositories": {"existing": {}}}
-        result = await _project_add_impl("existing", "/tmp", "g", "j")
-        assert "already exists" in result[0].text
+    async def test_project_already_exists(self):
+        with (
+            patch("tool_modules.aa_workflow.src.project_tools._save_config"),
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {"existing": {}}}
+            result = await _project_add_impl("existing", "/tmp", "g", "j")
+            assert "already exists" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_with_auto_detect(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {"repositories": {}}
-        mock_save.return_value = True
+    async def test_add_with_auto_detect(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {}}
+            mock_save.return_value = True
 
-        # Create a Python project
-        (tmp_path / "pyproject.toml").touch()
-        (tmp_path / "api").mkdir()
+            # Create a Python project
+            (tmp_path / "pyproject.toml").touch()
+            (tmp_path / "api").mkdir()
 
-        result = await _project_add_impl(
-            "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=True
-        )
-        text = result[0].text
-        assert "added" in text.lower()
-
-    @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_no_auto_detect(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {"repositories": {}}
-        mock_save.return_value = True
-
-        result = await _project_add_impl(
-            "newproj",
-            str(tmp_path),
-            "org/repo",
-            "AAP",
-            lint_command="ruff check",
-            test_command="pytest",
-            jira_component="UI",
-            konflux_namespace="ns",
-            scopes="api,core",
-            auto_detect=False,
-        )
-        assert "added" in result[0].text.lower()
+            result = await _project_add_impl(
+                "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=True
+            )
+            text = result[0].text
+            assert "added" in text.lower()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_validation_error(self, mock_load, mock_save):
-        mock_load.return_value = {"repositories": {}}
-        result = await _project_add_impl(
-            "newproj", "/nonexistent", "org/repo", "AAP", auto_detect=False
-        )
-        assert "Validation" in result[0].text or "does not exist" in result[0].text
+    async def test_add_no_auto_detect(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {}}
+            mock_save.return_value = True
+
+            result = await _project_add_impl(
+                "newproj",
+                str(tmp_path),
+                "org/repo",
+                "AAP",
+                lint_command="ruff check",
+                test_command="pytest",
+                jira_component="UI",
+                konflux_namespace="ns",
+                scopes="api,core",
+                auto_detect=False,
+            )
+            assert "added" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_save_fails(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {"repositories": {}}
-        mock_save.return_value = False
-
-        result = await _project_add_impl(
-            "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=False
-        )
-        assert "Failed to save" in result[0].text
-
-    @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_creates_repositories_key(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {}  # No repositories key
-        mock_save.return_value = True
-
-        result = await _project_add_impl(
-            "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=False
-        )
-        assert "added" in result[0].text.lower()
+    async def test_add_validation_error(self):
+        with (
+            patch("tool_modules.aa_workflow.src.project_tools._save_config"),
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {}}
+            result = await _project_add_impl(
+                "newproj", "/nonexistent", "org/repo", "AAP", auto_detect=False
+            )
+            assert "Validation" in result[0].text or "does not exist" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_add_with_test_setup(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {"repositories": {}}
-        mock_save.return_value = True
+    async def test_add_save_fails(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {}}
+            mock_save.return_value = False
 
-        result = await _project_add_impl(
-            "newproj",
-            str(tmp_path),
-            "org/repo",
-            "AAP",
-            test_setup="custom setup",
-            auto_detect=False,
-        )
-        assert "added" in result[0].text.lower()
+            result = await _project_add_impl(
+                "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=False
+            )
+            assert "Failed to save" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_add_creates_repositories_key(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {}  # No repositories key
+            mock_save.return_value = True
+
+            result = await _project_add_impl(
+                "newproj", str(tmp_path), "org/repo", "AAP", auto_detect=False
+            )
+            assert "added" in result[0].text.lower()
+
+    @pytest.mark.asyncio
+    async def test_add_with_test_setup(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {}}
+            mock_save.return_value = True
+
+            result = await _project_add_impl(
+                "newproj",
+                str(tmp_path),
+                "org/repo",
+                "AAP",
+                test_setup="custom setup",
+                auto_detect=False,
+            )
+            assert "added" in result[0].text.lower()
 
 
 # ==================== _project_remove_impl ====================
@@ -536,69 +592,99 @@ class TestProjectAddImpl:
 
 class TestProjectRemoveImpl:
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_project_not_found(self, mock_load):
-        mock_load.return_value = {"repositories": {"other": {}}}
-        result = await _project_remove_impl("missing")
-        assert "not found" in result[0].text
+    async def test_project_not_found(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {"repositories": {"other": {}}}
+            result = await _project_remove_impl("missing")
+            assert "not found" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_confirm_prompt(self, mock_load):
-        mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
-        result = await _project_remove_impl("myproj", confirm=False)
-        text = result[0].text
-        assert "Confirm" in text
-        assert "myproj" in text
+    async def test_confirm_prompt(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
+            result = await _project_remove_impl("myproj", confirm=False)
+            text = result[0].text
+            assert "Confirm" in text
+            assert "myproj" in text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_remove_success(self, mock_load, mock_save):
-        mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
-        mock_save.return_value = True
-        result = await _project_remove_impl("myproj", confirm=True)
-        assert "removed" in result[0].text.lower()
+    async def test_remove_success(self):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
+            mock_save.return_value = True
+            result = await _project_remove_impl("myproj", confirm=True)
+            assert "removed" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_remove_also_cleans_quay(self, mock_load, mock_save):
-        mock_load.return_value = {
-            "repositories": {"myproj": {"path": "/x"}},
-            "quay": {"repositories": {"myproj": {}}},
-        }
-        mock_save.return_value = True
-        result = await _project_remove_impl("myproj", confirm=True)
-        assert "quay.repositories" in result[0].text
+    async def test_remove_also_cleans_quay(self):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {"myproj": {"path": "/x"}},
+                "quay": {"repositories": {"myproj": {}}},
+            }
+            mock_save.return_value = True
+            result = await _project_remove_impl("myproj", confirm=True)
+            assert "quay.repositories" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_remove_also_cleans_saas(self, mock_load, mock_save):
-        mock_load.return_value = {
-            "repositories": {"myproj": {"path": "/x"}},
-            "saas_pipelines": {"namespaces": {"myproj": {}}},
-        }
-        mock_save.return_value = True
-        result = await _project_remove_impl("myproj", confirm=True)
-        assert "saas_pipelines" in result[0].text
+    async def test_remove_also_cleans_saas(self):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {"myproj": {"path": "/x"}},
+                "saas_pipelines": {"namespaces": {"myproj": {}}},
+            }
+            mock_save.return_value = True
+            result = await _project_remove_impl("myproj", confirm=True)
+            assert "saas_pipelines" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_remove_save_fails(self, mock_load, mock_save):
-        mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
-        mock_save.return_value = False
-        result = await _project_remove_impl("myproj", confirm=True)
-        assert "Failed to save" in result[0].text
+    async def test_remove_save_fails(self):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {"repositories": {"myproj": {"path": "/x"}}}
+            mock_save.return_value = False
+            result = await _project_remove_impl("myproj", confirm=True)
+            assert "Failed to save" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_remove_no_repos_key(self, mock_load):
-        mock_load.return_value = {}
-        result = await _project_remove_impl("missing")
-        assert "not found" in result[0].text
+    async def test_remove_no_repos_key(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {}
+            result = await _project_remove_impl("missing")
+            assert "not found" in result[0].text
 
 
 # ==================== _project_update_impl ====================
@@ -606,117 +692,145 @@ class TestProjectRemoveImpl:
 
 class TestProjectUpdateImpl:
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_project_not_found(self, mock_load):
-        mock_load.return_value = {"repositories": {}}
-        result = await _project_update_impl("missing")
-        assert "not found" in result[0].text
+    async def test_project_not_found(self):
+        with patch(
+            "tool_modules.aa_workflow.src.project_tools._load_config"
+        ) as mock_load:
+            mock_load.return_value = {"repositories": {}}
+            result = await _project_update_impl("missing")
+            assert "not found" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_no_fields_provided(self, mock_load, mock_save):
-        mock_load.return_value = {
-            "repositories": {
-                "myproj": {
-                    "path": "/tmp",
-                    "gitlab": "org/repo",
-                    "jira_project": "AAP",
-                    "default_branch": "main",
+    async def test_no_fields_provided(self):
+        with (
+            patch("tool_modules.aa_workflow.src.project_tools._save_config"),
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {
+                    "myproj": {
+                        "path": "/tmp",
+                        "gitlab": "org/repo",
+                        "jira_project": "AAP",
+                        "default_branch": "main",
+                    }
                 }
             }
-        }
-        result = await _project_update_impl("myproj")
-        assert "No fields" in result[0].text
+            result = await _project_update_impl("myproj")
+            assert "No fields" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_update_fields(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {
-            "repositories": {
-                "myproj": {
-                    "path": str(tmp_path),
-                    "gitlab": "org/repo",
-                    "jira_project": "AAP",
-                    "default_branch": "main",
+    async def test_update_fields(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {
+                    "myproj": {
+                        "path": str(tmp_path),
+                        "gitlab": "org/repo",
+                        "jira_project": "AAP",
+                        "default_branch": "main",
+                    }
                 }
             }
-        }
-        mock_save.return_value = True
+            mock_save.return_value = True
 
-        result = await _project_update_impl(
-            "myproj",
-            gitlab="org/newrepo",
-            jira_project="NEWP",
-            jira_component="UI",
-            lint_command="ruff check",
-            test_command="pytest -v",
-            default_branch="develop",
-            konflux_namespace="ns",
-            scopes="api,core",
-        )
-        text = result[0].text
-        assert "updated" in text.lower()
-        assert "gitlab" in text
-        assert "jira_project" in text
+            result = await _project_update_impl(
+                "myproj",
+                gitlab="org/newrepo",
+                jira_project="NEWP",
+                jira_component="UI",
+                lint_command="ruff check",
+                test_command="pytest -v",
+                default_branch="develop",
+                konflux_namespace="ns",
+                scopes="api,core",
+            )
+            text = result[0].text
+            assert "updated" in text.lower()
+            assert "gitlab" in text
+            assert "jira_project" in text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_update_path(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {
-            "repositories": {
-                "myproj": {
-                    "path": "/old",
-                    "gitlab": "org/repo",
-                    "jira_project": "AAP",
-                    "default_branch": "main",
+    async def test_update_path(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {
+                    "myproj": {
+                        "path": "/old",
+                        "gitlab": "org/repo",
+                        "jira_project": "AAP",
+                        "default_branch": "main",
+                    }
                 }
             }
-        }
-        mock_save.return_value = True
+            mock_save.return_value = True
 
-        result = await _project_update_impl("myproj", path=str(tmp_path))
-        assert "updated" in result[0].text.lower()
+            result = await _project_update_impl("myproj", path=str(tmp_path))
+            assert "updated" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_update_save_fails(self, mock_load, mock_save, tmp_path):
-        mock_load.return_value = {
-            "repositories": {
-                "myproj": {
-                    "path": str(tmp_path),
-                    "gitlab": "org/repo",
-                    "jira_project": "AAP",
-                    "default_branch": "main",
+    async def test_update_save_fails(self, tmp_path):
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._save_config"
+            ) as mock_save,
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {
+                    "myproj": {
+                        "path": str(tmp_path),
+                        "gitlab": "org/repo",
+                        "jira_project": "AAP",
+                        "default_branch": "main",
+                    }
                 }
             }
-        }
-        mock_save.return_value = False
+            mock_save.return_value = False
 
-        result = await _project_update_impl("myproj", gitlab="org/new")
-        assert "Failed to save" in result[0].text
+            result = await _project_update_impl("myproj", gitlab="org/new")
+            assert "Failed to save" in result[0].text
 
     @pytest.mark.asyncio
-    @patch("tool_modules.aa_workflow.src.project_tools._save_config")
-    @patch("tool_modules.aa_workflow.src.project_tools._load_config")
-    async def test_update_validation_fails(self, mock_load, mock_save):
-        mock_load.return_value = {
-            "repositories": {
-                "myproj": {
-                    "path": "/nonexistent",
-                    "gitlab": "",
-                    "jira_project": "",
-                    "default_branch": "main",
+    async def test_update_validation_fails(self):
+        with (
+            patch("tool_modules.aa_workflow.src.project_tools._save_config"),
+            patch(
+                "tool_modules.aa_workflow.src.project_tools._load_config"
+            ) as mock_load,
+        ):
+            mock_load.return_value = {
+                "repositories": {
+                    "myproj": {
+                        "path": "/nonexistent",
+                        "gitlab": "",
+                        "jira_project": "",
+                        "default_branch": "main",
+                    }
                 }
             }
-        }
-        # Updating gitlab to empty value triggers validation error
-        result = await _project_update_impl("myproj", jira_component="comp")
-        # The validation should fail because of empty gitlab, missing jira_project, and bad path
-        assert "Validation" in result[0].text or "does not exist" in result[0].text
+            # Updating gitlab to empty value triggers validation error
+            result = await _project_update_impl("myproj", jira_component="comp")
+            # The validation should fail because of empty gitlab, missing jira_project, and bad path
+            assert "Validation" in result[0].text or "does not exist" in result[0].text
 
 
 # ==================== Constants ====================

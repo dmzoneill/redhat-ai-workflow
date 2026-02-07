@@ -2,7 +2,7 @@
 
 import json
 import sys
-from datetime import datetime, time
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,7 +13,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from tool_modules.aa_workflow.src.sprint_bot import (
     ACTIONABLE_STATUSES,
-    LOCK_FILE,
     SprintBotConfig,
     WorkingHours,
     acquire_lock,
@@ -360,7 +359,7 @@ class TestSkipIssue:
             patch(f"{MOD}.update_issue_status", return_value=True) as mock_update,
             patch(f"{MOD}.add_timeline_event"),
         ):
-            result = skip_issue("AAP-1")
+            skip_issue("AAP-1")
         mock_update.assert_called_once_with(
             "AAP-1", "blocked", waiting_reason="Manually skipped"
         )
@@ -654,11 +653,11 @@ class TestRunSprintBot:
             patch(f"{MOD}.refresh_sprint_state", return_value=state) as mock_refresh,
             patch(f"{MOD}.process_next_issue", return_value=False),
         ):
-            result = run_sprint_bot()
+            run_sprint_bot()
         mock_refresh.assert_called_once()
 
     def test_error_handling(self):
-        state = _state(bot_enabled=True, last_updated=datetime.now().isoformat())
+        _state(bot_enabled=True, last_updated=datetime.now().isoformat())
         with (
             patch(f"{MOD}.is_within_working_hours", return_value=True),
             patch(f"{MOD}.acquire_lock", return_value=True),

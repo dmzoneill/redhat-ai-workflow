@@ -1,10 +1,9 @@
 """Tests for tool_modules/aa_workflow/src/working_hours.py"""
 
-import asyncio
 import sys
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest

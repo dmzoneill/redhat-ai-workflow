@@ -1,11 +1,8 @@
 """Tests for StateManager singleton."""
 
 import json
-import tempfile
 import threading
 import time
-from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -279,7 +276,9 @@ class TestStateManager:
         manager.set("services", "existing", {"enabled": True}, flush=True)
 
         # Merge new data
-        manager.update_section("services", {"new_service": {"enabled": False}}, merge=True, flush=True)
+        manager.update_section(
+            "services", {"new_service": {"enabled": False}}, merge=True, flush=True
+        )
 
         # Both should exist
         assert manager.get("services", "existing") is not None
@@ -294,7 +293,9 @@ class TestStateManager:
         manager.set("services", "existing", {"enabled": True}, flush=True)
 
         # Replace entire section
-        manager.update_section("services", {"new_service": {"enabled": False}}, merge=False, flush=True)
+        manager.update_section(
+            "services", {"new_service": {"enabled": False}}, merge=False, flush=True
+        )
 
         # Only new should exist
         assert manager.get("services", "existing") is None

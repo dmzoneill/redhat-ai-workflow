@@ -1,9 +1,7 @@
 """Tests for tool_modules.aa_workflow.src.resources module."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 import yaml
 
 from tool_modules.aa_workflow.src.resources import (

@@ -7,7 +7,6 @@ This tests the export functionality directly without going through MCP.
 """
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -51,7 +50,7 @@ async def test_export():
     # Validate session
     print("\n📡 Validating Slack session...")
     try:
-        result = await session.validate_session()
+        await session.validate_session()
         user_id = session.user_id
         print(f"✅ Session valid! Your user ID: {user_id}")
     except Exception as e:
@@ -107,8 +106,12 @@ async def test_export():
 
         # Categorize (already done above for client.counts path)
         dms = [c for c in conversations if c.get("is_im")]
-        groups = [c for c in conversations if c.get("is_mpim")]
-        channels = [c for c in conversations if c.get("is_channel") or (not c.get("is_im") and not c.get("is_mpim"))]
+        [c for c in conversations if c.get("is_mpim")]
+        channels = [
+            c
+            for c in conversations
+            if c.get("is_channel") or (not c.get("is_im") and not c.get("is_mpim"))
+        ]
 
     except Exception as e:
         print(f"❌ Failed to get conversations: {e}")
@@ -119,7 +122,7 @@ async def test_export():
         print("\n💬 Testing message fetch from first DM...")
         dm = dms[0]
         dm_id = dm.get("id")
-        dm_user = dm.get("user", "unknown")
+        dm.get("user", "unknown")
 
         try:
             messages = await session.get_channel_history(

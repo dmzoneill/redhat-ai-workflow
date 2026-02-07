@@ -1,10 +1,7 @@
 """Tests for tool_modules/aa_workflow/src/external_sessions.py"""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from tool_modules.aa_workflow.src.external_sessions import (
     ClaudeSession,

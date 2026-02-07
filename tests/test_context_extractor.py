@@ -1,8 +1,7 @@
 """Tests for scripts/common/context_extractor.py - Slack context extraction."""
 
-import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 

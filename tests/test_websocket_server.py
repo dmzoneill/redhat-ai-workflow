@@ -6,8 +6,6 @@ import subprocess
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from server.websocket_server import (
     MAX_RUNNING_SKILLS,
     MAX_SKILL_AGE_SECONDS,

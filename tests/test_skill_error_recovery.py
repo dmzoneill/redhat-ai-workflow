@@ -1,8 +1,6 @@
 """Tests for scripts/common/skill_error_recovery.py"""
 
-import asyncio
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

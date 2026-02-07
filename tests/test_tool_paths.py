@@ -81,7 +81,7 @@ class TestGetToolsFilePath:
         def exists_side_effect(self_path):
             return "tools_basic.py" in str(self_path)
 
-        with patch.object(Path, "exists", side_effect=lambda: False) as mock_exists:
+        with patch.object(Path, "exists", side_effect=lambda: False):
             # Need a more careful approach: tools_core doesn't exist, tools_basic does
             call_count = 0
 

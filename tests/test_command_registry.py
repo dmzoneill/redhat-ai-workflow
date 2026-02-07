@@ -3,7 +3,6 @@
 import sys
 import textwrap
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -190,7 +189,7 @@ class TestCommandHelp:
 
 class TestRegistryBuiltins:
     def test_builtin_commands_exist(self):
-        registry = CommandRegistry()
+        CommandRegistry()
         builtins = CommandRegistry.BUILTIN_COMMANDS
         assert "help" in builtins
         assert "status" in builtins
@@ -554,7 +553,7 @@ class TestRegistryTools:
         # Make unreadable
         broken.chmod(0o000)
         try:
-            cmds = registry.list_commands(command_type=CommandType.TOOL)
+            registry.list_commands(command_type=CommandType.TOOL)
             # Should not raise, may or may not find tools
         except PermissionError:
             pass  # OK on some systems
