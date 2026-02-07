@@ -19,9 +19,6 @@ from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import resolve_repo_path, run_cmd
 
-# Setup project path for server imports
-
-
 logger = logging.getLogger(__name__)
 
 

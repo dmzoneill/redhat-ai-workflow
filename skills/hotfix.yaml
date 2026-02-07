@@ -19,6 +19,20 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Hotfix can start from any commit
+  validates: []             # Hotfix is an emergency path, not a validator
+  validated_by:
+    - check_ci_health       # Pipeline validates hotfix builds cleanly
+    - test_mr_ephemeral     # Ephemeral deploy validates hotfix works
+  chains_to:
+    - release_to_prod       # Promote hotfix to production
+    - notify_team           # Announce hotfix
+    - test_mr_ephemeral     # Test hotfix in ephemeral
+  provides_context_for:
+    - release_to_prod       # Hotfix commit SHA for release
+    - investigate_alert     # Hotfix context for alert investigation
+
 inputs:
   - name: commit
     type: string

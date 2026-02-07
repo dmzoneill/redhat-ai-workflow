@@ -10,6 +10,24 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - create_mr             # Draft MR must exist
+  validates:
+    - create_mr             # Marking ready validates MR is complete
+    - review_local_changes  # Local review should pass before marking ready
+  validated_by:
+    - review_pr             # Review validates the MR after it's marked ready
+    - test_mr_ephemeral     # Deployment validates the ready MR
+    - notify_mr
+  chains_to:
+    - review_pr             # Request review after marking ready
+    - notify_mr             # Notify team about the ready MR
+    - test_mr_ephemeral     # Deploy for testing
+  provides_context_for:
+    - review_pr             # MR status informs review priority
+    - check_my_prs          # Ready status appears in PR check
+
 inputs:
   - name: mr_id
     type: string

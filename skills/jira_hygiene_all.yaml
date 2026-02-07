@@ -10,6 +10,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone batch operation
+  validates:
+    - jira_hygiene          # Runs hygiene on each issue, validating it works at scale
+  chains_to:
+    - sprint_planning       # After cleanup, backlog is ready for planning
+  provides_context_for:
+    - coffee                # Morning briefing can show hygiene status
+    - beer                  # EOD wrap-up shows cleanup results
+  validated_by:
+    - coffee
+    - sprint_planning
+
 inputs:
   - name: status
     type: string

@@ -18,6 +18,20 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - test_mr_ephemeral     # Namespace must exist from a deployment
+    - deploy_to_ephemeral   # Or from a generic deployment
+  validates:
+    - test_mr_ephemeral     # Extension validates deployment is still active
+    - deploy_to_ephemeral   # Extension validates namespace is still alive
+  validated_by: []          # Extension is a utility, not validated by others
+  chains_to:
+    - environment_overview  # Check health of extended namespace
+  provides_context_for:
+    - beer                  # EOD shows expiring namespaces
+    - coffee                # Morning shows namespace status
+
 inputs:
   - name: namespace
     type: string

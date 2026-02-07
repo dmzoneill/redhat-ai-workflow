@@ -9,6 +9,25 @@ description: |
   Resolves Jira statuses from config.json.
 version: "1.2"
 
+links:
+  depends_on:
+    - start_work            # Issue must have been worked on
+    - create_mr             # MR should exist (usually merged)
+  validates:
+    - start_work            # Full lifecycle validates start_work
+    - create_mr             # Closing confirms MR was merged
+    - test_mr_ephemeral     # Closing confirms deployment was good
+  chains_to:
+    - cleanup_branches      # Clean up feature branch after close
+    - discovered_work_summary  # Summarize any discovered work
+  provides_context_for:
+    - standup_summary       # Closed issues appear in standup
+    - weekly_summary        # Closed issues appear in weekly report
+    - beer                  # End-of-day wrap-up shows closed issues
+  validated_by:
+    - beer
+    - cleanup_branches
+
 inputs:
   - name: issue_key
     type: string

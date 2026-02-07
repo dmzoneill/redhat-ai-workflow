@@ -13,6 +13,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone learning skill
+  validates: []             # Pattern recording is generative
+  validated_by:
+    - investigate_alert     # Alert investigation uses patterns, validates they're useful
+    - debug_prod            # Debugging uses patterns, validates they're accurate
+  chains_to:
+    - suggest_patterns      # Check for more patterns to learn
+  provides_context_for:
+    - investigate_alert     # Learned patterns for alert matching
+    - debug_prod            # Learned patterns for debugging
+    - gather_context        # Patterns as part of context
+
 inputs:
   - name: pattern
     type: string

@@ -15,6 +15,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone maintenance
+  validates: []             # Cleanup is housekeeping
+  validated_by:
+    - memory_view           # View validates cleanup removed correct items
+  chains_to:
+    - memory_view           # Verify cleanup results
+  provides_context_for:
+    - beer                  # EOD cleanup results
+    - coffee                # Morning freshness after nightly cleanup
+
 inputs:
   - name: dry_run
     type: boolean

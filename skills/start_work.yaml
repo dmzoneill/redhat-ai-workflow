@@ -24,6 +24,27 @@ description: |
                   code_search, knowledge_query, check_known_issues
 version: "2.0"
 
+links:
+  validates:
+    - jira_hygiene          # Runs hygiene check as part of startup
+  validated_by:
+    - create_mr             # If MR creates successfully, start_work set up the branch correctly
+    - test_mr_ephemeral     # If deployment works, branch code is valid
+    - close_issue
+    - review_local_changes
+    - review_pr
+    - sprint_autopilot
+    - sync_branch
+  chains_to:
+    - create_mr             # Natural next step after coding
+    - review_local_changes  # Pre-commit review of work
+    - close_issue
+    - sync_branch
+    - update_docs
+  provides_context_for:
+    - create_mr             # Branch name, issue context
+    - close_issue           # Issue key, branch commits
+
 inputs:
   - name: issue_key
     type: string

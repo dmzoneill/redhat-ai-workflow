@@ -18,6 +18,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - investigate_alert     # Should investigate before silencing
+  validates:
+    - investigate_alert     # Silencing validates triage found a known issue
+  validated_by: []          # Silencing is a terminal mitigation action
+  chains_to:
+    - create_jira_issue     # Track underlying issue for proper fix
+  provides_context_for:
+    - coffee                # Morning briefing shows silenced alerts
+    - investigate_alert     # Existing silences inform future investigations
+
 inputs:
   - name: alert_name
     type: string

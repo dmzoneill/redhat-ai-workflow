@@ -16,6 +16,22 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone end-of-day ritual
+  validates:
+    - close_issue           # EOD validates issues were properly closed
+    - create_mr             # EOD validates MRs are in good state
+    - cleanup_branches      # EOD shows cleaned branches
+  validated_by: []          # EOD wrap-up is informational
+  chains_to:
+    - cleanup_branches      # Clean up stale branches
+    - memory_cleanup        # Clean up stale memory entries
+    - extend_ephemeral      # Extend expiring namespaces
+  provides_context_for:
+    - coffee                # EOD notes inform next morning's briefing
+    - standup_summary       # EOD activity for standup
+    - weekly_summary        # Daily activity for weekly report
+
 inputs:
   - name: generate_standup
     type: boolean

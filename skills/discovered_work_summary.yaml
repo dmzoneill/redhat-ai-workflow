@@ -15,6 +15,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - sync_discovered_work  # Work items should be synced first
+  validates:
+    - sync_discovered_work  # Summary validates discovered work was synced properly
+  validated_by: []          # Summary is informational
+  chains_to:
+    - sprint_planning       # Discovered work informs planning
+    - create_jira_issue     # Create issues for untracked items
+  provides_context_for:
+    - standup_summary       # Discovered work in daily standup
+    - weekly_summary        # Discovered work in weekly report
+
 inputs:
   - name: period
     type: string

@@ -4,9 +4,11 @@ Sync AI rules from single source of truth to all targets.
 
 Source: docs/ai-rules/*.md
 Targets:
-  - .cursorrules (concatenated markdown)
-  - CLAUDE.md (with @import statements)
-  - AGENTS.md (cross-tool standard)
+  - .cursorrules (concatenated markdown - Cursor)
+  - CLAUDE.md (with @import statements - Claude Code)
+  - AGENTS.md (cross-tool standard - Codex, OpenCode, Amp)
+  - GEMINI.md (concatenated markdown - Gemini CLI)
+  - .github/copilot-instructions.md (concatenated markdown - GitHub Copilot)
 
 Also syncs slash commands via sync_commands.py.
 
@@ -28,6 +30,8 @@ AI_RULES_DIR = PROJECT_ROOT / "docs" / "ai-rules"
 CURSORRULES_FILE = PROJECT_ROOT / ".cursorrules"
 CLAUDE_MD_FILE = PROJECT_ROOT / "CLAUDE.md"
 AGENTS_MD_FILE = PROJECT_ROOT / "AGENTS.md"
+GEMINI_MD_FILE = PROJECT_ROOT / "GEMINI.md"
+COPILOT_MD_FILE = PROJECT_ROOT / ".github" / "copilot-instructions.md"
 
 # Header for generated files
 GENERATED_HEADER = """<!--
@@ -136,7 +140,7 @@ def generate_agents_md(rule_files: list[Path], dry_run: bool = False) -> bool:
   AGENTS.md - Cross-tool AI assistant configuration
 
   This file follows the agents.md standard for AI coding assistants.
-  Compatible with: Claude Code, Cursor, Codex, Amp, and others.
+  Compatible with: Claude Code, Cursor, Codex, Gemini, Copilot, OpenCode, Amp, and others.
 
   Source: docs/ai-rules/
   Generated: {timestamp}
@@ -167,6 +171,104 @@ def generate_agents_md(rule_files: list[Path], dry_run: bool = False) -> bool:
     else:
         AGENTS_MD_FILE.write_text(new_content)
         print("  ✅ AGENTS.md (updated)")
+
+    return True
+
+
+def generate_gemini_md(rule_files: list[Path], dry_run: bool = False) -> bool:
+    """Generate GEMINI.md for Gemini CLI.
+
+    Gemini CLI reads GEMINI.md from the project root for context.
+    Uses full concatenated content (like .cursorrules).
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    header = f"""<!--
+  GEMINI.md - Gemini CLI AI assistant configuration
+
+  Project-level context for Gemini CLI.
+  See also: AGENTS.md, CLAUDE.md, .cursorrules
+
+  Source: docs/ai-rules/
+  Generated: {timestamp}
+-->
+
+"""
+
+    content_parts = [header]
+
+    for rule_file in rule_files:
+        content = rule_file.read_text().strip()
+        content_parts.append(content)
+        content_parts.append("\n")
+
+    new_content = "\n".join(content_parts)
+
+    # Check if changed
+    if GEMINI_MD_FILE.exists():
+        existing = GEMINI_MD_FILE.read_text()
+        existing_body = "\n".join(existing.split("\n")[10:])  # Skip header
+        new_body = "\n".join(new_content.split("\n")[10:])
+        if existing_body == new_body:
+            print("  ⏭️  GEMINI.md (unchanged)")
+            return False
+
+    if dry_run:
+        print("  📝 GEMINI.md (would update)")
+    else:
+        GEMINI_MD_FILE.write_text(new_content)
+        print("  ✅ GEMINI.md (updated)")
+
+    return True
+
+
+def generate_copilot_md(rule_files: list[Path], dry_run: bool = False) -> bool:
+    """Generate .github/copilot-instructions.md for GitHub Copilot.
+
+    GitHub Copilot reads .github/copilot-instructions.md for
+    repository-wide custom instructions.
+    Uses full concatenated content.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    header = f"""<!--
+  copilot-instructions.md - GitHub Copilot custom instructions
+
+  Repository-wide instructions for GitHub Copilot.
+  See also: AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules
+
+  Source: docs/ai-rules/
+  Generated: {timestamp}
+-->
+
+"""
+
+    content_parts = [header]
+
+    for rule_file in rule_files:
+        content = rule_file.read_text().strip()
+        content_parts.append(content)
+        content_parts.append("\n")
+
+    new_content = "\n".join(content_parts)
+
+    # Ensure .github directory exists
+    COPILOT_MD_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if changed
+    if COPILOT_MD_FILE.exists():
+        existing = COPILOT_MD_FILE.read_text()
+        existing_body = "\n".join(existing.split("\n")[10:])  # Skip header
+        new_body = "\n".join(new_content.split("\n")[10:])
+        if existing_body == new_body:
+            print("  ⏭️  .github/copilot-instructions.md (unchanged)")
+            return False
+
+    if dry_run:
+        print("  📝 .github/copilot-instructions.md (would update)")
+    else:
+        COPILOT_MD_FILE.write_text(new_content)
+        print("  ✅ .github/copilot-instructions.md (updated)")
 
     return True
 
@@ -244,6 +346,8 @@ def main():
     changes.append(generate_cursorrules(rule_files, args.dry_run))
     changes.append(generate_claude_md(rule_files, args.dry_run))
     changes.append(generate_agents_md(rule_files, args.dry_run))
+    changes.append(generate_gemini_md(rule_files, args.dry_run))
+    changes.append(generate_copilot_md(rule_files, args.dry_run))
 
     # Sync commands
     if not args.rules_only:
@@ -251,9 +355,10 @@ def main():
 
     # Summary
     changed_count = sum(changes)
+    total_targets = len(changes)
     print("\n📊 Summary:")
     print(f"   Rule files: {len(rule_files)}")
-    print(f"   Targets updated: {changed_count}/3")
+    print(f"   Targets updated: {changed_count}/{total_targets}")
 
     if args.dry_run and changed_count:
         print("\n💡 Run without --dry-run to apply changes")

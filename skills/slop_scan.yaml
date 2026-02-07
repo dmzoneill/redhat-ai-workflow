@@ -8,6 +8,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone analysis skill
+  validates: []             # Scanning is diagnostic
+  validated_by:
+    - slop_fix              # Fix validates scan found real issues
+    - slop_scan_now
+  chains_to:
+    - slop_fix              # Fix issues found by scan
+  provides_context_for:
+    - slop_fix              # Scan findings for fix
+    - review_local_changes  # Code quality context for review
+
 inputs:
   - name: codebase_path
     type: string

@@ -19,6 +19,21 @@ description: |
 
 version: "1.2"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist with a branch to rebase
+  validates:
+    - create_mr             # Successful rebase validates MR branch is maintainable
+    - sync_branch           # Rebase is the more thorough version of sync
+  validated_by:
+    - check_ci_health       # Pipeline success after rebase validates clean rebase
+    - review_all_prs        # Batch review calls rebase when needed
+  chains_to:
+    - check_ci_health       # Verify pipeline after rebase
+    - mark_mr_ready         # Mark ready after clean rebase
+  provides_context_for:
+    - create_mr             # Rebase cleans up commit history for MR
+
 inputs:
   - name: mr_id
     type: integer

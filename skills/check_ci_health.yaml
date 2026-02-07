@@ -14,6 +14,24 @@ description: |
   Uses: gitlab_ci_list, gitlab_ci_view, gitlab_ci_trace, gitlab_ci_lint
 version: "1.1"
 
+links:
+  depends_on: []            # Standalone health check
+  validates:
+    - create_mr             # Pipeline success validates MR builds correctly
+    - rebase_pr             # Pipeline success validates rebase was clean
+    - ci_retry              # Validates retry resolved the failure
+    - cve_fix               # Pipeline validates CVE fix compiles
+    - hotfix                # Pipeline validates hotfix builds
+  validated_by: []          # Health check is authoritative
+  chains_to:
+    - ci_retry              # Retry failed pipelines
+    - test_mr_ephemeral     # Deploy if pipeline passes
+    - mark_mr_ready         # Mark MR ready if pipeline passes
+  provides_context_for:
+    - create_mr             # CI status for MR description
+    - coffee                # Morning briefing shows CI health
+    - review_pr             # Pipeline status for code review
+
 inputs:
   - name: project
     type: string

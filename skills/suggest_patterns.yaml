@@ -15,6 +15,16 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone analysis skill
+  validates: []             # Suggestion is advisory
+  validated_by:
+    - learn_pattern         # If pattern is saved, suggestion was good
+  chains_to:
+    - learn_pattern         # Save suggested patterns
+  provides_context_for:
+    - learn_pattern         # Suggested patterns for saving
+
 inputs: []
 
 steps:

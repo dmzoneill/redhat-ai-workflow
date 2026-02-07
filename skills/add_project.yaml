@@ -11,6 +11,17 @@ description: |
 
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone setup skill
+  validates: []             # Project addition is configuration
+  validated_by:
+    - bootstrap_knowledge   # Knowledge bootstrap validates project config is correct
+  chains_to:
+    - bootstrap_knowledge   # Build knowledge for new project
+    - reindex_all_vectors   # Index new project code
+  provides_context_for:
+    - bootstrap_knowledge   # New project config for knowledge generation
+
 inputs:
   - name: path
     type: string

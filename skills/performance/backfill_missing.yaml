@@ -10,6 +10,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - export_report
+  chains_to:
+    - evaluate_questions
+    - export_report
+  provides_context_for:
+    - export_report
+
 inputs:
   - name: max_days
     type: integer

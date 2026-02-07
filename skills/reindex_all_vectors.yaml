@@ -21,6 +21,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone maintenance skill
+  validates: []             # Reindexing is maintenance
+  validated_by:
+    - gather_context        # Context gathering validates index returns results
+    - find_similar_code     # Similar code search validates index quality
+    - explain_code          # Code explanation validates index accuracy
+    - knowledge_refresh
+  chains_to:
+    - knowledge_refresh     # Refresh knowledge after reindexing
+  provides_context_for: []  # Infrastructure skill, context via search tools
+
 inputs:
   - name: force
     type: boolean

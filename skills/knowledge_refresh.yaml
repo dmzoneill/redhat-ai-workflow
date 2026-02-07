@@ -14,6 +14,20 @@ description: |
   Run this periodically or after major code changes.
 version: "1.0"
 
+links:
+  depends_on:
+    - bootstrap_knowledge   # Knowledge must exist before refreshing
+  validates:
+    - bootstrap_knowledge   # Refresh validates initial bootstrap created valid knowledge
+    - reindex_all_vectors   # Refresh validates vector index is maintainable
+  validated_by:
+    - gather_context        # Context gathering validates refreshed knowledge is useful
+  chains_to:
+    - gather_context        # Use refreshed knowledge for context
+  provides_context_for:
+    - gather_context        # Fresh knowledge for context gathering
+    - coffee                # Knowledge freshness in morning briefing
+
 inputs:
   - name: project
     type: string

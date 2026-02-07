@@ -62,16 +62,23 @@ export class HtmlGenerator {
     const tabContents = this.getTabContentsHtml();
     logger.log(`generateHtml() - tabContents generated: ${tabContents.length} chars`);
 
+    // Get D3.js URI from local resources
+    const d3Uri = this.context.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'js', 'd3.v7.min.js')
+    );
+
     const html = `<!DOCTYPE html>
     <html lang="en">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' 'unsafe-inline'; img-src ${this.context.webview.cspSource} https: data:; connect-src ws://localhost:* wss://localhost:*;">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' 'unsafe-inline' ${this.context.webview.cspSource}; img-src ${this.context.webview.cspSource} https: data:; connect-src ws://localhost:* wss://localhost:*;">
       <title>AI Workflow Command Center</title>
       <style>
         ${styles}
       </style>
+      <!-- D3.js for visualizations (mind map) - loaded from local resources -->
+      <script nonce="${nonce}" src="${d3Uri}"></script>
     </head>
     <body>
       <div class="main-content">
@@ -80,6 +87,23 @@ export class HtmlGenerator {
         ${tabContents}
       </div>
       <script nonce="${nonce}">
+        // Bridge webview console.log to extension Output panel
+        (function() {
+          const origLog = console.log;
+          const origWarn = console.warn;
+          const origError = console.error;
+          function relay(level, args) {
+            try {
+              const msg = Array.from(args).map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+              if (msg.startsWith('[MindMap]') || msg.startsWith('Mind map')) {
+                vscode.postMessage({ command: 'webviewLog', level: level, message: msg });
+              }
+            } catch(e) {}
+          }
+          console.log = function() { relay('log', arguments); origLog.apply(console, arguments); };
+          console.warn = function() { relay('warn', arguments); origWarn.apply(console, arguments); };
+          console.error = function() { relay('error', arguments); origError.apply(console, arguments); };
+        })();
         ${scripts}
       </script>
     </body>
@@ -282,7 +306,7 @@ export class HtmlGenerator {
             hideReconnectBanner();
             break;
           case 'updateBadges':
-            // Update tab badges
+            // Update tab badges - only update when badge has data, never hide existing badges
             if (message.badges) {
               Object.entries(message.badges).forEach(([tabId, badge]) => {
                 const badgeEl = document.querySelector(\`[data-tab="\${tabId}"] .tab-badge\`);
@@ -290,9 +314,9 @@ export class HtmlGenerator {
                   badgeEl.textContent = badge.text;
                   badgeEl.className = 'tab-badge ' + (badge.class || '');
                   badgeEl.style.display = '';
-                } else if (badgeEl) {
-                  badgeEl.style.display = 'none';
                 }
+                // Don't hide badges when badge is null - the static HTML
+                // may already have correct badges from the initial render
               });
             }
             break;
@@ -473,6 +497,22 @@ export class HtmlGenerator {
                   }
                 }
                 // Event delegation handles clicks - no need to re-run scripts
+                // EXCEPTION: Mind map needs D3 initialization after content update
+                if (message.tabId === 'skills') {
+                  console.log('[MindMap] tabContentUpdate for skills tab');
+                  console.log('[MindMap] typeof d3:', typeof d3);
+                  console.log('[MindMap] typeof initMindMap:', typeof initMindMap);
+                  console.log('[MindMap] mindmapSvg exists:', !!document.getElementById('mindmapSvg'));
+                  console.log('[MindMap] mindmapDataScript exists:', !!document.getElementById('mindmapDataScript'));
+                  if (typeof initMindMap === 'function') {
+                    setTimeout(function() {
+                      console.log('[MindMap] Calling initMindMap()...');
+                      initMindMap();
+                    }, 200);
+                  } else {
+                    console.warn('[MindMap] initMindMap is NOT defined - scripts may not have loaded');
+                  }
+                }
               } else {
                 console.warn('[TabContentUpdate] Tab content element not found:', message.tabId);
               }

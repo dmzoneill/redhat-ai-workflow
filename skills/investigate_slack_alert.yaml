@@ -34,6 +34,21 @@ description: |
   - Numbered sequentially from existing billing events
 version: "1.0"
 
+links:
+  depends_on: []            # Triggered by Slack messages, no prior skill needed
+  validates: []             # Slack alert investigation is diagnostic
+  validated_by:
+    - investigate_alert     # Standard investigation validates Slack alert parsing
+    - debug_prod            # Deep investigation validates initial triage
+  chains_to:
+    - investigate_alert     # Standard investigation workflow
+    - create_jira_issue     # Create tracking issue
+    - silence_alert         # Silence if false positive
+    - notify_team           # Post investigation results
+  provides_context_for:
+    - investigate_alert     # Parsed alert details feed investigation
+    - create_jira_issue     # Alert context for issue creation
+
 inputs:
   - name: channel_id
     type: string

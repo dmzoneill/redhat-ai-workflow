@@ -20,6 +20,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone scheduled skill
+  validates: []             # Monitoring doesn't validate other skills
+  validated_by: []          # Scheduled job, not validated by others
+  chains_to:
+    - start_work            # Detected question may need work
+    - notify_team           # Notify about important comments
+  provides_context_for:
+    - coffee                # Morning briefing shows comment activity
+    - standup_summary       # Comment responses appear in standup
+
 inputs:
   - name: jira_project
     description: Jira project key (e.g., AAP)

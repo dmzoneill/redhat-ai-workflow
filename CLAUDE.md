@@ -4,7 +4,7 @@
   ║                                                                           ║
   ║  Source: docs/ai-rules/                                                   ║
   ║  Sync:   make sync-ai-rules                                               ║
-  ║  Generated: 2026-02-06 09:33:52                                            ║
+  ║  Generated: 2026-02-06 23:08:39                                            ║
   ╚═══════════════════════════════════════════════════════════════════════════╝
 -->
 
@@ -18,3 +18,4 @@
 @import docs/ai-rules/40-ephemeral.md
 @import docs/ai-rules/50-auto-debug.md
 @import docs/ai-rules/55-work-completion.md
+@import docs/ai-rules/60-use-mcp-tools.md

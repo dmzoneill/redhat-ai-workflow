@@ -33,6 +33,13 @@ description: |
 
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone HR skill
+  validates: []             # Recognition doesn't validate other skills
+  validated_by: []          # Not validated by other skills
+  chains_to: []             # No natural next step
+  provides_context_for: []  # Standalone utility
+
 inputs:
   - name: action
     type: string

@@ -12,6 +12,23 @@ description: |
   - Analyzes git history for contributor patterns
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone bootstrap skill
+  validates: []             # Bootstrap is generative
+  validated_by:
+    - gather_context        # Context gathering validates knowledge was built correctly
+    - explain_code          # Code explanation validates knowledge is accurate
+    - find_similar_code     # Similar code validates vector index works
+    - bootstrap_all_knowledge
+    - knowledge_refresh
+  chains_to:
+    - knowledge_refresh     # Refresh specific areas after bootstrap
+    - learn_architecture    # Deep dive into architecture
+  provides_context_for:
+    - gather_context        # Knowledge for context gathering
+    - review_pr             # Project knowledge for reviews
+    - start_work            # Project knowledge for new work
+
 inputs:
   - name: project
     type: string

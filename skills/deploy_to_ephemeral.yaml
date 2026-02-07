@@ -15,6 +15,23 @@ description: |
         bonfire_deploy, kubectl_rollout_status, kubectl_get_pods
 version: "1.0"
 
+links:
+  depends_on: []            # Can deploy any image, no prior skill required
+  validates: []             # Generic deploy, doesn't validate specific skills
+  validated_by:
+    - environment_overview  # Environment check validates deployment health
+    - check_secrets         # Secrets check validates config is correct
+    - extend_ephemeral
+  chains_to:
+    - extend_ephemeral      # Extend if more testing needed
+    - environment_overview  # Check deployment health
+    - check_secrets         # Verify configuration
+    - rollout_restart       # Restart if pods are unhealthy
+  provides_context_for:
+    - extend_ephemeral      # Namespace name for extension
+    - environment_overview  # Namespace for health check
+    - debug_prod            # Deployment context for debugging
+
 inputs:
   - name: app
     type: string

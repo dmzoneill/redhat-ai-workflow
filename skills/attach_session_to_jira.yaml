@@ -24,6 +24,15 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Can attach to any Jira issue
+  validates: []             # Session attachment is documentation
+  validated_by: []          # Terminal documentation action
+  chains_to:
+    - close_issue           # After documenting, may close issue
+  provides_context_for:
+    - close_issue           # Session context for closing
+
 inputs:
   - name: issue_key
     type: string

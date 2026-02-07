@@ -393,6 +393,50 @@ export interface ConfigState {
   cache_valid: boolean;
 }
 
+// Skills Graph Types for Mind Map Visualization
+export interface SkillsGraphNode {
+  id: string;
+  type: "skill" | "tool" | "intent";
+  category: string;
+  label: string;
+  description?: string;
+  tools?: string[];
+  intents?: string[];
+  outputs?: string[];
+  personas?: string[];
+  size: number;
+}
+
+export interface SkillsGraphLink {
+  source: string;
+  target: string;
+  type: "calls" | "uses" | "triggers";
+  strength: number;
+}
+
+export interface SkillsGraphPersona {
+  name: string;
+  description: string;
+  skill_count: number;
+  skills: string[];
+}
+
+export interface SkillsGraphStats {
+  skill_count: number;
+  tool_count: number;
+  intent_count: number;
+  link_count: number;
+  persona_count: number;
+  categories: Record<string, number>;
+}
+
+export interface SkillsGraphData {
+  nodes: SkillsGraphNode[];
+  links: SkillsGraphLink[];
+  personas: Record<string, SkillsGraphPersona>;
+  stats: SkillsGraphStats;
+}
+
 // Memory Types
 export interface MemoryHealth {
   totalSize: string;
@@ -1803,6 +1847,13 @@ class DBusClient {
    */
   async config_getState(): Promise<DBusResult<{ state: ConfigState }>> {
     return this.callMethod("config", "get_state");
+  }
+
+  /**
+   * Get skills graph data for visualization (nodes, links, personas, stats)
+   */
+  async config_getSkillsGraph(): Promise<DBusResult<{ graph: SkillsGraphData }>> {
+    return this.callMethod("config", "get_skills_graph");
   }
 
   /**

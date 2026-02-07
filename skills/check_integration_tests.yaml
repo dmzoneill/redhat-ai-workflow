@@ -14,6 +14,20 @@ description: |
         konflux_get_snapshot
 version: "1.0"
 
+links:
+  depends_on:
+    - konflux_status        # Should check Konflux status first
+  validates:
+    - test_mr_ephemeral     # Integration tests validate deployment was correct
+    - create_mr             # Test results validate MR code quality
+  validated_by: []          # Test results are authoritative
+  chains_to:
+    - release_to_prod       # Release if tests pass
+    - ci_retry              # Retry if tests failed transiently
+  provides_context_for:
+    - release_to_prod       # Test results for release decision
+    - create_mr             # Test status for MR description
+
 inputs:
   - name: namespace
     type: string

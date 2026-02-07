@@ -19,6 +19,22 @@ description: |
 
 version: "1.3"
 
+links:
+  depends_on: []            # Standalone batch operation
+  validates:
+    - review_pr             # Runs review_pr on each MR, validates it works at scale
+    - create_mr             # Batch review validates all MRs have proper structure
+    - rebase_pr             # Auto-rebases when needed, validates rebase works
+  chains_to:
+    - check_my_prs          # After reviewing others, check your own
+    - rebase_pr             # Rebase MRs that need it
+  provides_context_for:
+    - coffee                # Morning briefing shows review status
+    - beer                  # EOD wrap-up shows reviews completed
+    - weekly_summary        # Weekly report includes review activity
+  validated_by:
+    - coffee
+
 inputs:
   - name: project
     type: string

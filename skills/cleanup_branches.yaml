@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - close_issue           # Branches to clean up from closed issues
+    - close_mr              # Branches from closed MRs
+  validates:
+    - close_issue           # Cleanup validates issues are properly closed
+    - close_mr              # Cleanup validates MRs are properly closed
+  chains_to: []             # No natural next step
+  provides_context_for:
+    - beer                  # EOD shows stale branches cleaned up
+  validated_by:
+    - beer
+
 inputs:
   - name: repo
     type: string

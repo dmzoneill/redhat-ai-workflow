@@ -15,6 +15,16 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone initialization
+  validates: []             # Init is a setup action
+  validated_by:
+    - memory_view           # View validates initialization worked
+  chains_to:
+    - memory_view           # Verify initialization
+    - bootstrap_knowledge   # Rebuild knowledge after reset
+  provides_context_for: []  # Clean slate after init
+
 inputs:
   - name: confirm
     type: boolean

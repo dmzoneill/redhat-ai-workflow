@@ -14,6 +14,16 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - memory_view           # Should view before editing
+  validates: []             # Editing is a mutation
+  validated_by:
+    - memory_view           # View after edit validates edit was correct
+  chains_to:
+    - memory_view           # Verify edits
+  provides_context_for: []  # Internal maintenance
+
 inputs:
   - name: file
     type: string

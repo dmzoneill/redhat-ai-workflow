@@ -12,6 +12,20 @@ description: |
   - Discovers API endpoints and data models
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone scanning skill
+  validates: []             # Architecture learning is generative
+  validated_by:
+    - gather_context        # Context gathering validates architecture knowledge is usable
+    - explain_code          # Code explanation validates architecture understanding
+  chains_to:
+    - bootstrap_knowledge   # Full knowledge bootstrap after architecture scan
+    - knowledge_refresh     # Refresh specific knowledge areas
+  provides_context_for:
+    - review_pr             # Architecture context for reviews
+    - plan_implementation   # Architecture context for planning
+    - debug_prod            # Architecture context for debugging
+
 inputs:
   - name: project
     type: string

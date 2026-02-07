@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist to notify about
+    - mark_mr_ready         # MR should be ready before notifying
+  validates:
+    - create_mr             # Notification validates MR exists and is shareable
+    - mark_mr_ready         # Notification validates MR was marked ready
+  validated_by:
+    - review_pr             # Review after notification validates it was seen
+  chains_to:
+    - review_pr             # Team reviews after notification
+  provides_context_for: []  # Notification is one-way
+
 inputs:
   - name: mr_id
     type: string

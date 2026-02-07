@@ -26,6 +26,14 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone HR/calendar skill
+  validates: []             # PTO sync doesn't validate other skills
+  validated_by: []          # Not validated by other skills
+  chains_to: []             # No natural next step
+  provides_context_for:
+    - coffee                # PTO days affect meeting scheduling
+
 inputs:
   - name: dry_run
     type: boolean

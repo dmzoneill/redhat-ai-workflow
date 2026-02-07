@@ -14,6 +14,19 @@ description: |
   Uses MCP tools: git_status, git_fetch, git_stash, git_push
 version: "1.3"
 
+links:
+  depends_on:
+    - start_work            # Must be on a feature branch
+  validates:
+    - start_work            # Syncing validates branch is in good state
+  validated_by:
+    - rebase_pr             # Rebase is the more thorough sync mechanism
+  chains_to:
+    - create_mr             # After syncing, ready to create MR
+    - review_local_changes  # Review changes after sync
+  provides_context_for:
+    - create_mr             # Sync status informs MR readiness
+
 inputs:
   - name: repo
     type: string

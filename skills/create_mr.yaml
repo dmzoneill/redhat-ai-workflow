@@ -24,6 +24,46 @@ description: |
                   code_search, knowledge_query, git_blame
 version: "3.0"
 
+links:
+  depends_on:
+    - start_work            # Branch must exist with commits
+  validates:
+    - start_work            # If MR creates, branch setup was correct
+    - jira_hygiene          # Runs hygiene as pre-check
+    - update_docs           # Checks/updates docs before MR
+  validated_by:
+    - review_pr             # Code review validates MR quality
+    - review_pr_multiagent  # Multi-agent review validates MR quality
+    - test_mr_ephemeral     # Deployment validates MR is deployable
+    - check_ci_health       # Pipeline success validates MR builds
+    - beer
+    - check_integration_tests
+    - check_my_prs
+    - close_issue
+    - mark_mr_ready
+    - notify_mr
+    - pr_jira_audit
+    - rebase_pr
+    - release_to_prod
+    - review_all_prs
+    - sprint_autopilot
+  chains_to:
+    - mark_mr_ready         # After draft MR is polished
+    - test_mr_ephemeral     # Deploy for integration testing
+    - notify_mr             # Notify team about the MR
+    - review_pr             # Request code review
+    - check_mr_feedback
+    - check_my_prs
+    - close_issue
+    - close_mr
+    - rebase_pr
+    - review_pr_multiagent
+    - review_pr_multiagent_test
+  provides_context_for:
+    - close_issue           # MR link, commit history
+    - test_mr_ephemeral     # MR ID for deployment
+    - release_to_prod       # Commit SHA for release
+
 inputs:
   - name: issue_key
     type: string

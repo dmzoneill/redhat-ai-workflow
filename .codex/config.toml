@@ -1,0 +1,23 @@
+# Codex project configuration
+# Blocked CLI commands should use MCP tools instead.
+# See AGENTS.md for the full CLI-to-MCP mapping.
+
+# Require approval for shell commands (agent must ask before running)
+# This ensures dangerous CLI commands get manual review
+approval_policy = "on-request"
+
+# Sandbox mode - workspace write access with network
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+
+# MCP server - AA Workflow (skills, personas, memory, tools)
+[mcp_servers.aa_workflow]
+command = "python"
+args = [
+    "/home/daoneill/src/redhat-ai-workflow/scripts/mcp_proxy.py",
+    "--cwd", "/home/daoneill/src/redhat-ai-workflow",
+    "--",
+    "uv", "run", "python", "-m", "server"
+]

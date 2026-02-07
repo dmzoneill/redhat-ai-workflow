@@ -16,6 +16,20 @@ description: |
         kubectl_get_deployments, kubectl_get_resourcequotas, gitlab_mr_list
 version: "3.1"
 
+links:
+  depends_on: []            # Standalone validation skill
+  validates:
+    - release_to_prod       # Validates production release config is correct
+    - release_aa_backend_prod  # Validates AA-specific release config
+  chains_to:
+    - release_to_prod       # Proceed with release if check passes
+    - release_aa_backend_prod  # Proceed with AA release if check passes
+  provides_context_for:
+    - release_to_prod       # App-interface state for release
+    - release_aa_backend_prod  # Config validation results
+  validated_by:
+    - release_aa_backend_prod
+
 inputs:
   - name: saas_file
     type: string

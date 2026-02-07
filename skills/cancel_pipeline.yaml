@@ -20,6 +20,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Can cancel any pipeline
+  validates: []             # Cancellation doesn't validate other skills
+  chains_to:
+    - ci_retry              # Retry the cancelled pipeline with fixes
+    - konflux_status        # Check overall build status
+  provides_context_for:
+    - ci_retry              # Cancellation reason informs retry
+  validated_by:
+    - ci_retry
+
 inputs:
   - name: run_name
     type: string

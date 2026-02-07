@@ -100,6 +100,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("get_persona_definition", self._handle_get_persona_definition)
         self.register_handler("get_tool_modules", self._handle_get_tool_modules)
         self.register_handler("get_config", self._handle_get_config)
+        self.register_handler("get_skills_graph", self._handle_get_skills_graph)
         self.register_handler("invalidate_cache", self._handle_invalidate_cache)
         self.register_handler("get_state", self._handle_get_state)
 
@@ -107,9 +108,20 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
 
     async def get_service_stats(self) -> dict:
         """Return config-specific statistics."""
+        # Use _skills_list_cache (populated at startup) rather than _skills_cache (lazy per-skill)
+        skills_count = (
+            len(self._skills_list_cache)
+            if self._skills_list_cache
+            else (len(self._skills_cache) if self._skills_cache else 0)
+        )
+        personas_count = (
+            len(self._personas_list_cache)
+            if self._personas_list_cache
+            else (len(self._personas_cache) if self._personas_cache else 0)
+        )
         return {
-            "skills_count": len(self._skills_cache) if self._skills_cache else 0,
-            "personas_count": len(self._personas_cache) if self._personas_cache else 0,
+            "skills_count": skills_count,
+            "personas_count": personas_count,
             "tool_modules_count": len(self._tool_modules_cache) if self._tool_modules_cache else 0,
             "skills_loaded_at": self._skills_loaded_at.isoformat() if self._skills_loaded_at else None,
             "personas_loaded_at": self._personas_loaded_at.isoformat() if self._personas_loaded_at else None,
@@ -212,6 +224,234 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         except Exception as e:
             logger.error(f"Failed to get config: {e}")
             return {"success": False, "error": str(e)}
+
+    async def _handle_get_skills_graph(self, **kwargs) -> dict:
+        """Get skills graph data for visualization (nodes, links, stats).
+
+        Returns a graph structure suitable for D3.js force-directed visualization:
+        - nodes: skills, tools, intents with metadata
+        - links: connections between nodes (calls, uses, triggers)
+        - personas: persona definitions with their skills
+        - stats: counts and categories
+        """
+        try:
+            graph_data = self._generate_skills_graph()
+            return {"success": True, "graph": graph_data}
+        except Exception as e:
+            logger.error(f"Failed to generate skills graph: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _generate_skills_graph(self) -> dict:
+        """Generate graph data structure for skills visualization."""
+        nodes = []
+        links = []
+        tool_nodes = {}
+        intent_nodes = {}
+
+        # Load skills and personas
+        skills_list = self._load_skills_list()
+        personas_list = self._load_personas_list()
+
+        # Build skill -> personas mapping
+        skill_to_personas = {}
+        for persona in personas_list:
+            for skill_name in persona.get("skills", []):
+                if skill_name not in skill_to_personas:
+                    skill_to_personas[skill_name] = []
+                skill_to_personas[skill_name].append(persona["name"])
+
+        # Category keywords for classification
+        category_keywords = {
+            "code": ["git", "commit", "branch", "mr", "pr", "review", "lint", "code"],
+            "deploy": ["deploy", "ephemeral", "namespace", "bonfire", "rollout", "scale"],
+            "jira": ["jira", "issue", "sprint", "ticket", "hygiene"],
+            "incident": ["alert", "incident", "debug", "investigate", "silence"],
+            "daily": ["coffee", "beer", "standup", "weekly", "morning", "evening"],
+            "memory": ["memory", "learn", "pattern", "knowledge", "bootstrap"],
+            "comms": ["slack", "notify", "schedule", "meeting", "team"],
+            "maintenance": ["cleanup", "sync", "reindex", "refresh"],
+        }
+
+        # Intent keywords
+        intent_keywords = [
+            "create",
+            "review",
+            "deploy",
+            "investigate",
+            "check",
+            "start",
+            "close",
+            "update",
+            "notify",
+            "schedule",
+            "debug",
+            "release",
+            "sync",
+            "cleanup",
+            "learn",
+            "scan",
+            "extend",
+            "cancel",
+            "silence",
+            "scale",
+            "rollout",
+            "rebase",
+            "hotfix",
+            "clone",
+        ]
+
+        # Track categories for stats
+        categories = {}
+        all_tools = set()
+
+        for skill_info in skills_list:
+            skill_name = skill_info["name"]
+
+            # Load full skill definition for detailed analysis
+            skill_def = self._load_skill_definition(skill_name)
+            if not skill_def:
+                continue
+
+            description = skill_def.get("description", "")
+
+            # Categorize skill
+            category = "other"
+            name_lower = skill_name.lower()
+            desc_lower = description.lower()
+            for cat, keywords in category_keywords.items():
+                if any(kw in name_lower or kw in desc_lower for kw in keywords):
+                    category = cat
+                    break
+
+            categories[category] = categories.get(category, 0) + 1
+
+            # Extract tools used in steps
+            tools_used = []
+            nested_skills = []
+            for step in skill_def.get("steps", []):
+                if isinstance(step, dict):
+                    tool = step.get("tool")
+                    if tool:
+                        tools_used.append(tool)
+                        all_tools.add(tool)
+                    # Check for nested skill_run calls
+                    if tool == "skill_run":
+                        args = step.get("args", {})
+                        nested = args.get("skill_name") or args.get("name")
+                        if nested:
+                            # Handle template syntax
+                            if "{{" not in str(nested):
+                                nested_skills.append(nested)
+
+            # Extract intents from description and inputs
+            skill_intents = []
+            for intent in intent_keywords:
+                if intent in name_lower or intent in desc_lower:
+                    skill_intents.append(intent)
+                    if intent not in intent_nodes:
+                        intent_nodes[intent] = {
+                            "id": f"intent_{intent}",
+                            "type": "intent",
+                            "category": "intent",
+                            "label": intent.title(),
+                            "size": 6,
+                        }
+
+            # Extract outputs
+            outputs = []
+            for out in skill_def.get("outputs", []):
+                if isinstance(out, dict):
+                    outputs.append(out.get("name", ""))
+                elif isinstance(out, str):
+                    outputs.append(out)
+
+            # Get personas that use this skill
+            skill_personas = skill_to_personas.get(skill_name, [])
+
+            # Create skill node
+            nodes.append(
+                {
+                    "id": skill_name,
+                    "type": "skill",
+                    "category": category,
+                    "label": skill_name.replace("_", " ").title(),
+                    "description": description[:300] if description else "",
+                    "tools": tools_used,
+                    "intents": skill_intents,
+                    "outputs": outputs,
+                    "personas": skill_personas,
+                    "size": 8 + min(len(skill_def.get("steps", [])), 20),
+                }
+            )
+
+            # Create tool nodes and links
+            for tool in tools_used:
+                if tool not in tool_nodes:
+                    tool_nodes[tool] = {
+                        "id": f"tool_{tool}",
+                        "type": "tool",
+                        "category": "tool",
+                        "label": tool.replace("_", " ").title(),
+                        "size": 5,
+                    }
+                links.append(
+                    {
+                        "source": skill_name,
+                        "target": f"tool_{tool}",
+                        "type": "uses",
+                        "strength": 0.3,
+                    }
+                )
+
+            # Create intent links
+            for intent in skill_intents:
+                links.append(
+                    {
+                        "source": f"intent_{intent}",
+                        "target": skill_name,
+                        "type": "triggers",
+                        "strength": 0.5,
+                    }
+                )
+
+            # Create skill-to-skill links
+            for nested in nested_skills:
+                links.append(
+                    {
+                        "source": skill_name,
+                        "target": nested,
+                        "type": "calls",
+                        "strength": 0.8,
+                    }
+                )
+
+        # Add tool and intent nodes
+        nodes.extend(tool_nodes.values())
+        nodes.extend(intent_nodes.values())
+
+        # Build persona data
+        persona_data = {}
+        for persona in personas_list:
+            persona_data[persona["name"]] = {
+                "name": persona["name"],
+                "description": persona.get("description", ""),
+                "skill_count": len(persona.get("skills", [])),
+                "skills": persona.get("skills", []),
+            }
+
+        return {
+            "nodes": nodes,
+            "links": links,
+            "personas": persona_data,
+            "stats": {
+                "skill_count": len(skills_list),
+                "tool_count": len(all_tools),
+                "intent_count": len(intent_nodes),
+                "link_count": len(links),
+                "persona_count": len(personas_list),
+                "categories": categories,
+            },
+        }
 
     async def _handle_invalidate_cache(self, cache_type: str = "all", **kwargs) -> dict:
         """Invalidate cache(s) to force reload."""

@@ -14,6 +14,15 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - slack_persona_sync    # Needs Slack messages synced for style analysis
+  validates:
+    - slack_persona_sync    # Persona build validates message sync captured style
+  validated_by: []          # Creative/generative, not validated
+  chains_to: []             # No natural next step
+  provides_context_for: []  # Standalone utility
+
 inputs:
   - name: months
     type: integer

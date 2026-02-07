@@ -10,6 +10,22 @@ description: |
   Resolves project and component from issue_key prefix or repo_name.
 version: "1.2"
 
+links:
+  depends_on: []            # Standalone - can run independently
+  validates: []             # Hygiene is a validator, not validated
+  validated_by:
+    - start_work            # start_work calls hygiene as a step
+    - create_mr             # create_mr calls hygiene as pre-check
+    - jira_hygiene_all      # Batch runner validates individual runs
+    - review_pr
+    - sprint_autopilot
+  chains_to:
+    - start_work            # After hygiene, start working on the issue
+    - create_mr             # After hygiene, create MR
+  provides_context_for:
+    - create_mr             # Hygiene status informs MR description
+    - sprint_planning       # Clean issues are ready for sprint
+
 inputs:
   - name: issue_key
     type: string

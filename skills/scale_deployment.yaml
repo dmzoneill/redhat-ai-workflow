@@ -19,6 +19,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Can scale any deployment
+  validates: []             # Scaling is a remediation, not a validator
+  validated_by:
+    - environment_overview  # Environment check validates scaling worked
+  chains_to:
+    - environment_overview  # Check health after scaling
+    - notify_team           # Announce scaling change
+  provides_context_for:
+    - debug_prod            # Scale context for investigation
+    - investigate_alert     # Current scale for alert triage
+
 inputs:
   - name: deployment
     type: string

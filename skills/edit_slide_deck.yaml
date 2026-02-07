@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - create_slide_deck     # Presentation must exist
+    - list_presentations    # Or found via listing
+  validates:
+    - create_slide_deck     # Successful edit validates creation worked
+  chains_to:
+    - export_presentation   # Export after editing
+  provides_context_for:
+    - export_presentation   # Updated presentation for export
+  validated_by:
+    - export_presentation
+
 inputs:
   - name: presentation_id
     type: string

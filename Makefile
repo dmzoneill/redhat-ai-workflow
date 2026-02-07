@@ -20,6 +20,7 @@
         mcp-server mcp-developer mcp-devops mcp-incident mcp-release mcp-slack mcp-all mcp-custom \
         integration-test integration-test-agent integration-test-fix integration-test-dry \
         skill-test skill-test-list skill-test-dry \
+        validate-skills \
         docs-serve docs-check list-skills list-tools list-modules \
         validate-personas generate-personas generate-personas-dry \
         sync-ai-rules sync-ai-rules-dry sync-ai-rules-verbose \
@@ -98,6 +99,7 @@ help:
 	@printf "  \033[32mmake skill-test\033[0m         Run skill tests (live execution)\n"
 	@printf "  \033[32mmake skill-test-list\033[0m    List all skills\n"
 	@printf "  \033[32mmake skill-test-dry\033[0m     Run skill tests (dry-run)\n"
+	@printf "  \033[32mmake validate-skills\033[0m    Validate skill YAML structure and links\n"
 	@printf "\n"
 	@printf "\033[1mDocumentation:\033[0m\n"
 	@printf "  \033[32mmake list-skills\033[0m        List all available skills\n"
@@ -368,6 +370,10 @@ skill-test-list:
 skill-test-dry:
 	@printf "\033[36mRunning skill tests (dry-run)...\033[0m\n"
 	cd $(PROJECT_ROOT) && $(PYTHON) scripts/skill_test_runner.py --dry-run
+
+validate-skills:
+	@printf "\033[36mValidating skill YAML files...\033[0m\n"
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/validate_skills.py
 
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"

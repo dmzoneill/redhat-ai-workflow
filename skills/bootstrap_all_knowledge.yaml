@@ -20,6 +20,15 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone batch operation
+  validates:
+    - bootstrap_knowledge   # Batch validates single-project bootstrap works at scale
+  validated_by: []          # Terminal batch operation
+  chains_to:
+    - reindex_all_vectors   # Reindex vectors after knowledge bootstrap
+  provides_context_for: []  # Batch operation, context via individual bootstraps
+
 inputs:
   - name: force
     type: boolean

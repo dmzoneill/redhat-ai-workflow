@@ -14,6 +14,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - create_slide_deck     # Presentation must exist
+    - edit_slide_deck       # Usually edited before export
+  validates:
+    - create_slide_deck     # Export validates presentation is complete
+    - edit_slide_deck       # Export validates edits are final
+  validated_by: []          # Terminal export action
+  chains_to: []             # No natural next step
+  provides_context_for: []  # Standalone export
+
 inputs:
   - name: presentation_id
     type: string

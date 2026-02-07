@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": ".cursor/hooks/block-cli.sh",
+        "timeout": 5,
+        "matcher": "curl|wget|git|kubectl|oc|bonfire|gh|glab|docker|docker-compose|podman|ssh|sshpass|systemctl|journalctl|virsh|virt-install|flake8|mypy|black|isort|ruff|pytest|make|openssl|nmap|psql|mysql|sqlite3|aws|gcloud|ansible|ansible-playbook|tkn|skopeo|helm|rh-issue"
+      }
+    ]
+  }
+}

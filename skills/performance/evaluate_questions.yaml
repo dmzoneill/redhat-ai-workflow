@@ -14,6 +14,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - collect_daily
+  validates:
+    - collect_daily
+  validated_by:
+    - export_report
+  chains_to:
+    - export_report
+  provides_context_for:
+    - export_report
+
 inputs:
   - name: question_id
     type: string

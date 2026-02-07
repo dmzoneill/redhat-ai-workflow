@@ -15,6 +15,20 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - research_topic        # Should research options before comparing
+  validates:
+    - research_topic        # Comparison validates research found viable options
+  validated_by:
+    - plan_implementation   # If plan uses an option, comparison was useful
+  chains_to:
+    - plan_implementation   # Plan after deciding on approach
+    - start_work            # Start work with chosen option
+  provides_context_for:
+    - plan_implementation   # Chosen option informs plan
+    - create_jira_issue     # Decision rationale for issue
+
 inputs:
   - name: question
     type: string

@@ -9,6 +9,15 @@ description: |
 
 version: "2.0"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist to review it
+  validates:
+    - review_pr_multiagent  # Test variant validates multi-agent review works
+  validated_by: []          # Test skill, not validated by production skills
+  chains_to: []             # Test skill, no production chains
+  provides_context_for: []  # Test skill, no production context
+
 inputs:
   - name: mr_id
     type: integer

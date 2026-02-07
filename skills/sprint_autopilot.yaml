@@ -29,6 +29,21 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone orchestration skill
+  validates:
+    - start_work            # Autopilot calls start_work as a step
+    - create_mr             # Autopilot calls create_mr as a step
+    - jira_hygiene          # Autopilot validates issue quality
+  validated_by:
+    - close_issue           # If issue closes, autopilot workflow was successful
+  chains_to:
+    - test_mr_ephemeral     # Deploy for testing after autopilot
+    - close_issue           # Close after MR merge
+  provides_context_for:
+    - standup_summary       # Autopilot activity for standup
+    - weekly_summary        # Autopilot activity for weekly report
+
 inputs:
   - name: issue_key
     description: Jira issue key (e.g., AAP-12345)

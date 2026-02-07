@@ -14,6 +14,20 @@ description: |
   Uses: jira_list_issues, jira_list_blocked, jira_add_to_sprint, jira_add_flag
 version: "1.0"
 
+links:
+  depends_on:
+    - jira_hygiene_all      # Issues should be cleaned up before planning
+  validates:
+    - jira_hygiene_all      # Planning success means hygiene batch worked
+    - create_jira_issue     # Planned issues validate creation worked
+  validated_by: []          # Planning is a coordination skill
+  chains_to:
+    - start_work            # Pick up a planned issue
+    - jira_hygiene          # Clean individual issues during planning
+  provides_context_for:
+    - coffee                # Morning briefing shows sprint status
+    - standup_summary       # Sprint context for daily standup
+
 inputs:
   - name: project
     type: string

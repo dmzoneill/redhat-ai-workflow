@@ -13,6 +13,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone trigger skill
+  validates:
+    - slop_scan             # Triggering a scan validates the scan daemon works
+  chains_to:
+    - slop_fix              # Fix after fresh scan
+  provides_context_for:
+    - slop_fix              # Fresh findings for fix
+  validated_by:
+    - slop_fix
+
 inputs:
   - name: wait_for_completion
     type: boolean

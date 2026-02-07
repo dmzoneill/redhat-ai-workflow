@@ -21,6 +21,25 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone utility skill
+  validates:
+    - bootstrap_knowledge   # Context gathering validates knowledge was indexed
+    - knowledge_refresh     # Validates knowledge is up to date
+    - reindex_all_vectors   # Validates vector index returns relevant results
+  chains_to:
+    - plan_implementation   # Context informs implementation planning
+    - research_topic        # Deeper research after initial context
+    - start_work            # Context helps start work
+  provides_context_for:
+    - start_work            # Code context for starting work
+    - review_pr             # Context for code review
+    - debug_prod            # Context for debugging
+    - create_mr             # Context for MR description
+  validated_by:
+    - plan_implementation
+    - research_topic
+
 inputs:
   - name: query
     type: string

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": ".cursor/hooks/block-cli.sh",
+        "cwd": ".",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

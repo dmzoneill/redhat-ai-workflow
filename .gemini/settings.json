@@ -1,0 +1,28 @@
+{
+  "mcpServers": {
+    "aa_workflow": {
+      "command": "python",
+      "args": [
+        "/home/daoneill/src/redhat-ai-workflow/scripts/mcp_proxy.py",
+        "--cwd", "/home/daoneill/src/redhat-ai-workflow",
+        "--",
+        "uv", "run", "python", "-m", "server"
+      ]
+    }
+  },
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "run_shell_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".cursor/hooks/block-cli.sh",
+            "name": "block-cli-for-mcp",
+            "description": "Block CLI commands that have MCP tool equivalents"
+          }
+        ]
+      }
+    ]
+  }
+}

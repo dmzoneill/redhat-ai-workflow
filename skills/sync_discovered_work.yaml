@@ -24,6 +24,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone sync skill
+  validates: []             # Sync is a data operation
+  validated_by:
+    - discovered_work_summary  # Summary validates sync captured work correctly
+  chains_to:
+    - discovered_work_summary  # Summarize after syncing
+    - create_jira_issue     # Create issues for discovered work
+    - sprint_planning       # Add discovered work to sprint
+  provides_context_for:
+    - discovered_work_summary  # Synced data for summary
+    - sprint_planning       # Discovered work for planning
+
 inputs:
   - name: auto_create
     type: boolean

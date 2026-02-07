@@ -16,6 +16,22 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - slop_scan             # Should scan before fixing
+    - slop_scan_now         # Or trigger a fresh scan first
+  validates:
+    - slop_scan             # Successful fixes validate scan found real issues
+    - slop_scan_now         # Validates triggered scan produced actionable results
+  validated_by:
+    - check_ci_health       # Pipeline validates fixes don't break builds
+    - review_local_changes  # Local review validates fixes are correct
+  chains_to:
+    - create_mr             # Create MR with fixes
+    - review_local_changes  # Review fixes before committing
+  provides_context_for:
+    - create_mr             # Fix details for MR description
+
 inputs:
   - name: dry_run
     type: boolean

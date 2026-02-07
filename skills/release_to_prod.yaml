@@ -18,6 +18,26 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - test_mr_ephemeral     # Should test in ephemeral before releasing
+    - scan_vulnerabilities   # Should scan image before production release
+  validates:
+    - test_mr_ephemeral     # Production release validates ephemeral testing was valid
+    - create_mr             # Release validates the MR code is production-worthy
+    - scan_vulnerabilities   # Release validates security scan passed
+  validated_by:
+    - appinterface_check    # App-interface check validates release config
+    - environment_overview  # Production health validates release
+    - release_aa_backend_prod
+  chains_to:
+    - appinterface_check    # Verify app-interface after release
+    - close_issue           # Close issues included in release
+    - notify_team           # Announce release to team
+  provides_context_for:
+    - weekly_summary        # Release appears in weekly report
+    - beer                  # EOD shows release activity
+
 inputs:
   - name: commit_sha
     type: string

@@ -7,6 +7,8 @@ Validates all skills at runtime without executing them:
 3. Compute block compilation (syntax check)
 4. Template variable dependency chain analysis
 5. Input/output schema validation
+6. Skill links validation (depends_on, validates, validated_by, chains_to, provides_context_for)
+7. Cross-skill link consistency (bidirectional reference checks)
 
 Usage:
     python scripts/validate_skills.py [--verbose] [--skill NAME]
@@ -259,6 +261,101 @@ def validate_unique_step_names(skill: dict) -> list[str]:
     return errors
 
 
+VALID_LINK_TYPES = {"depends_on", "validates", "validated_by", "chains_to", "provides_context_for"}
+
+
+def validate_links_structure(skill: dict) -> list[str]:
+    """Validate the links: metadata structure."""
+    errors = []
+    links = skill.get("links")
+    if links is None:
+        return []  # links: is optional
+
+    if not isinstance(links, dict):
+        errors.append("'links' must be a dict")
+        return errors
+
+    for key, value in links.items():
+        if key not in VALID_LINK_TYPES:
+            errors.append(
+                f"links: unknown link type '{key}' " f"(must be one of: {', '.join(sorted(VALID_LINK_TYPES))})"
+            )
+        if not isinstance(value, list):
+            errors.append(f"links.{key}: must be a list, got {type(value).__name__}")
+        else:
+            for item in value:
+                if not isinstance(item, str):
+                    errors.append(f"links.{key}: items must be strings, got {type(item).__name__}: {item}")
+
+    return errors
+
+
+def validate_links_references(skill: dict, all_skill_names: set[str]) -> list[str]:
+    """Validate that linked skill names reference real skills."""
+    errors = []
+    links = skill.get("links")
+    if not links or not isinstance(links, dict):
+        return []
+
+    for link_type, refs in links.items():
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if isinstance(ref, str) and ref not in all_skill_names:
+                errors.append(f"links.{link_type}: references unknown skill '{ref}'")
+
+    return errors
+
+
+def validate_links_consistency(all_skills: dict[str, dict]) -> list[str]:
+    """Cross-skill validation: check bidirectional link consistency.
+
+    Rules:
+    - If A.validates includes B, B.validated_by should include A (warning)
+    - If A.depends_on includes B, B.chains_to should include A (warning)
+    - Self-references are not allowed
+    """
+    warnings = []
+
+    for skill_name, skill in all_skills.items():
+        links = skill.get("links")
+        if not links or not isinstance(links, dict):
+            continue
+
+        # Check for self-references
+        for link_type, refs in links.items():
+            if not isinstance(refs, list):
+                continue
+            if skill_name in refs:
+                warnings.append(f"'{skill_name}': links.{link_type} references itself (warning)")
+
+        # Check validates <-> validated_by consistency
+        for validated in links.get("validates", []):
+            if not isinstance(validated, str) or validated not in all_skills:
+                continue
+            other_links = all_skills[validated].get("links", {})
+            validated_by = other_links.get("validated_by", [])
+            if isinstance(validated_by, list) and skill_name not in validated_by:
+                warnings.append(
+                    f"'{skill_name}' validates '{validated}' but "
+                    f"'{validated}' doesn't list '{skill_name}' in validated_by (warning)"
+                )
+
+        # Check depends_on <-> chains_to consistency
+        for dependency in links.get("depends_on", []):
+            if not isinstance(dependency, str) or dependency not in all_skills:
+                continue
+            other_links = all_skills[dependency].get("links", {})
+            chains_to = other_links.get("chains_to", [])
+            if isinstance(chains_to, list) and skill_name not in chains_to:
+                warnings.append(
+                    f"'{skill_name}' depends_on '{dependency}' but "
+                    f"'{dependency}' doesn't list '{skill_name}' in chains_to (warning)"
+                )
+
+    return warnings
+
+
 def validate_skill(path: Path, valid_tools: set[str], verbose: bool = False) -> dict:
     """Run all validations on a single skill file."""
     skill = load_skill(path)
@@ -278,6 +375,7 @@ def validate_skill(path: Path, valid_tools: set[str], verbose: bool = False) -> 
         ("variable_chain", validate_variable_chain),
         ("inputs", validate_inputs),
         ("unique_names", validate_unique_step_names),
+        ("links_structure", validate_links_structure),
     ]
 
     for name, validator in validators:
@@ -339,15 +437,41 @@ def main():
     total_warnings = 0
     failed_skills = []
 
+    # First pass: load all skills for cross-reference validation
+    all_skills = {}
+    all_skill_names = set()
+    for path in skill_files:
+        skill = load_skill(path)
+        if skill and "_error" not in skill:
+            name = skill.get("name", path.stem)
+            all_skills[name] = skill
+            all_skill_names.add(name)
+
     for path in skill_files:
         result = validate_skill(path, valid_tools, verbose)
+
+        # Run link reference validation (needs all skill names)
+        skill = load_skill(path)
+        if skill and "_error" not in skill:
+            link_ref_errors = validate_links_references(skill, all_skill_names)
+            for err in link_ref_errors:
+                if "warning" in err.lower():
+                    result["warnings"].append(f"[links_refs] {err}")
+                else:
+                    result["errors"].append(f"[links_refs] {err}")
+            if link_ref_errors:
+                result["passed"] = len(result["errors"]) == 0
 
         if result["passed"]:
             passed += 1
             if verbose:
+                skill_data = all_skills.get(result.get("name", ""), {})
+                links = skill_data.get("links", {})
+                link_count = sum(len(v) for v in links.values() if isinstance(v, list))
                 print(
                     f"  PASS  {path.stem} ({result['step_count']} steps, "
-                    f"{result['tool_steps']} tool, {result['compute_steps']} compute)"
+                    f"{result['tool_steps']} tool, {result['compute_steps']} compute, "
+                    f"{link_count} links)"
                 )
                 for w in result["warnings"]:
                     print(f"        WARN: {w}")
@@ -361,10 +485,31 @@ def main():
 
         total_warnings += len(result["warnings"])
 
+    # Cross-skill link consistency check
+    if not single_skill:
+        print("\nRunning cross-skill link consistency checks...")
+        consistency_warnings = validate_links_consistency(all_skills)
+        total_warnings += len(consistency_warnings)
+        if consistency_warnings:
+            if verbose:
+                for w in consistency_warnings:
+                    print(f"  WARN: {w}")
+            print(f"  {len(consistency_warnings)} consistency warning(s)")
+        else:
+            print("  All cross-skill links are consistent")
+
+    # Link statistics
+    skills_with_links = sum(1 for s in all_skills.values() if s.get("links"))
+    total_link_refs = sum(
+        sum(len(v) for v in s.get("links", {}).values() if isinstance(v, list)) for s in all_skills.values()
+    )
+
     # Summary
     print(f"\n{'=' * 60}")
     print(f"RESULTS: {passed}/{passed + failed} passed, {failed} failed")
     print(f"         {total_errors} errors, {total_warnings} warnings")
+    print(f"  LINKS: {skills_with_links}/{len(all_skills)} skills have links metadata")
+    print(f"         {total_link_refs} total link references")
     print(f"{'=' * 60}")
 
     if failed_skills:

@@ -13,6 +13,18 @@ description: |
   Uses: gitlab_mr_view, gitlab_mr_close, jira_transition, jira_add_comment
 version: "1.0"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist to close it
+  validates: []             # Closing an MR doesn't validate other skills
+  chains_to:
+    - create_mr             # May create a replacement MR
+    - cleanup_branches      # Clean up the abandoned branch
+  provides_context_for:
+    - close_issue           # May need to update Jira status
+  validated_by:
+    - cleanup_branches
+
 inputs:
   - name: mr_id
     type: integer

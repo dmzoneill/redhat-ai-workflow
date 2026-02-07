@@ -555,6 +555,15 @@ export class CommandCenterPanel {
     });
     // Set up render callback so tabs can trigger re-renders when their state changes
     this._tabManager.setRenderCallback(() => {
+      // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
+      const skillsTab = this._tabManager.getTab("skills") as any;
+      const skipRerender = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+
+      if (skipRerender) {
+        debugLog("Tab requested re-render - SKIPPED (mind map active)");
+        return;
+      }
+
       debugLog("Tab requested re-render");
       this._triggerTabRerender();
     });
@@ -579,6 +588,13 @@ export class CommandCenterPanel {
         // Support both 'command' and 'type' message formats
         const msgType = message.command || message.type;
         debugLog(`Received message: ${msgType} - ${JSON.stringify(message)}`);
+
+        // Bridge webview console logs to Output panel
+        if (msgType === 'webviewLog') {
+          const level = message.level || 'log';
+          debugLog(`[Webview ${level}] ${message.message}`);
+          return;
+        }
 
         // First, try to handle via TabManager (for tab-specific messages)
         const handledByTab = await this._tabManager.handleMessage(message);
@@ -3899,13 +3915,23 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     if (cycleSecond % 5 === 0) {
       const activeTab = this._tabManager.getTab(this._currentTab);
       if (activeTab) {
-        this._logActivity(`Refreshing ${this._currentTab}`);
-        activeTab.loadData().then(() => {
-          this._triggerTabRerender();
+        // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
+        const skillsTab = this._tabManager.getTab("skills") as any;
+        const skipRerender = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+
+        if (skipRerender) {
+          debugLog("Tiered sync: Skipping re-render - mind map is active");
+          // Still update badges
           this._updateAllTabBadges();
-        }).catch(e => {
-          debugLog(`Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`);
-        });
+        } else {
+          this._logActivity(`Refreshing ${this._currentTab}`);
+          activeTab.loadData().then(() => {
+            this._triggerTabRerender();
+            this._updateAllTabBadges();
+          }).catch(e => {
+            debugLog(`Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`);
+          });
+        }
       } else {
         // Still update badges even if no active tab
         this._updateAllTabBadges();
@@ -3937,7 +3963,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    *   Second 14: inference
    *   Second 16: slop (2nd refresh for running scans)
    *   Second 18: skills (skill list rarely changes, 30s is enough)
+   *   Second 20: personas
    *   Second 22: meetings (2nd refresh for active meetings)
+   *   Second 24: tools
    */
   private _refreshStaggeredTab(cycleSecond: number): void {
     const schedule: Record<number, string> = {
@@ -3949,7 +3977,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       14: "inference",
       16: "slop",      // Extra refresh for slop (running scans need updates)
       18: "skills",    // Skills list rarely changes, 30s refresh is enough
+      20: "personas",  // Personas list from config daemon
       22: "meetings",  // Extra refresh for meetings (active meetings need updates)
+      24: "tools",     // Tool modules from config daemon
     };
 
     const tabId = schedule[cycleSecond];

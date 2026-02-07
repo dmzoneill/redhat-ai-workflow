@@ -55,6 +55,22 @@ description: |
 
 version: "1.1"
 
+links:
+  depends_on: []            # Standalone - creates branches from main
+  validates: []             # CVE fix is a specialized workflow
+  validated_by:
+    - check_ci_health       # Pipeline validates CVE fix builds
+    - review_pr             # Code review validates the fix
+    - test_mr_ephemeral     # Deployment validates fix doesn't break app
+    - scan_vulnerabilities   # Vuln scan validates CVE is actually fixed
+  chains_to:
+    - review_pr             # Get review on the CVE fix
+    - test_mr_ephemeral     # Test fix in ephemeral
+    - notify_team           # Announce CVE fix
+  provides_context_for:
+    - scan_vulnerabilities   # CVE fix informs next vulnerability scan
+    - weekly_summary        # CVE fixes in weekly report
+
 inputs:
   - name: downstream_component
     type: string

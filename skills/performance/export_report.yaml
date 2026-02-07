@@ -13,6 +13,18 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - collect_daily
+    - evaluate_questions
+  validates:
+    - collect_daily
+    - evaluate_questions
+    - backfill_missing
+  validated_by: []
+  chains_to: []
+  provides_context_for: []
+
 inputs:
   - name: format
     type: string

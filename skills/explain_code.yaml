@@ -14,6 +14,19 @@ description: |
   Combines semantic search with project knowledge for comprehensive explanations.
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone explanation skill
+  validates:
+    - bootstrap_knowledge   # Code explanation validates knowledge is accurate
+    - reindex_all_vectors   # Validates vector search returns relevant context
+  validated_by: []          # Educational skill, not validated
+  chains_to:
+    - find_similar_code     # Find similar patterns after understanding code
+    - research_topic        # Deeper research on the topic
+  provides_context_for:
+    - review_pr             # Code understanding for review
+    - debug_prod            # Code understanding for debugging
+
 inputs:
   - name: file
     type: string

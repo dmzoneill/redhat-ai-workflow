@@ -24,6 +24,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone audit skill
+  validates:
+    - create_mr             # Verifies MRs have proper Jira links
+    - create_jira_issue     # Can create issues for unlinked MRs
+  validated_by: []          # Audit is a validator, not validated
+  chains_to:
+    - create_jira_issue     # Create missing issues for unlinked MRs
+    - jira_hygiene          # Run hygiene on discovered issues
+  provides_context_for:
+    - sprint_planning       # Audit results inform sprint health
+    - weekly_summary        # Audit stats for weekly report
+
 inputs:
   - name: project
     type: string

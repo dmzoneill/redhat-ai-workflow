@@ -10,6 +10,7 @@ import * as vscode from "vscode";
 import { BaseTab, TabConfig, dbus, createLogger } from "./BaseTab";
 import { getSkillWebSocketClient, SkillState, SkillWebSocketClient } from "../skillWebSocket";
 import { getSkillExecutionWatcher } from "../skillExecutionWatcher";
+import { SkillsGraphData } from "../dbusClient";
 
 const logger = createLogger("SkillsTab");
 
@@ -86,14 +87,46 @@ export class SkillsTab extends BaseTab {
   private currentExecution: SkillExecution | null = null;
   private detailedExecution: DetailedExecution | null = null;  // Live execution with step status
   private watchingExecutionId: string | null = null;  // Execution ID user explicitly selected to watch
-  private skillView: "info" | "workflow" | "yaml" = "info";
+  private skillView: "info" | "workflow" | "yaml" | "mindmap" = "info";
   private workflowViewMode: "horizontal" | "vertical" = "horizontal";
   private wsClient: SkillWebSocketClient | null = null;
   private wsDisposables: vscode.Disposable[] = [];
 
+  // Mind map data
+  private mindMapData: SkillsGraphData | null = null;
+  private lastMindMapLoad: number = 0;
+  private static readonly MINDMAP_MIN_INTERVAL_MS = 60000; // 60 seconds
+
   // Throttling: skills list rarely changes, don't refresh more than once per 30 seconds
   private lastSkillsListLoad: number = 0;
   private static readonly SKILLS_LIST_MIN_INTERVAL_MS = 30000; // 30 seconds
+
+  // Flag to force next render even if mind map is active (for user-initiated view changes)
+  private forceNextRender: boolean = false;
+
+  /**
+   * Check if the mind map view is currently active AND we should skip rendering.
+   * Returns false if forceNextRender is set (user-initiated action).
+   */
+  public isMindMapActive(): boolean {
+    if (this.forceNextRender) {
+      this.forceNextRender = false; // Reset the flag
+      return false; // Allow the render
+    }
+    return this.skillView === "mindmap";
+  }
+
+  /**
+   * Conditionally trigger re-render, skipping if mind map is active.
+   * This prevents the D3 force simulation from restarting on every update.
+   */
+  private notifyNeedsRenderIfNotMindMap(): void {
+    if (this.isMindMapActive()) {
+      logger.log("Skipping re-render - mind map is active");
+      return;
+    }
+    this.notifyNeedsRender();
+  }
 
   constructor() {
     super({
@@ -111,11 +144,12 @@ export class SkillsTab extends BaseTab {
       this.wsClient = getSkillWebSocketClient();
 
       // Subscribe to skill events
+      // Use notifyNeedsRenderIfNotMindMap to avoid restarting D3 simulation
       this.wsDisposables.push(
         this.wsClient.onSkillStarted((skill) => {
           logger.log(`WebSocket: Skill started - ${skill.skillName}`);
           this.addOrUpdateRunningSkill(skill);
-          this.notifyNeedsRender();
+          this.notifyNeedsRenderIfNotMindMap();
         })
       );
 
@@ -123,7 +157,7 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onSkillUpdate((skill) => {
           logger.log(`WebSocket: Skill update - ${skill.skillName} step ${skill.currentStep}/${skill.totalSteps}`);
           this.addOrUpdateRunningSkill(skill);
-          this.notifyNeedsRender();
+          this.notifyNeedsRenderIfNotMindMap();
         })
       );
 
@@ -131,7 +165,7 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onSkillCompleted(({ skillId, success }) => {
           logger.log(`WebSocket: Skill completed - ${skillId} success=${success}`);
           this.markSkillCompleted(skillId, success);
-          this.notifyNeedsRender();
+          this.notifyNeedsRenderIfNotMindMap();
         })
       );
 
@@ -139,7 +173,7 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onStepUpdate(({ skillId, step }) => {
           logger.log(`WebSocket: Step update - ${skillId} step ${step.index}: ${step.status}`);
           this.updateSkillStep(skillId, step);
-          this.notifyNeedsRender();
+          this.notifyNeedsRenderIfNotMindMap();
         })
       );
 
@@ -313,7 +347,7 @@ export class SkillsTab extends BaseTab {
       // Remove after a delay
       setTimeout(() => {
         this.runningSkills = this.runningSkills.filter(s => s.executionId !== skillId);
-        this.notifyNeedsRender();
+        this.notifyNeedsRenderIfNotMindMap();
       }, 5000);
     }
   }
@@ -522,6 +556,51 @@ export class SkillsTab extends BaseTab {
       (s) => s.status === "running"
     ).length;
 
+    // Mind Map view takes over the entire content area
+    if (this.skillView === "mindmap") {
+      return `
+        <!-- Running Skills Panel -->
+        ${runningCount > 0 ? this.getRunningSkillsHtml() : ""}
+
+        <!-- Mind Map Full View -->
+        <div class="mindmap-container">
+          <div class="mindmap-header-compact">
+            <div class="mindmap-header-top">
+              <div class="mindmap-header-left">
+                <span class="mindmap-icon">🧠</span>
+                <div class="mindmap-title-block">
+                  <span class="mindmap-title-text">Skills Mind Map</span>
+                  <span class="mindmap-stats-inline" id="mindmapStatsInline"></span>
+                </div>
+              </div>
+              <div class="view-toggle">
+                <button class="toggle-btn" data-view="info">List View</button>
+                <button class="toggle-btn active" data-view="mindmap">Mind Map</button>
+              </div>
+            </div>
+            <div class="mindmap-header-controls">
+              <select class="mindmap-select" id="personaSelect">
+                <option value="none">All Personas</option>
+              </select>
+              <select class="mindmap-select" id="categorySelect">
+                <option value="all">All Categories</option>
+              </select>
+              <div class="mindmap-toggles">
+                <label class="toggle-label"><input type="checkbox" id="toggleTools" checked /> Tools</label>
+                <label class="toggle-label"><input type="checkbox" id="toggleIntents" checked /> Intents</label>
+                <label class="toggle-label"><input type="checkbox" id="toggleLabels" /> Labels</label>
+                <label class="toggle-label"><input type="checkbox" id="toggleSticky" /> Sticky</label>
+              </div>
+              <button class="btn btn-xs mindmap-physics-toggle" id="physicsToggle" title="Physics Controls">⚙️</button>
+            </div>
+          </div>
+          <div class="mindmap-content" id="mindmapContent">
+            ${this.getMindMapHtml()}
+          </div>
+        </div>
+      `;
+    }
+
     return `
       <!-- Running Skills Panel -->
       ${runningCount > 0 ? this.getRunningSkillsHtml() : ""}
@@ -548,6 +627,7 @@ export class SkillsTab extends BaseTab {
               <button class="toggle-btn ${this.skillView === "info" ? "active" : ""}" data-view="info">Info</button>
               <button class="toggle-btn ${this.skillView === "workflow" ? "active" : ""}" data-view="workflow">Workflow</button>
               <button class="toggle-btn ${this.skillView === "yaml" ? "active" : ""}" data-view="yaml">YAML</button>
+              <button class="toggle-btn" data-view="mindmap" title="View all skills as a mind map">🧠</button>
             </div>
           </div>
           <div class="skills-main-content" id="skillContent">
@@ -1020,6 +1100,112 @@ export class SkillsTab extends BaseTab {
   }
 
   /**
+   * Generate the Mind Map visualization HTML with embedded D3.js
+   */
+  private getMindMapHtml(): string {
+    logger.log(`getMindMapHtml: mindMapData=${!!this.mindMapData}, nodes=${this.mindMapData?.nodes?.length || 0}`);
+    if (!this.mindMapData) {
+      logger.warn("getMindMapHtml: NO DATA - showing loading state");
+      return `
+        <div class="mindmap-loading">
+          <div class="loading-spinner"></div>
+          <p>Loading mind map data...</p>
+          <p class="mindmap-loading-hint">Make sure the config daemon is running (aa-daemon start config)</p>
+        </div>
+      `;
+    }
+
+    const stats = this.mindMapData.stats || { skill_count: 0, tool_count: 0, intent_count: 0, link_count: 0, persona_count: 0, categories: {} };
+    logger.log(`getMindMapHtml: HAS DATA - ${stats.skill_count} skills, ${stats.link_count} links, rendering SVG+JSON`);
+    const graphDataJson = JSON.stringify(this.mindMapData);
+
+    // Generate persona options for the select
+    const personaOptions = Object.keys(this.mindMapData.personas || {}).map(p =>
+      `<option value="${p}">${this.capitalizeFirst(p)}</option>`
+    ).join('');
+
+    // Generate category options for the select
+    const categoryOptions = Object.keys(stats.categories || {}).map(c =>
+      `<option value="${c}">${this.capitalizeFirst(c)}</option>`
+    ).join('');
+
+    return `
+      <div class="mindmap-wrapper">
+        <!-- Physics Controls Panel (collapsible) -->
+        <div class="mindmap-physics-panel" id="physicsPanel" style="display: none;">
+          <div class="physics-row">
+            <div class="physics-control">
+              <label for="chargeSlider">Repulsion <span class="physics-value" id="chargeValue">-120</span></label>
+              <input type="range" id="chargeSlider" min="-400" max="0" step="10" value="-120" />
+            </div>
+            <div class="physics-control">
+              <label for="linkDistSlider">Link Distance <span class="physics-value" id="linkDistValue">70</span></label>
+              <input type="range" id="linkDistSlider" min="20" max="250" step="5" value="70" />
+            </div>
+            <div class="physics-control">
+              <label for="collisionSlider">Padding <span class="physics-value" id="collisionValue">5</span></label>
+              <input type="range" id="collisionSlider" min="0" max="30" step="1" value="5" />
+            </div>
+          </div>
+          <div class="physics-row">
+            <div class="physics-control">
+              <label for="centerSlider">Centering <span class="physics-value" id="centerValue">0.05</span></label>
+              <input type="range" id="centerSlider" min="0" max="100" step="1" value="5" />
+            </div>
+            <div class="physics-control">
+              <label for="decaySlider">Cooling <span class="physics-value" id="decayValue">0.023</span></label>
+              <input type="range" id="decaySlider" min="1" max="100" step="1" value="23" />
+            </div>
+            <div class="physics-control">
+              <label for="velocitySlider">Friction <span class="physics-value" id="velocityValue">0.40</span></label>
+              <input type="range" id="velocitySlider" min="0" max="100" step="1" value="40" />
+            </div>
+          </div>
+          <div class="physics-row physics-actions">
+            <button class="btn btn-xs" id="physicsReset" title="Reset to defaults">Reset</button>
+            <button class="btn btn-xs" id="physicsReheat" title="Restart simulation">Reheat</button>
+            <button class="btn btn-xs" id="physicsPause" title="Pause/resume simulation">Pause</button>
+            <button class="btn btn-xs" id="physicsUnstick" title="Release all pinned nodes">Unstick All</button>
+          </div>
+        </div>
+
+        <!-- Graph Container -->
+        <div class="mindmap-graph" id="mindmapGraph">
+          <svg id="mindmapSvg" style="width: 100%; height: 100%;">
+            <defs>
+              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+          </svg>
+        </div>
+
+        <!-- Tooltip -->
+        <div class="mindmap-tooltip" id="mindmapTooltip"></div>
+
+        <!-- Legend (compact, bottom-left) -->
+        <div class="mindmap-legend-compact">
+          <span class="legend-item-compact"><span class="legend-dot" style="background: #667eea"></span>Skill</span>
+          <span class="legend-item-compact"><span class="legend-dot" style="background: #4ecdc4"></span>Tool</span>
+          <span class="legend-item-compact"><span class="legend-dot" style="background: #ffe66d"></span>Intent</span>
+        </div>
+      </div>
+
+      <!-- Data for populating header controls -->
+      <script type="application/json" id="mindmapPersonaOptions">${personaOptions}</script>
+      <script type="application/json" id="mindmapCategoryOptions">${categoryOptions}</script>
+      <script type="application/json" id="mindmapStatsData">${JSON.stringify(stats)}</script>
+
+      <!-- Embed graph data for JavaScript -->
+      <script id="mindmapDataScript" type="application/json">${graphDataJson}</script>
+    `;
+  }
+
+  /**
    * Format data as YAML-like string (simple formatter for display)
    */
   private formatAsYaml(data: any, indent: number = 0): string {
@@ -1078,7 +1264,7 @@ export class SkillsTab extends BaseTab {
   }
 
   getStyles(): string {
-    // All styles are in unified.css
+    // Mind map styles are now in unified.css
     return "";
   }
 
@@ -1247,6 +1433,14 @@ export class SkillsTab extends BaseTab {
         background: var(--bg-secondary);
         padding: 16px;
         border-radius: 6px;
+      }
+
+      .yaml-content code {
+        background: transparent;
+        padding: 0;
+        font-family: inherit;
+        font-size: inherit;
+        color: inherit;
       }
 
       .yaml-loading {
@@ -1848,8 +2042,10 @@ export class SkillsTab extends BaseTab {
             const workflowViewBtn = target.closest('.toggle-btn[data-workflow-view]');
             const skillCallBadge = target.closest('.skill-call-badge');
             const runningSkillItem = target.closest('.running-skill-item');
+            const personaBtn = target.closest('.persona-btn');
+            const categoryBtn = target.closest('.category-btn');
 
-            // Skill view toggle (Info/Workflow/YAML)
+            // Skill view toggle (Info/Workflow/YAML/MindMap)
             if (viewToggle && viewToggle.dataset.view) {
               vscode.postMessage({ command: 'setSkillView', view: viewToggle.dataset.view });
               return;
@@ -1858,6 +2054,18 @@ export class SkillsTab extends BaseTab {
             // Workflow view mode toggle (Horizontal/Vertical)
             if (workflowViewBtn && workflowViewBtn.dataset.workflowView) {
               vscode.postMessage({ command: 'setWorkflowViewMode', mode: workflowViewBtn.dataset.workflowView });
+              return;
+            }
+
+            // Persona button clicks (mind map filtering)
+            if (personaBtn && personaBtn.dataset.persona !== undefined) {
+              vscode.postMessage({ command: 'setMindMapPersona', persona: personaBtn.dataset.persona });
+              return;
+            }
+
+            // Category button clicks (mind map filtering)
+            if (categoryBtn && categoryBtn.dataset.category !== undefined) {
+              vscode.postMessage({ command: 'setMindMapCategory', category: categoryBtn.dataset.category });
               return;
             }
 
@@ -1896,7 +2104,749 @@ export class SkillsTab extends BaseTab {
             }
           });
         }
+
+        // Initialize mind map if present (delay to ensure DOM is ready)
+        setTimeout(function() {
+          if (typeof initMindMap === 'function') {
+            initMindMap();
+          }
+        }, 100);
       })();
+
+      // Mind Map D3.js Initialization
+      var mindMapState = {
+        graphData: null,
+        simulation: null,
+        selectedPersona: 'none',
+        selectedCategory: 'all',
+        showTools: true,
+        showIntents: true,
+        showLabels: false,
+        // Physics controls
+        sticky: false,
+        chargeStrength: -120,
+        linkDistance: 70,
+        collisionRadius: 5,
+        centerStrength: 0.05,
+        alphaDecay: 0.0228,
+        velocityDecay: 0.4
+      };
+
+      function initMindMap() {
+        const dataScript = document.getElementById('mindmapDataScript');
+        const svg = document.getElementById('mindmapSvg');
+
+        // Not on mind map view
+        if (!dataScript || !svg) {
+          console.log('Mind map elements not found - not on mind map view');
+          return;
+        }
+
+        try {
+          const dataText = dataScript.textContent || dataScript.innerText;
+          if (!dataText || dataText.trim() === '') {
+            console.warn('Mind map data script is empty');
+            return;
+          }
+
+          mindMapState.graphData = JSON.parse(dataText);
+          if (!mindMapState.graphData || !mindMapState.graphData.nodes) {
+            console.warn('Mind map data has no nodes');
+            return;
+          }
+
+          console.log('Mind map data loaded:', mindMapState.graphData.nodes.length, 'nodes');
+
+          // Populate header controls
+          populateHeaderControls();
+
+          // Check if D3 is loaded
+          if (typeof d3 === 'undefined') {
+            console.warn('D3.js not loaded yet, waiting...');
+            // D3 should be loaded via the webview - retry after a delay
+            setTimeout(initMindMap, 500);
+            return;
+          }
+
+          console.log('D3.js is loaded, creating graph...');
+
+          // Set up filter handlers (every time since DOM is recreated)
+          setupMindMapFilters();
+
+          createMindMapGraph(mindMapState.graphData);
+        } catch (e) {
+          console.error('Failed to initialize mind map:', e);
+        }
+      }
+
+      function populateHeaderControls() {
+        // Populate stats in header
+        const statsEl = document.getElementById('mindmapStatsInline');
+        const statsData = document.getElementById('mindmapStatsData');
+        if (statsEl && statsData) {
+          try {
+            const stats = JSON.parse(statsData.textContent || '{}');
+            statsEl.textContent = stats.skill_count + ' skills · ' + stats.tool_count + ' tools · ' + stats.intent_count + ' intents';
+          } catch (e) {}
+        }
+
+        // Populate persona select
+        const personaSelect = document.getElementById('personaSelect');
+        const personaOptions = document.getElementById('mindmapPersonaOptions');
+        if (personaSelect && personaOptions && mindMapState.graphData?.personas) {
+          // Add persona options
+          Object.keys(mindMapState.graphData.personas).forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p;
+            opt.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+            personaSelect.appendChild(opt);
+          });
+        }
+
+        // Populate category select
+        const categorySelect = document.getElementById('categorySelect');
+        if (categorySelect && mindMapState.graphData?.stats?.categories) {
+          Object.keys(mindMapState.graphData.stats.categories).forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c;
+            opt.textContent = c.charAt(0).toUpperCase() + c.slice(1);
+            categorySelect.appendChild(opt);
+          });
+        }
+      }
+
+      function setupMindMapFilters() {
+        // Persona select
+        const personaSelect = document.getElementById('personaSelect');
+        if (personaSelect) {
+          personaSelect.addEventListener('change', function() {
+            mindMapState.selectedPersona = this.value === 'none' ? 'none' : this.value;
+            applyMindMapFilters();
+          });
+        }
+
+        // Category select
+        const categorySelect = document.getElementById('categorySelect');
+        if (categorySelect) {
+          categorySelect.addEventListener('change', function() {
+            mindMapState.selectedCategory = this.value;
+            applyMindMapFilters();
+          });
+        }
+
+        // Toggle checkboxes
+        const toggleTools = document.getElementById('toggleTools');
+        const toggleIntents = document.getElementById('toggleIntents');
+        const toggleLabels = document.getElementById('toggleLabels');
+
+        if (toggleTools) {
+          toggleTools.addEventListener('change', function() {
+            mindMapState.showTools = this.checked;
+            applyMindMapFilters();
+          });
+        }
+        if (toggleIntents) {
+          toggleIntents.addEventListener('change', function() {
+            mindMapState.showIntents = this.checked;
+            applyMindMapFilters();
+          });
+        }
+        if (toggleLabels) {
+          toggleLabels.addEventListener('change', function() {
+            mindMapState.showLabels = this.checked;
+            applyMindMapLabels();
+          });
+        }
+
+        // Sticky toggle
+        const toggleSticky = document.getElementById('toggleSticky');
+        if (toggleSticky) {
+          toggleSticky.addEventListener('change', function() {
+            mindMapState.sticky = this.checked;
+          });
+        }
+
+        // Physics panel toggle
+        const physicsToggle = document.getElementById('physicsToggle');
+        const physicsPanel = document.getElementById('physicsPanel');
+        if (physicsToggle && physicsPanel) {
+          physicsToggle.addEventListener('click', function() {
+            const isVisible = physicsPanel.style.display !== 'none';
+            physicsPanel.style.display = isVisible ? 'none' : 'flex';
+            physicsToggle.classList.toggle('active', !isVisible);
+          });
+        }
+
+        // Physics sliders
+        setupPhysicsSlider('chargeSlider', 'chargeValue', function(v) {
+          mindMapState.chargeStrength = v;
+          updateSimulationForce('charge', function(sim) {
+            sim.force('charge').strength(function(d) {
+              var base = v;
+              return d.type === 'skill' ? base * 1.25 : base * 0.4;
+            });
+          });
+        }, function(v) { return v; });
+
+        setupPhysicsSlider('linkDistSlider', 'linkDistValue', function(v) {
+          mindMapState.linkDistance = v;
+          updateSimulationForce('link', function(sim) {
+            sim.force('link').distance(function(d) {
+              return d.type === 'calls' ? v * 1.15 : v;
+            });
+          });
+        }, function(v) { return v; });
+
+        setupPhysicsSlider('collisionSlider', 'collisionValue', function(v) {
+          mindMapState.collisionRadius = v;
+          updateSimulationForce('collision', function(sim) {
+            sim.force('collision').radius(function(d) {
+              return (d.size || 8) + v;
+            });
+          });
+        }, function(v) { return v; });
+
+        setupPhysicsSlider('centerSlider', 'centerValue', function(v) {
+          var mapped = v / 100;
+          mindMapState.centerStrength = mapped;
+          updateSimulationForce('center', function(sim) {
+            sim.force('center').strength(mapped);
+          });
+        }, function(v) { return (v / 100).toFixed(2); });
+
+        setupPhysicsSlider('decaySlider', 'decayValue', function(v) {
+          var mapped = v / 1000;
+          mindMapState.alphaDecay = mapped;
+          if (mindMapState.simulation) {
+            mindMapState.simulation.alphaDecay(mapped);
+          }
+        }, function(v) { return (v / 1000).toFixed(3); });
+
+        setupPhysicsSlider('velocitySlider', 'velocityValue', function(v) {
+          var mapped = v / 100;
+          mindMapState.velocityDecay = mapped;
+          if (mindMapState.simulation) {
+            mindMapState.simulation.velocityDecay(mapped);
+          }
+        }, function(v) { return (v / 100).toFixed(2); });
+
+        // Physics action buttons
+        var resetBtn = document.getElementById('physicsReset');
+        if (resetBtn) {
+          resetBtn.addEventListener('click', function() {
+            resetPhysicsDefaults();
+          });
+        }
+
+        var reheatBtn = document.getElementById('physicsReheat');
+        if (reheatBtn) {
+          reheatBtn.addEventListener('click', function() {
+            if (mindMapState.simulation) {
+              mindMapState.simulation.alpha(1).restart();
+            }
+          });
+        }
+
+        var pauseBtn = document.getElementById('physicsPause');
+        if (pauseBtn) {
+          pauseBtn.addEventListener('click', function() {
+            if (mindMapState.simulation) {
+              if (mindMapState.simulation.alpha() > 0.001) {
+                mindMapState.simulation.stop();
+                pauseBtn.textContent = 'Resume';
+              } else {
+                mindMapState.simulation.alpha(0.3).restart();
+                pauseBtn.textContent = 'Pause';
+              }
+            }
+          });
+        }
+
+        var unstickBtn = document.getElementById('physicsUnstick');
+        if (unstickBtn) {
+          unstickBtn.addEventListener('click', function() {
+            if (mindMapState.simulation) {
+              mindMapState.simulation.nodes().forEach(function(d) {
+                d.fx = null;
+                d.fy = null;
+              });
+              mindMapState.simulation.alpha(0.3).restart();
+            }
+          });
+        }
+      }
+
+      function setupPhysicsSlider(sliderId, valueId, onUpdate, formatFn) {
+        var slider = document.getElementById(sliderId);
+        var valueEl = document.getElementById(valueId);
+        if (slider) {
+          slider.addEventListener('input', function() {
+            var v = parseFloat(this.value);
+            if (valueEl) valueEl.textContent = formatFn(v);
+            onUpdate(v);
+          });
+        }
+      }
+
+      function updateSimulationForce(forceName, updateFn) {
+        if (mindMapState.simulation && mindMapState.simulation.force(forceName)) {
+          updateFn(mindMapState.simulation);
+          mindMapState.simulation.alpha(0.3).restart();
+        }
+      }
+
+      function resetPhysicsDefaults() {
+        var defaults = {
+          chargeStrength: -120, linkDistance: 70, collisionRadius: 5,
+          centerStrength: 0.05, alphaDecay: 0.0228, velocityDecay: 0.4
+        };
+        Object.assign(mindMapState, defaults);
+
+        // Update slider positions and labels
+        setSlider('chargeSlider', 'chargeValue', -120, String(-120));
+        setSlider('linkDistSlider', 'linkDistValue', 70, '70');
+        setSlider('collisionSlider', 'collisionValue', 5, '5');
+        setSlider('centerSlider', 'centerValue', 5, '0.05');
+        setSlider('decaySlider', 'decayValue', 23, '0.023');
+        setSlider('velocitySlider', 'velocityValue', 40, '0.40');
+
+        // Apply to simulation
+        if (mindMapState.simulation) {
+          var sim = mindMapState.simulation;
+          sim.force('charge').strength(function(d) { return d.type === 'skill' ? -150 : -50; });
+          sim.force('link').distance(function(d) { return d.type === 'calls' ? 80 : 60; });
+          sim.force('collision').radius(function(d) { return (d.size || 8) + 5; });
+          sim.force('center').strength(0.05);
+          sim.alphaDecay(0.0228);
+          sim.velocityDecay(0.4);
+          sim.alpha(0.5).restart();
+        }
+      }
+
+      function setSlider(sliderId, valueId, sliderVal, displayVal) {
+        var s = document.getElementById(sliderId);
+        var v = document.getElementById(valueId);
+        if (s) s.value = String(sliderVal);
+        if (v) v.textContent = displayVal;
+      }
+
+      function applyMindMapFilters() {
+        if (!mindMapState.graphData) return;
+
+        const { selectedPersona, selectedCategory, showTools, showIntents } = mindMapState;
+        const { nodes, links, personas } = mindMapState.graphData;
+
+        // Get skills for selected persona
+        const personaSkills = selectedPersona !== 'none' && personas[selectedPersona]
+          ? new Set(personas[selectedPersona].skills)
+          : null;
+
+        // Apply filters to nodes
+        const svgEl = d3.select('#mindmapSvg');
+        const nodeSelection = svgEl.selectAll('.node');
+        const linkSelection = svgEl.selectAll('.link');
+
+        // Persona colors for glow effect
+        const personaColors = {
+          developer: '#667eea',
+          devops: '#4ecdc4',
+          incident: '#ff6b6b',
+          release: '#f7dc6f',
+          researcher: '#bb8fce'
+        };
+        const personaColor = personaColors[selectedPersona] || '#667eea';
+
+        // Filter nodes
+        nodeSelection.each(function(d) {
+          const node = d3.select(this);
+          let visible = true;
+          let personaActive = false;
+
+          // Type filter (tools/intents)
+          if (d.type === 'tool' && !showTools) visible = false;
+          if (d.type === 'intent' && !showIntents) visible = false;
+
+          // Category filter
+          if (selectedCategory !== 'all' && d.type === 'skill' && d.category !== selectedCategory) {
+            visible = false;
+          }
+
+          // Persona filter
+          if (personaSkills) {
+            if (d.type === 'skill') {
+              personaActive = personaSkills.has(d.id);
+            } else if (d.type === 'tool') {
+              // Tool is active if any persona skill uses it
+              personaActive = nodes.some(n =>
+                n.type === 'skill' && personaSkills.has(n.id) && (n.tools || []).includes(d.id.replace('tool_', ''))
+              );
+            } else if (d.type === 'intent') {
+              // Intent is active if any persona skill has it
+              personaActive = nodes.some(n =>
+                n.type === 'skill' && personaSkills.has(n.id) && (n.intents || []).includes(d.id.replace('intent_', ''))
+              );
+            }
+          }
+
+          // Apply classes
+          node.classed('hidden', !visible);
+          node.style('display', visible ? null : 'none');
+
+          if (personaSkills) {
+            node.classed('persona-active', personaActive);
+            node.classed('persona-inactive', !personaActive);
+            node.select('.glow-ring').attr('stroke', personaColor);
+            node.style('--persona-color', personaColor);
+          } else {
+            node.classed('persona-active', false);
+            node.classed('persona-inactive', false);
+          }
+        });
+
+        // Filter links
+        linkSelection.each(function(l) {
+          const link = d3.select(this);
+          const sourceId = l.source.id || l.source;
+          const targetId = l.target.id || l.target;
+
+          // Check if both ends are visible
+          const sourceNode = nodes.find(n => n.id === sourceId);
+          const targetNode = nodes.find(n => n.id === targetId);
+
+          let visible = true;
+          if (sourceNode?.type === 'tool' && !showTools) visible = false;
+          if (targetNode?.type === 'tool' && !showTools) visible = false;
+          if (sourceNode?.type === 'intent' && !showIntents) visible = false;
+          if (targetNode?.type === 'intent' && !showIntents) visible = false;
+
+          link.style('display', visible ? null : 'none');
+
+          // Persona highlighting for links
+          if (personaSkills) {
+            const sourceActive = sourceNode?.type === 'skill' ? personaSkills.has(sourceId) : false;
+            const targetActive = targetNode?.type === 'skill' ? personaSkills.has(targetId) : false;
+            const linkActive = sourceActive || targetActive;
+
+            link.classed('persona-active', linkActive);
+            link.classed('persona-inactive', !linkActive);
+            link.style('--persona-color', personaColor);
+          } else {
+            link.classed('persona-active', false);
+            link.classed('persona-inactive', false);
+          }
+        });
+      }
+
+      function applyMindMapLabels() {
+        const svgEl = d3.select('#mindmapSvg');
+        const labels = svgEl.selectAll('.node-label');
+
+        if (mindMapState.showLabels) {
+          // Add labels if they don't exist
+          if (labels.empty()) {
+            svgEl.selectAll('.node').each(function(d) {
+              if (d.type === 'skill') {
+                d3.select(this).append('text')
+                  .attr('class', 'node-label')
+                  .attr('dy', d.size + 12)
+                  .attr('text-anchor', 'middle')
+                  .attr('fill', 'var(--vscode-foreground)')
+                  .attr('font-size', '10px')
+                  .text(d.label.length > 15 ? d.label.substring(0, 12) + '...' : d.label);
+              }
+            });
+          } else {
+            labels.style('display', null);
+          }
+        } else {
+          labels.style('display', 'none');
+        }
+      }
+
+      function createMindMapGraph(graphData) {
+        console.log('createMindMapGraph called with', graphData.nodes?.length, 'nodes');
+
+        const svgEl = d3.select('#mindmapSvg');
+        const container = document.querySelector('.mindmap-graph');
+        if (!container) {
+          console.error('Mind map container not found');
+          return;
+        }
+
+        const width = container.clientWidth || 800;
+        const height = container.clientHeight || 600;
+
+        console.log('Mind map container size:', width, 'x', height);
+
+        // Clear existing
+        svgEl.selectAll('g').remove();
+
+        // Category colors
+        const categoryColors = {
+          code: '#ff6b6b',
+          deploy: '#4ecdc4',
+          jira: '#45b7d1',
+          incident: '#f7dc6f',
+          daily: '#bb8fce',
+          memory: '#82e0aa',
+          comms: '#f8b500',
+          maintenance: '#95a5a6',
+          other: '#667eea',
+          tool: '#4ecdc4',
+          intent: '#ffe66d'
+        };
+
+        // Filter nodes based on current state
+        let filteredNodes = graphData.nodes;
+        if (!mindMapState.showTools) {
+          filteredNodes = filteredNodes.filter(n => n.type !== 'tool');
+        }
+        if (!mindMapState.showIntents) {
+          filteredNodes = filteredNodes.filter(n => n.type !== 'intent');
+        }
+        if (mindMapState.selectedCategory !== 'all') {
+          filteredNodes = filteredNodes.filter(n =>
+            n.type !== 'skill' || n.category === mindMapState.selectedCategory
+          );
+        }
+
+        const nodeIds = new Set(filteredNodes.map(n => n.id));
+        const filteredLinks = graphData.links.filter(l => {
+          const sourceId = l.source.id || l.source;
+          const targetId = l.target.id || l.target;
+          return nodeIds.has(sourceId) && nodeIds.has(targetId);
+        });
+
+        // Create zoom behavior
+        const zoom = d3.zoom()
+          .scaleExtent([0.1, 4])
+          .on('zoom', (event) => {
+            g.attr('transform', event.transform);
+          });
+
+        svgEl.call(zoom);
+
+        // Main group for zoom/pan
+        const g = svgEl.append('g');
+
+        // Create simulation using physics state
+        var cs = mindMapState.chargeStrength;
+        var ld = mindMapState.linkDistance;
+        var cr = mindMapState.collisionRadius;
+        var cStr = mindMapState.centerStrength;
+
+        const simulation = d3.forceSimulation(filteredNodes)
+          .force('link', d3.forceLink(filteredLinks)
+            .id(d => d.id)
+            .distance(d => d.type === 'calls' ? ld * 1.15 : ld)
+            .strength(d => d.strength || 0.5))
+          .force('charge', d3.forceManyBody()
+            .strength(d => d.type === 'skill' ? cs * 1.25 : cs * 0.4))
+          .force('center', d3.forceCenter(width / 2, height / 2).strength(cStr))
+          .force('collision', d3.forceCollide()
+            .radius(d => (d.size || 8) + cr))
+          .alphaDecay(mindMapState.alphaDecay)
+          .velocityDecay(mindMapState.velocityDecay);
+
+        // Store simulation reference for live controls
+        mindMapState.simulation = simulation;
+
+        // Draw links
+        const link = g.append('g')
+          .attr('class', 'links')
+          .selectAll('line')
+          .data(filteredLinks)
+          .enter()
+          .append('line')
+          .attr('class', d => 'link ' + d.type)
+          .attr('stroke-width', d => d.type === 'calls' ? 2 : 1);
+
+        // Draw nodes
+        const node = g.append('g')
+          .attr('class', 'nodes')
+          .selectAll('g')
+          .data(filteredNodes)
+          .enter()
+          .append('g')
+          .attr('class', 'node')
+          .call(d3.drag()
+            .on('start', dragstarted)
+            .on('drag', dragged)
+            .on('end', dragended));
+
+        console.log('Created', node.size(), 'nodes and', link.size(), 'links');
+
+        // Glow ring
+        node.append('circle')
+          .attr('class', 'glow-ring')
+          .attr('r', d => (d.size || 8) + 6)
+          .attr('stroke', '#667eea');
+
+        // Main node circle
+        node.append('circle')
+          .attr('class', 'main')
+          .attr('r', d => d.size || 8)
+          .attr('fill', d => categoryColors[d.category] || categoryColors.other)
+          .attr('stroke', d => d3.color(categoryColors[d.category] || categoryColors.other).brighter(0.5));
+
+        // Inner highlight
+        node.append('circle')
+          .attr('r', d => (d.size || 8) * 0.4)
+          .attr('fill', 'rgba(255,255,255,0.3)')
+          .attr('cx', d => -(d.size || 8) * 0.2)
+          .attr('cy', d => -(d.size || 8) * 0.2);
+
+        // Hover interactions
+        node.on('mouseenter', (event, d) => {
+          highlightConnections(d, filteredNodes, filteredLinks, node, link);
+          showTooltip(event, d, categoryColors);
+        })
+        .on('mousemove', (event) => {
+          moveTooltip(event);
+        })
+        .on('mouseleave', () => {
+          resetHighlights(node, link);
+          hideTooltip();
+        })
+        .on('click', (event, d) => {
+          if (d.type === 'skill') {
+            vscode.postMessage({ command: 'loadSkill', skillName: d.id });
+            vscode.postMessage({ command: 'setSkillView', view: 'info' });
+          }
+        });
+
+        // Update positions on tick
+        simulation.on('tick', () => {
+          link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+          node.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+        });
+
+        // Initial zoom to fit
+        setTimeout(() => {
+          const bounds = g.node().getBBox();
+          const fullWidth = bounds.width || 1;
+          const fullHeight = bounds.height || 1;
+          const midX = bounds.x + fullWidth / 2;
+          const midY = bounds.y + fullHeight / 2;
+
+          const scale = 0.8 / Math.max(fullWidth / width, fullHeight / height);
+          const translate = [width / 2 - scale * midX, height / 2 - scale * midY];
+
+          svgEl.transition()
+            .duration(750)
+            .call(zoom.transform, d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale));
+        }, 1000);
+
+        // Drag functions - respects sticky mode
+        function dragstarted(event, d) {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+          d.fx = event.x;
+          d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+          if (!event.active) simulation.alphaTarget(0);
+          // In sticky mode, keep the node pinned where dropped
+          if (!mindMapState.sticky) {
+            d.fx = null;
+            d.fy = null;
+          }
+        }
+      }
+
+      function highlightConnections(d, nodes, links, nodeSelection, linkSelection) {
+        const connectedIds = new Set([d.id]);
+
+        links.forEach(l => {
+          const sourceId = l.source.id || l.source;
+          const targetId = l.target.id || l.target;
+          if (sourceId === d.id) connectedIds.add(targetId);
+          if (targetId === d.id) connectedIds.add(sourceId);
+        });
+
+        nodeSelection.classed('dimmed', n => !connectedIds.has(n.id));
+        nodeSelection.classed('highlighted', n => connectedIds.has(n.id));
+
+        linkSelection.classed('dimmed', l => {
+          const sourceId = l.source.id || l.source;
+          const targetId = l.target.id || l.target;
+          return sourceId !== d.id && targetId !== d.id;
+        });
+        linkSelection.classed('highlighted', l => {
+          const sourceId = l.source.id || l.source;
+          const targetId = l.target.id || l.target;
+          return sourceId === d.id || targetId === d.id;
+        });
+      }
+
+      function resetHighlights(nodeSelection, linkSelection) {
+        nodeSelection.classed('dimmed', false).classed('highlighted', false);
+        linkSelection.classed('dimmed', false).classed('highlighted', false);
+      }
+
+      function showTooltip(event, d, categoryColors) {
+        const tooltip = document.getElementById('mindmapTooltip');
+        if (!tooltip) return;
+
+        const color = categoryColors[d.category] || categoryColors.other;
+        let html = '<h3>' + escapeHtml(d.label) + '<span class="type-badge" style="background: ' + color + '">' + d.type + '</span></h3>';
+
+        if (d.description) {
+          html += '<p class="description">' + escapeHtml(d.description.substring(0, 150)) + (d.description.length > 150 ? '...' : '') + '</p>';
+        }
+
+        if (d.type === 'skill') {
+          if (d.personas && d.personas.length > 0) {
+            html += '<div class="meta-tags">';
+            d.personas.forEach(function(p) {
+              html += '<span class="meta-tag">' + p + '</span>';
+            });
+            html += '</div>';
+          }
+        }
+
+        tooltip.innerHTML = html;
+        tooltip.classList.add('visible');
+        moveTooltip(event);
+      }
+
+      function moveTooltip(event) {
+        const tooltip = document.getElementById('mindmapTooltip');
+        if (!tooltip) return;
+
+        const container = document.querySelector('.mindmap-graph');
+        if (!container) return;
+
+        const rect = container.getBoundingClientRect();
+        const x = event.clientX - rect.left + 15;
+        const y = event.clientY - rect.top + 15;
+
+        tooltip.style.left = x + 'px';
+        tooltip.style.top = y + 'px';
+      }
+
+      function hideTooltip() {
+        const tooltip = document.getElementById('mindmapTooltip');
+        if (tooltip) {
+          tooltip.classList.remove('visible');
+        }
+      }
+
+      function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
     `;
   }
 
@@ -1912,6 +2862,37 @@ export class SkillsTab extends BaseTab {
 
       case "setSkillView":
         this.skillView = message.view;
+        logger.log(`setSkillView: view=${message.view}, skills.length=${this.skills.length}, mindMapData=${!!this.mindMapData}`);
+        // Build mind map data immediately if needed
+        if (message.view === "mindmap" && !this.mindMapData) {
+          logger.log("Mind map: no data yet, building from local skills...");
+          if (this.skills.length > 0) {
+            try {
+              this.mindMapData = this.buildGraphFromSkills();
+              logger.log(`Mind map: built graph - nodes=${this.mindMapData?.nodes?.length}, links=${this.mindMapData?.links?.length}, stats=${JSON.stringify(this.mindMapData?.stats)}`);
+            } catch (e) {
+              logger.error(`Mind map: buildGraphFromSkills FAILED: ${e}`);
+            }
+          } else {
+            logger.warn("Mind map: this.skills is EMPTY - cannot build graph");
+          }
+          // Also try D-Bus async for richer data
+          this.loadMindMapData().catch(e => logger.warn(`Mind map: async D-Bus load failed: ${e}`));
+        }
+        if (message.view === "mindmap") {
+          logger.log(`Mind map: rendering with mindMapData=${!!this.mindMapData}, nodes=${this.mindMapData?.nodes?.length || 0}`);
+        }
+        this.forceNextRender = true;
+        this.notifyNeedsRender();
+        return true;
+
+      case "setMindMapPersona":
+        // Handle persona filtering in mind map (client-side for now)
+        this.notifyNeedsRender();
+        return true;
+
+      case "setMindMapCategory":
+        // Handle category filtering in mind map (client-side for now)
         this.notifyNeedsRender();
         return true;
 
@@ -2032,7 +3013,7 @@ export class SkillsTab extends BaseTab {
           this.deduplicateRunningSkills();
 
           logger.log(`Updated running skills: ${this.runningSkills.length} skills`);
-          this.notifyNeedsRender();
+          this.notifyNeedsRenderIfNotMindMap();
         }
         return true;
 
@@ -2063,6 +3044,156 @@ export class SkillsTab extends BaseTab {
       default:
         return false;
     }
+  }
+
+  /**
+   * Load mind map graph data from D-Bus
+   */
+  private async loadMindMapData(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastLoad = now - this.lastMindMapLoad;
+
+    // Throttle mind map loading
+    if (timeSinceLastLoad < SkillsTab.MINDMAP_MIN_INTERVAL_MS && this.mindMapData) {
+      logger.log(`Skipping mind map load - last load ${Math.round(timeSinceLastLoad / 1000)}s ago`);
+      return;
+    }
+
+    logger.log("Loading mind map data via D-Bus...");
+    try {
+      const result = await dbus.config_getSkillsGraph();
+      if (result.success && result.data) {
+        const dbusGraph = (result.data as any).graph || result.data;
+        const dbusNodeCount = dbusGraph?.nodes?.length || 0;
+        const localNodeCount = this.mindMapData?.nodes?.length || 0;
+        logger.log(`Mind map D-Bus returned ${dbusNodeCount} nodes (local has ${localNodeCount})`);
+        // Only use D-Bus data if it's richer than what we already have
+        if (dbusNodeCount > localNodeCount) {
+          this.mindMapData = dbusGraph;
+          this.lastMindMapLoad = now;
+          this.forceNextRender = true;
+          this.notifyNeedsRender();
+        } else {
+          logger.log("Mind map D-Bus data not richer than local - keeping local");
+        }
+        return;
+      } else if (result.error) {
+        logger.warn(`Mind map D-Bus load failed: ${result.error}, falling back to local data`);
+      }
+    } catch (error) {
+      logger.warn(`Mind map D-Bus error: ${error}, falling back to local data`);
+    }
+
+    // Fallback: build graph from already-loaded skills list
+    if (this.skills.length > 0) {
+      this.mindMapData = this.buildGraphFromSkills();
+      this.lastMindMapLoad = now;
+      logger.log(`Built mind map from local skills: ${this.mindMapData?.stats?.skill_count || 0} skills`);
+      this.forceNextRender = true;
+      this.notifyNeedsRender();
+    }
+  }
+
+  /**
+   * Build graph data from already-loaded skills list (fallback when D-Bus unavailable)
+   */
+  private buildGraphFromSkills(): SkillsGraphData {
+    const nodes: any[] = [];
+    const links: any[] = [];
+    const toolNodes: Record<string, any> = {};
+    const intentNodes: Record<string, any> = {};
+    const allTools = new Set<string>();
+    const categories: Record<string, number> = {};
+
+    const categoryKeywords: Record<string, string[]> = {
+      code: ["git", "commit", "branch", "mr", "pr", "review", "lint", "code"],
+      deploy: ["deploy", "ephemeral", "namespace", "bonfire", "rollout", "scale"],
+      jira: ["jira", "issue", "sprint", "ticket", "hygiene"],
+      incident: ["alert", "incident", "debug", "investigate", "silence"],
+      daily: ["coffee", "beer", "standup", "weekly", "morning", "evening"],
+      memory: ["memory", "learn", "pattern", "knowledge", "bootstrap"],
+      comms: ["slack", "notify", "schedule", "meeting", "team"],
+      maintenance: ["cleanup", "sync", "reindex", "refresh"],
+    };
+
+    const intentKeywords = [
+      "create", "review", "deploy", "investigate", "check", "start",
+      "close", "update", "notify", "schedule", "debug", "release",
+      "sync", "cleanup", "learn", "scan", "extend", "cancel",
+    ];
+
+    for (const skill of this.skills) {
+      const nameLower = skill.name.toLowerCase();
+      const descLower = (skill.description || "").toLowerCase();
+
+      // Categorize
+      let category = "other";
+      for (const [cat, keywords] of Object.entries(categoryKeywords)) {
+        if (keywords.some(kw => nameLower.includes(kw) || descLower.includes(kw))) {
+          category = cat;
+          break;
+        }
+      }
+      categories[category] = (categories[category] || 0) + 1;
+
+      // Extract intents
+      const skillIntents: string[] = [];
+      for (const intent of intentKeywords) {
+        if (nameLower.includes(intent) || descLower.includes(intent)) {
+          skillIntents.push(intent);
+          if (!intentNodes[intent]) {
+            intentNodes[intent] = {
+              id: `intent_${intent}`,
+              type: "intent",
+              category: "intent",
+              label: intent.charAt(0).toUpperCase() + intent.slice(1),
+              size: 6,
+            };
+          }
+        }
+      }
+
+      // Skill node
+      nodes.push({
+        id: skill.name,
+        type: "skill",
+        category,
+        label: skill.name.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+        description: (skill.description || "").substring(0, 300),
+        tools: [],
+        intents: skillIntents,
+        outputs: [],
+        personas: [],
+        size: 8 + Math.min(skill.step_count || 0, 20),
+      });
+
+      // Intent links
+      for (const intent of skillIntents) {
+        links.push({
+          source: `intent_${intent}`,
+          target: skill.name,
+          type: "triggers",
+          strength: 0.5,
+        });
+      }
+    }
+
+    nodes.push(...Object.values(toolNodes));
+    nodes.push(...Object.values(intentNodes));
+
+    return {
+      nodes,
+      links,
+      personas: {},
+      stats: {
+        skill_count: this.skills.length,
+        tool_count: allTools.size,
+        intent_count: Object.keys(intentNodes).length,
+        link_count: links.length,
+        persona_count: 0,
+        categories,
+      },
+    };
   }
 
   private async loadSkill(skillName: string): Promise<void> {

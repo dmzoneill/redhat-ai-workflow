@@ -2,6 +2,13 @@ name: test_error_recovery
 description: Test skill to demonstrate interactive error recovery
 version: "1.0"
 
+links:
+  depends_on: []            # Test skill, no dependencies
+  validates: []             # Test skill, validates nothing
+  validated_by: []          # Test skill, not validated
+  chains_to: []             # Test skill, no chains
+  provides_context_for: []  # Test skill, no context
+
 inputs:
   - name: test_value
     type: string

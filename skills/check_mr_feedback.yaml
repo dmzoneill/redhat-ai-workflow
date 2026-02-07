@@ -17,6 +17,19 @@ description: |
   Uses MCP tools: gitlab_mr_list, gitlab_mr_comments
 version: "1.2"
 
+links:
+  depends_on:
+    - create_mr             # Must have open MRs to check feedback
+  validates:
+    - review_pr             # Feedback check validates reviews were posted
+  validated_by: []          # Status check, not validated by others
+  chains_to:
+    - schedule_meeting      # Schedule meeting if reviewer requests one
+    - mark_mr_ready         # Mark ready after addressing feedback
+  provides_context_for:
+    - coffee                # Morning briefing shows feedback needing response
+    - check_my_prs          # Detailed feedback for PR management
+
 inputs:
   - name: project
     type: string

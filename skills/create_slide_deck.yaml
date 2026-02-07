@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone creation skill
+  validates: []             # Creation doesn't validate
+  chains_to:
+    - edit_slide_deck       # Edit the new presentation
+    - export_presentation   # Export when done
+  provides_context_for:
+    - edit_slide_deck       # New presentation ID for editing
+    - export_presentation   # Presentation ID for export
+  validated_by:
+    - edit_slide_deck
+    - export_presentation
+
 inputs:
   - name: title
     type: string

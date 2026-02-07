@@ -15,6 +15,23 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone research skill
+  validates:
+    - gather_context        # Research validates context gathering found relevant info
+  validated_by:
+    - plan_implementation   # If planning succeeds, research was sufficient
+    - compare_options
+    - summarize_findings
+  chains_to:
+    - plan_implementation   # Plan after researching
+    - compare_options       # Compare options discovered during research
+    - summarize_findings    # Summarize research results
+  provides_context_for:
+    - plan_implementation   # Research findings inform implementation plan
+    - start_work            # Research context for starting work
+    - create_jira_issue     # Research informs issue description
+
 inputs:
   - name: topic
     type: string

@@ -14,6 +14,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone listing skill
+  validates: []             # Listing doesn't validate
+  validated_by: []          # Not validated by other skills
+  chains_to:
+    - edit_slide_deck       # Edit a found presentation
+    - export_presentation   # Export a found presentation
+  provides_context_for:
+    - edit_slide_deck       # Presentation IDs for editing
+    - export_presentation   # Presentation IDs for export
+
 inputs:
   - name: search
     type: string

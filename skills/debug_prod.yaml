@@ -17,6 +17,27 @@ description: |
   Resolves namespace and paths from config.json.
 version: "2.0"
 
+links:
+  depends_on:
+    - investigate_alert     # Usually escalated from initial triage
+  validates:
+    - investigate_alert     # Deep investigation validates initial alert triage
+    - environment_overview  # Debug validates environment health assessment
+  validated_by:
+    - hotfix                # If hotfix works, debugging found the right cause
+    - rollout_restart       # If restart fixes it, root cause was identified
+  chains_to:
+    - hotfix                # Apply emergency fix
+    - rollout_restart       # Restart unhealthy deployments
+    - scale_deployment      # Scale up if resource-related
+    - silence_alert         # Silence alert if mitigated
+    - create_jira_issue     # Track as issue for proper fix
+    - learn_pattern         # Record the error pattern
+  provides_context_for:
+    - hotfix                # Root cause informs fix
+    - create_jira_issue     # Debug findings for issue description
+    - learn_pattern         # Error pattern for future reference
+
 inputs:
   - name: namespace
     type: string

@@ -14,6 +14,18 @@ description: |
         kubectl_get_pods
 version: "1.0"
 
+links:
+  depends_on: []            # Can restart any deployment
+  validates: []             # Restart is a remediation, not a validator
+  validated_by:
+    - environment_overview  # Environment check validates restart worked
+  chains_to:
+    - environment_overview  # Check health after restart
+    - check_secrets         # Verify config after restart
+  provides_context_for:
+    - debug_prod            # Restart context for investigation
+    - investigate_alert     # Restart status for alert triage
+
 inputs:
   - name: deployment
     type: string

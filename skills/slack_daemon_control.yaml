@@ -15,6 +15,15 @@
 
 name: slack_daemon_control
 version: "1.0"
+
+links:
+  depends_on: []            # Standalone daemon management
+  validates: []             # Daemon control is infrastructure
+  validated_by: []          # Not validated by other skills
+  chains_to: []             # No natural next step
+  provides_context_for:
+    - notify_team           # Daemon status affects notification delivery
+
 description: |
   Control the autonomous Slack daemon via D-Bus IPC.
 

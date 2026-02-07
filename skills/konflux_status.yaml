@@ -15,6 +15,19 @@ description: |
         konflux_running_pipelines, konflux_failed_pipelines
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone status check
+  validates: []             # Status check is observational
+  validated_by: []          # Not validated by other skills
+  chains_to:
+    - check_integration_tests  # Check tests if pipelines look good
+    - cancel_pipeline       # Cancel stuck pipelines
+    - release_to_prod       # Release if builds are ready
+  provides_context_for:
+    - release_to_prod       # Build status for release decisions
+    - test_mr_ephemeral     # Image availability for deployment
+    - coffee                # Morning briefing shows build status
+
 inputs:
   - name: namespace
     type: string

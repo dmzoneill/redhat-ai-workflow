@@ -19,6 +19,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone introspection
+  validates: []             # Viewing is read-only
+  validated_by: []          # Not validated by others
+  chains_to:
+    - memory_edit           # Edit after viewing
+    - memory_cleanup        # Cleanup after reviewing
+  provides_context_for:
+    - memory_edit           # View informs what to edit
+    - memory_cleanup        # View informs what to clean
+
 inputs:
   - name: section
     type: string

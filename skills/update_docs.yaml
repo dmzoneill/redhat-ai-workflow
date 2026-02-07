@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - start_work            # Must have code changes to document
+  validates: []             # Doc updates are a support task
+  validated_by:
+    - create_mr             # MR creation checks docs, validates update was complete
+    - review_pr             # Review checks documentation quality
+  chains_to:
+    - create_mr             # Create MR after docs are updated
+  provides_context_for:
+    - create_mr             # Doc update status for MR description
+    - review_pr             # Documentation changes for review
+
 inputs:
   - name: repo
     type: string

@@ -16,6 +16,23 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - research_topic        # Should research before planning
+    - gather_context        # Should gather context before planning
+  validates:
+    - research_topic        # Successful planning validates research was adequate
+    - gather_context        # Planning validates context was relevant
+  validated_by:
+    - start_work            # If work starts successfully, plan was good
+    - create_mr             # If MR is created, plan was followed
+  chains_to:
+    - start_work            # Execute the plan
+    - create_jira_issue     # Create sub-tasks from plan
+  provides_context_for:
+    - start_work            # Implementation steps for work
+    - create_jira_issue     # Sub-task details for issue creation
+
 inputs:
   - name: goal
     type: string

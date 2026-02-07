@@ -1,0 +1,134 @@
+# Chat Command Analysis Progress
+# Task: Analyze all AI chat logs to find direct CLI commands for MCP conversion
+
+status: completed_analysis
+last_updated: "2026-02-06"
+analysis_script: scripts/analyze_chat_commands.py
+report_doc: docs/analysis/chat-command-analysis.md
+report_json: /tmp/chat_commands_report.json
+
+data_sources:
+  cursor_sqlite:
+    path: "~/.cursor/chats/*/store.db"
+    databases_found: 1
+    commands_found: 36
+  claude_code:
+    path: "~/.claude/projects/*/*.jsonl"
+    sessions_found: 2068
+    projects_found: 17
+    commands_found: 7870
+  gemini_cli:
+    path: "~/.gemini/tmp/*/chats/session-*.json"
+    sessions_found: 144
+    commands_found: 770
+  codex:
+    path: "~/.codex/sessions/**/*.jsonl"
+    sessions_found: 27
+    commands_found: 64
+
+summary:
+  total_commands: 8740
+  unique_commands: 6884
+
+top_categories:
+  - category: system
+    count: 3053
+    top_tools: [sudo, ssh, systemctl, journalctl]
+  - category: lint
+    count: 1266
+    top_tools: [flake8, mypy, black, pylint, ruff, isort]
+  - category: test
+    count: 1133
+    top_tools: [pytest]
+  - category: git
+    count: 1115
+    top_tools: [git]
+  - category: build
+    count: 407
+    top_tools: [make]
+  - category: runtime
+    count: 373
+    top_tools: [python]
+  - category: network
+    count: 336
+    top_tools: [curl, wget]
+  - category: package_mgmt
+    count: 313
+    top_tools: [pipenv, dnf, pip, npm]
+  - category: project_mgmt
+    count: 272
+    top_tools: [gh, glab, jira-cli]
+  - category: kubernetes
+    count: 191
+    top_tools: [kubectl, bonfire, oc]
+  - category: infrastructure
+    count: 123
+    top_tools: [ansible]
+  - category: container
+    count: 79
+    top_tools: [docker, podman, skopeo]
+
+proposed_new_mcp_modules:
+  - name: http_basic
+    priority: P1
+    commands_covered: 336
+    tools: [http_get, http_post, http_request, api_health_check]
+  - name: system_basic
+    priority: P1
+    commands_covered: 1664
+    tools: [systemctl_manage, journal_logs, ssh_exec, vm_manage]
+  - name: github_basic
+    priority: P1
+    commands_covered: 139
+    tools: [github_run_list, github_run_view, github_run_logs, github_auth_status]
+  - name: lint_basic
+    priority: P2
+    commands_covered: 1266
+    tools: [run_flake8, run_mypy, run_ruff, run_lint]
+  - name: test_basic
+    priority: P2
+    commands_covered: 1133
+    tools: [run_pytest, run_coverage]
+  - name: container_basic
+    priority: P2
+    commands_covered: 79
+    tools: [container_run, container_build, compose_up, compose_down]
+  - name: package_basic
+    priority: P3
+    commands_covered: 313
+    tools: [dnf_install, pip_install, pipenv_run]
+  - name: data_basic
+    priority: P3
+    commands_covered: 45
+    tools: [json_query, yaml_query, base64_encode]
+  - name: credential_basic
+    priority: P3
+    commands_covered: 21
+    tools: [bw_get, pass_show, ssl_check]
+  - name: cloud_basic
+    priority: P3
+    commands_covered: 10
+    tools: [gcloud_exec, aws_exec]
+
+existing_modules_bypassed:
+  - module: git_core
+    direct_cli_count: 1115
+    reason: "Claude Code uses Bash tool, not MCP"
+  - module: k8s_basic
+    direct_cli_count: 191
+    reason: "Not always loaded; kubectl habit"
+  - module: bonfire_basic
+    direct_cli_count: 65
+    reason: "Sometimes faster to use CLI directly"
+  - module: gitlab_basic
+    direct_cli_count: 105
+    reason: "Missing some operations (mr diff)"
+
+next_steps:
+  - "Create http_basic module (covers 336 curl commands)"
+  - "Create system_basic module (covers 1664 system commands)"
+  - "Create github_basic module (covers 139 gh commands)"
+  - "Expand gitlab_basic with mr_diff and other missing ops"
+  - "Create lint_basic module (covers 1266 linting commands)"
+  - "Create test_basic module (covers 1133 test commands)"
+  - "Ensure Claude Code/Gemini use MCP tools for git, k8s"

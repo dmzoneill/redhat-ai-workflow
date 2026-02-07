@@ -23,6 +23,20 @@ description: |
   Requires: Gmail API access (same OAuth as Calendar)
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone morning ritual
+  validates:
+    - review_all_prs        # Morning briefing validates PR review state
+    - jira_hygiene_all      # Morning shows issue hygiene results
+  validated_by: []          # Briefing is informational, not validated
+  chains_to:
+    - start_work            # Pick up an issue after briefing
+    - review_all_prs        # Review pending PRs identified in briefing
+    - investigate_alert     # Investigate alerts shown in briefing
+  provides_context_for:
+    - start_work            # Morning context for prioritizing work
+    - standup_summary       # Morning data feeds standup
+
 inputs:
   - name: full_email_scan
     type: boolean

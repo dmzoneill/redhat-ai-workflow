@@ -17,6 +17,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Can retry any failed pipeline
+  validates:
+    - cancel_pipeline       # Successful retry validates cancellation was appropriate
+  validated_by:
+    - check_ci_health       # Health check validates retry resolved the issue
+  chains_to:
+    - check_ci_health       # Check pipeline health after retry
+    - konflux_status        # Check overall build status
+  provides_context_for:
+    - check_ci_health       # Retry context for health check
+    - create_mr             # Pipeline retry status for MR
+
 inputs:
   - name: mr_id
     type: integer

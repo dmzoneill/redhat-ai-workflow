@@ -15,6 +15,24 @@ description: |
         kubectl_get_ingress, kubectl_get_pods
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone health check
+  validates:
+    - deploy_to_ephemeral   # Environment overview validates deployment is healthy
+    - test_mr_ephemeral     # Validates ephemeral deployment
+    - rollout_restart       # Validates restart completed successfully
+    - release_to_prod       # Validates production release
+  chains_to:
+    - rollout_restart       # Restart unhealthy deployments
+    - scale_deployment      # Scale if resource issues detected
+    - debug_prod            # Deep investigation if issues found
+    - check_secrets         # Check config if misconfigs suspected
+  provides_context_for:
+    - debug_prod            # Environment state for debugging
+    - investigate_alert     # Environment context for alert triage
+  validated_by:
+    - debug_prod
+
 inputs:
   - name: namespace
     type: string

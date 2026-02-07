@@ -20,6 +20,17 @@ description: |
 
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone reporting skill
+  validates:
+    - standup_summary       # Weekly report validates daily standups captured activity
+    - work_analysis         # Weekly uses similar data, validates analysis
+  validated_by: []          # Terminal reporting skill
+  chains_to:
+    - sprint_planning       # Weekly review informs next sprint planning
+  provides_context_for:
+    - sprint_planning       # Weekly stats for sprint review
+
 inputs:
   - name: days
     type: integer

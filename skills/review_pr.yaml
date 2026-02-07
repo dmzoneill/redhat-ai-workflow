@@ -24,6 +24,26 @@ description: |
   Automatically approves or posts feedback based on findings.
 version: "2.0"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist to review it
+  validates:
+    - create_mr             # Review validates MR quality and structure
+    - jira_hygiene          # Review checks Jira link and description
+    - start_work            # Review validates branch and commit conventions
+  validated_by:
+    - review_all_prs        # Batch reviewer calls review_pr for each MR
+    - check_mr_feedback
+    - check_my_prs
+    - review_pr_multiagent
+  chains_to:
+    - check_ci_health       # Check pipeline after review
+    - test_mr_ephemeral     # Deploy for integration testing after approval
+    - close_issue           # After merge, close the issue
+  provides_context_for:
+    - check_my_prs          # Review feedback appears in PR status
+    - check_mr_feedback     # Review comments need author response
+
 inputs:
   - name: mr_id
     type: integer

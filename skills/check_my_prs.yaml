@@ -16,6 +16,22 @@ description: |
 
 version: "1.2"
 
+links:
+  depends_on:
+    - create_mr             # Must have open MRs to check
+  validates:
+    - create_mr             # Checking feedback validates MR communication
+    - review_pr             # Shows whether reviews were effective
+  validated_by: []          # Status check, not validated by others
+  chains_to:
+    - rebase_pr             # Rebase MRs that have conflicts
+    - mark_mr_ready         # Mark ready if feedback addressed
+    - close_mr              # Close abandoned MRs
+  provides_context_for:
+    - coffee                # Morning briefing shows PR status
+    - beer                  # EOD shows outstanding feedback
+    - standup_summary       # PR feedback status for standup
+
 inputs:
   - name: project
     type: string

@@ -19,6 +19,22 @@ description: |
   - Approving MRs with image changes
 version: "1.0"
 
+links:
+  depends_on: []            # Can scan any image
+  validates: []             # Scanning is diagnostic, not a validator
+  validated_by:
+    - cve_fix               # CVE fix validates scan found real vulnerabilities
+    - release_to_prod       # Release validates scan didn't block incorrectly
+    - test_mr_ephemeral
+  chains_to:
+    - cve_fix               # Fix discovered vulnerabilities
+    - release_to_prod       # Proceed with release if scan passes
+    - create_jira_issue     # Track vulnerabilities as issues
+    - release_aa_backend_prod
+  provides_context_for:
+    - release_to_prod       # Scan results inform release decision
+    - cve_fix               # Vulnerability details for fix
+
 inputs:
   - name: image_tag
     type: string

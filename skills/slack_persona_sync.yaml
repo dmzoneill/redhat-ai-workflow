@@ -15,6 +15,16 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone sync skill
+  validates: []             # Sync is a data operation
+  validated_by:
+    - build_persona_style   # Persona build validates sync captured enough messages
+  chains_to:
+    - build_persona_style   # Build persona after syncing messages
+  provides_context_for:
+    - build_persona_style   # Synced messages for style analysis
+
 inputs:
   - name: mode
     type: string

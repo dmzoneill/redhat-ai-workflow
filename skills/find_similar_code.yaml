@@ -14,6 +14,20 @@ description: |
   Uses semantic vector search for intelligent matching.
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone search skill
+  validates:
+    - reindex_all_vectors   # Similar code search validates index quality
+    - bootstrap_knowledge   # Validates knowledge includes code patterns
+  validated_by: []          # Search tool, not validated
+  chains_to:
+    - explain_code          # Explain similar code found
+    - research_topic        # Research patterns found
+  provides_context_for:
+    - review_pr             # Similar code for review context
+    - start_work            # Existing patterns to follow
+    - create_mr             # Related code for MR description
+
 inputs:
   - name: query
     type: string

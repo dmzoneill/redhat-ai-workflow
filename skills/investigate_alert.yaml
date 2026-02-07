@@ -20,6 +20,23 @@ description: |
   Resolves namespaces and paths from config.json.
 version: "3.0"
 
+links:
+  depends_on: []            # Triggered by alerts, no prior skill needed
+  validates: []             # Investigation is diagnostic, not a validator
+  validated_by:
+    - debug_prod            # Deep investigation validates initial triage
+    - silence_alert         # If alert is silenced, triage was sufficient
+  chains_to:
+    - debug_prod            # Escalate for deeper investigation
+    - silence_alert         # Silence if known issue
+    - create_jira_issue     # Create tracking issue for the alert
+    - hotfix                # Apply emergency fix
+    - notify_team           # Notify team about findings
+  provides_context_for:
+    - debug_prod            # Alert context for deep debugging
+    - create_jira_issue     # Alert details for issue creation
+    - learn_pattern         # New error patterns discovered
+
 inputs:
   - name: environment
     type: string

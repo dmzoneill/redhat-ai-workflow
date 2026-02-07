@@ -49,6 +49,13 @@ description: |
 
 version: "1.1"
 
+links:
+  depends_on: []            # Standalone notification utility
+  validates: []             # Notification doesn't validate other skills
+  validated_by: []          # Terminal communication action
+  chains_to: []             # No natural next step after notification
+  provides_context_for: []  # Notification is one-way
+
 inputs:
   - name: message
     type: string

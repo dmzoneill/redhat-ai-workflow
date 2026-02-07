@@ -16,6 +16,15 @@ description: |
   - OAuth token for calendar access
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone calendar skill
+  validates: []             # Scheduling doesn't validate other skills
+  validated_by: []          # Not validated by other skills
+  chains_to: []             # No natural next step
+  provides_context_for:
+    - coffee                # Scheduled meetings appear in morning briefing
+    - check_mr_feedback     # Meeting requests from MR feedback
+
 inputs:
   - name: title
     type: string

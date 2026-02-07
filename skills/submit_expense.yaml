@@ -40,6 +40,13 @@ description: |
 
 version: "2.0"
 
+links:
+  depends_on: []            # Standalone finance skill
+  validates: []             # Expense submission doesn't validate other skills
+  validated_by: []          # Not validated by other skills
+  chains_to: []             # No natural next step
+  provides_context_for: []  # Standalone utility
+
 inputs:
   - name: month
     type: string

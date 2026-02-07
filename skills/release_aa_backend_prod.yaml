@@ -10,6 +10,24 @@ description: |
   Resolves paths and Quay images from config.json.
 version: "1.2"
 
+links:
+  depends_on:
+    - appinterface_check    # Verify app-interface config before release
+    - scan_vulnerabilities   # Scan image before production
+  validates:
+    - release_to_prod       # AA-specific release validates generic release process
+    - appinterface_check    # Successful release validates app-interface config
+  validated_by:
+    - environment_overview  # Production health check validates release
+    - appinterface_check
+  chains_to:
+    - close_issue           # Close related issues
+    - notify_team           # Announce release
+    - environment_overview  # Verify production health
+  provides_context_for:
+    - weekly_summary        # Release in weekly report
+    - beer                  # EOD release activity
+
 inputs:
   - name: commit_sha
     type: string

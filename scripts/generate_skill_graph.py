@@ -110,6 +110,20 @@ def extract_nested_skills(skill: dict) -> list[str]:
     return list(nested)
 
 
+def extract_explicit_links(skill: dict) -> dict:
+    """Extract explicit skill relationships from links: metadata."""
+    links = skill.get("links", {})
+    return {
+        "depends_on": links.get("depends_on", []) if isinstance(links.get("depends_on"), list) else [],
+        "validates": links.get("validates", []) if isinstance(links.get("validates"), list) else [],
+        "validated_by": links.get("validated_by", []) if isinstance(links.get("validated_by"), list) else [],
+        "chains_to": links.get("chains_to", []) if isinstance(links.get("chains_to"), list) else [],
+        "provides_context_for": (
+            links.get("provides_context_for", []) if isinstance(links.get("provides_context_for"), list) else []
+        ),
+    }
+
+
 def extract_outputs(skill: dict) -> list[str]:
     """Extract output types from skill."""
     outputs = []
@@ -172,6 +186,7 @@ def parse_skill_file(path: Path) -> dict | None:
             "intents": extract_intent_keywords(skill),
             "tools": extract_tools_used(skill),
             "nested_skills": extract_nested_skills(skill),
+            "explicit_links": extract_explicit_links(skill),
             "outputs": extract_outputs(skill),
             "version": skill.get("version", "1.0"),
             "input_count": len(skill.get("inputs", [])),
@@ -225,7 +240,7 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
                 }
             )
 
-    # Create skill-to-skill links
+    # Create skill-to-skill links from runtime calls (skill_run)
     for skill_id, skill in skills.items():
         for nested in skill["nested_skills"]:
             if nested in skills:
@@ -237,6 +252,31 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
                         "strength": 0.8,
                     }
                 )
+
+    # Create skill-to-skill links from explicit links: metadata
+    link_type_config = {
+        "depends_on": {"strength": 0.9, "type": "depends_on"},
+        "validates": {"strength": 0.7, "type": "validates"},
+        "validated_by": {"strength": 0.6, "type": "validated_by"},
+        "chains_to": {"strength": 0.5, "type": "chains_to"},
+        "provides_context_for": {"strength": 0.4, "type": "provides_context"},
+    }
+
+    for skill_id, skill in skills.items():
+        for link_type, config in link_type_config.items():
+            for target in skill["explicit_links"].get(link_type, []):
+                if target in skills:
+                    # Avoid duplicate links (already captured by nested_skills/calls)
+                    existing = any(lnk["source"] == skill_id and lnk["target"] == target for lnk in links)
+                    if not existing:
+                        links.append(
+                            {
+                                "source": skill_id,
+                                "target": target,
+                                "type": config["type"],
+                                "strength": config["strength"],
+                            }
+                        )
 
     # Create tool nodes and links
     all_tools = set()
@@ -310,6 +350,14 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
         cat = skill["category"]
         categories[cat] = categories.get(cat, 0) + 1
 
+    # Link type statistics
+    link_type_counts = {}
+    for link in links:
+        lt = link["type"]
+        link_type_counts[lt] = link_type_counts.get(lt, 0) + 1
+
+    skills_with_links = sum(1 for s in skills.values() if any(s["explicit_links"].get(lt) for lt in link_type_config))
+
     # Build persona data for the visualization
     persona_data = {}
     for name, data in personas.items():
@@ -331,6 +379,8 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
             "link_count": len(links),
             "persona_count": len(personas),
             "categories": categories,
+            "link_types": link_type_counts,
+            "skills_with_links": skills_with_links,
         },
     }
 

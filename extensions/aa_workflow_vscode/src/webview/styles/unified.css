@@ -2798,6 +2798,14 @@ select {
   border-radius: 6px;
 }
 
+.yaml-content code {
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
 .yaml-loading {
   text-align: center;
   padding: 40px;
@@ -8067,3 +8075,601 @@ select {
       margin-top: 16px;
       flex-wrap: wrap;
     }
+
+/* =============================================================================
+   SKILLS MIND MAP
+   ============================================================================= */
+
+/* Mind Map Container */
+.mindmap-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 200px);
+  min-height: 500px;
+  background: var(--bg-secondary);
+}
+
+.mindmap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* Compact header for mind map */
+.mindmap-header-compact {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  gap: 6px;
+}
+
+.mindmap-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mindmap-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mindmap-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mindmap-title-text {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.mindmap-stats-inline {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.mindmap-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mindmap-select {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 120px;
+}
+
+.mindmap-select:hover {
+  border-color: var(--accent);
+}
+
+.mindmap-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.mindmap-toggles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mindmap-toggles .toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.mindmap-toggles .toggle-label:hover {
+  color: var(--text-primary);
+}
+
+.mindmap-toggles input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* Compact legend */
+.mindmap-legend-compact {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.legend-item-compact {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.mindmap-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.mindmap-icon {
+  font-size: 1.1rem;
+}
+
+.mindmap-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.mindmap-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Physics Controls Panel */
+.mindmap-physics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  animation: slideDown 0.15s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0);    max-height: 200px; }
+}
+
+.physics-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.physics-control {
+  flex: 1;
+  min-width: 0;
+}
+
+.physics-control label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.physics-value {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+  color: var(--accent);
+  min-width: 38px;
+  text-align: right;
+}
+
+.physics-control input[type="range"] {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.physics-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 4px rgba(102, 126, 234, 0.4);
+  transition: transform 0.1s;
+}
+
+.physics-control input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+.physics-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 4px rgba(102, 126, 234, 0.4);
+}
+
+.physics-actions {
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.physics-actions .btn {
+  font-size: 0.72rem;
+  padding: 3px 10px;
+}
+
+.mindmap-physics-toggle {
+  font-size: 0.85rem !important;
+  padding: 2px 6px !important;
+  line-height: 1;
+  min-width: unset;
+}
+
+.mindmap-physics-toggle.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* Stats Bar */
+.mindmap-stats {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.85rem;
+}
+
+.mindmap-stats .stat-item {
+  color: var(--text-secondary);
+}
+
+.mindmap-stats .stat-item strong {
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+
+/* Controls */
+.mindmap-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mindmap-controls .control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mindmap-controls label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mindmap-controls .persona-buttons,
+.mindmap-controls .category-buttons,
+.mindmap-controls .toggle-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mindmap-controls .persona-btn,
+.mindmap-controls .category-btn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mindmap-controls .persona-btn:hover,
+.mindmap-controls .category-btn:hover {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
+.mindmap-controls .persona-btn.active,
+.mindmap-controls .category-btn.active {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: white;
+}
+
+/* Graph Container */
+.mindmap-graph {
+  flex: 1;
+  width: 100%;
+  height: calc(100% - 120px);
+  min-height: 400px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mindmap-graph svg {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+.mindmap-graph svg:active {
+  cursor: grabbing;
+}
+
+/* Node styles */
+.mindmap-graph .node {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.mindmap-graph .node circle.main {
+  stroke-width: 2px;
+  transition: all 0.3s ease;
+}
+
+.mindmap-graph .node circle.glow-ring {
+  fill: none;
+  stroke-width: 0;
+  opacity: 0;
+  transition: all 0.4s ease;
+}
+
+.mindmap-graph .node:hover circle.main {
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 12px currentColor);
+}
+
+.mindmap-graph .node.dimmed {
+  opacity: 0.15;
+}
+
+.mindmap-graph .node.highlighted {
+  opacity: 1;
+}
+
+.mindmap-graph .node.highlighted circle.main {
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 20px currentColor);
+}
+
+.mindmap-graph .node.persona-active circle.glow-ring {
+  stroke-width: 4px;
+  opacity: 0.8;
+  animation: persona-pulse 2s ease-in-out infinite;
+}
+
+.mindmap-graph .node.persona-active circle.main {
+  filter: drop-shadow(0 0 15px var(--persona-color, #667eea));
+}
+
+.mindmap-graph .node.persona-inactive {
+  opacity: 0.25;
+}
+
+@keyframes persona-pulse {
+  0%, 100% { stroke-width: 4px; opacity: 0.6; }
+  50% { stroke-width: 8px; opacity: 1; }
+}
+
+/* Link styles */
+.mindmap-graph .link {
+  fill: none;
+  stroke-opacity: 0.3;
+  transition: all 0.4s ease;
+}
+
+.mindmap-graph .link.dimmed {
+  stroke-opacity: 0.05;
+}
+
+.mindmap-graph .link.highlighted {
+  stroke-opacity: 0.8;
+  stroke-width: 3px;
+}
+
+.mindmap-graph .link.calls {
+  stroke: #ff6b6b;
+  stroke-dasharray: 5,3;
+}
+
+.mindmap-graph .link.uses {
+  stroke: #4ecdc4;
+}
+
+.mindmap-graph .link.triggers {
+  stroke: #ffe66d;
+  stroke-dasharray: 2,2;
+}
+
+.mindmap-graph .link.persona-active {
+  stroke-opacity: 0.9;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px var(--persona-color, #667eea));
+}
+
+.mindmap-graph .link.persona-inactive {
+  stroke-opacity: 0.08;
+}
+
+/* Tooltip */
+.mindmap-tooltip {
+  position: absolute;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  max-width: 300px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.mindmap-tooltip.visible {
+  opacity: 1;
+}
+
+.mindmap-tooltip h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.mindmap-tooltip .type-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-left: 6px;
+  color: white;
+}
+
+.mindmap-tooltip .description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.mindmap-tooltip .meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.mindmap-tooltip .meta-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+/* Legend */
+.mindmap-legend {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  gap: 16px;
+  font-size: 0.75rem;
+}
+
+.mindmap-legend .legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mindmap-legend .legend-title {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.mindmap-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.mindmap-legend .legend-circle {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.mindmap-legend .legend-line {
+  width: 16px;
+  height: 2px;
+}
+
+/* Loading state */
+.mindmap-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.mindmap-loading-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.mindmap-loading .loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: mindmap-spin 1s linear infinite;
+}
+
+@keyframes mindmap-spin {
+  to { transform: rotate(360deg); }
+}

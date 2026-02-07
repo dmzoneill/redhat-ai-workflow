@@ -13,6 +13,18 @@ description: |
   Uses: jira_view_issue, jira_clone_issue, jira_add_link, jira_assign
 version: "1.0"
 
+links:
+  depends_on:
+    - create_jira_issue     # Original issue must exist (or be created manually)
+  validates: []             # Cloning doesn't validate other skills
+  validated_by:
+    - jira_hygiene          # Hygiene validates the clone's completeness
+  chains_to:
+    - start_work            # Start working on the cloned issue
+    - jira_hygiene          # Run hygiene on the clone
+  provides_context_for:
+    - start_work            # Cloned issue key for branch creation
+
 inputs:
   - name: issue_key
     type: string

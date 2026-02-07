@@ -49,6 +49,29 @@ description: |
   DO NOT fall back to raw bonfire commands - always use the MCP tools.
 version: "1.4"
 
+links:
+  depends_on:
+    - create_mr             # MR must exist with a built image
+  validates:
+    - create_mr             # Successful deployment validates MR code is functional
+    - start_work            # Deployment validates branch code works end-to-end
+    - scan_vulnerabilities   # Pre-deploy scan validates image safety
+  validated_by:
+    - close_issue           # If issue closes after deploy, deployment was good
+    - check_integration_tests
+    - environment_overview
+    - extend_ephemeral
+    - release_to_prod
+  chains_to:
+    - extend_ephemeral      # Extend if more testing needed
+    - close_issue           # Close issue after successful test
+    - release_to_prod       # Promote to production after testing
+    - notify_team           # Notify team about deployment status
+  provides_context_for:
+    - debug_prod            # Deployment context helps debug production issues
+    - release_to_prod       # Commit SHA for production release
+    - environment_overview  # Deployment details for environment check
+
 inputs:
   - name: mr_id
     type: integer

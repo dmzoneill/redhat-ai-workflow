@@ -18,6 +18,17 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []            # Standalone analysis skill
+  validates: []             # Analysis is informational
+  validated_by:
+    - weekly_summary        # Weekly summary cross-validates analysis data
+  chains_to:
+    - sprint_planning       # Analysis informs planning decisions
+  provides_context_for:
+    - weekly_summary        # Analysis feeds weekly report
+    - sprint_planning       # Effort distribution for planning
+
 inputs:
   - name: start_date
     type: string

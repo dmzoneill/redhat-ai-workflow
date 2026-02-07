@@ -14,6 +14,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on:
+    - research_topic        # Should have research to summarize
+  validates:
+    - research_topic        # Summary validates research produced useful findings
+  validated_by: []          # Terminal reporting skill
+  chains_to:
+    - plan_implementation   # Plan based on findings
+    - create_jira_issue     # Create issues from findings
+  provides_context_for:
+    - plan_implementation   # Summary informs planning
+    - create_jira_issue     # Findings for issue description
+
 inputs:
   - name: topic
     type: string

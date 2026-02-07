@@ -17,6 +17,19 @@ description: |
 
 version: "1.0"
 
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - evaluate_questions
+    - export_report
+  chains_to:
+    - evaluate_questions
+    - export_report
+  provides_context_for:
+    - evaluate_questions
+    - export_report
+
 inputs:
   - name: date
     type: string

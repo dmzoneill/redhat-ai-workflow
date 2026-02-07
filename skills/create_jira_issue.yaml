@@ -27,6 +27,23 @@ description: |
 
 version: "1.2"
 
+links:
+  depends_on: []            # Standalone - creates new issues
+  validates: []             # Issue creation doesn't validate other skills
+  validated_by:
+    - start_work            # If work starts successfully, issue was created correctly
+    - jira_hygiene          # Hygiene validates issue completeness
+    - pr_jira_audit
+    - sprint_planning
+  chains_to:
+    - start_work            # Start working on the new issue
+    - jira_hygiene          # Run hygiene on the newly created issue
+    - sprint_planning       # Add new issue to sprint
+    - clone_jira_issue
+  provides_context_for:
+    - start_work            # Issue key for branch creation
+    - clone_jira_issue      # Template for cloning
+
 inputs:
   - name: summary
     type: string
