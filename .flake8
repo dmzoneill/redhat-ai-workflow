@@ -1,5 +1,6 @@
 [flake8]
-# Line length - match Black's default
+# Line length - allow longer lines since Black formats to 88 but
+# many existing lines are up to 120 chars
 max-line-length = 120
 
 # Ignore E203 - conflicts with Black's slice formatting
@@ -17,9 +18,12 @@ exclude =
     dist,
     .claude,
     extensions/*,
-    tests/*,
     node_modules,
     */node_modules/*
+
+# Per-file ignores for tests (allow unused imports in test fixtures)
+per-file-ignores =
+    tests/*:F401,F841,F541,E402
 
 # McCabe complexity - increased to accommodate complex daemon/registry functions
 max-complexity = 35

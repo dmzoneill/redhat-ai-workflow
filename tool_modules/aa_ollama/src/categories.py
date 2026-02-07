@@ -11,7 +11,17 @@ TOOL_CATEGORIES = {
     # === JIRA (High Priority for Developer) ===
     "jira_read": {
         "description": "View and search Jira issues",
-        "keywords": ["issue", "ticket", "aap-", "jira", "story", "bug", "task", "sprint", "backlog"],
+        "keywords": [
+            "issue",
+            "ticket",
+            "aap-",
+            "jira",
+            "story",
+            "bug",
+            "task",
+            "sprint",
+            "backlog",
+        ],
         "tools": [
             "jira_view_issue",
             "jira_view_issue_json",
@@ -25,7 +35,14 @@ TOOL_CATEGORIES = {
     },
     "jira_write": {
         "description": "Update Jira issues - status, comments, assignments",
-        "keywords": ["update issue", "set status", "assign", "comment on", "transition", "move to"],
+        "keywords": [
+            "update issue",
+            "set status",
+            "assign",
+            "comment on",
+            "transition",
+            "move to",
+        ],
         "tools": [
             "jira_set_status",
             "jira_add_comment",
@@ -40,7 +57,13 @@ TOOL_CATEGORIES = {
     },
     "jira_create": {
         "description": "Create new Jira issues",
-        "keywords": ["create issue", "new story", "new bug", "file ticket", "create task"],
+        "keywords": [
+            "create issue",
+            "new story",
+            "new bug",
+            "file ticket",
+            "create task",
+        ],
         "tools": [
             "jira_create_issue",
             "jira_clone_issue",
@@ -91,7 +114,14 @@ TOOL_CATEGORIES = {
     # === GIT ===
     "git_read": {
         "description": "View git status, log, diff",
-        "keywords": ["git status", "git log", "git diff", "commit history", "blame", "show commit"],
+        "keywords": [
+            "git status",
+            "git log",
+            "git diff",
+            "commit history",
+            "blame",
+            "show commit",
+        ],
         "tools": [
             "git_status",
             "git_log",
@@ -107,7 +137,16 @@ TOOL_CATEGORIES = {
     },
     "git_write": {
         "description": "Git operations - commit, push, branch",
-        "keywords": ["commit", "push", "branch", "checkout", "merge", "rebase", "stash", "pull"],
+        "keywords": [
+            "commit",
+            "push",
+            "branch",
+            "checkout",
+            "merge",
+            "rebase",
+            "stash",
+            "pull",
+        ],
         "tools": [
             "git_commit",
             "git_push",
@@ -127,7 +166,16 @@ TOOL_CATEGORIES = {
     # === KUBERNETES ===
     "k8s_read": {
         "description": "View Kubernetes resources - pods, logs, events",
-        "keywords": ["pod", "container", "k8s", "kubernetes", "logs", "deployment", "namespace", "clowdapp"],
+        "keywords": [
+            "pod",
+            "container",
+            "k8s",
+            "kubernetes",
+            "logs",
+            "deployment",
+            "namespace",
+            "clowdapp",
+        ],
         "tools": [
             "kubectl_get_pods",
             "kubectl_logs",
@@ -153,7 +201,14 @@ TOOL_CATEGORIES = {
     # === EPHEMERAL ===
     "ephemeral": {
         "description": "Ephemeral environments - reserve, deploy, release",
-        "keywords": ["ephemeral", "bonfire", "reserve", "namespace", "test mr", "spin up"],
+        "keywords": [
+            "ephemeral",
+            "bonfire",
+            "reserve",
+            "namespace",
+            "test mr",
+            "spin up",
+        ],
         "tools": [
             "bonfire_namespace_reserve",
             "bonfire_namespace_list",
@@ -191,7 +246,14 @@ TOOL_CATEGORIES = {
     # === MONITORING ===
     "alerts": {
         "description": "Alerts - view firing alerts, silences",
-        "keywords": ["alert", "firing", "critical", "warning", "silence", "alertmanager"],
+        "keywords": [
+            "alert",
+            "firing",
+            "critical",
+            "warning",
+            "silence",
+            "alertmanager",
+        ],
         "tools": [
             "alertmanager_list_alerts",
             "alertmanager_list_silences",
@@ -302,29 +364,41 @@ TOOL_CATEGORIES = {
 CORE_CATEGORIES = ["skills", "session", "memory"]
 
 # Categories by priority tier
-HIGH_PRIORITY_CATEGORIES = [cat for cat, info in TOOL_CATEGORIES.items() if info["priority"] >= 8]
-MEDIUM_PRIORITY_CATEGORIES = [cat for cat, info in TOOL_CATEGORIES.items() if 5 <= info["priority"] < 8]
-LOW_PRIORITY_CATEGORIES = [cat for cat, info in TOOL_CATEGORIES.items() if info["priority"] < 5]
+HIGH_PRIORITY_CATEGORIES = [
+    cat
+    for cat, info in TOOL_CATEGORIES.items()
+    if info["priority"] >= 8  # type: ignore[operator]
+]
+MEDIUM_PRIORITY_CATEGORIES = [
+    cat
+    for cat, info in TOOL_CATEGORIES.items()
+    if 5 <= info["priority"] < 8  # type: ignore[operator]
+]
+LOW_PRIORITY_CATEGORIES = [
+    cat
+    for cat, info in TOOL_CATEGORIES.items()
+    if info["priority"] < 5  # type: ignore[operator]
+]
 
 
 def get_category_tools(category_name: str) -> list[str]:
     """Get tools for a specific category."""
     cat = TOOL_CATEGORIES.get(category_name)
-    return cat["tools"] if cat else []
+    return list(cat["tools"]) if cat else []  # type: ignore[call-overload]
 
 
 def get_all_tools() -> list[str]:
     """Get all tools from all categories."""
-    tools = set()
+    tools: set[str] = set()
     for cat in TOOL_CATEGORIES.values():
-        tools.update(cat["tools"])
+        tools.update(cat["tools"])  # type: ignore[arg-type]
     return list(tools)
 
 
 def get_category_for_tool(tool_name: str) -> str | None:
     """Find which category a tool belongs to."""
     for cat_name, cat_info in TOOL_CATEGORIES.items():
-        if tool_name in cat_info["tools"]:
+        if tool_name in cat_info["tools"]:  # type: ignore[operator]
             return cat_name
     return None
 
@@ -333,7 +407,10 @@ def format_categories_for_prompt(exclude: set[str] | None = None) -> str:
     """Format categories for NPU classification prompt."""
     exclude = exclude or set()
     lines = []
-    for name, info in sorted(TOOL_CATEGORIES.items(), key=lambda x: -x[1]["priority"]):
+    for name, info in sorted(  # type: ignore[call-overload]
+        TOOL_CATEGORIES.items(),
+        key=lambda x: -int(x[1]["priority"]),
+    ):
         if name not in exclude:
             lines.append(f"- {name}: {info['description']}")
     return "\n".join(lines)

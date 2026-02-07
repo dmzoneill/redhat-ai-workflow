@@ -38,7 +38,11 @@ REPOS_CONFIG = load_config()
 # Repos are stored as dict: {"name": {"path": "...", ...}}
 repos_data = REPOS_CONFIG.get("repositories", {})
 if isinstance(repos_data, dict):
-    REPO_PATHS = {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
+    REPO_PATHS = {
+        name: info.get("path", "")
+        for name, info in repos_data.items()
+        if info.get("path")
+    }
 else:
     REPO_PATHS = {}
 
@@ -90,7 +94,9 @@ async def create_github_issue(
 
     # Cleanup: remove expired entries and enforce max size
     global _recent_issues
-    _recent_issues = {k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS}
+    _recent_issues = {
+        k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
+    }
     if len(_recent_issues) > _MAX_RECENT_ISSUES:
         # Keep only the most recent entries
         sorted_items = sorted(_recent_issues.items(), key=lambda x: x[1], reverse=True)
@@ -181,7 +187,9 @@ async def create_github_issue(
                     "message": f"Issue created: {issue_url}",
                 }
             else:
-                logger.warning(f"Failed to create issue: {response.status_code} - {response.text[:200]}")
+                logger.warning(
+                    f"Failed to create issue: {response.status_code} - {response.text[:200]}"
+                )
                 url = format_github_issue_url(tool, error, context)
                 return {
                     "success": False,
@@ -225,7 +233,9 @@ def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
 **Expected behavior:**
 (what should have happened)
 """
-    params = urllib.parse.urlencode({"title": title, "body": body, "labels": "bug,tool-error"})
+    params = urllib.parse.urlencode(
+        {"title": title, "body": body, "labels": "bug,tool-error"}
+    )
     return f"{GITHUB_ISSUES_URL}?{params}"
 
 
@@ -265,15 +275,18 @@ try:
     from .skill_engine import register_skill_tools
     from .sprint_tools import register_sprint_tools
 except ImportError:
-    from chat_context import register_chat_context_tools
-    from infra_tools import register_infra_tools
-    from memory_tools import register_memory_tools
-    from meta_tools import register_meta_tools
-    from persona_tools import register_persona_tools
-    from resources import register_resources
-    from session_tools import register_prompts, register_session_tools
-    from skill_engine import register_skill_tools
-    from sprint_tools import register_sprint_tools
+    from chat_context import register_chat_context_tools  # type: ignore[no-redef]
+    from infra_tools import register_infra_tools  # type: ignore[no-redef]
+    from memory_tools import register_memory_tools  # type: ignore[no-redef]
+    from meta_tools import register_meta_tools  # type: ignore[no-redef]
+    from persona_tools import register_persona_tools  # type: ignore[no-redef]
+    from resources import register_resources  # type: ignore[no-redef]
+    from session_tools import (  # type: ignore[no-redef]
+        register_prompts,
+        register_session_tools,
+    )
+    from skill_engine import register_skill_tools  # type: ignore[no-redef]
+    from sprint_tools import register_sprint_tools  # type: ignore[no-redef]
 
 
 def register_tools(server: "FastMCP") -> int:
@@ -300,7 +313,10 @@ def register_tools(server: "FastMCP") -> int:
 
     # Detect Claude Code and set up AskUserQuestion integration
     try:
-        from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+        from .claude_code_integration import (
+            create_ask_question_wrapper,
+            get_claude_code_capabilities,
+        )
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")
@@ -308,9 +324,13 @@ def register_tools(server: "FastMCP") -> int:
         # Create AskUserQuestion wrapper if available
         ask_question_fn = create_ask_question_wrapper(server)
         if ask_question_fn:
-            logger.info("✅ AskUserQuestion integration enabled - using native Claude Code UI")
+            logger.info(
+                "✅ AskUserQuestion integration enabled - using native Claude Code UI"
+            )
         else:
-            logger.info("ℹ️  AskUserQuestion not available - using CLI fallback for skill errors")
+            logger.info(
+                "ℹ️  AskUserQuestion not available - using CLI fallback for skill errors"
+            )
     except ImportError:
         logger.debug("Claude Code integration module not available")
         ask_question_fn = None

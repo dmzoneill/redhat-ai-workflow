@@ -76,7 +76,8 @@ class TestSkillRegressions:
                     violations.append(f"{path.name} step '{step_name}'")
 
         assert not violations, (
-            f"eval() found in compute blocks (use locals().get() instead):\n"
+            "eval() found in compute blocks"
+            " (use locals().get() instead):\n"
             + "\n".join(f"  - {v}" for v in violations)
         )
 
@@ -99,7 +100,7 @@ class TestSkillRegressions:
 
         assert (
             not violations
-        ), f"shell=True found in compute blocks (use shell=False):\n" + "\n".join(
+        ), "shell=True found in compute blocks" " (use shell=False):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -120,7 +121,7 @@ class TestSkillRegressions:
 
         assert (
             not violations
-        ), f"Bare 'except:' found (use 'except Exception:' instead):\n" + "\n".join(
+        ), "Bare 'except:' found" " (use 'except Exception:' instead):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -144,7 +145,7 @@ class TestSkillRegressions:
 
         assert (
             not violations
-        ), f"Tool steps found in outputs section (move to steps):\n" + "\n".join(
+        ), "Tool steps found in outputs section" " (move to steps):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -258,7 +259,7 @@ class TestSkillRegressions:
                         f"missing tool/compute/then/description"
                     )
 
-        assert not violations, f"Steps without action found:\n" + "\n".join(
+        assert not violations, "Steps without action found:\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -281,7 +282,7 @@ class TestSkillRegressions:
                         f"on_error='{on_error}' (valid: {valid_on_error})"
                     )
 
-        assert not violations, f"Invalid on_error values found:\n" + "\n".join(
+        assert not violations, "Invalid on_error values found:\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -321,7 +322,7 @@ class TestSkillRegressions:
                         has_condition,
                     )
 
-        assert not violations, f"Duplicate output names found:\n" + "\n".join(
+        assert not violations, "Duplicate output names found:\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -342,7 +343,7 @@ class TestSkillRegressions:
                     f"suggests '{expected_name}'"
                 )
 
-        assert not violations, f"Skill name/filename mismatches:\n" + "\n".join(
+        assert not violations, "Skill name/filename mismatches:\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 

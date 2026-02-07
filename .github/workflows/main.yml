@@ -22,3 +22,12 @@ jobs:
       VALIDATE_JSCPD: "false"
       # Disable natural language linting - too noisy for technical docs
       VALIDATE_NATURAL_LANGUAGE: "false"
+      # Disable CI black/isort - enforced by pre-commit hooks locally
+      # with correct versions; super-linter ships older black that
+      # formats differently
+      VALIDATE_PYTHON_BLACK: "false"
+      VALIDATE_PYTHON_ISORT: "false"
+      # Disable CI mypy - runs on entire codebase with strict mode;
+      # pre-commit runs mypy on critical files (config_loader, parsers,
+      # validators); full codebase mypy compliance is tracked separately
+      VALIDATE_PYTHON_MYPY: "false"

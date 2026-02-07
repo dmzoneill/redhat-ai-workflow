@@ -8,7 +8,7 @@ Part of Layer 5: Usage Pattern Learning
 """
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 # Usage Error Categories
 USAGE_ERROR_TYPES = {
@@ -124,7 +124,9 @@ def _extract_namespace_from_error(error_message: str) -> Optional[str]:
     return None
 
 
-def _extract_parameter_from_error(error_message: str, param_hint: str = "") -> Optional[str]:
+def _extract_parameter_from_error(
+    error_message: str, param_hint: str = ""
+) -> Optional[str]:
     """Extract parameter value from error message."""
     if param_hint:
         # Try to find param_hint in message
@@ -135,7 +137,9 @@ def _extract_parameter_from_error(error_message: str, param_hint: str = "") -> O
     return None
 
 
-def classify_error_type(tool_name: str, params: dict, error_message: str, result: str = "") -> dict:
+def classify_error_type(
+    tool_name: str, params: dict, error_message: str, result: str = ""
+) -> dict:
     """
     Classify if this is a usage error vs infrastructure error.
 
@@ -167,7 +171,7 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
         }
 
     # Now check usage patterns
-    classification = {
+    classification: dict[str, Any] = {
         "is_usage_error": False,
         "error_category": None,
         "confidence": 0.0,
@@ -189,14 +193,17 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
             classification["confidence"] = 0.9
             classification["learnable"] = True
             classification["evidence"]["pattern"] = "ownership_mismatch"
-            classification["evidence"]["incorrect_param"] = _extract_namespace_from_error(error_message)
+            classification["evidence"]["incorrect_param"] = (
+                _extract_namespace_from_error(error_message)
+            )
             classification["evidence"]["tool"] = tool_name
             return classification
 
     # Pattern 2: Format validation errors
-    format_checks = {
+    format_checks: dict[str, dict[str, Any]] = {
         r"manifest unknown": {
-            "param_check": lambda p: "image_tag" in p and len(str(p.get("image_tag", ""))) < 40,
+            "param_check": lambda p: "image_tag" in p
+            and len(str(p.get("image_tag", ""))) < 40,
             "category": "PARAMETER_FORMAT",
             "incorrect_param": "image_tag",
             "expected_format": "40-character SHA",
@@ -218,10 +225,16 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
                     classification["confidence"] = config["confidence"]
                     classification["learnable"] = True
                     classification["evidence"]["pattern"] = pattern
-                    classification["evidence"]["incorrect_param"] = config.get("incorrect_param")
-                    classification["evidence"]["expected_format"] = config.get("expected_format")
+                    classification["evidence"]["incorrect_param"] = config.get(
+                        "incorrect_param"
+                    )
+                    classification["evidence"]["expected_format"] = config.get(
+                        "expected_format"
+                    )
                     if "incorrect_param" in config:
-                        classification["evidence"]["incorrect_value"] = params.get(config["incorrect_param"])
+                        classification["evidence"]["incorrect_value"] = params.get(
+                            config["incorrect_param"]
+                        )
                     return classification
             else:
                 # No param check, just pattern match
@@ -234,7 +247,7 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
 
     # Pattern 3: Workflow sequence errors (check before prerequisite to prioritize)
     # Some errors could be both, but workflow sequence is more specific
-    sequence_indicators = {
+    sequence_indicators: dict[str, dict[str, Any]] = {
         "bonfire_deploy": {
             "before": ["bonfire_namespace_reserve"],
             "error_if_missing": r"namespace.*not.*found|no.*namespace",
@@ -296,7 +309,9 @@ def classify_error_type(tool_name: str, params: dict, error_message: str, result
             classification["confidence"] = 0.7  # Lower confidence - might be env issue
             classification["learnable"] = True
             classification["evidence"]["pattern"] = "tty_required"
-            classification["evidence"]["suggestion"] = "Use non-interactive flag or debug_tool()"
+            classification["evidence"][
+                "suggestion"
+            ] = "Use non-interactive flag or debug_tool()"
             return classification
 
     # No pattern matched
@@ -318,4 +333,4 @@ def is_learnable_error(classification: dict) -> bool:
         return False
 
     category_info = USAGE_ERROR_TYPES.get(category, {})
-    return category_info.get("learnable", False)
+    return bool(category_info.get("learnable", False))
