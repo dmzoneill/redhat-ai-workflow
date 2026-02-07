@@ -8,8 +8,6 @@ The ``skill_file`` parameter is auto-parametrized by the ``conftest.py`` in
 this directory via ``pytest_generate_tests``.
 """
 
-import pytest
-import yaml
 from validate_skills import load_skill
 
 
@@ -61,7 +59,11 @@ class TestSkillTemplates:
                     except Exception as exc:
                         errors.append(f"step '{step_name}' arg '{arg_key}': {exc}")
 
-        assert errors == [], f"{skill_file.name} template errors in args:\n" + "\n".join(f"  - {e}" for e in errors)
+        assert (
+            errors == []
+        ), f"{skill_file.name} template errors in args:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
 
     def test_output_templates_resolve(self, skill_file, make_executor):
         """Output value templates must render without Jinja2 error."""
@@ -80,7 +82,11 @@ class TestSkillTemplates:
                 except Exception as exc:
                     errors.append(f"output '{out_name}': {exc}")
 
-        assert errors == [], f"{skill_file.name} template errors in outputs:\n" + "\n".join(f"  - {e}" for e in errors)
+        assert (
+            errors == []
+        ), f"{skill_file.name} template errors in outputs:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
 
     def test_condition_templates_resolve(self, skill_file, make_executor):
         """Condition expressions must render without Jinja2 error.
@@ -103,7 +109,11 @@ class TestSkillTemplates:
             except Exception as exc:
                 errors.append(f"step '{step_name}': {exc}")
 
-        assert errors == [], f"{skill_file.name} condition render errors:\n" + "\n".join(f"  - {e}" for e in errors)
+        assert (
+            errors == []
+        ), f"{skill_file.name} condition render errors:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
 
     # ------------------------------------------------------------------
     # Non-parametrized tests

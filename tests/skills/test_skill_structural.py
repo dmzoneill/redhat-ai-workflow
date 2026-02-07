@@ -8,7 +8,6 @@ The ``skill_file`` parameter is auto-parametrized by the ``conftest.py`` in
 this directory via ``pytest_generate_tests``.
 """
 
-import yaml
 from validate_skills import (
     load_skill,
     validate_compute_syntax,
@@ -33,7 +32,9 @@ class TestSkillStructuralValidation:
         """Load a skill file and fail fast on parse errors."""
         skill = load_skill(skill_file)
         assert skill is not None, f"Failed to load {skill_file.name}"
-        assert "_error" not in skill, f"YAML parse error in {skill_file.name}: {skill.get('_error')}"
+        assert (
+            "_error" not in skill
+        ), f"YAML parse error in {skill_file.name}: {skill.get('_error')}"
         return skill
 
     # ------------------------------------------------------------------

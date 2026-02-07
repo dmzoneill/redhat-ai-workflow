@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.persona_loader import (
+from server.persona_loader import (  # noqa: E402
     CORE_TOOLS,
     PERSONAS_DIR,
     PROJECT_DIR,
@@ -26,7 +26,9 @@ class TestPaths:
 
     def test_servers_dir_exists(self):
         """TOOL_MODULES_DIR should point to tool_modules directory."""
-        assert TOOL_MODULES_DIR.exists(), f"TOOL_MODULES_DIR does not exist: {TOOL_MODULES_DIR}"
+        assert (
+            TOOL_MODULES_DIR.exists()
+        ), f"TOOL_MODULES_DIR does not exist: {TOOL_MODULES_DIR}"
         assert TOOL_MODULES_DIR.name == "tool_modules"
 
     def test_project_dir_exists(self):
@@ -158,7 +160,9 @@ class TestPersonaFiles:
 
             tools = config.get("tools", [])
             for tool in tools:
-                assert tool in available_modules, f"Persona {persona_file.stem} references unknown module: {tool}"
+                assert (
+                    tool in available_modules
+                ), f"Persona {persona_file.stem} references unknown module: {tool}"
 
 
 class TestGlobalLoader:

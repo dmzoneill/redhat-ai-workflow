@@ -16,10 +16,8 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
 import copy
 from typing import Any
-from unittest.mock import AsyncMock, patch
 
 from tests.skills.mock_responses import generate_default_response
 
@@ -73,8 +71,6 @@ class SkillTestHarness:
         self._tool_calls: list[tuple[str, dict]] = []
 
         # Monkey-patch _exec_tool on the executor instance
-        original_exec_tool = self._executor._exec_tool
-
         async def _mock_exec_tool(tool_name: str, args: dict) -> dict:
             self._tool_calls.append((tool_name, dict(args)))
 
@@ -167,9 +163,14 @@ class SkillTestHarness:
         calls = self.get_tool_calls_for(name)
         if not calls:
             called_tools = sorted({t for t, _ in self._tool_calls})
-            raise AssertionError(f"Tool '{name}' was never called.\n" f"Tools that WERE called: {called_tools}")
+            raise AssertionError(
+                f"Tool '{name}' was never called.\n"
+                f"Tools that WERE called: {called_tools}"
+            )
         if times is not None and len(calls) != times:
-            raise AssertionError(f"Tool '{name}' was called {len(calls)} time(s), expected {times}.")
+            raise AssertionError(
+                f"Tool '{name}' was called {len(calls)} time(s), expected {times}."
+            )
 
     def assert_tool_not_called(self, name: str) -> None:
         """Assert that *name* was **not** called."""
@@ -185,7 +186,10 @@ class SkillTestHarness:
         calls = self.get_tool_calls_for(name)
         if not calls:
             called_tools = sorted({t for t, _ in self._tool_calls})
-            raise AssertionError(f"Tool '{name}' was never called.\n" f"Tools that WERE called: {called_tools}")
+            raise AssertionError(
+                f"Tool '{name}' was never called.\n"
+                f"Tools that WERE called: {called_tools}"
+            )
         for call_args in calls:
             if all(call_args.get(k) == v for k, v in expected_args.items()):
                 return  # match found
@@ -199,7 +203,10 @@ class SkillTestHarness:
         """Assert *key* exists in context; optionally check its value."""
         ctx = self._executor.context
         if key not in ctx:
-            raise AssertionError(f"Context key '{key}' not found.\n" f"Available keys: {sorted(ctx.keys())}")
+            raise AssertionError(
+                f"Context key '{key}' not found.\n"
+                f"Available keys: {sorted(ctx.keys())}"
+            )
         if value is not None and ctx[key] != value:
             raise AssertionError(f"Context['{key}'] = {ctx[key]!r}, expected {value!r}")
 
@@ -207,15 +214,22 @@ class SkillTestHarness:
         """Assert that every executed step succeeded (no errors)."""
         for i, sr in enumerate(self._executor.step_results):
             if not sr.get("success", True):
-                raise AssertionError(f"Step {i} ('{sr.get('name', '?')}') failed: {sr.get('error', 'unknown')}")
+                raise AssertionError(
+                    f"Step {i} ('{sr.get('name', '?')}') failed: {sr.get('error', 'unknown')}"
+                )
 
     def assert_step_failed(self, step_name: str) -> None:
         """Assert that a step with *step_name* recorded a failure."""
         for sr in self._executor.step_results:
             if sr.get("name") == step_name:
                 if sr.get("success", True):
-                    raise AssertionError(f"Step '{step_name}' was expected to fail but succeeded.")
+                    raise AssertionError(
+                        f"Step '{step_name}' was expected to fail but succeeded."
+                    )
                 return
         # Step not found at all - list available step names
         available = [sr.get("name", "?") for sr in self._executor.step_results]
-        raise AssertionError(f"Step '{step_name}' not found in results.\n" f"Available steps: {available}")
+        raise AssertionError(
+            f"Step '{step_name}' not found in results.\n"
+            f"Available steps: {available}"
+        )

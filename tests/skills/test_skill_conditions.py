@@ -8,10 +8,6 @@ Also includes a smoke test that extracts every ``condition:`` string from
 every skill YAML file and verifies it can be parsed without errors.
 """
 
-import re
-
-import pytest
-import yaml
 from validate_skills import load_skill
 
 
@@ -84,7 +80,9 @@ class TestConditionEvaluation:
                 "is_ready": True,
             }
         )
-        assert executor._eval_condition("has_branch and has_issue and is_ready") is False
+        assert (
+            executor._eval_condition("has_branch and has_issue and is_ready") is False
+        )
 
     # ------------------------------------------------------------------
     # Undefined variables
@@ -155,4 +153,8 @@ class TestConditionEvaluation:
                 except Exception as exc:
                     errors.append(f"{skill_path.stem}:{step_name}: {exc}")
 
-        assert errors == [], f"{len(errors)} condition(s) failed to parse:\n" + "\n".join(f"  - {e}" for e in errors)
+        assert (
+            errors == []
+        ), f"{len(errors)} condition(s) failed to parse:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )

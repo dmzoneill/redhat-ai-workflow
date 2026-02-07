@@ -6,7 +6,6 @@ real tool calls with mock responses from mock_responses.py.
 
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -88,15 +87,20 @@ class SkillHarness:
         """
         calls = [c for c in self.tool_calls if c["tool"] == tool_name]
         assert len(calls) > 0, (
-            f"Tool '{tool_name}' was never called. " f"Called tools: {[c['tool'] for c in self.tool_calls]}"
+            f"Tool '{tool_name}' was never called. "
+            f"Called tools: {[c['tool'] for c in self.tool_calls]}"
         )
         if times is not None:
-            assert len(calls) == times, f"Tool '{tool_name}' called {len(calls)} times, expected {times}"
+            assert (
+                len(calls) == times
+            ), f"Tool '{tool_name}' called {len(calls)} times, expected {times}"
 
     def assert_tool_not_called(self, tool_name: str):
         """Assert that a specific tool was never called."""
         calls = [c for c in self.tool_calls if c["tool"] == tool_name]
-        assert len(calls) == 0, f"Tool '{tool_name}' was called {len(calls)} time(s), expected 0"
+        assert (
+            len(calls) == 0
+        ), f"Tool '{tool_name}' was called {len(calls)} time(s), expected 0"
 
     def get_tool_args(self, tool_name: str) -> list[dict]:
         """Return all argument dicts for calls to the given tool."""
@@ -193,7 +197,9 @@ class TestSkillExecution:
         # Verify known high-risk skills are in the exclusion list
         assert "release_aa_backend_prod" in test_exclusions["excluded_skills"]
 
-    async def test_all_safe_skills_execute(self, all_skill_files, harness, test_exclusions):
+    async def test_all_safe_skills_execute(
+        self, all_skill_files, harness, test_exclusions
+    ):
         """Every non-excluded skill executes without crashing.
 
         Smoke tests the first 10 non-excluded skills. Skills that require

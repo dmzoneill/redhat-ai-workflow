@@ -6,8 +6,6 @@ can be executed end-to-end without hitting real services.
 
 from __future__ import annotations
 
-import time
-
 # ---------------------------------------------------------------------------
 # Specific tool overrides (exact tool name match takes priority)
 # ---------------------------------------------------------------------------

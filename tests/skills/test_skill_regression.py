@@ -9,7 +9,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 # Ensure project root is importable
@@ -76,8 +75,9 @@ class TestSkillRegressions:
                 if "eval(" in stripped:
                     violations.append(f"{path.name} step '{step_name}'")
 
-        assert not violations, f"eval() found in compute blocks (use locals().get() instead):\n" + "\n".join(
-            f"  - {v}" for v in violations
+        assert not violations, (
+            f"eval() found in compute blocks (use locals().get() instead):\n"
+            + "\n".join(f"  - {v}" for v in violations)
         )
 
     def test_no_shell_true_in_compute_blocks(self):
@@ -97,7 +97,9 @@ class TestSkillRegressions:
                 if "shell=True" in stripped:
                     violations.append(f"{path.name} step '{step_name}'")
 
-        assert not violations, f"shell=True found in compute blocks (use shell=False):\n" + "\n".join(
+        assert (
+            not violations
+        ), f"shell=True found in compute blocks (use shell=False):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -116,7 +118,9 @@ class TestSkillRegressions:
                 if bare_except_re.search(code):
                     violations.append(f"{path.name} step '{step_name}'")
 
-        assert not violations, f"Bare 'except:' found (use 'except Exception:' instead):\n" + "\n".join(
+        assert (
+            not violations
+        ), f"Bare 'except:' found (use 'except Exception:' instead):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -133,9 +137,14 @@ class TestSkillRegressions:
                 if not isinstance(output, dict):
                     continue
                 if "tool" in output:
-                    violations.append(f"{path.name} output '{output.get('name', '?')}' " f"has tool: {output['tool']}")
+                    violations.append(
+                        f"{path.name} output '{output.get('name', '?')}' "
+                        f"has tool: {output['tool']}"
+                    )
 
-        assert not violations, f"Tool steps found in outputs section (move to steps):\n" + "\n".join(
+        assert (
+            not violations
+        ), f"Tool steps found in outputs section (move to steps):\n" + "\n".join(
             f"  - {v}" for v in violations
         )
 
@@ -244,9 +253,14 @@ class TestSkillRegressions:
                     continue
                 if not any(key in step for key in valid_actions):
                     step_name = step.get("name", f"step_{i}")
-                    violations.append(f"{path.name} step '{step_name}': " f"missing tool/compute/then/description")
+                    violations.append(
+                        f"{path.name} step '{step_name}': "
+                        f"missing tool/compute/then/description"
+                    )
 
-        assert not violations, f"Steps without action found:\n" + "\n".join(f"  - {v}" for v in violations)
+        assert not violations, f"Steps without action found:\n" + "\n".join(
+            f"  - {v}" for v in violations
+        )
 
     def test_on_error_values_are_valid(self):
         """on_error should be 'continue', 'fail', or 'auto_heal'.
@@ -263,10 +277,13 @@ class TestSkillRegressions:
                 if on_error is not None and on_error not in valid_on_error:
                     step_name = step.get("name", "unnamed")
                     violations.append(
-                        f"{path.name} step '{step_name}': " f"on_error='{on_error}' (valid: {valid_on_error})"
+                        f"{path.name} step '{step_name}': "
+                        f"on_error='{on_error}' (valid: {valid_on_error})"
                     )
 
-        assert not violations, f"Invalid on_error values found:\n" + "\n".join(f"  - {v}" for v in violations)
+        assert not violations, f"Invalid on_error values found:\n" + "\n".join(
+            f"  - {v}" for v in violations
+        )
 
     def test_output_names_are_unique_per_skill(self):
         """Each step's output name should be unique within a skill.
@@ -299,9 +316,14 @@ class TestSkillRegressions:
                         f"'{prev_name}' and '{step.get('name', '?')}'"
                     )
                 else:
-                    seen_outputs[output_name] = (step.get("name", "unnamed"), has_condition)
+                    seen_outputs[output_name] = (
+                        step.get("name", "unnamed"),
+                        has_condition,
+                    )
 
-        assert not violations, f"Duplicate output names found:\n" + "\n".join(f"  - {v}" for v in violations)
+        assert not violations, f"Duplicate output names found:\n" + "\n".join(
+            f"  - {v}" for v in violations
+        )
 
     def test_skill_names_match_filenames(self):
         """Skill 'name' field should match the YAML filename.
@@ -315,9 +337,14 @@ class TestSkillRegressions:
             expected_name = path.stem
             actual_name = skill.get("name", "")
             if actual_name and actual_name != expected_name:
-                violations.append(f"{path.name}: name='{actual_name}' but filename " f"suggests '{expected_name}'")
+                violations.append(
+                    f"{path.name}: name='{actual_name}' but filename "
+                    f"suggests '{expected_name}'"
+                )
 
-        assert not violations, f"Skill name/filename mismatches:\n" + "\n".join(f"  - {v}" for v in violations)
+        assert not violations, f"Skill name/filename mismatches:\n" + "\n".join(
+            f"  - {v}" for v in violations
+        )
 
 
 # ============================================================================

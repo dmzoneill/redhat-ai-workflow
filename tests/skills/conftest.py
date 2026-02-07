@@ -14,7 +14,6 @@ import copy
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -26,8 +25,8 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(PROJECT_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
-from tests.skills.harness import SkillTestHarness
-from tests.skills.mock_responses import generate_default_response
+from tests.skills.harness import SkillTestHarness  # noqa: E402
+from tests.skills.mock_responses import generate_default_response  # noqa: E402
 
 # Directories
 SKILLS_DIR = PROJECT_ROOT / "skills"
@@ -210,7 +209,9 @@ def harness(mock_tool_responses):
             if not path.exists():
                 matches = list(SKILLS_DIR.rglob(f"{skill_name}.yaml"))
                 if not matches:
-                    raise FileNotFoundError(f"Skill '{skill_name}' not found under {SKILLS_DIR}")
+                    raise FileNotFoundError(
+                        f"Skill '{skill_name}' not found under {SKILLS_DIR}"
+                    )
                 path = matches[0]
             with open(path) as f:
                 _cache[skill_name] = yaml.safe_load(f)
