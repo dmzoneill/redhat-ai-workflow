@@ -418,3 +418,454 @@ class TestMultiplePatterns:
         # Should warn for both patterns
         assert len(result["warnings"]) == 2
         assert len(result["patterns_matched"]) == 2
+
+
+# ============================================================================
+# Additional coverage tests targeting uncovered lines
+# ============================================================================
+
+
+class TestIncorrectParameterMatching:
+    """Test INCORRECT_PARAMETER category matching (lines 206-225)."""
+
+    def test_incorrect_parameter_no_param(self, checker, temp_storage):
+        """Should return False when parameter is not in params."""
+        pattern = {
+            "id": "incorrect_param_test",
+            "tool": "test_tool",
+            "error_category": "INCORRECT_PARAMETER",
+            "mistake_pattern": {
+                "parameter": "namespace",
+                "common_mistakes": ["using arbitrary namespace name"],
+            },
+            "root_cause": "Wrong namespace used",
+            "prevention_steps": [],
+            "observations": 10,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"other_param": "value"},
+        )
+        assert result["warnings"] == []
+
+    def test_incorrect_parameter_arbitrary_namespace(self, checker, temp_storage):
+        """Should not falsely flag arbitrary ephemeral namespace."""
+        pattern = {
+            "id": "incorrect_param_ns",
+            "tool": "bonfire_ns_release",
+            "error_category": "INCORRECT_PARAMETER",
+            "mistake_pattern": {
+                "parameter": "namespace",
+                "common_mistakes": ["using arbitrary namespace name"],
+            },
+            "root_cause": "Wrong namespace",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="bonfire_ns_release",
+            params={"namespace": "ephemeral-abc123"},
+        )
+        # Should not warn for INCORRECT_PARAMETER to avoid false positives
+        assert result["warnings"] == []
+
+    def test_incorrect_parameter_no_common_mistakes(self, checker, temp_storage):
+        """Should not warn when no common_mistakes defined."""
+        pattern = {
+            "id": "incorrect_no_common",
+            "tool": "test_tool",
+            "error_category": "INCORRECT_PARAMETER",
+            "mistake_pattern": {
+                "parameter": "value",
+                "common_mistakes": [],
+            },
+            "root_cause": "Wrong value",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"value": "anything"},
+        )
+        assert result["warnings"] == []
+
+
+class TestMissingPrerequisiteMatching:
+    """Test MISSING_PREREQUISITE category matching (lines 269-279)."""
+
+    def test_missing_prerequisite_no_commits(self, checker, temp_storage):
+        """Should detect missing commits prerequisite."""
+        pattern = {
+            "id": "missing_prereq_test",
+            "tool": "git_push",
+            "error_category": "MISSING_PREREQUISITE",
+            "mistake_pattern": {
+                "context": "branch created but no commits",
+            },
+            "root_cause": "Pushing empty branch",
+            "prevention_steps": [
+                {"action": "commit_first", "reason": "Make commits before pushing"},
+            ],
+            "observations": 10,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="git_push",
+            params={"branch": "feature/new"},
+            context={"recent_tool_calls": ["git_branch"]},
+        )
+        assert len(result["warnings"]) == 1
+
+    def test_missing_prerequisite_with_commits(self, checker, temp_storage):
+        """Should not warn when commits exist."""
+        pattern = {
+            "id": "missing_prereq_ok",
+            "tool": "git_push",
+            "error_category": "MISSING_PREREQUISITE",
+            "mistake_pattern": {
+                "context": "branch created but no commits",
+            },
+            "root_cause": "Pushing empty branch",
+            "prevention_steps": [],
+            "observations": 10,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="git_push",
+            params={"branch": "feature/new"},
+            context={"recent_tool_calls": ["git_commit"]},
+        )
+        assert result["warnings"] == []
+
+    def test_missing_prerequisite_unrecognized_context(self, checker, temp_storage):
+        """Should not warn for unrecognized prerequisite context."""
+        pattern = {
+            "id": "missing_prereq_unknown",
+            "tool": "test_tool",
+            "error_category": "MISSING_PREREQUISITE",
+            "mistake_pattern": {
+                "context": "some other prerequisite",
+            },
+            "root_cause": "Unknown prerequisite",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"param": "value"},
+            context={},
+        )
+        assert result["warnings"] == []
+
+
+class TestUnknownCategory:
+    """Test unknown error_category handling (line 147)."""
+
+    def test_unknown_category_no_match(self, checker, temp_storage):
+        """Should not match for unknown error category."""
+        pattern = {
+            "id": "unknown_cat_test",
+            "tool": "test_tool",
+            "error_category": "UNKNOWN_CATEGORY",
+            "mistake_pattern": {
+                "parameter": "test",
+            },
+            "root_cause": "Unknown",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"test": "value"},
+        )
+        assert result["warnings"] == []
+
+
+class TestCaching:
+    """Test pattern caching (lines 352-406)."""
+
+    def test_cache_hit(self, checker, short_sha_pattern):
+        """Should use cached patterns on second call."""
+        # First call populates cache
+        checker.check_before_call(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+        )
+
+        # Second call should hit cache
+        result = checker.check_before_call(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short2"},
+        )
+        assert len(result["warnings"]) == 1
+
+    def test_cache_clear(self, checker, short_sha_pattern):
+        """Should clear cache properly."""
+        # Populate cache
+        checker.check_before_call(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+        )
+
+        # Clear cache
+        checker.clear_cache()
+        assert checker._pattern_cache is None
+        assert checker._cache_timestamp is None
+
+    def test_cache_expiry(self, temp_storage):
+        """Should expire cache after TTL."""
+        import time
+
+        checker = UsagePatternChecker(storage=temp_storage, cache_ttl=0)
+
+        pattern = {
+            "id": "cache_exp_test",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "test",
+                "validation": {"regex": "^valid$"},
+            },
+            "root_cause": "test",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        # First call
+        checker.check_before_call(tool_name="test_tool", params={"test": "x"})
+
+        # Wait for TTL to expire (TTL=0 means immediate expiry)
+        time.sleep(0.01)
+
+        # Second call should find cache expired
+        result = checker.check_before_call(tool_name="test_tool", params={"test": "x"})
+        assert len(result["warnings"]) == 1
+
+    def test_cache_miss_for_different_tool(self, checker, short_sha_pattern):
+        """Should miss cache for different tool."""
+        # Populate cache for bonfire_deploy
+        checker.check_before_call(
+            tool_name="bonfire_deploy",
+            params={"image_tag": "short"},
+        )
+
+        # Different tool should be a cache miss
+        result = checker.check_before_call(
+            tool_name="other_tool",
+            params={"param": "value"},
+        )
+        assert result["warnings"] == []
+
+    def test_cache_eviction_max_entries(self, temp_storage):
+        """Should evict oldest entry when max cache entries exceeded."""
+        checker = UsagePatternChecker(storage=temp_storage, cache_ttl=300)
+        checker._max_cache_entries = 2
+
+        # Create pattern
+        pattern = {
+            "id": "eviction_test",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {"parameter": "p", "validation": {"regex": "^x$"}},
+            "root_cause": "test",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        # Fill cache with 3 entries (max is 2)
+        checker.check_before_call(
+            tool_name="test_tool", params={"p": "a"}, min_confidence=0.70
+        )
+        checker.check_before_call(
+            tool_name="test_tool", params={"p": "b"}, min_confidence=0.60
+        )
+        checker.check_before_call(
+            tool_name="test_tool", params={"p": "c"}, min_confidence=0.50
+        )
+
+        # Cache should have evicted oldest
+        assert len(checker._pattern_cache) <= 2
+
+
+class TestWarningLevels:
+    """Test warning generation for different confidence levels (lines 302-303)."""
+
+    def test_low_confidence_warning(self, checker, temp_storage):
+        """Should generate LOW level warning for < 75% confidence."""
+        pattern = {
+            "id": "low_conf_warn",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "test",
+                "validation": {"regex": "^valid$"},
+            },
+            "root_cause": "test issue",
+            "prevention_steps": [{"action": "check", "reason": "Verify value"}],
+            "observations": 3,
+            "confidence": 0.60,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"test": "invalid"},
+            min_confidence=0.50,
+        )
+        assert len(result["warnings"]) == 1
+        warning = result["warnings"][0]
+        assert "LOW" in warning
+
+    def test_critical_confidence_warning(self, checker, temp_storage):
+        """Should generate CRITICAL level warning for >= 95% confidence."""
+        pattern = {
+            "id": "critical_conf_warn",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "test",
+                "validation": {"regex": "^valid$"},
+            },
+            "root_cause": "critical issue",
+            "prevention_steps": [{"action": "fix", "reason": "Must fix"}],
+            "observations": 100,
+            "confidence": 0.96,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"test": "invalid"},
+        )
+        assert len(result["warnings"]) == 1
+        warning = result["warnings"][0]
+        assert "CRITICAL" in warning
+        assert "blocked" in warning.lower()
+
+
+class TestPreventionSummaryExtended:
+    """Test prevention summary with success rate (lines 343-346)."""
+
+    def test_summary_with_success_rate(self, checker, short_sha_pattern):
+        """Should show prevention success rate in summary."""
+        summary = checker.get_prevention_summary("bonfire_deploy")
+        assert "90%" in summary  # 45/50 = 90%
+
+    def test_summary_without_success(self, checker, temp_storage):
+        """Should handle pattern with no success_after_prevention."""
+        pattern = {
+            "id": "no_success_test",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {},
+            "root_cause": "test",
+            "prevention_steps": [],
+            "observations": 10,
+            "success_after_prevention": 0,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        summary = checker.get_prevention_summary("test_tool")
+        assert summary != ""
+        assert "test" in summary
+
+
+class TestParameterFormatValidation:
+    """Test parameter format validation edge cases (lines 176-189)."""
+
+    def test_validation_check_length_passes(self, checker, temp_storage):
+        """Should detect parameter failing length check."""
+        pattern = {
+            "id": "len_check_test",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "sha",
+                "validation": {
+                    "check": "len(sha) < 40",
+                },
+            },
+            "root_cause": "Short value",
+            "prevention_steps": [{"action": "fix", "reason": "Use full value"}],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"sha": "abc123"},  # Less than 40 chars
+        )
+        assert len(result["warnings"]) == 1
+
+    def test_validation_check_length_full(self, checker, temp_storage):
+        """Should not warn when value is long enough."""
+        pattern = {
+            "id": "len_check_ok",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "sha",
+                "validation": {
+                    "check": "len(sha) < 40",
+                },
+            },
+            "root_cause": "Short value",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"sha": "a" * 40},
+        )
+        assert result["warnings"] == []
+
+    def test_missing_parameter_no_match(self, checker, temp_storage):
+        """Should not match when param is missing from params dict."""
+        pattern = {
+            "id": "missing_param_test",
+            "tool": "test_tool",
+            "error_category": "PARAMETER_FORMAT",
+            "mistake_pattern": {
+                "parameter": "missing_param",
+                "validation": {"regex": "^x$"},
+            },
+            "root_cause": "test",
+            "prevention_steps": [],
+            "observations": 5,
+            "confidence": 0.80,
+        }
+        temp_storage.add_pattern(pattern)
+
+        result = checker.check_before_call(
+            tool_name="test_tool",
+            params={"other": "value"},
+        )
+        assert result["warnings"] == []
