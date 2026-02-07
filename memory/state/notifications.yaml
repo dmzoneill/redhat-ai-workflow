@@ -1,8 +1,0 @@
-notifications:
-- job_name: nightly_jira_hygiene
-  message: "\u274C Skill `jira_hygiene_all` failed.\n\nError: Claude CLI timed out\
-    \ after 5 minutes"
-  skill: jira_hygiene_all
-  success: false
-  timestamp: '2026-01-22T21:05:00.180970'
-  title: 'Scheduled Job: nightly_jira_hygiene'

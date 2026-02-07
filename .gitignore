@@ -67,9 +67,12 @@ config.json
 # Copy state.json.example to state.json and customize
 state.json
 
+# Memory state (auto-updated by MCP tools, machine-specific)
+memory/
+
 # Session logs (personal work history)
-memory/sessions/*.yaml
-!memory/sessions/.gitkeep
+# memory/sessions/*.yaml
+# !memory/sessions/.gitkeep
 
 # Generated files
 docs/*.pdf
