@@ -104,12 +104,36 @@ async def cleanup_meetbot_modules():
 
 
 # Skip markers for tests that require specific system capabilities
+def _check_pactl() -> bool:
+    try:
+        return (
+            subprocess.run(["pactl", "info"], capture_output=True, timeout=5).returncode
+            == 0
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _check_pw_metadata() -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["which", "pw-metadata"], capture_output=True, timeout=5
+            ).returncode
+            == 0
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 requires_pulseaudio = pytest.mark.skipif(
-    subprocess.run(["pactl", "info"], capture_output=True).returncode != 0, reason="PulseAudio/PipeWire not available"
+    not _check_pactl(),
+    reason="PulseAudio/PipeWire not available",
 )
 
 requires_pw_metadata = pytest.mark.skipif(
-    subprocess.run(["which", "pw-metadata"], capture_output=True).returncode != 0, reason="pw-metadata not available"
+    not _check_pw_metadata(),
+    reason="pw-metadata not available",
 )
 
 
@@ -160,7 +184,9 @@ class TestDefaultSourcePreservation:
         # Get current default
         original_default = await get_default_source()
         assert original_default is not None
-        assert "meet_bot" not in original_default.lower(), "Test requires non-meetbot default"
+        assert (
+            "meet_bot" not in original_default.lower()
+        ), "Test requires non-meetbot default"
 
         # Create device manager and source
         manager = InstanceDeviceManager("test_preserve_default")
@@ -202,7 +228,9 @@ class TestDefaultSourcePreservation:
         # Verify the default is now the physical mic
         current_default = await get_default_source()
         # It should either be the physical mic or at least not a meetbot device
-        assert "meet_bot" not in current_default.lower(), f"Default is still a meetbot device: {current_default}"
+        assert (
+            "meet_bot" not in current_default.lower()
+        ), f"Default is still a meetbot device: {current_default}"
 
     @requires_pulseaudio
     @pytest.mark.asyncio
@@ -252,7 +280,9 @@ class TestDeviceCleanup:
 
         # Verify devices exist
         sources = await list_sources()
-        assert any("test_cleanup" in s for s in sources), "Source should exist after creation"
+        assert any(
+            "test_cleanup" in s for s in sources
+        ), "Source should exist after creation"
 
         # Cleanup
         await manager.cleanup()
@@ -262,7 +292,9 @@ class TestDeviceCleanup:
 
         # Verify devices are gone
         sources = await list_sources()
-        assert not any("test_cleanup" in s for s in sources), "Source should be removed after cleanup"
+        assert not any(
+            "test_cleanup" in s for s in sources
+        ), "Source should be removed after cleanup"
 
     @requires_pulseaudio
     @pytest.mark.asyncio
@@ -283,13 +315,18 @@ class TestDeviceCleanup:
         await manager.cleanup()
 
         # Verify monitor task is stopped
-        assert manager._source_monitor_task is None or manager._source_monitor_task.done()
+        assert (
+            manager._source_monitor_task is None or manager._source_monitor_task.done()
+        )
 
     @requires_pulseaudio
     @pytest.mark.asyncio
     async def test_orphaned_device_cleanup(self):
         """Test cleanup of orphaned devices."""
-        from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDeviceManager, cleanup_orphaned_meetbot_devices
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            InstanceDeviceManager,
+            cleanup_orphaned_meetbot_devices,
+        )
 
         # Create a device but don't clean it up properly
         manager = InstanceDeviceManager("test_orphan")
@@ -307,7 +344,9 @@ class TestDeviceCleanup:
 
         # Verify devices are gone
         sources = await list_sources()
-        assert not any("test_orphan" in s for s in sources), "Orphaned source should be removed"
+        assert not any(
+            "test_orphan" in s for s in sources
+        ), "Orphaned source should be removed"
 
 
 class TestBrowserClosureCleanup:
@@ -387,7 +426,9 @@ class TestAudioCaptureSourceHandling:
         source_code = inspect.getsource(PulseAudioCapture.start)
 
         # Verify it doesn't call set-default-source
-        assert "set-default-source" not in source_code, "PulseAudioCapture.start should not set default source"
+        assert (
+            "set-default-source" not in source_code
+        ), "PulseAudioCapture.start should not set default source"
         assert (
             "default.audio.source" not in source_code
         ), "PulseAudioCapture.start should not set default source via pw-metadata"
@@ -455,19 +496,30 @@ class TestVideoGeneratorStartupCheck:
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            "video_generator", PROJECT_ROOT / "tool_modules" / "aa_meet_bot" / "src" / "video_generator.py"
+            "video_generator",
+            PROJECT_ROOT
+            / "tool_modules"
+            / "aa_meet_bot"
+            / "src"
+            / "video_generator.py",
         )
 
         # We can't easily test this without mocking, so verify the function exists
         # and has the right structure
-        video_gen_path = PROJECT_ROOT / "tool_modules" / "aa_meet_bot" / "src" / "video_generator.py"
+        video_gen_path = (
+            PROJECT_ROOT / "tool_modules" / "aa_meet_bot" / "src" / "video_generator.py"
+        )
         content = video_gen_path.read_text()
 
-        assert "ensure_default_source_not_meetbot" in content, "Should have ensure_default_source_not_meetbot function"
+        assert (
+            "ensure_default_source_not_meetbot" in content
+        ), "Should have ensure_default_source_not_meetbot function"
         assert (
             "meet_bot" in content and "get-default-source" in content
         ), "Function should check for meetbot in default source"
-        assert "pw-metadata" in content or "set-default-source" in content, "Function should restore default source"
+        assert (
+            "pw-metadata" in content or "set-default-source" in content
+        ), "Function should restore default source"
 
 
 class TestMultipleInstanceIsolation:
@@ -599,7 +651,9 @@ class TestSourceMonitorTask:
 
         # Default should be restored
         current = await get_default_source()
-        assert "meet_bot" not in current.lower(), f"Monitor should have restored default, but it's: {current}"
+        assert (
+            "meet_bot" not in current.lower()
+        ), f"Monitor should have restored default, but it's: {current}"
 
         await manager.cleanup()
 
@@ -612,7 +666,9 @@ class TestSourceMonitorTask:
 def _check_v4l2loopback() -> bool:
     """Check if v4l2loopback is available."""
     try:
-        result = subprocess.run(["which", "v4l2loopback-ctl"], capture_output=True, timeout=5)
+        result = subprocess.run(
+            ["which", "v4l2loopback-ctl"], capture_output=True, timeout=5
+        )
         if result.returncode != 0:
             return False
         # Also check if module is loaded or can be loaded
@@ -627,10 +683,13 @@ def _check_v4l2loopback_control() -> bool:
     return Path("/dev/v4l2loopback").exists()
 
 
-requires_v4l2loopback = pytest.mark.skipif(not _check_v4l2loopback(), reason="v4l2loopback not available")
+requires_v4l2loopback = pytest.mark.skipif(
+    not _check_v4l2loopback(), reason="v4l2loopback not available"
+)
 
 requires_v4l2loopback_control = pytest.mark.skipif(
-    not _check_v4l2loopback_control(), reason="v4l2loopback control device not available (need sudo access)"
+    not _check_v4l2loopback_control(),
+    reason="v4l2loopback control device not available (need sudo access)",
 )
 
 
@@ -826,7 +885,10 @@ class TestVideoDeviceCleanup:
     @pytest.mark.asyncio
     async def test_orphaned_video_device_cleanup(self):
         """Orphaned video devices should be cleaned up."""
-        from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDeviceManager, _cleanup_orphaned_video_devices
+        from tool_modules.aa_meet_bot.src.virtual_devices import (
+            InstanceDeviceManager,
+            _cleanup_orphaned_video_devices,
+        )
 
         manager = InstanceDeviceManager("test_orphan_video")
 
