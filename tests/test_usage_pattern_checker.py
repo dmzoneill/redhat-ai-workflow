@@ -633,7 +633,7 @@ class TestCaching:
 
     def test_cache_expiry(self, temp_storage):
         """Should expire cache after TTL."""
-        import time
+        from unittest.mock import patch
 
         checker = UsagePatternChecker(storage=temp_storage, cache_ttl=0)
 
@@ -652,15 +652,22 @@ class TestCaching:
         }
         temp_storage.add_pattern(pattern)
 
-        # First call
-        checker.check_before_call(tool_name="test_tool", params={"test": "x"})
+        fake_time = 1000.0
 
-        # Wait for TTL to expire (TTL=0 means immediate expiry)
-        time.sleep(0.01)
+        with patch("server.usage_pattern_checker.time") as mock_time:
+            mock_time.time.return_value = fake_time
 
-        # Second call should find cache expired
-        result = checker.check_before_call(tool_name="test_tool", params={"test": "x"})
-        assert len(result["warnings"]) == 1
+            # First call - populates cache
+            checker.check_before_call(tool_name="test_tool", params={"test": "x"})
+
+            # Advance time past TTL (TTL=0, any advance expires)
+            mock_time.time.return_value = fake_time + 0.01
+
+            # Second call should find cache expired
+            result = checker.check_before_call(
+                tool_name="test_tool", params={"test": "x"}
+            )
+            assert len(result["warnings"]) == 1
 
     def test_cache_miss_for_different_tool(self, checker, short_sha_pattern):
         """Should miss cache for different tool."""

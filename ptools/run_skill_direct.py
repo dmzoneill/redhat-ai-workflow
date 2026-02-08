@@ -13,7 +13,7 @@ if str(WORKFLOW_SRC) not in sys.path:
     sys.path.append(str(WORKFLOW_SRC))
 
 import yaml  # noqa: E402
-from skill_engine import SkillExecutor  # noqa: E402
+from skill_engine import SkillExecutor, SkillExecutorConfig  # noqa: E402
 
 
 async def run_coffee():
@@ -22,10 +22,19 @@ async def run_coffee():
         skill = yaml.safe_load(f)
 
     # Inputs for coffee skill
-    inputs = {"full_email_scan": False, "auto_archive_email": False, "days_back": 1, "slack_format": False}
+    inputs = {
+        "full_email_scan": False,
+        "auto_archive_email": False,
+        "days_back": 1,
+        "slack_format": False,
+    }
 
+    direct_config = SkillExecutorConfig(debug=True, emit_events=False)
     executor = SkillExecutor(
-        skill=skill, inputs=inputs, debug=True, server=None, emit_events=False  # We'll let it load modules dynamically
+        skill=skill,
+        inputs=inputs,
+        config=direct_config,
+        server=None,  # We'll let it load modules dynamically
     )
 
     print("Starting coffee skill...")

@@ -107,7 +107,7 @@ try:
     sys.path.insert(0, str(PROJECT_ROOT))
 
     import yaml as skill_yaml
-    from skill_engine import SkillExecutor
+    from skill_engine import SkillExecutor, SkillExecutorConfig
 
     SKILL_EXECUTOR_AVAILABLE = True
     SKILLS_DIR = Path(__file__).parent.parent / "skills"
@@ -132,7 +132,9 @@ def _get_available_skills_description() -> str:
             with open(f) as fp:
                 data = skill_yaml.safe_load(fp)
             name = data.get("name", f.stem)
-            desc = data.get("description", "").split("\n")[0][:60]  # First line, truncated
+            desc = data.get("description", "").split("\n")[0][
+                :60
+            ]  # First line, truncated
             inputs = [i["name"] for i in data.get("inputs", []) if i.get("required")]
             input_str = f" (inputs: {', '.join(inputs)})" if inputs else ""
             skills.append(f"- {name}: {desc}{input_str}")
@@ -329,7 +331,9 @@ class ToolRegistry:
                 description="Get CI/CD pipeline status for a project.",
                 parameters={
                     "type": "object",
-                    "properties": {"mr_id": {"type": "string", "description": "Merge Request ID"}},
+                    "properties": {
+                        "mr_id": {"type": "string", "description": "Merge Request ID"}
+                    },
                     "required": ["mr_id"],
                 },
             )
@@ -799,7 +803,9 @@ class ToolExecutor:
         if RESOLVER_AVAILABLE:
             try:
                 self.resolver = ContextResolver()
-                logger.info(f"Context resolver loaded with {len(self.resolver.repos)} repositories")
+                logger.info(
+                    f"Context resolver loaded with {len(self.resolver.repos)} repositories"
+                )
             except Exception as e:
                 logger.warning(f"Failed to load context resolver: {e}")
 
@@ -840,10 +846,14 @@ class ToolExecutor:
                 return f"Unknown tool: {tool_name}"
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Tool execution error for {tool_name}: {error_msg}", exc_info=True)
+            logger.error(
+                f"Tool execution error for {tool_name}: {error_msg}", exc_info=True
+            )
 
             # Check for known issues from memory
-            matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+            matches = _check_known_issues_sync(
+                tool_name=tool_name, error_text=error_msg
+            )
             known_text = _format_known_issues(matches)
 
             if known_text:
@@ -898,7 +908,9 @@ class ToolExecutor:
         elif tool_name == "jira_search":
             jql = args.get("jql", "")
             max_results = args.get("max_results", 10)
-            return await self._run_command([self.rh_issue, "search", jql, "--max", str(max_results)])
+            return await self._run_command(
+                [self.rh_issue, "search", jql, "--max", str(max_results)]
+            )
         elif tool_name == "jira_comment":
             key = args.get("issue_key", "")
             comment = args.get("comment", "")
@@ -927,7 +939,9 @@ class ToolExecutor:
 
         # Fallback: manual URL parsing
         if not project or not mr_id:
-            url_match = re.match(r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)", mr_input)
+            url_match = re.match(
+                r"https?://[^/]+/(.+?)/-/merge_requests/(\d+)", mr_input
+            )
             if url_match:
                 project = project or url_match.group(1)
                 mr_id = mr_id or url_match.group(2)
@@ -955,7 +969,9 @@ class ToolExecutor:
             "use_repo_flag": use_repo_flag,
         }
 
-    async def _gitlab_mr_view(self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool) -> str:
+    async def _gitlab_mr_view(
+        self, mr_id: str, project: str, run_cwd: str | None, use_repo_flag: bool
+    ) -> str:
         """Execute gitlab_mr_view tool."""
         if not mr_id:
             return "MR ID is required for gitlab_mr_view"
@@ -980,7 +996,9 @@ class ToolExecutor:
             cmd.extend(["--repo", project])
         return await self._run_command(cmd, cwd=run_cwd)
 
-    async def _gitlab_pipeline_status(self, project: str, run_cwd: str | None, use_repo_flag: bool) -> str:
+    async def _gitlab_pipeline_status(
+        self, project: str, run_cwd: str | None, use_repo_flag: bool
+    ) -> str:
         """Execute gitlab_pipeline_status tool."""
         cmd = ["glab", "ci", "status"]
         if use_repo_flag:
@@ -1096,11 +1114,17 @@ class ToolExecutor:
         elif tool_name == "gitlab_pipeline_status":
             return await self._gitlab_pipeline_status(project, run_cwd, use_repo_flag)
         elif tool_name == "gitlab_mr_approve":
-            return await self._gitlab_mr_approve(mr_id, project, run_cwd, use_repo_flag, args)
+            return await self._gitlab_mr_approve(
+                mr_id, project, run_cwd, use_repo_flag, args
+            )
         elif tool_name == "gitlab_mr_comment":
-            return await self._gitlab_mr_comment(mr_id, project, run_cwd, use_repo_flag, args)
+            return await self._gitlab_mr_comment(
+                mr_id, project, run_cwd, use_repo_flag, args
+            )
         elif tool_name == "gitlab_mr_merge":
-            return await self._gitlab_mr_merge(mr_id, project, run_cwd, use_repo_flag, args)
+            return await self._gitlab_mr_merge(
+                mr_id, project, run_cwd, use_repo_flag, args
+            )
 
         return f"Unknown GitLab tool: {tool_name}"
 
@@ -1141,7 +1165,9 @@ class ToolExecutor:
             return await self._run_command(["git", "status", "-sb"], cwd=repo_path)
         elif tool_name == "git_log":
             count = args.get("count", 10)
-            return await self._run_command(["git", "log", f"-{count}", "--oneline"], cwd=repo_path)
+            return await self._run_command(
+                ["git", "log", f"-{count}", "--oneline"], cwd=repo_path
+            )
         return f"Unknown Git tool: {tool_name}"
 
     def _get_kubeconfig(self, environment: str) -> str:
@@ -1166,14 +1192,18 @@ class ToolExecutor:
         environment = args.get("environment", "stage")
 
         # Detect ephemeral namespace
-        if namespace.startswith("ephemeral-") or namespace.startswith("tower-analytics-pr-"):
+        if namespace.startswith("ephemeral-") or namespace.startswith(
+            "tower-analytics-pr-"
+        ):
             environment = "ephemeral"
 
         kubeconfig = self._get_kubeconfig(environment)
         env = {"KUBECONFIG": kubeconfig}
 
         if tool_name == "k8s_get_pods":
-            return await self._run_command(["kubectl", "get", "pods", "-n", namespace], env=env)
+            return await self._run_command(
+                ["kubectl", "get", "pods", "-n", namespace], env=env
+            )
         elif tool_name == "k8s_get_events":
             return await self._run_command(
                 [
@@ -1189,7 +1219,9 @@ class ToolExecutor:
         elif tool_name == "k8s_logs":
             pod = args.get("pod", "")
             tail = args.get("tail", 100)
-            return await self._run_command(["kubectl", "logs", "-n", namespace, pod, f"--tail={tail}"], env=env)
+            return await self._run_command(
+                ["kubectl", "logs", "-n", namespace, pod, f"--tail={tail}"], env=env
+            )
         return f"Unknown K8s tool: {tool_name}"
 
     def _get_bonfire_env(self) -> dict[str, str]:
@@ -1273,17 +1305,26 @@ class ToolExecutor:
                 )
 
             # Select component and image
-            component = "tower-analytics-billing-clowdapp" if billing else "tower-analytics-clowdapp"
+            component = (
+                "tower-analytics-billing-clowdapp"
+                if billing
+                else "tower-analytics-clowdapp"
+            )
             image_base = "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
             repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
 
             # HARD STOP: Check if image exists in Quay before deploying
             logger.info(f"Checking if image exists: {image_base}:{template_ref}")
-            image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
+            image_ref = (
+                f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
+            )
             check_cmd = ["skopeo", "inspect", "--raw", image_ref]
             check_result = await self._run_command(check_cmd)
 
-            if "manifest unknown" in check_result.lower() or "error" in check_result.lower():
+            if (
+                "manifest unknown" in check_result.lower()
+                or "error" in check_result.lower()
+            ):
                 return f"""❌ **STOP: Image not found in Quay**
 
 The image for commit `{template_ref[:12]}` does not exist in redhat-user-workloads.
@@ -1343,7 +1384,9 @@ Please verify the image exists before proceeding."""
                 "tower-analytics",
             ]
 
-            logger.info(f"Bonfire deploy command: KUBECONFIG={env['KUBECONFIG']} {' '.join(cmd)}")
+            logger.info(
+                f"Bonfire deploy command: KUBECONFIG={env['KUBECONFIG']} {' '.join(cmd)}"
+            )
             return await self._run_command(cmd, env=env)
 
         return f"Unknown bonfire tool: {tool_name}"
@@ -1398,7 +1441,9 @@ Please verify the image exists before proceeding."""
             for f in memory_dir.rglob("*.yaml"):
                 rel_path = f.relative_to(memory_dir)
                 files.append(str(rel_path).replace(".yaml", ""))
-            return "Available memory files:\n" + "\n".join(f"- {f}" for f in sorted(files))
+            return "Available memory files:\n" + "\n".join(
+                f"- {f}" for f in sorted(files)
+            )
 
         data = read_memory(key)
         if not data:
@@ -1408,7 +1453,9 @@ Please verify the image exists before proceeding."""
 
         return f"## Memory: {key}\n```yaml\n{yaml.safe_dump(data, default_flow_style=False)}\n```"
 
-    def _execute_memory_append(self, key: str, list_path: str, item_str: Any, append_to_list) -> str:
+    def _execute_memory_append(
+        self, key: str, list_path: str, item_str: Any, append_to_list
+    ) -> str:
         """Execute memory_append tool."""
         if not key or not list_path:
             return "Error: key and list_path are required"
@@ -1480,7 +1527,9 @@ Please verify the image exists before proceeding."""
                 append_to_list,
             )
         elif tool_name == "memory_session_log":
-            return self._execute_memory_session_log(args.get("action", ""), args.get("details", ""))
+            return self._execute_memory_session_log(
+                args.get("action", ""), args.get("details", "")
+            )
 
         return f"Unknown memory tool: {tool_name}"
 
@@ -1507,10 +1556,14 @@ Please verify the image exists before proceeding."""
 
                 client = SlackAgentClient()
                 if await client.connect():
-                    result = await client.send_message(channel_id, text, thread_ts or "")
+                    result = await client.send_message(
+                        channel_id, text, thread_ts or ""
+                    )
                     await client.disconnect()
                     if result.get("success"):
-                        return f"✅ Message sent to {channel_id}" + (f" in thread {thread_ts}" if thread_ts else "")
+                        return f"✅ Message sent to {channel_id}" + (
+                            f" in thread {thread_ts}" if thread_ts else ""
+                        )
                     else:
                         return f"❌ Failed to send message: {result.get('error', 'unknown error')}"
                 else:
@@ -1555,7 +1608,11 @@ Please verify the image exists before proceeding."""
         skill_file = SKILLS_DIR / f"{skill_name}.yaml"
         if not skill_file.exists():
             # List available skills
-            available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
+            available = (
+                [f.stem for f in SKILLS_DIR.glob("*.yaml")]
+                if SKILLS_DIR.exists()
+                else []
+            )
             return f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(sorted(available)) or 'none'}"
 
         # Load and execute the skill
@@ -1564,12 +1621,15 @@ Please verify the image exists before proceeding."""
                 skill = skill_yaml.safe_load(f)
 
             # Create executor and run
+            agent_config = SkillExecutorConfig(
+                debug=True,  # Enable debug for visibility
+                source="slack",  # Claude agent is typically invoked from Slack
+            )
             executor = SkillExecutor(
                 skill=skill,
                 inputs=inputs,
-                debug=True,  # Enable debug for visibility
+                config=agent_config,
                 server=None,  # No MCP server needed - tools loaded dynamically
-                source="slack",  # Claude agent is typically invoked from Slack
             )
 
             # Execute and return result
@@ -1609,7 +1669,9 @@ Please verify the image exists before proceeding."""
                     merge_sha = mr_data.get("merge_commit_sha", "")
                     if merge_sha:
                         commit_sha = merge_sha
-                        logger.info(f"MR {mr_id} is merged, using merge commit: {commit_sha[:12]}")
+                        logger.info(
+                            f"MR {mr_id} is merged, using merge commit: {commit_sha[:12]}"
+                        )
 
             except Exception as e:
                 sha_match = re.search(r"[a-f0-9]{40}", mr_result)
@@ -1710,7 +1772,9 @@ class ClaudeAgent:
         system_prompt: Optional[str] = None,
     ) -> None:
         if not ANTHROPIC_AVAILABLE:
-            raise ImportError("anthropic package not installed. Install with: uv add anthropic")
+            raise ImportError(
+                "anthropic package not installed. Install with: uv add anthropic"
+            )
 
         self.max_tokens = max_tokens
         self.system_prompt = system_prompt or self._default_system_prompt()
@@ -1727,7 +1791,9 @@ class ClaudeAgent:
 
         if use_vertex and vertex_project:
             if not VERTEX_AVAILABLE:
-                raise ImportError("AnthropicVertex not available. Update anthropic: uv add anthropic --upgrade")
+                raise ImportError(
+                    "AnthropicVertex not available. Update anthropic: uv add anthropic --upgrade"
+                )
             self.client = AnthropicVertex(
                 project_id=vertex_project,
                 region=vertex_region,
@@ -1735,7 +1801,9 @@ class ClaudeAgent:
             self.use_vertex = True
             # Use Vertex-compatible model name
             self.model = vertex_model
-            logger.info(f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}")
+            logger.info(
+                f"Using Vertex AI: project={vertex_project}, region={vertex_region}, model={self.model}"
+            )
         else:
             # Fall back to direct API
             api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -1775,21 +1843,31 @@ class ClaudeAgent:
         now = time.time()
 
         # Clear stale conversations
-        stale_ids = [cid for cid, ts in self._conversation_timestamps.items() if now - ts > self._history_ttl]
+        stale_ids = [
+            cid
+            for cid, ts in self._conversation_timestamps.items()
+            if now - ts > self._history_ttl
+        ]
         for cid in stale_ids:
             self._conversations.pop(cid, None)
             self._conversation_timestamps.pop(cid, None)
 
         # Enforce max conversations limit - remove oldest if over limit
         if len(self._conversations) > self._max_conversations:
-            sorted_convs = sorted(self._conversation_timestamps.items(), key=lambda x: x[1])
-            for cid, _ in sorted_convs[: len(self._conversations) - self._max_conversations]:
+            sorted_convs = sorted(
+                self._conversation_timestamps.items(), key=lambda x: x[1]
+            )
+            for cid, _ in sorted_convs[
+                : len(self._conversations) - self._max_conversations
+            ]:
                 self._conversations.pop(cid, None)
                 self._conversation_timestamps.pop(cid, None)
 
         return self._conversations.get(conversation_id, [])
 
-    def _save_conversation_history(self, conversation_id: str, user_msg: str, assistant_msg: str) -> None:
+    def _save_conversation_history(
+        self, conversation_id: str, user_msg: str, assistant_msg: str
+    ) -> None:
         """Save a message exchange to conversation history."""
         if conversation_id not in self._conversations:
             self._conversations[conversation_id] = []
@@ -1883,14 +1961,20 @@ for mr urls use gitlab_mr_view."""
                     "be professional, clear, no typos, no casual slang. skip emojis."
                 )
             elif user_category == "safe":
-                context_parts.append("TONE: casual - teammate, full irish dev mode, typos ok, emojis ok")
+                context_parts.append(
+                    "TONE: casual - teammate, full irish dev mode, typos ok, emojis ok"
+                )
             else:
                 emoji_note = "emojis ok" if include_emojis else "skip emojis"
-                context_parts.append(f"TONE: professional - clear and helpful, {emoji_note}")
+                context_parts.append(
+                    f"TONE: professional - clear and helpful, {emoji_note}"
+                )
 
         if resolved_ctx and resolved_ctx.is_valid():
             if resolved_ctx.repo_path:
-                context_parts.append(f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}")
+                context_parts.append(
+                    f"Repository: {resolved_ctx.repo_name} at {resolved_ctx.repo_path}"
+                )
             if resolved_ctx.gitlab_project:
                 context_parts.append(f"GitLab: {resolved_ctx.gitlab_project}")
             if resolved_ctx.issue_key:
@@ -1899,7 +1983,9 @@ for mr urls use gitlab_mr_view."""
                 context_parts.append(f"MR: !{resolved_ctx.mr_id}")
         elif resolved_ctx and resolved_ctx.needs_clarification():
             repos = ", ".join(a["name"] for a in resolved_ctx.alternatives)
-            context_parts.append(f"Ambiguous repo - matches: {repos}. Ask user which one.")
+            context_parts.append(
+                f"Ambiguous repo - matches: {repos}. Ask user which one."
+            )
 
         # === Add enriched context from HybridToolFilter ===
         enrichment_parts = []
@@ -1922,7 +2008,9 @@ for mr urls use gitlab_mr_view."""
             if skill.get("name"):
                 enrichment_parts.append(f"Detected skill: {skill['name']}")
                 if skill.get("description"):
-                    enrichment_parts.append(f"Skill purpose: {skill['description'][:100]}")
+                    enrichment_parts.append(
+                        f"Skill purpose: {skill['description'][:100]}"
+                    )
 
             # Learned patterns (error fixes)
             patterns = ctx.get("learned_patterns", [])
@@ -1940,7 +2028,9 @@ for mr urls use gitlab_mr_view."""
                 code_hints = []
                 for s in semantic[:2]:
                     if s.get("file"):
-                        code_hints.append(f"• {s['file']}: {s.get('content', '')[:80]}...")
+                        code_hints.append(
+                            f"• {s['file']}: {s.get('content', '')[:80]}..."
+                        )
                 if code_hints:
                     enrichment_parts.append("Relevant code:\n" + "\n".join(code_hints))
 
@@ -1957,7 +2047,9 @@ for mr urls use gitlab_mr_view."""
     async def _execute_tool_loop(self, response, messages, tools):
         """Execute tool calls in a loop until Claude stops requesting tools."""
         while response.stop_reason == "tool_use":
-            tool_calls = [block for block in response.content if block.type == "tool_use"]
+            tool_calls = [
+                block for block in response.content if block.type == "tool_use"
+            ]
 
             tool_results = []
             for tc in tool_calls:
@@ -2020,7 +2112,9 @@ for mr urls use gitlab_mr_view."""
             try:
                 # Lazy init context injector
                 if self.context_injector is None:
-                    self.context_injector = ContextInjector(project=self.default_project)
+                    self.context_injector = ContextInjector(
+                        project=self.default_project
+                    )
 
                 # Gather context from all sources
                 gathered_context = await self.context_injector.gather_context_async(
@@ -2078,7 +2172,9 @@ for mr urls use gitlab_mr_view."""
             tools = all_tools
 
         # Build context-enriched message (includes memory, patterns, semantic knowledge)
-        enriched_message = self._build_context_message(message, context, resolved_ctx, filter_result)
+        enriched_message = self._build_context_message(
+            message, context, resolved_ctx, filter_result
+        )
         messages = history + [{"role": "user", "content": enriched_message}]
 
         # ============================================================

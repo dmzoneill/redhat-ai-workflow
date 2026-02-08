@@ -180,11 +180,21 @@ def test_list_multiple(loops_dir):
 
 
 def test_list_sorted_by_started_at(loops_dir):
-    import time
+    from datetime import datetime
+    from unittest.mock import patch
 
-    start_ralph_loop("first")
-    time.sleep(0.01)
-    start_ralph_loop("second")
+    # Use explicit timestamps instead of sleeping for ordering
+    t1 = datetime(2025, 1, 1, 12, 0, 0)
+    t2 = datetime(2025, 1, 1, 12, 0, 1)  # 1 second later
+
+    with patch("server.ralph_loop_manager.datetime") as mock_dt:
+        mock_dt.now.return_value = t1
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        start_ralph_loop("first")
+
+        mock_dt.now.return_value = t2
+        start_ralph_loop("second")
+
     loops = list_active_loops()
     assert loops[0]["session_id"] == "second"  # most recent first
 

@@ -395,6 +395,7 @@ class TestStateManagerThreadSafety:
                 for _ in range(20):
                     result = manager.is_service_enabled("scheduler")
                     read_results.append(result)
+                    # Yield to other thread to promote interleaving
                     time.sleep(0.001)
             except Exception as e:
                 errors.append(e)
@@ -403,6 +404,7 @@ class TestStateManagerThreadSafety:
             try:
                 for i in range(20):
                     manager.set_service_enabled("scheduler", i % 2 == 0)
+                    # Yield to other thread to promote interleaving
                     time.sleep(0.001)
             except Exception as e:
                 errors.append(e)

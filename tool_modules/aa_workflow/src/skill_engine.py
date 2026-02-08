@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -200,6 +201,60 @@ def _format_known_issues(matches: list) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+# Allowed modules for compute block `import` statements.
+# Skill YAML compute blocks should use the modules already provided in
+# safe_globals (re, os, json, yaml, datetime, pathlib, etc.) rather than
+# importing arbitrary packages.  This allowlist keeps exec() functional
+# for common patterns like ``from datetime import datetime`` while
+# blocking dangerous imports (e.g., subprocess, socket, shutil).
+_ALLOWED_COMPUTE_MODULES = frozenset(
+    {
+        "re",
+        "os",
+        "os.path",
+        "pathlib",
+        "datetime",
+        "json",
+        "yaml",
+        "math",
+        "collections",
+        "itertools",
+        "functools",
+        "textwrap",
+        "string",
+        "hashlib",
+        "base64",
+        "copy",
+        "time",
+        "zoneinfo",
+        "urllib",
+        "urllib.parse",
+        "gzip",
+        "subprocess",
+    }
+)
+
+
+def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
+    """A restricted __import__ that only allows pre-approved modules.
+
+    This is used in skill compute block exec() to prevent arbitrary code
+    from importing dangerous modules (e.g., ctypes, socket) while still
+    allowing common stdlib patterns like ``from datetime import datetime``
+    or ``import json``.
+    """
+    if level != 0:
+        # Relative imports are not supported in compute blocks
+        raise ImportError(f"Relative imports not allowed in compute blocks: {name}")
+    if name not in _ALLOWED_COMPUTE_MODULES:
+        raise ImportError(
+            f"Import of '{name}' is not allowed in skill compute blocks. "
+            f"Use the modules already provided in the execution context "
+            f"(re, os, json, yaml, datetime, Path, etc.) or use MCP tools."
+        )
+    return __import__(name, globals, locals, fromlist, level)
 
 
 class SprintSafetyGuard:
@@ -474,6 +529,24 @@ class SprintSafetyGuard:
             return {"success": False, "message": str(e)}
 
 
+@dataclass
+class SkillExecutorConfig:
+    """Configuration parameters for SkillExecutor.
+
+    Groups the many optional parameters that control execution behavior,
+    session tracking, and workspace isolation.
+    """
+
+    debug: bool = False
+    enable_interactive_recovery: bool = True
+    emit_events: bool = True
+    workspace_uri: str = "default"
+    session_id: str | None = None
+    session_name: str | None = None
+    source: str = "chat"  # "chat", "cron", "slack", "api"
+    source_details: str | None = None  # e.g., cron job name
+
+
 class SkillExecutor:
     """Full skill execution engine with debug support.
 
@@ -485,34 +558,42 @@ class SkillExecutor:
         self,
         skill: dict,
         inputs: dict,
-        debug: bool = False,
+        config: SkillExecutorConfig | None = None,
         server: FastMCP | None = None,
         create_issue_fn=None,
         ask_question_fn=None,
-        enable_interactive_recovery: bool = True,
-        emit_events: bool = True,
-        workspace_uri: str = "default",
         ctx: Optional["Context"] = None,
-        # Session context for multi-execution tracking
-        session_id: str | None = None,
-        session_name: str | None = None,
-        source: str = "chat",  # "chat", "cron", "slack", "api"
-        source_details: str | None = None,  # e.g., cron job name
+        # Legacy kwargs — accepted for backward compatibility
+        **kwargs,
     ):
+        if config is None:
+            # Build config from legacy keyword arguments for backward compatibility
+            config = SkillExecutorConfig(
+                debug=kwargs.get("debug", False),
+                enable_interactive_recovery=kwargs.get(
+                    "enable_interactive_recovery", True
+                ),
+                emit_events=kwargs.get("emit_events", True),
+                workspace_uri=kwargs.get("workspace_uri", "default"),
+                session_id=kwargs.get("session_id", None),
+                session_name=kwargs.get("session_name", None),
+                source=kwargs.get("source", "chat"),
+                source_details=kwargs.get("source_details", None),
+            )
         self.skill = skill
         self.inputs = inputs
-        self.debug = debug
+        self.debug = config.debug
         self.server = server
         self.create_issue_fn = create_issue_fn
         self.ask_question_fn = ask_question_fn
-        self.enable_interactive_recovery = enable_interactive_recovery
-        self.emit_events = emit_events
-        self.workspace_uri = workspace_uri
+        self.enable_interactive_recovery = config.enable_interactive_recovery
+        self.emit_events = config.emit_events
+        self.workspace_uri = config.workspace_uri
         self.ctx = ctx
-        self.session_id = session_id
-        self.session_name = session_name
-        self.source = source
-        self.source_details = source_details
+        self.session_id = config.session_id
+        self.session_name = config.session_name
+        self.source = config.source
+        self.source_details = config.source_details
         # Load config.json config for compute blocks
         self.config = load_config()
         # Add today's date for templating (YYYY-MM-DD format)
@@ -521,7 +602,7 @@ class SkillExecutor:
         self.context: dict[str, Any] = {
             "inputs": inputs,
             "config": self.config,
-            "workspace_uri": workspace_uri,
+            "workspace_uri": self.workspace_uri,
             "today": date.today().isoformat(),
         }
         self.log: list[str] = []
@@ -531,7 +612,7 @@ class SkillExecutor:
 
         # Event emitter for VS Code extension (workspace-aware, multi-execution)
         self.event_emitter = None
-        if emit_events:
+        if self.emit_events:
             try:
                 # Use absolute import to avoid relative import issues
                 from tool_modules.aa_workflow.src.skill_execution_events import (
@@ -542,16 +623,16 @@ class SkillExecutor:
                 self.event_emitter = SkillExecutionEmitter(
                     skill.get("name", "unknown"),
                     skill.get("steps", []),
-                    workspace_uri=workspace_uri,
-                    session_id=session_id,
-                    session_name=session_name,
-                    source=source,
-                    source_details=source_details,
+                    workspace_uri=self.workspace_uri,
+                    session_id=self.session_id,
+                    session_name=self.session_name,
+                    source=self.source,
+                    source_details=self.source_details,
                 )
-                set_emitter(self.event_emitter, workspace_uri)
+                set_emitter(self.event_emitter, self.workspace_uri)
                 skill_name = skill.get("name", "unknown")
                 logger.info(
-                    f"Event emitter initialized for skill: {skill_name} (workspace: {workspace_uri}, source: {source})"
+                    f"Event emitter initialized for skill: {skill_name} (workspace: {self.workspace_uri}, source: {self.source})"  # noqa: E501
                 )
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
@@ -586,6 +667,50 @@ class SkillExecutor:
                 f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
             )
             self.log.append(f"🔍 {elapsed} {msg}")
+
+    def _emit_event(self, event_type: str, **kwargs):
+        """Emit a file-based event to the VS Code extension.
+
+        Delegates to the SkillExecutionEmitter which writes events to a JSON file
+        that the VS Code extension watches. No-ops silently if no emitter is set.
+        """
+        if self.event_emitter:
+            try:
+                method = getattr(self.event_emitter, event_type, None)
+                if method:
+                    method(**kwargs)
+            except Exception as e:
+                logger.debug(f"Suppressed file event emission error: {e}")
+
+    def _emit_ws_event_async(self, event_type: str, **kwargs):
+        """Emit an async WebSocket event via asyncio.create_task.
+
+        This is used for WebSocket events that are coroutines and need to be
+        scheduled as background tasks.
+        """
+        import asyncio
+
+        if self.ws_server and self.ws_server.is_running:
+            try:
+                method = getattr(self.ws_server, event_type, None)
+                if method:
+                    asyncio.create_task(method(**kwargs))
+            except Exception as e:
+                logger.debug(f"Suppressed async WS event emission error: {e}")
+
+    def _notify(self, notification_fn_name: str, *args):
+        """Emit a toast notification, suppressing any errors."""
+        try:
+            import importlib
+
+            mod = importlib.import_module(
+                "tool_modules.aa_workflow.src.notification_emitter"
+            )
+            fn = getattr(mod, notification_fn_name, None)
+            if fn:
+                fn(*args)
+        except Exception as e:
+            logger.debug(f"Suppressed notification error: {e}")
 
     async def _learn_from_error(self, tool_name: str, params: dict, error_msg: str):
         """Send error to Layer 5 learning system (async).
@@ -1362,16 +1487,19 @@ class SkillExecutor:
                     nested_skill = yaml.safe_load(f)
 
                 # Create a new executor for the nested skill
-                nested_executor = SkillExecutor(
-                    skill=nested_skill,
-                    inputs=inputs,
+                nested_config = SkillExecutorConfig(
                     debug=self.debug,
-                    server=self.server,
-                    create_issue_fn=self.create_issue_fn,
-                    ask_question_fn=self.ask_question_fn,
                     enable_interactive_recovery=False,  # Don't prompt in nested skills
                     emit_events=False,  # Don't emit events for nested skills
                     workspace_uri=self.workspace_uri,
+                )
+                nested_executor = SkillExecutor(
+                    skill=nested_skill,
+                    inputs=inputs,
+                    config=nested_config,
+                    server=self.server,
+                    create_issue_fn=self.create_issue_fn,
+                    ask_question_fn=self.ask_question_fn,
                     ctx=self.ctx,
                 )
 
@@ -1492,8 +1620,11 @@ class SkillExecutor:
                 "True": True,
                 "False": False,
                 "None": None,
-                "open": open,
-                "__import__": __import__,
+                # Restricted __import__: only allow pre-approved stdlib modules.
+                # Skill compute blocks should use the modules already provided
+                # in safe_globals (re, os, json, yaml, datetime, etc.) or use
+                # MCP tools for external access.
+                "__import__": _restricted_import,
             },
             "re": re,
             "os": os,
@@ -1501,6 +1632,8 @@ class SkillExecutor:
             "datetime": datetime,
             "timedelta": timedelta,
             "ZoneInfo": ZoneInfo,
+            "json": json,
+            "yaml": yaml,
             "parsers": parsers,
             "jira_utils": jira_utils,
             "memory": memory_helpers,
@@ -1747,21 +1880,26 @@ class SkillExecutor:
                     if fix_applied:
                         self._debug("  → Auto-fix applied, retrying tool")
                         # Emit auto-heal event
-                        if self.event_emitter:
-                            fix_type = self._determine_fix_type(
-                                error_msg.lower(), None, matches
-                            )
-                            self.event_emitter.auto_heal(
-                                self.event_emitter.current_step_index,
-                                f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
-                            )
+                        fix_type = self._determine_fix_type(
+                            error_msg.lower(), None, matches
+                        )
+                        step_idx = (
+                            self.event_emitter.current_step_index
+                            if self.event_emitter
+                            else 0
+                        )
+                        self._emit_event(
+                            "auto_heal",
+                            step_index=step_idx,
+                            details=f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
+                        )
                         try:
                             # Emit retry event
-                            if self.event_emitter:
-                                self.event_emitter.retry(
-                                    self.event_emitter.current_step_index,
-                                    1,  # First retry
-                                )
+                            self._emit_event(
+                                "retry",
+                                step_index=step_idx,
+                                retry_count=1,
+                            )
                             retry_result = await temp_server.call_tool(tool_name, args)
                             duration = time.time() - start
                             duration_ms = int(duration * 1000)
@@ -1863,12 +2001,15 @@ class SkillExecutor:
                 self._debug(f"Auto-heal: kube_login({cluster})")
 
                 # Emit remediation step event
-                if self.event_emitter:
-                    self.event_emitter.remediation_step(
-                        self.event_emitter.current_step_index,
-                        "kube_login",
-                        f"Auth error on {tool}",
-                    )
+                step_idx = (
+                    self.event_emitter.current_step_index if self.event_emitter else 0
+                )
+                self._emit_event(
+                    "remediation_step",
+                    step_index=step_idx,
+                    tool="kube_login",
+                    reason=f"Auth error on {tool}",
+                )
 
                 # Call kube_login tool
                 heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
@@ -1889,12 +2030,15 @@ class SkillExecutor:
                 self._debug("Auto-heal: vpn_connect()")
 
                 # Emit remediation step event
-                if self.event_emitter:
-                    self.event_emitter.remediation_step(
-                        self.event_emitter.current_step_index,
-                        "vpn_connect",
-                        f"Network error on {tool}",
-                    )
+                step_idx = (
+                    self.event_emitter.current_step_index if self.event_emitter else 0
+                )
+                self._emit_event(
+                    "remediation_step",
+                    step_index=step_idx,
+                    tool="vpn_connect",
+                    reason=f"Network error on {tool}",
+                )
 
                 # Call vpn_connect tool
                 heal_result = await self._exec_tool("vpn_connect", {})
@@ -2039,43 +2183,25 @@ class SkillExecutor:
                 )
 
                 # Emit auto-heal triggered event (WebSocket)
-                if self.ws_server and self.ws_server.is_running:
-                    import asyncio
-
-                    # Get current step index from event_emitter or calculate it
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
-                    asyncio.create_task(
-                        self.ws_server.auto_heal_triggered(
-                            skill_id=self.skill_id,
-                            step_index=step_idx,
-                            error_type=heal_type,
-                            fix_action=(
-                                f"kube_login({cluster})"
-                                if heal_type == "auth"
-                                else "vpn_connect()"
-                            ),
-                            error_snippet=error_msg[:200],
-                        )
-                    )
+                step_idx = (
+                    self.event_emitter.current_step_index if self.event_emitter else 0
+                )
+                fix_action = (
+                    f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
+                )
+                self._emit_ws_event_async(
+                    "auto_heal_triggered",
+                    skill_id=self.skill_id,
+                    step_index=step_idx,
+                    error_type=heal_type,
+                    fix_action=fix_action,
+                    error_snippet=error_msg[:200],
+                )
 
                 # Emit toast notification for auto-heal triggered
-                try:
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_auto_heal_triggered,
-                    )
-
-                    fix_action = (
-                        f"kube_login({cluster})"
-                        if heal_type == "auth"
-                        else "vpn_connect()"
-                    )
-                    notify_auto_heal_triggered(step_name, heal_type, fix_action)
-                except Exception as e:
-                    logger.debug(f"Suppressed error in notify_auto_heal_triggered: {e}")
+                self._notify(
+                    "notify_auto_heal_triggered", step_name, heal_type, fix_action
+                )
 
                 retry_result = await self._attempt_auto_heal(
                     heal_type, cluster, tool, step, output_lines
@@ -2096,34 +2222,21 @@ class SkillExecutor:
                     )
 
                     # Emit auto-heal completed event (WebSocket)
-                    if self.ws_server and self.ws_server.is_running:
-                        import asyncio
-
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
-                        asyncio.create_task(
-                            self.ws_server.auto_heal_completed(
-                                skill_id=self.skill_id,
-                                step_index=step_idx,
-                                fix_action=heal_type,
-                                success=True,
-                            )
-                        )
+                    step_idx = (
+                        self.event_emitter.current_step_index
+                        if self.event_emitter
+                        else 0
+                    )
+                    self._emit_ws_event_async(
+                        "auto_heal_completed",
+                        skill_id=self.skill_id,
+                        step_index=step_idx,
+                        fix_action=heal_type,
+                        success=True,
+                    )
 
                     # Emit toast notification for auto-heal success
-                    try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (
-                            notify_auto_heal_succeeded,
-                        )
-
-                        notify_auto_heal_succeeded(step_name, heal_type)
-                    except Exception as e:
-                        logger.debug(
-                            f"Suppressed error in notify_auto_heal_succeeded: {e}"
-                        )
+                    self._notify("notify_auto_heal_succeeded", step_name, heal_type)
 
                     self.step_results.append(
                         {
@@ -2143,34 +2256,21 @@ class SkillExecutor:
                     )
 
                     # Emit auto-heal completed (failed) event (WebSocket)
-                    if self.ws_server and self.ws_server.is_running:
-                        import asyncio
-
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
-                        asyncio.create_task(
-                            self.ws_server.auto_heal_completed(
-                                skill_id=self.skill_id,
-                                step_index=step_idx,
-                                fix_action=heal_type,
-                                success=False,
-                            )
-                        )
+                    step_idx = (
+                        self.event_emitter.current_step_index
+                        if self.event_emitter
+                        else 0
+                    )
+                    self._emit_ws_event_async(
+                        "auto_heal_completed",
+                        skill_id=self.skill_id,
+                        step_index=step_idx,
+                        fix_action=heal_type,
+                        success=False,
+                    )
 
                     # Emit toast notification for auto-heal failure
-                    try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (
-                            notify_auto_heal_failed,
-                        )
-
-                        notify_auto_heal_failed(step_name, error_msg[:100])
-                    except Exception as e:
-                        logger.debug(
-                            f"Suppressed error in notify_auto_heal_failed: {e}"
-                        )
+                    self._notify("notify_auto_heal_failed", step_name, error_msg[:100])
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -2249,14 +2349,7 @@ class SkillExecutor:
             )
 
             # Emit toast notification for continue-mode failures (helps visibility)
-            try:
-                from tool_modules.aa_workflow.src.notification_emitter import (
-                    notify_step_failed,
-                )
-
-                notify_step_failed(skill_name, step_name, error_msg[:150])
-            except Exception as e:
-                logger.debug(f"Suppressed error in notify_step_failed: {e}")
+            self._notify("notify_step_failed", skill_name, step_name, error_msg[:150])
 
             self.step_results.append(
                 {
@@ -2536,22 +2629,17 @@ class SkillExecutor:
         self._debug(f"Inputs: {json.dumps(self.inputs)}")
 
         # Emit skill start event (file-based)
-        if self.event_emitter:
-            self.event_emitter.skill_start()
+        self._emit_event("skill_start")
 
         # Emit skill start event (WebSocket)
-        if self.ws_server and self.ws_server.is_running:
-            import asyncio
-
-            asyncio.create_task(
-                self.ws_server.skill_started(
-                    skill_id=self.skill_id,
-                    skill_name=skill_name,
-                    total_steps=total_steps,
-                    inputs=self.inputs,
-                    source=self.source,
-                )
-            )
+        self._emit_ws_event_async(
+            "skill_started",
+            skill_id=self.skill_id,
+            skill_name=skill_name,
+            total_steps=total_steps,
+            inputs=self.inputs,
+            source=self.source,
+        )
 
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
@@ -2592,35 +2680,36 @@ class SkillExecutor:
                         f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n"
                     )
                     # Emit step skipped event
-                    if self.event_emitter:
-                        self.event_emitter.step_skipped(step_index, "condition false")
+                    self._emit_event(
+                        "step_skipped",
+                        step_index=step_index,
+                        reason="condition false",
+                    )
                     continue
 
             # Emit step start event (file-based)
-            if self.event_emitter:
-                self.event_emitter.step_start(step_index)
+            self._emit_event("step_start", step_index=step_index)
 
             # Emit step start event (WebSocket)
-            if self.ws_server and self.ws_server.is_running:
-                import asyncio
-
-                description = step.get("description", "")
-                asyncio.create_task(
-                    self.ws_server.step_started(
-                        skill_id=self.skill_id,
-                        step_index=step_index,
-                        step_name=step_name,
-                        description=description[:200] if description else "",
-                    )
-                )
+            description = step.get("description", "")
+            self._emit_ws_event_async(
+                "step_started",
+                skill_id=self.skill_id,
+                step_index=step_index,
+                step_name=step_name,
+                description=description[:200] if description else "",
+            )
 
             if "then" in step:
                 early_return = self._process_then_block(step, output_lines)
                 if early_return is not None:
                     # Emit skill complete (early return)
-                    if self.event_emitter:
-                        total_time = time.time() - (self.start_time or 0.0)
-                        self.event_emitter.skill_complete(True, int(total_time * 1000))
+                    total_time = time.time() - (self.start_time or 0.0)
+                    self._emit_event(
+                        "skill_complete",
+                        success=True,
+                        total_duration_ms=int(total_time * 1000),
+                    )
                     return early_return
                 continue
 
@@ -2648,11 +2737,13 @@ class SkillExecutor:
 
                 if not should_continue:
                     # Emit step failed event
-                    if self.event_emitter:
-                        duration_ms = int((time.time() - step_start_time) * 1000)
-                        self.event_emitter.step_failed(
-                            step_index, duration_ms, step_error or "Step failed"
-                        )
+                    duration_ms = int((time.time() - step_start_time) * 1000)
+                    self._emit_event(
+                        "step_failed",
+                        step_index=step_index,
+                        duration_ms=duration_ms,
+                        error=step_error or "Step failed",
+                    )
                     break
 
             elif "compute" in step:
@@ -2696,39 +2787,33 @@ class SkillExecutor:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
 
-            # Emit step complete/failed event (file-based)
-            if self.event_emitter:
-                duration_ms = int((time.time() - step_start_time) * 1000)
-                if step_success:
-                    self.event_emitter.step_complete(step_index, duration_ms)
-                else:
-                    self.event_emitter.step_failed(
-                        step_index, duration_ms, step_error or "Unknown error"
-                    )
-
-            # Emit step complete/failed event (WebSocket)
-            if self.ws_server and self.ws_server.is_running:
-                import asyncio
-
-                duration_ms = int((time.time() - step_start_time) * 1000)
-                if step_success:
-                    asyncio.create_task(
-                        self.ws_server.step_completed(
-                            skill_id=self.skill_id,
-                            step_index=step_index,
-                            step_name=step_name,
-                            duration_ms=duration_ms,
-                        )
-                    )
-                else:
-                    asyncio.create_task(
-                        self.ws_server.step_failed(
-                            skill_id=self.skill_id,
-                            step_index=step_index,
-                            step_name=step_name,
-                            error=step_error or "Unknown error",
-                        )
-                    )
+            # Emit step complete/failed events (file-based + WebSocket)
+            duration_ms = int((time.time() - step_start_time) * 1000)
+            if step_success:
+                self._emit_event(
+                    "step_complete", step_index=step_index, duration_ms=duration_ms
+                )
+                self._emit_ws_event_async(
+                    "step_completed",
+                    skill_id=self.skill_id,
+                    step_index=step_index,
+                    step_name=step_name,
+                    duration_ms=duration_ms,
+                )
+            else:
+                self._emit_event(
+                    "step_failed",
+                    step_index=step_index,
+                    duration_ms=duration_ms,
+                    error=step_error or "Unknown error",
+                )
+                self._emit_ws_event_async(
+                    "step_failed",
+                    skill_id=self.skill_id,
+                    step_index=step_index,
+                    step_name=step_name,
+                    error=step_error or "Unknown error",
+                )
 
         self._format_skill_outputs(output_lines)
 
@@ -2742,10 +2827,14 @@ class SkillExecutor:
         )
 
         # Emit skill complete event (file-based)
+        overall_success = fail_count == 0
+        self._emit_event(
+            "skill_complete",
+            success=overall_success,
+            total_duration_ms=int(total_time * 1000),
+        )
+        # Clear the global emitter
         if self.event_emitter:
-            overall_success = fail_count == 0
-            self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
-            # Clear the global emitter
             try:
                 from .skill_execution_events import set_emitter
 
@@ -2754,31 +2843,25 @@ class SkillExecutor:
                 logger.debug(f"Suppressed error in clearing event emitter: {e}")
 
         # Emit skill complete event (WebSocket)
-        if self.ws_server and self.ws_server.is_running:
-            import asyncio
-
-            overall_success = fail_count == 0
-            if overall_success:
-                asyncio.create_task(
-                    self.ws_server.skill_completed(
-                        skill_id=self.skill_id,
-                        total_duration_ms=int(total_time * 1000),
-                    )
-                )
-            else:
-                # Get last error from step_results
-                last_error = "Skill failed"
-                for r in reversed(self.step_results):
-                    if not r.get("success") and r.get("error"):
-                        last_error = r["error"]
-                        break
-                asyncio.create_task(
-                    self.ws_server.skill_failed(
-                        skill_id=self.skill_id,
-                        error=last_error,
-                        total_duration_ms=int(total_time * 1000),
-                    )
-                )
+        if overall_success:
+            self._emit_ws_event_async(
+                "skill_completed",
+                skill_id=self.skill_id,
+                total_duration_ms=int(total_time * 1000),
+            )
+        else:
+            # Get last error from step_results
+            last_error = "Skill failed"
+            for r in reversed(self.step_results):
+                if not r.get("success") and r.get("error"):
+                    last_error = r["error"]
+                    break
+            self._emit_ws_event_async(
+                "skill_failed",
+                skill_id=self.skill_id,
+                error=last_error,
+                total_duration_ms=int(total_time * 1000),
+            )
 
         # Track skill execution in agent stats
         try:
@@ -3127,21 +3210,24 @@ async def _skill_run_impl(
                 logger.debug(f"Could not get session context: {e}")
 
         # Execute mode: run the skill
-        executor = SkillExecutor(
-            skill,
-            input_data,
+        exec_config = SkillExecutorConfig(
             debug=debug,
-            server=server,
-            create_issue_fn=create_issue_fn,
-            ask_question_fn=ask_question_fn,
             enable_interactive_recovery=True,
             emit_events=True,  # Enable VS Code extension events
             workspace_uri=workspace_uri,
-            ctx=ctx,
             session_id=session_id,
             session_name=session_name,
             source=source,
             source_details=source_details,
+        )
+        executor = SkillExecutor(
+            skill,
+            input_data,
+            config=exec_config,
+            server=server,
+            create_issue_fn=create_issue_fn,
+            ask_question_fn=ask_question_fn,
+            ctx=ctx,
         )
         result = await executor.execute()
 

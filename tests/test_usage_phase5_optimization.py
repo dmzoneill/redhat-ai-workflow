@@ -8,6 +8,7 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -141,27 +142,32 @@ class TestPatternCaching:
         """Should expire cache after TTL."""
         checker = UsagePatternChecker(storage=temp_storage, cache_ttl=1)  # 1 second TTL
 
-        # First call
-        checker.check_before_call(
-            tool_name="test_tool",
-            params={},
-            min_confidence=0.75,
-        )
+        fake_time = 1000.0
 
-        # Wait for cache to expire
-        time.sleep(1.1)
+        with patch("server.usage_pattern_checker.time") as mock_time:
+            mock_time.time.return_value = fake_time
 
-        # Second call - cache should be expired
-        cache_timestamp_before = checker._cache_timestamp
+            # First call - populates cache at fake_time=1000
+            checker.check_before_call(
+                tool_name="test_tool",
+                params={},
+                min_confidence=0.75,
+            )
 
-        checker.check_before_call(
-            tool_name="test_tool",
-            params={},
-            min_confidence=0.75,
-        )
+            cache_timestamp_before = checker._cache_timestamp
 
-        # Cache should have been refreshed (new timestamp)
-        assert checker._cache_timestamp > cache_timestamp_before
+            # Advance time past TTL (1s TTL + 0.1s buffer)
+            mock_time.time.return_value = fake_time + 1.1
+
+            # Second call - cache should be expired
+            checker.check_before_call(
+                tool_name="test_tool",
+                params={},
+                min_confidence=0.75,
+            )
+
+            # Cache should have been refreshed (new timestamp)
+            assert checker._cache_timestamp > cache_timestamp_before
 
     def test_clear_cache(self, temp_storage, recent_pattern):
         """Should clear cache when requested."""
@@ -354,7 +360,9 @@ class TestPatternDecay:
 class TestOptimizationStats:
     """Test optimization statistics."""
 
-    def test_get_optimization_stats(self, temp_storage, old_pattern, recent_pattern, inactive_pattern):
+    def test_get_optimization_stats(
+        self, temp_storage, old_pattern, recent_pattern, inactive_pattern
+    ):
         """Should calculate optimization stats correctly."""
         optimizer = UsagePatternOptimizer(storage=temp_storage)
 
@@ -381,7 +389,9 @@ class TestOptimizationStats:
 class TestFullOptimization:
     """Test full optimization (prune + decay)."""
 
-    def test_optimize_all(self, temp_storage, old_pattern, inactive_pattern, recent_pattern):
+    def test_optimize_all(
+        self, temp_storage, old_pattern, inactive_pattern, recent_pattern
+    ):
         """Should run both pruning and decay."""
         optimizer = UsagePatternOptimizer(storage=temp_storage)
 

@@ -206,23 +206,38 @@ class TestPatternMerging:
     @pytest.mark.asyncio
     async def test_merge_updates_last_seen(self, learner):
         """Merging should update last_seen timestamp."""
-        pattern1 = await learner.analyze_result(
-            tool_name="bonfire_namespace_release",
-            params={"namespace": "ephemeral-abc"},
-            result="Namespace not owned",
-        )
+        from datetime import datetime
+        from unittest.mock import patch
 
-        first_last_seen = pattern1["last_seen"]
+        t1 = datetime(2025, 1, 1, 12, 0, 0)
+        t2 = datetime(2025, 1, 1, 12, 0, 1)  # 1 second later
 
-        import time
+        # Patch datetime.now in both modules that set last_seen
+        with (
+            patch("server.usage_pattern_extractor.datetime") as mock_dt_ext,
+            patch("server.usage_pattern_learner.datetime") as mock_dt_lrn,
+        ):
+            mock_dt_ext.now.return_value = t1
+            mock_dt_ext.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt_lrn.now.return_value = t1
+            mock_dt_lrn.side_effect = lambda *a, **kw: datetime(*a, **kw)
 
-        time.sleep(0.01)
+            pattern1 = await learner.analyze_result(
+                tool_name="bonfire_namespace_release",
+                params={"namespace": "ephemeral-abc"},
+                result="Namespace not owned",
+            )
 
-        pattern2 = await learner.analyze_result(
-            tool_name="bonfire_namespace_release",
-            params={"namespace": "ephemeral-xyz"},
-            result="Namespace not owned",
-        )
+            first_last_seen = pattern1["last_seen"]
+
+            mock_dt_ext.now.return_value = t2
+            mock_dt_lrn.now.return_value = t2
+
+            pattern2 = await learner.analyze_result(
+                tool_name="bonfire_namespace_release",
+                params={"namespace": "ephemeral-xyz"},
+                result="Namespace not owned",
+            )
 
         assert pattern2["last_seen"] >= first_last_seen
 

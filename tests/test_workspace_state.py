@@ -5,7 +5,6 @@ independent state (project, persona, issue, branch).
 """
 
 import json
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -85,16 +84,14 @@ class TestChatSession:
     def test_touch_updates_last_activity(self):
         """Test that touch updates last_activity."""
         session = ChatSession(session_id="abc", workspace_uri="file:///test")
-        old_activity = session.last_activity
 
-        # Small delay to ensure time difference
-        import time
-
-        time.sleep(0.01)
+        # Set last_activity to a known past time instead of sleeping
+        past_time = datetime.now() - timedelta(seconds=10)
+        session.last_activity = past_time
 
         session.touch()
 
-        assert session.last_activity > old_activity
+        assert session.last_activity > past_time
 
     def test_is_stale(self):
         """Test stale session detection."""
@@ -1227,10 +1224,11 @@ class TestWorkspaceStateAdvanced:
     def test_workspace_touch(self):
         """WorkspaceState.touch() updates last_activity."""
         state = WorkspaceState(workspace_uri="file:///test")
-        old = state.last_activity
-        time.sleep(0.01)
+        # Set last_activity to a known past time instead of sleeping
+        past_time = datetime.now() - timedelta(seconds=10)
+        state.last_activity = past_time
         state.touch()
-        assert state.last_activity > old
+        assert state.last_activity > past_time
 
     def test_workspace_is_stale(self):
         """WorkspaceState.is_stale detects old workspaces."""
@@ -1482,10 +1480,11 @@ class TestWorkspaceRegistryAdvanced:
     def test_touch_existing_workspace(self):
         """WorkspaceRegistry.touch() updates workspace last_activity."""
         state = WorkspaceRegistry.get_or_create("file:///ws1", ensure_session=False)
-        old = state.last_activity
-        time.sleep(0.01)
+        # Set last_activity to a known past time instead of sleeping
+        past_time = datetime.now() - timedelta(seconds=10)
+        state.last_activity = past_time
         WorkspaceRegistry.touch("file:///ws1")
-        assert state.last_activity > old
+        assert state.last_activity > past_time
 
     def test_touch_nonexistent_workspace(self):
         """WorkspaceRegistry.touch() does nothing for unknown workspace."""

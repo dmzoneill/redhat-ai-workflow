@@ -794,6 +794,199 @@ async def _detect_project_from_mcp_roots(ctx) -> str | None:
         return None
 
 
+async def _resume_session(
+    workspace, resume_session_id: str, agent: str, project: str, name: str
+):
+    """Handle the session resume path.
+
+    Finds the existing session, updates its fields, and returns session state.
+
+    Args:
+        workspace: WorkspaceState for the current workspace.
+        resume_session_id: ID of the session to resume.
+        agent: Optional agent/persona to set on the resumed session.
+        project: Optional project to set on the resumed session.
+        name: Optional name to set on the resumed session.
+
+    Returns:
+        Tuple of (lines, session_id, chat_session, is_resumed).
+        If the session is not found, is_resumed is False and a fallback
+        to new-session creation is expected.
+    """
+    from server.workspace_state import WorkspaceRegistry
+
+    existing_session = workspace.get_session(resume_session_id)
+    if existing_session:
+        # Resume the existing session
+        workspace.set_active_session(resume_session_id)
+        chat_session = existing_session
+        session_id = resume_session_id
+
+        # Update persona if provided
+        if agent:
+            chat_session.persona = agent
+
+        # Update name if provided
+        if name:
+            chat_session.name = name
+
+        chat_session.touch()
+        logger.info(f"Resumed session {session_id}")
+
+        # Emit notification for session resume
+        try:
+            from .notification_emitter import notify_session_resumed
+
+            notify_session_resumed(session_id, name or chat_session.name)
+        except Exception as e:
+            logger.debug(f"Suppressed error in notify_session_resumed: {e}")
+
+        # For resumed sessions, update project if explicitly provided
+        if project:
+            chat_session.project = project
+            chat_session.is_project_auto_detected = False
+            # Persist the project change to disk
+            WorkspaceRegistry.save_to_disk()
+            logger.info(
+                f"Updated and persisted project '{project}' for resumed session {session_id}"
+            )
+
+        lines: list[str] = []  # Will be rebuilt in _build_session_output
+        return lines, session_id, chat_session, True
+    else:
+        # Session not found - list available sessions
+        available = list(workspace.sessions.keys())
+        lines = [
+            "# \u26a0\ufe0f Session Not Found\n",
+            f"Session `{resume_session_id}` does not exist.\n",
+            f"**Available sessions:** {', '.join(f'`{s}`' for s in available) or 'none'}\n",
+            "Creating a new session instead...\n",
+            "---\n",
+        ]
+        return lines, None, None, False
+
+
+async def _create_new_session(workspace, agent: str, project: str, name: str):
+    """Handle creating a new session.
+
+    Args:
+        workspace: WorkspaceState for the current workspace.
+        agent: Optional agent/persona for the new session.
+        project: Optional explicit project for the new session.
+        name: Optional friendly name for the new session.
+
+    Returns:
+        Tuple of (lines, session_id, chat_session).
+    """
+    lines = ["# \U0001f680 Session Started\n"]
+
+    # Determine project for this session
+    # If explicitly provided, use that; otherwise auto-detect from workspace
+    session_project = project if project else workspace.project
+    is_auto_detected = not bool(project) and workspace.is_auto_detected
+
+    # Create a new chat session with its own project
+    # Get default persona from config
+    from server.utils import load_config
+
+    cfg = load_config()
+    default_persona = cfg.get("agent", {}).get("default_persona", "researcher")
+    persona = agent or default_persona
+    chat_session = workspace.create_session(
+        persona=persona,
+        name=name or None,
+        project=session_project,
+        is_project_auto_detected=is_auto_detected,
+    )
+    session_id = chat_session.session_id
+
+    # Set persona on the session if agent provided
+    if agent:
+        chat_session.persona = agent
+
+    # Emit notification for session creation
+    try:
+        from .notification_emitter import notify_session_created
+
+        notify_session_created(session_id, name or None)
+    except Exception as e:
+        logger.debug(f"Suppressed error in notify_session_created: {e}")
+
+    return lines, session_id, chat_session
+
+
+def _build_session_output(
+    lines: list[str],
+    session_id: str | None,
+    chat_session,
+    workspace,
+    is_resumed: bool,
+    project: str,
+    name: str,
+) -> list[str]:
+    """Build the session header output lines with session ID and project info.
+
+    Args:
+        lines: Existing output lines (may already have content).
+        session_id: The session ID to display.
+        chat_session: The ChatSession object (may be None for no-ctx path).
+        workspace: The WorkspaceState (may be None for no-ctx path).
+        is_resumed: Whether this is a resumed session.
+        project: The project name for display.
+        name: Optional session name.
+
+    Returns:
+        The lines list (modified in place and returned for convenience).
+    """
+    if workspace is None or chat_session is None:
+        # No-ctx fallback path: lines already populated, nothing more to add
+        return lines
+
+    # Add session ID and total session count to output
+    total_sessions = workspace.session_count()
+    session_name_info = (
+        f" - *{name or chat_session.name}*" if (name or chat_session.name) else ""
+    )
+
+    # Get project info for display
+    session_project = chat_session.project or workspace.project or "default"
+    project_source = (
+        "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
+    )
+
+    if is_resumed:
+        session_line = (
+            f"**Session ID:** `{session_id}`{session_name_info}"
+            f" *(1 of {total_sessions} sessions in this workspace)*\n"
+        )
+        lines[:] = [
+            "# \U0001f504 Session Resumed\n",
+            session_line,
+            f"**Project:** {session_project} {project_source}\n",
+            f"**Persona:** {chat_session.persona}\n",
+        ]
+        if chat_session.issue_key:
+            lines.append(f"**Active Issue:** {chat_session.issue_key}\n")
+        if chat_session.branch:
+            lines.append(f"**Branch:** {chat_session.branch}\n")
+        lines.append("")
+    else:
+        session_line = (
+            f"**Session ID:** `{session_id}`{session_name_info}"
+            f" *(1 of {total_sessions} sessions in this workspace)*\n"
+        )
+        lines.insert(1, session_line)
+        lines.insert(2, f"**Project:** {session_project} {project_source}\n")
+        lines.insert(
+            3,
+            "\u26a0\ufe0f **SAVE THIS SESSION ID**"
+            ' - Pass it to `session_info(session_id="...")`'
+            " to track YOUR session.\n",
+        )
+
+    return lines
+
+
 async def _session_start_impl(  # noqa: C901
     ctx: "Context | None" = None,
     agent: str = "",
@@ -806,6 +999,11 @@ async def _session_start_impl(  # noqa: C901
 
     Uses WorkspaceRegistry for per-workspace state management.
     Creates a new ChatSession or resumes an existing one.
+
+    Orchestrates three helpers:
+    - _resume_session: handles resuming an existing session
+    - _create_new_session: handles creating a new session
+    - _build_session_output: builds the header output lines
     """
     # Track session start in stats
     from tool_modules.aa_workflow.src.agent_stats import start_session
@@ -814,6 +1012,8 @@ async def _session_start_impl(  # noqa: C901
 
     is_resumed = False
     session_id = None
+    chat_session = None
+    workspace = None
 
     # Use workspace-aware context if ctx is available
     if ctx:
@@ -824,139 +1024,34 @@ async def _session_start_impl(  # noqa: C901
 
         # Check if we're resuming an existing session
         if resume_session_id:
-            existing_session = workspace.get_session(resume_session_id)
-            if existing_session:
-                # Resume the existing session
-                workspace.set_active_session(resume_session_id)
-                chat_session = existing_session
-                session_id = resume_session_id
-                is_resumed = True
-
-                # Update persona if provided
-                if agent:
-                    chat_session.persona = agent
-
-                # Update name if provided
-                if name:
-                    chat_session.name = name
-
-                chat_session.touch()
-                logger.info(f"Resumed session {session_id}")
-
-                # Emit notification for session resume
-                try:
-                    from .notification_emitter import notify_session_resumed
-
-                    notify_session_resumed(session_id, name or chat_session.name)
-                except Exception as e:
-                    logger.debug(f"Suppressed error in notify_session_resumed: {e}")
-            else:
-                # Session not found - list available sessions
-                available = list(workspace.sessions.keys())
-                lines = [
-                    "# ⚠️ Session Not Found\n",
-                    f"Session `{resume_session_id}` does not exist.\n",
-                    f"**Available sessions:** {', '.join(f'`{s}`' for s in available) or 'none'}\n",
-                    "Creating a new session instead...\n",
-                    "---\n",
-                ]
-                # Fall through to create new session
-                resume_session_id = ""
+            lines, session_id, chat_session, is_resumed = await _resume_session(
+                workspace, resume_session_id, agent, project, name
+            )
 
         if not is_resumed:
-            lines = ["# 🚀 Session Started\n"]
-
-            # Determine project for this session
-            # If explicitly provided, use that; otherwise auto-detect from workspace
-            session_project = project if project else workspace.project
-            is_auto_detected = not bool(project) and workspace.is_auto_detected
-
-            # Create a new chat session with its own project
-            # Get default persona from config
-            from server.utils import load_config
-
-            cfg = load_config()
-            default_persona = cfg.get("agent", {}).get("default_persona", "researcher")
-            persona = agent or default_persona
-            chat_session = workspace.create_session(
-                persona=persona,
-                name=name or None,
-                project=session_project,
-                is_project_auto_detected=is_auto_detected,
+            new_lines, session_id, chat_session = await _create_new_session(
+                workspace, agent, project, name
             )
-            session_id = chat_session.session_id
-
-            # Emit notification for session creation
-            try:
-                from .notification_emitter import notify_session_created
-
-                notify_session_created(session_id, name or None)
-            except Exception as e:
-                logger.debug(f"Suppressed error in notify_session_created: {e}")
-
-        else:
-            # For resumed sessions, update project if explicitly provided
-            if project:
-                chat_session.project = project
-                chat_session.is_project_auto_detected = False
-                # Persist the project change to disk
-                WorkspaceRegistry.save_to_disk()
-                logger.info(
-                    f"Updated and persisted project '{project}' for resumed session {session_id}"
-                )
+            # If resume failed (session not found), prepend the warning lines
+            if resume_session_id and not is_resumed:
+                # lines already has the "Session Not Found" warning
+                lines.extend(new_lines)
+            else:
+                lines = new_lines
 
         # Use the session's project (not workspace's) for the rest of the function
         project = chat_session.project
 
-        # Set persona on the session if agent provided (for new sessions)
-        if agent and not is_resumed:
-            chat_session.persona = agent
-
         # Load chat context using async version
         chat_project = await _load_chat_context_async(ctx, lines)
 
-        # Add session ID and total session count to output
-        total_sessions = workspace.session_count()
-        session_name_info = (
-            f" - *{name or chat_session.name}*" if (name or chat_session.name) else ""
+        # Build session header output
+        _build_session_output(
+            lines, session_id, chat_session, workspace, is_resumed, project, name
         )
-
-        # Get project info for display
-        session_project = chat_session.project or workspace.project or "default"
-        project_source = (
-            "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
-        )
-
-        if is_resumed:
-            session_line = (
-                f"**Session ID:** `{session_id}`{session_name_info}"
-                f" *(1 of {total_sessions} sessions in this workspace)*\n"
-            )
-            lines = [
-                "# 🔄 Session Resumed\n",
-                session_line,
-                f"**Project:** {session_project} {project_source}\n",
-                f"**Persona:** {chat_session.persona}\n",
-            ]
-            if chat_session.issue_key:
-                lines.append(f"**Active Issue:** {chat_session.issue_key}\n")
-            if chat_session.branch:
-                lines.append(f"**Branch:** {chat_session.branch}\n")
-            lines.append("")
-        else:
-            session_line = (
-                f"**Session ID:** `{session_id}`{session_name_info}"
-                f" *(1 of {total_sessions} sessions in this workspace)*\n"
-            )
-            lines.insert(1, session_line)
-            lines.insert(2, f"**Project:** {session_project} {project_source}\n")
-            lines.insert(
-                3,
-                '⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id="...")` to track YOUR session.\n',
-            )
     else:
         # Fallback to sync version for backward compatibility (no ctx available)
-        lines = ["# 🚀 Session Started\n"]
+        lines = ["# \U0001f680 Session Started\n"]
 
         # Detect project from MCP roots if not explicitly provided
         detected_from_roots = None
@@ -991,7 +1086,7 @@ async def _session_start_impl(  # noqa: C901
     detected_project = _load_project_knowledge(lines, agent) or chat_project
 
     # Show available skills
-    lines.append("## ⚡ Quick Skills\n")
+    lines.append("## \u26a1 Quick Skills\n")
     lines.append("Run with `skill_run(name, inputs)`:\n")
     lines.append("- **start_work** - Begin Jira issue (creates branch, updates status)")
     lines.append("- **create_mr** - Create MR with proper formatting")
@@ -1002,7 +1097,7 @@ async def _session_start_impl(  # noqa: C901
     lines.append("")
 
     # Show tool usage guidance
-    lines.append("## 🛠️ Tool Usage\n")
+    lines.append("## \U0001f6e0\ufe0f Tool Usage\n")
     lines.append("**ALWAYS prefer MCP tools over CLI commands!**\n")
     lines.append("| Instead of CLI | Use MCP Tool |")
     lines.append("|---------------|--------------|")
@@ -1018,7 +1113,7 @@ async def _session_start_impl(  # noqa: C901
     # Bootstrap context: Query memory abstraction for intent classification and suggested persona
     bootstrap_context = await _get_bootstrap_context(detected_project, name)
     if bootstrap_context:
-        lines.append("## 🎯 Bootstrap Context\n")
+        lines.append("## \U0001f3af Bootstrap Context\n")
 
         # Show intent classification
         intent = bootstrap_context.get("intent", {})
@@ -1032,7 +1127,9 @@ async def _session_start_impl(  # noqa: C901
 
         # Show suggested persona with auto-load logic
         suggested_persona = bootstrap_context.get("suggested_persona")
-        current_persona = chat_session.persona if ctx else (agent or "researcher")
+        current_persona = (
+            chat_session.persona if chat_session else (agent or "researcher")
+        )
 
         if suggested_persona and suggested_persona != current_persona:
             confidence = bootstrap_context.get("persona_confidence", 0)
@@ -1047,13 +1144,13 @@ async def _session_start_impl(  # noqa: C901
                     loader = get_loader()
                     if loader:
                         await loader.switch_persona(suggested_persona)
-                        if ctx:
+                        if chat_session:
                             chat_session.persona = suggested_persona
                         lines.append(
-                            f"  ✅ Switched from {current_persona} to {suggested_persona}"
+                            f"  \u2705 Switched from {current_persona} to {suggested_persona}"
                         )
                 except Exception as e:
-                    lines.append(f"  ⚠️ Failed to auto-load: {e}")
+                    lines.append(f"  \u26a0\ufe0f Failed to auto-load: {e}")
             else:
                 conf_pct = int(confidence * 100)
                 lines.append(

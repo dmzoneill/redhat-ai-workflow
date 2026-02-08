@@ -63,7 +63,9 @@ class RetryConfig:
     retry_on: list[str] = field(default_factory=lambda: ["auth", "network"])
 
     @classmethod
-    def from_config(cls, job_config: dict, default_config: dict | None = None) -> "RetryConfig":
+    def from_config(
+        cls, job_config: dict, default_config: dict | None = None
+    ) -> "RetryConfig":
         """Create RetryConfig from job configuration.
 
         Args:
@@ -169,11 +171,20 @@ class SchedulerConfig:
 
     def get_cron_jobs(self) -> list[dict]:
         """Get jobs that use cron triggers (not poll triggers) and are enabled."""
-        return [j for j in self.jobs if j.get("cron") and state_manager.is_job_enabled(j.get("name", ""))]
+        return [
+            j
+            for j in self.jobs
+            if j.get("cron") and state_manager.is_job_enabled(j.get("name", ""))
+        ]
 
     def get_poll_jobs(self) -> list[dict]:
         """Get jobs that use poll triggers and are enabled."""
-        return [j for j in self.jobs if j.get("trigger") == "poll" and state_manager.is_job_enabled(j.get("name", ""))]
+        return [
+            j
+            for j in self.jobs
+            if j.get("trigger") == "poll"
+            and state_manager.is_job_enabled(j.get("name", ""))
+        ]
 
     def get_retry_config(self, job_config: dict) -> RetryConfig:
         """Get the retry configuration for a specific job.
@@ -345,7 +356,9 @@ class CronScheduler:
             error: Error message to record
         """
         try:
-            execution_file = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+            execution_file = (
+                Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+            )
             if not execution_file.exists():
                 return
 
@@ -362,7 +375,9 @@ class CronScheduler:
                 return
 
             if current_state.get("status") != "running":
-                self._log_to_file(f"Skill execution state is already {current_state.get('status')}, not cleaning up")
+                self._log_to_file(
+                    f"Skill execution state is already {current_state.get('status')}, not cleaning up"
+                )
                 return
 
             # Update state to failed
@@ -390,7 +405,9 @@ class CronScheduler:
                 json.dump(current_state, f, indent=2)
             tmp_file.rename(execution_file)
 
-            self._log_to_file(f"Cleaned up stale skill execution state for {skill_name}")
+            self._log_to_file(
+                f"Cleaned up stale skill execution state for {skill_name}"
+            )
             logger.info(f"Cleaned up stale skill execution state for {skill_name}")
 
         except Exception as e:
@@ -407,7 +424,9 @@ class CronScheduler:
             add_cron_jobs: If False, skip adding cron jobs (useful when cron daemon handles them).
                           Default True for backward compatibility with cron_daemon.py.
         """
-        self._log_to_file(f"start() called, _running={self._running}, add_cron_jobs={add_cron_jobs}")
+        self._log_to_file(
+            f"start() called, _running={self._running}, add_cron_jobs={add_cron_jobs}"
+        )
 
         if self._running:
             logger.warning("Scheduler already running")
@@ -432,13 +451,17 @@ class CronScheduler:
         # The MCP server should pass add_cron_jobs=False since cron_daemon handles cron jobs
         if self.config.enabled and add_cron_jobs:
             cron_jobs = self.config.get_cron_jobs()
-            self._log_to_file(f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}")
+            self._log_to_file(
+                f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}"
+            )
             for job in cron_jobs:
                 self._add_cron_job(job)
             logger.info(f"Scheduler started with {len(cron_jobs)} cron jobs")
         elif self.config.enabled and not add_cron_jobs:
             logger.info("Scheduler started (cron jobs handled by cron_daemon)")
-            self._log_to_file("Scheduler started, cron jobs skipped (handled by cron_daemon)")
+            self._log_to_file(
+                "Scheduler started, cron jobs skipped (handled by cron_daemon)"
+            )
         else:
             logger.info("Scheduler started (disabled in config, watching for changes)")
             self._log_to_file("Scheduler disabled in config")
@@ -446,7 +469,9 @@ class CronScheduler:
         # Start the scheduler
         self.scheduler.start()
         self._running = True
-        self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        self._config_mtime = (
+            CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        )
         self._log_to_file(f"Scheduler started, _running={self._running}")
 
     async def stop(self):
@@ -502,8 +527,14 @@ class CronScheduler:
             )
 
             persona_info = f" (persona: {persona})" if persona else ""
-            retry_info = f", retry: {retry_config.max_attempts}" if retry_config.enabled else ", retry: disabled"
-            timeout_info = f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
+            retry_info = (
+                f", retry: {retry_config.max_attempts}"
+                if retry_config.enabled
+                else ", retry: disabled"
+            )
+            timeout_info = (
+                f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
+            )
             logger.info(
                 f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}{timeout_info}"
             )
@@ -518,7 +549,9 @@ class CronScheduler:
         """
         parts = cron_expr.split()
         if len(parts) != 5:
-            raise ValueError(f"Invalid cron expression: {cron_expr} (expected 5 fields)")
+            raise ValueError(
+                f"Invalid cron expression: {cron_expr} (expected 5 fields)"
+            )
 
         minute, hour, day, month, day_of_week = parts
 
@@ -560,16 +593,22 @@ class CronScheduler:
         now = datetime.now()
         # Replace / with - in skill name to avoid invalid file paths
         safe_skill = skill.replace("/", "-")
-        session_name = f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        session_name = (
+            f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        )
         persona_info = f", persona: {persona}" if persona else ""
-        logger.info(f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}")
+        logger.info(
+            f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}"
+        )
         self._log_to_file(
             f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
         )
 
         # Emit toast notification for job start
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_started
+            from tool_modules.aa_workflow.src.notification_emitter import (
+                notify_cron_job_started,
+            )
 
             notify_cron_job_started(job_name, skill)
         except Exception:
@@ -605,30 +644,46 @@ class CronScheduler:
                 retry_info["retried"] = True
                 # Calculate backoff delay
                 delay = retry_config.calculate_delay(attempt - 1)
-                logger.info(f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay")
-                self._log_to_file(f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s")
+                logger.info(
+                    f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay"
+                )
+                self._log_to_file(
+                    f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s"
+                )
                 await asyncio.sleep(delay)
 
             # Execute the job
             if use_claude_cli and claude_path:
-                self._log_to_file(f"Using Claude CLI at {claude_path} (attempt {attempt + 1})")
+                self._log_to_file(
+                    f"Using Claude CLI at {claude_path} (attempt {attempt + 1})"
+                )
                 success, output, error_msg = await self._run_with_claude_cli(
                     job_name=job_name,
                     skill=skill,
                     inputs=inputs,
-                    session_name=f"{session_name}-attempt{attempt + 1}" if attempt > 0 else session_name,
+                    session_name=(
+                        f"{session_name}-attempt{attempt + 1}"
+                        if attempt > 0
+                        else session_name
+                    ),
                     persona=persona,
                     timeout_seconds=timeout_seconds,
                 )
             else:
                 if use_claude_cli and not claude_path:
-                    self._log_to_file("Claude CLI not found, falling back to direct execution")
+                    self._log_to_file(
+                        "Claude CLI not found, falling back to direct execution"
+                    )
                 else:
-                    self._log_to_file(f"Using direct execution mode (attempt {attempt + 1})")
+                    self._log_to_file(
+                        f"Using direct execution mode (attempt {attempt + 1})"
+                    )
                 try:
                     output = await self._run_skill(skill, inputs, job_name=job_name)
                     success = True
-                    logger.info(f"Job {job_name} completed successfully (direct execution)")
+                    logger.info(
+                        f"Job {job_name} completed successfully (direct execution)"
+                    )
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"Job {job_name} failed: {e}")
@@ -636,7 +691,9 @@ class CronScheduler:
             # If successful, break out of retry loop
             if success:
                 if attempt > 0:
-                    logger.info(f"Job {job_name} succeeded after {attempt + 1} attempts")
+                    logger.info(
+                        f"Job {job_name} succeeded after {attempt + 1} attempts"
+                    )
                 break
 
             # Detect failure type for potential retry
@@ -645,16 +702,22 @@ class CronScheduler:
 
             # Check if we should retry
             if not retry_config.should_retry(failure_type, attempt):
-                logger.info(f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})")
+                logger.info(
+                    f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})"
+                )
                 break
 
             # Apply remediation before retry
-            remediation_applied, remediation_success = await self._apply_remediation(failure_type, job_name)
+            remediation_applied, remediation_success = await self._apply_remediation(
+                failure_type, job_name
+            )
             retry_info["remediation_applied"] = remediation_applied
             retry_info["remediation_success"] = remediation_success
 
             if not remediation_success:
-                logger.warning(f"Job {job_name}: Remediation failed, but will still retry")
+                logger.warning(
+                    f"Job {job_name}: Remediation failed, but will still retry"
+                )
 
         duration_ms = int((time.time() - start_time) * 1000)
         duration_seconds = duration_ms / 1000.0
@@ -662,11 +725,15 @@ class CronScheduler:
         # Emit toast notification for job completion
         try:
             if success:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_completed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_cron_job_completed,
+                )
 
                 notify_cron_job_completed(job_name, skill, duration_seconds)
             else:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_cron_job_failed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_cron_job_failed,
+                )
 
                 notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
         except Exception:
@@ -681,7 +748,11 @@ class CronScheduler:
             error=error_msg,
             output_preview=output,
             session_name=session_name,
-            retry_info=retry_info if retry_info["attempts"] > 1 or retry_info["failure_type"] else None,
+            retry_info=(
+                retry_info
+                if retry_info["attempts"] > 1 or retry_info["failure_type"]
+                else None
+            ),
         )
 
         # Send notifications
@@ -750,7 +821,9 @@ class CronScheduler:
 
         return "unknown"
 
-    async def _apply_remediation(self, failure_type: str, job_name: str) -> tuple[str | None, bool]:
+    async def _apply_remediation(
+        self, failure_type: str, job_name: str
+    ) -> tuple[str | None, bool]:
         """Apply remediation based on failure type before retry.
 
         Args:
@@ -809,8 +882,12 @@ class CronScheduler:
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
-                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=120
+                )
+                output = (stdout.decode() if stdout else "") + (
+                    stderr.decode() if stderr else ""
+                )
 
                 if process.returncode == 0 or "logged in" in output.lower():
                     logger.info(f"kube_login({cluster}) successful")
@@ -842,7 +919,9 @@ class CronScheduler:
 
         try:
             # Try to find VPN connect script
-            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+            vpn_script = os.path.expanduser(
+                "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+            )
 
             if not os.path.exists(vpn_script):
                 logger.warning(f"VPN script not found: {vpn_script}")
@@ -856,10 +935,17 @@ class CronScheduler:
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
-                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=120
+                )
+                output = (stdout.decode() if stdout else "") + (
+                    stderr.decode() if stderr else ""
+                )
 
-                if process.returncode == 0 or "successfully activated" in output.lower():
+                if (
+                    process.returncode == 0
+                    or "successfully activated" in output.lower()
+                ):
                     logger.info("vpn_connect successful")
                     return True
 
@@ -937,7 +1023,9 @@ Begin execution now."""
         log_file = log_dir / f"{session_name}.log"
 
         timeout_minutes = timeout_seconds // 60
-        self._log_to_file(f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s")
+        self._log_to_file(
+            f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s"
+        )
 
         try:
             # Run Claude CLI with --print flag for non-interactive mode
@@ -981,14 +1069,18 @@ Begin execution now."""
                 if error_output:
                     f.write(f"\n=== STDERR ===\n{error_output}\n")
 
-            self._log_to_file(f"Claude CLI completed with exit code {process.returncode}")
+            self._log_to_file(
+                f"Claude CLI completed with exit code {process.returncode}"
+            )
 
             if process.returncode == 0:
                 # Truncate output for preview
                 preview = output[:500] if len(output) > 500 else output
                 return True, preview, None
             else:
-                error_msg = error_output or f"Claude CLI exited with code {process.returncode}"
+                error_msg = (
+                    error_output or f"Claude CLI exited with code {process.returncode}"
+                )
                 return False, output[:200] if output else None, error_msg
 
         except FileNotFoundError:
@@ -999,7 +1091,9 @@ Begin execution now."""
             self._cleanup_skill_execution_state(skill, str(e))
             return False, None, str(e)
 
-    async def _run_skill(self, skill_name: str, inputs: dict, job_name: str | None = None) -> str:
+    async def _run_skill(
+        self, skill_name: str, inputs: dict, job_name: str | None = None
+    ) -> str:
         """Run a skill and return its output.
 
         Args:
@@ -1009,7 +1103,7 @@ Begin execution now."""
         """
         import yaml
 
-        from .skill_engine import SkillExecutor
+        from .skill_engine import SkillExecutor, SkillExecutorConfig
 
         skill_file = SKILLS_DIR / f"{skill_name}.yaml"
         if not skill_file.exists():
@@ -1018,16 +1112,19 @@ Begin execution now."""
         with open(skill_file) as f:
             skill = yaml.safe_load(f)
 
-        executor = SkillExecutor(
-            skill=skill,
-            inputs=inputs,
+        sched_config = SkillExecutorConfig(
             debug=False,
-            server=self.server,
             enable_interactive_recovery=False,  # No interactive recovery for scheduled jobs
             emit_events=True,  # Enable VS Code events for running skills viewer
             workspace_uri="cron",
             source="cron",
             source_details=job_name or skill_name,
+        )
+        executor = SkillExecutor(
+            skill=skill,
+            inputs=inputs,
+            config=sched_config,
+            server=self.server,
         )
 
         result = await executor.execute()
@@ -1107,7 +1204,9 @@ Begin execution now."""
             return
 
         logger.info("Config file changed, checking for updates...")
-        self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        self._config_mtime = (
+            CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        )
 
         # Reload config
         old_enabled = self.config.enabled
@@ -1291,7 +1390,9 @@ def init_scheduler(
         )
         return _scheduler
 
-    _scheduler = CronScheduler(server=server, notification_callback=notification_callback)
+    _scheduler = CronScheduler(
+        server=server, notification_callback=notification_callback
+    )
     return _scheduler
 
 

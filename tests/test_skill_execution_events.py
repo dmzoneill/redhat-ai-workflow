@@ -67,13 +67,23 @@ def test_generate_execution_id_unique():
         _generate_execution_id,
     )
 
-    id1 = _generate_execution_id("ws", "s")
-    time.sleep(0.001)
-    _generate_execution_id("ws", "s")
-    # Should be unique due to timestamp micro
-    # They might still be same if clock resolution is low, so just check format
+    # Mock datetime.now to return distinct timestamps deterministically
+    t1 = datetime(2025, 1, 1, 12, 0, 0, 0)
+    t2 = datetime(2025, 1, 1, 12, 0, 0, 1)  # 1 microsecond later
+
+    with patch(
+        "tool_modules.aa_workflow.src.skill_execution_events.datetime"
+    ) as mock_dt:
+        mock_dt.now.return_value = t1
+        mock_dt.fromisoformat = datetime.fromisoformat
+        id1 = _generate_execution_id("ws", "s")
+
+        mock_dt.now.return_value = t2
+        id2 = _generate_execution_id("ws", "s")
+
     assert isinstance(id1, str)
     assert len(id1) > 0
+    assert id1 != id2  # Unique due to different timestamps
 
 
 # ---------------------------------------------------------------------------

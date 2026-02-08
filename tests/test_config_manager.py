@@ -5,7 +5,6 @@ Tests thread safety, debouncing, file locking, and mtime-based cache invalidatio
 
 import json
 import threading
-import time
 from unittest.mock import patch
 
 import pytest
@@ -161,12 +160,12 @@ class TestConfigManager:
 
     def test_mtime_auto_reload(self, config_manager, temp_config):
         """Test automatic reload when file mtime changes."""
-        # Wait a bit to ensure mtime difference
-        time.sleep(0.1)
-
         # Modify file externally
         new_config = {"auto_reload_section": {"key": "value"}}
         temp_config.write_text(json.dumps(new_config, indent=2))
+
+        # Force mtime to be in the past so the new write is always detected
+        config_manager._last_mtime = 0.0
 
         # Access should trigger auto-reload
         assert config_manager.has_section("auto_reload_section")
@@ -180,8 +179,8 @@ class TestConfigManager:
         # Should be dirty but not yet written
         assert config_manager.is_dirty is True
 
-        # Wait for debounce timer (2 seconds + buffer)
-        time.sleep(2.5)
+        # Flush immediately instead of waiting for debounce timer
+        config_manager.flush()
 
         # Should now be written
         assert config_manager.is_dirty is False
