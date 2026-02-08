@@ -44,28 +44,19 @@ except ImportError:
         Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
     )
 
+from tool_modules.aa_meet_bot.src.meet_captions import (  # noqa: E402,F401
+    MAX_CAPTION_BUFFER,
+    CaptionEntry,
+    MeetCaptions,
+)
+from tool_modules.aa_meet_bot.src.meet_participants import MeetParticipants
+from tool_modules.aa_meet_bot.src.meet_sign_in import MeetSignIn
+
 logger = logging.getLogger(__name__)
-
-
-MAX_CAPTION_BUFFER = 10000
 
 
 class BrowserClosedError(Exception):
     """Raised when the browser has been closed unexpectedly."""
-
-
-@dataclass
-class CaptionEntry:
-    """A single caption entry from the meeting."""
-
-    speaker: str
-    text: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    caption_id: int = 0  # Unique ID for tracking updates
-    is_update: bool = False  # True if this is an update to a previous caption
-
-    def __str__(self) -> str:
-        return f"[{self.timestamp.strftime('%H:%M:%S')}] {self.speaker}: {self.text}"
 
 
 @dataclass
@@ -141,11 +132,6 @@ class GoogleMeetController:
         self.page = None
         # Initialize state early so errors can be captured during initialization
         self.state: MeetingState = MeetingState(meeting_id="", meeting_url="")
-        self._caption_callback: Optional[Callable[[CaptionEntry], None]] = None
-        self._caption_observer_running = False
-        self._caption_poll_task: Optional[asyncio.Task] = (
-            None  # Track caption polling task
-        )
         self._playwright = None
         self._audio_sink_name: Optional[str] = (
             None  # Virtual audio sink for meeting output
@@ -164,8 +150,38 @@ class GoogleMeetController:
         self._device_manager: Optional[InstanceDeviceManager] = None
         self._devices: Optional[InstanceDevices] = None
 
+        # Composed subsystems (sign-in, captions, participants)
+        self._sign_in = MeetSignIn(self)
+        self._captions = MeetCaptions(self)
+        self._participants = MeetParticipants(self)
+
         # Register this instance
         GoogleMeetController._instances[self._instance_id] = self
+
+    # Backward-compatible proxies for caption state (used by tests)
+    @property
+    def _caption_observer_running(self):
+        return self._captions._caption_observer_running
+
+    @_caption_observer_running.setter
+    def _caption_observer_running(self, value):
+        self._captions._caption_observer_running = value
+
+    @property
+    def _caption_callback(self):
+        return self._captions._caption_callback
+
+    @_caption_callback.setter
+    def _caption_callback(self, value):
+        self._captions._caption_callback = value
+
+    @property
+    def _caption_poll_task(self):
+        return self._captions._caption_poll_task
+
+    @_caption_poll_task.setter
+    def _caption_poll_task(self, value):
+        self._captions._caption_poll_task = value
 
     async def _create_virtual_audio_sink(self) -> bool:
         """Create a virtual PulseAudio sink for meeting audio output.
@@ -1327,227 +1343,9 @@ class GoogleMeetController:
         """
         )
 
-    async def sign_in_google(self) -> bool:  # noqa: C901
-        """
-        Sign in to Google using Red Hat SSO.
-
-        Handles the OAuth flow:
-        1. Click "Sign in" on Meet page
-        2. Enter email on Google login
-        3. Redirect to Red Hat SSO
-        4. Enter username/password
-        5. Return to Meet
-
-        Returns:
-            True if sign-in successful, False otherwise.
-        """
-        from tool_modules.aa_meet_bot.src.config import get_google_credentials
-
-        if not self.page:
-            logger.error("Browser not initialized")
-            return False
-
-        try:
-            # Get credentials from redhatter API
-            logger.info("Fetching credentials from redhatter API...")
-            username, password = await get_google_credentials(
-                self.config.bot_account.email
-            )
-
-            # Check if we need to sign in - look for Sign in button on Meet page
-            # Google Meet uses a div[role="button"] with "Sign in" text
-            sign_in_button = None
-
-            # Try to find the Sign in button using Playwright locator (better for text matching)
-            try:
-                # Use locator for better text matching
-                locator = self.page.locator('div[role="button"]:has-text("Sign in")')
-                if await locator.count() > 0:
-                    sign_in_button = locator.first
-                    logger.info("Found Sign in button (div role=button)")
-            except Exception as e:
-                logger.debug(f"Locator search failed: {e}")
-
-            # Fallback: try span with Sign in text
-            if not sign_in_button:
-                try:
-                    locator = self.page.locator('span:has-text("Sign in")').first
-                    if await locator.count() > 0:
-                        sign_in_button = locator
-                        logger.info("Found Sign in span")
-                except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in _handle_sign_in (span search): {e}"
-                    )
-
-            if sign_in_button:
-                logger.info("Clicking Sign in button...")
-                await sign_in_button.click()
-                await asyncio.sleep(3)
-
-            # Step 1: Wait for Google login page and enter email
-            try:
-                logger.info("Waiting for Google login page...")
-                email_input = await self.page.wait_for_selector(
-                    "#identifierId", timeout=15000  # Specific Google email input ID
-                )
-                if email_input:
-                    logger.info(f"Entering email: {self.config.bot_account.email}")
-                    await email_input.fill(self.config.bot_account.email)
-                    await asyncio.sleep(1)
-
-                    # Click Next button
-                    next_button = await self.page.wait_for_selector(
-                        "#identifierNext", timeout=5000
-                    )
-                    if next_button:
-                        logger.info("Clicking Next...")
-                        await next_button.click()
-                        await asyncio.sleep(5)  # Wait for redirect to SSO
-            except Exception as e:
-                logger.warning(f"Google email input not found: {e}")
-                return False
-
-            # Step 2: Wait for Red Hat SSO page and enter credentials
-            try:
-                logger.info("Waiting for Red Hat SSO page...")
-                saml_username = await self.page.wait_for_selector(
-                    "#username", timeout=15000  # Red Hat SSO username field
-                )
-                if saml_username:
-                    logger.info("Red Hat SSO page detected - using aa_sso helper")
-
-                    # Use the centralized SSO form filler from aa_sso module
-                    try:
-                        from tool_modules.aa_sso.src.tools_basic import fill_sso_form
-
-                        await fill_sso_form(self.page, username, password)
-                    except ImportError:
-                        # Fallback to inline implementation if aa_sso not available
-                        logger.warning(
-                            "aa_sso module not available, using inline SSO form fill"
-                        )
-                        await saml_username.fill(username)
-                        await asyncio.sleep(0.5)
-                        saml_password = await self.page.wait_for_selector(
-                            "#password", timeout=5000
-                        )
-                        if saml_password:
-                            await saml_password.fill(password)
-                            await asyncio.sleep(0.5)
-                        submit_button = await self.page.wait_for_selector(
-                            "#submit", timeout=5000
-                        )
-                        if submit_button:
-                            await submit_button.click()
-
-                    await asyncio.sleep(10)  # Wait for SSO processing and redirect
-                    logger.info("SSO login submitted, waiting for redirect to Meet...")
-
-                    # Wait for redirect back to Meet (or intermediate verification page)
-                    try:
-                        # Wait up to 30s for either Meet or a verification page
-                        for _ in range(30):
-                            await asyncio.sleep(1)
-                            current_url = self.page.url
-
-                            # Check for Google "Verify it's you" / account confirmation page
-                            if (
-                                "speedbump" in current_url
-                                or "samlconfirmaccount" in current_url
-                            ):
-                                logger.info(
-                                    "Google verification page detected, clicking Continue..."
-                                )
-                                try:
-                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
-                                    # Try multiple selectors to find the actual clickable button
-                                    continue_selectors = [
-                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
-                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
-                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
-                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
-                                    ]
-
-                                    clicked = False
-                                    for selector in continue_selectors:
-                                        try:
-                                            btn = self.page.locator(selector).first
-                                            if await btn.count() > 0:
-                                                logger.info(
-                                                    f"Found Continue button with selector: {selector}"
-                                                )
-                                                await btn.click(
-                                                    force=True, timeout=5000
-                                                )
-                                                logger.info(
-                                                    "Clicked Continue on verification page"
-                                                )
-                                                clicked = True
-                                                await asyncio.sleep(3)
-                                                break
-                                        except Exception as e:
-                                            logger.debug(
-                                                f"Selector {selector} failed: {e}"
-                                            )
-
-                                    if not clicked:
-                                        # Last resort: find by role and text
-                                        logger.info(
-                                            "Trying role-based selector for Continue..."
-                                        )
-                                        await self.page.get_by_role(
-                                            "button", name="Continue"
-                                        ).click(timeout=5000)
-                                        logger.info(
-                                            "Clicked Continue via role selector"
-                                        )
-                                        await asyncio.sleep(3)
-
-                                except Exception as e:
-                                    logger.warning(f"Failed to click Continue: {e}")
-
-                            # Check if we're back on Meet
-                            if "meet.google.com" in self.page.url:
-                                logger.info("Successfully signed in via Red Hat SSO")
-                                return True
-
-                        # Timeout - check final state
-                        if "meet.google.com" in self.page.url:
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise Exception("Timeout waiting for redirect to Meet")
-                    except Exception:
-                        # Check if we're already on meet
-                        if "meet.google.com" in self.page.url:
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise
-
-            except Exception as e:
-                logger.warning(f"Red Hat SSO login failed: {e}")
-                self.state.errors.append(f"SSO login failed: {e}")
-                return False
-
-            # Check if we're now signed in (back on Meet page)
-            current_url = self.page.url
-            if "meet.google.com" in current_url:
-                # Check if sign-in link is gone
-                sign_in_link = await self.page.query_selector(
-                    self.SELECTORS["sign_in_link"]
-                )
-                if not sign_in_link:
-                    logger.info("Sign-in appears successful")
-                    return True
-
-            logger.warning("Sign-in flow completed but status unclear")
-            return True
-
-        except Exception as e:
-            error_msg = f"Sign-in failed: {e}"
-            logger.error(error_msg)
-            self.state.errors.append(error_msg)
-            return False
+    async def sign_in_google(self) -> bool:
+        """Sign in to Google using Red Hat SSO. Delegates to MeetSignIn."""
+        return await self._sign_in.sign_in_google()
 
     async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901
         """
@@ -2631,108 +2429,8 @@ class GoogleMeetController:
             return False
 
     async def _dismiss_chrome_sync_dialog(self) -> bool:
-        """
-        Dismiss the "Sign in to Chromium?" dialog that appears after Google SSO login.
-
-        This dialog offers to sync Chrome with the Google account. We dismiss it by
-        clicking "Use Chromium without an account" or pressing Escape.
-
-        Returns:
-            True if dialog was dismissed, False if not present.
-        """
-        if not self.page:
-            return False
-
-        try:
-            # Wait a moment for the dialog to appear (it can be delayed)
-            logger.info("Checking for Chrome sync dialog (waiting up to 5s)...")
-            await asyncio.sleep(2)
-
-            # Look for the "Sign in to Chromium?" dialog - check page content
-            page_content = await self.page.content()
-            dialog_found = False
-
-            if (
-                "Sign in to Chromium" in page_content
-                or "Sign in to Chrome" in page_content
-            ):
-                dialog_found = True
-                logger.info("Chrome sync dialog detected via page content")
-
-            if not dialog_found:
-                # Also try locator-based detection
-                dialog_selectors = [
-                    'text="Sign in to Chromium?"',
-                    'text="Sign in to Chrome?"',
-                    'text="Turn on sync?"',
-                    ':text("Sign in to Chromium")',
-                ]
-
-                for selector in dialog_selectors:
-                    try:
-                        if await self.page.locator(selector).count() > 0:
-                            dialog_found = True
-                            logger.info(f"Chrome sync dialog detected: {selector}")
-                            break
-                    except Exception as e:
-                        logger.debug(
-                            f"Suppressed error in _dismiss_chrome_sync_dialog (selector check): {e}"
-                        )
-
-            if not dialog_found:
-                logger.info("No Chrome sync dialog found")
-                return False
-
-            # Try to click "Use Chromium without an account" or similar dismiss button
-            dismiss_selectors = [
-                # Exact button text matches
-                'button:has-text("Use Chromium without an account")',
-                'button:has-text("Use Chrome without an account")',
-                # Role-based
-                'role=button[name="Use Chromium without an account"]',
-                # Partial text matches
-                'button:has-text("without an account")',
-                'button:has-text("No thanks")',
-                'button:has-text("Cancel")',
-                'button:has-text("Not now")',
-                # The X close button
-                'button[aria-label="Close"]',
-                'button[aria-label="Dismiss"]',
-            ]
-
-            for selector in dismiss_selectors:
-                try:
-                    btn = self.page.locator(selector)
-                    count = await btn.count()
-                    if count > 0:
-                        logger.info(f"Found dismiss button: {selector} (count={count})")
-                        await btn.first.click(force=True, timeout=5000)
-                        await asyncio.sleep(1)
-                        logger.info("Chrome sync dialog dismissed")
-                        return True
-                except Exception as e:
-                    logger.debug(f"Dismiss button {selector} failed: {e}")
-
-            # Try Playwright's get_by_role
-            try:
-                logger.info("Trying get_by_role for dismiss button...")
-                await self.page.get_by_role(
-                    "button", name="Use Chromium without an account"
-                ).click(timeout=3000)
-                logger.info("Chrome sync dialog dismissed via get_by_role")
-                return True
-            except Exception as e:
-                logger.debug(f"get_by_role failed: {e}")
-
-            # Fallback: press Escape to close
-            logger.info("Trying Escape key to dismiss Chrome sync dialog")
-            await self.page.keyboard.press("Escape")
-            await asyncio.sleep(1)
-            return True
-
-        except Exception as e:
-            logger.warning(f"Error handling Chrome sync dialog: {e}")
-            return False
+        """Dismiss Chrome sync dialog. Delegates to MeetSignIn."""
+        return await self._sign_in.dismiss_chrome_sync_dialog()
 
     async def _handle_permissions_dialog(self) -> bool:
         """
@@ -2887,347 +2585,16 @@ class GoogleMeetController:
     async def start_caption_capture(
         self, callback: Callable[[CaptionEntry], None]
     ) -> None:
-        """
-        Start capturing captions via DOM observation.
-
-        Args:
-            callback: Function to call with each new caption entry.
-        """
-        if not self.page or self._caption_observer_running:
-            return
-
-        self._caption_callback = callback
-        self._caption_observer_running = True
-
-        # Inject DEBOUNCED caption observer with UPDATE-IN-PLACE support
-        # Google Meet corrects text in-place, so we:
-        # 1. Wait for text to "settle" (800ms no changes)
-        # 2. Use UPDATE mode for refinements of the same utterance (not new entries)
-        # 3. Only create NEW entries when speaker changes or it's clearly a new sentence
-        await self.page.evaluate(
-            """
-            () => {
-                window._meetBotCaptions = [];
-                window._meetBotCurrentSpeaker = 'Unknown';
-                window._meetBotLastText = '';
-                window._meetBotDebounceTimer = null;
-                window._meetBotLastEmittedText = '';
-                window._meetBotLastEmittedId = null;  // Track ID for updates
-                window._meetBotLastSpeakerForText = 'Unknown';
-                window._meetBotCaptionIdCounter = 0;
-
-                function findCaptionContainer() {
-                    // Try multiple selectors for the caption container
-                    return document.querySelector('[aria-label="Captions"]') ||
-                           document.querySelector('.a4cQT') ||
-                           document.querySelector('[jsname="dsyhDe"]');
-                }
-
-                function findCaptionTextDiv(container) {
-                    if (!container) return null;
-                    const divs = container.querySelectorAll('div');
-                    let bestDiv = null;
-                    let bestLen = 0;
-                    for (const div of divs) {
-                        if (div.querySelector('button, img')) continue;
-                        const text = div.textContent || '';
-                        if (text.length > bestLen && !text.includes('Jump to')) {
-                            bestLen = text.length;
-                            bestDiv = div;
-                        }
-                    }
-                    return bestDiv;
-                }
-
-                function getSpeaker(container) {
-                    if (!container) return null;
-
-                    // Method 1: Look for speaker name near avatar image
-                    const img = container.querySelector('img');
-                    if (img) {
-                        // Check parent and siblings for name
-                        let parent = img.parentElement;
-                        for (let i = 0; i < 3 && parent; i++) {
-                            const spans = parent.querySelectorAll('span');
-                            for (const span of spans) {
-                                const t = span.textContent.trim();
-                                // Name should be reasonable length, not contain common UI text
-                                if (t && t.length > 1 && t.length < 50 &&
-                                    !t.includes('Jump') && !t.includes('caption') &&
-                                    !t.includes('English') && !t.includes('Live')) {
-                                    return t;
-                                }
-                            }
-                            parent = parent.parentElement;
-                        }
-                    }
-
-                    // Method 2: Look for speaker class patterns
-                    const speakerEl = container.querySelector('.zs7s8d, .KcIKyf, [data-speaker-name]');
-                    if (speakerEl) {
-                        const t = speakerEl.textContent.trim();
-                        if (t && t.length > 1 && t.length < 50) return t;
-                    }
-
-                    return null;
-                }
-
-                // Normalize text for comparison (lowercase, collapse whitespace)
-                function normalizeText(text) {
-                    return (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-                }
-
-                // Check if newText is a refinement of oldText (same utterance, just corrected/extended)
-                function isRefinement(oldText, newText) {
-                    if (!oldText) return false;
-                    const oldNorm = normalizeText(oldText);
-                    const newNorm = normalizeText(newText);
-
-                    // Same text (case correction only)
-                    if (oldNorm === newNorm) return true;
-
-                    // New text starts with old text (extension)
-                    if (newNorm.startsWith(oldNorm)) return true;
-
-                    // Old text starts with new text (correction that shortened)
-                    if (oldNorm.startsWith(newNorm)) return true;
-
-                    // Check if they share a significant common prefix (>60% of shorter)
-                    const minLen = Math.min(oldNorm.length, newNorm.length);
-                    let commonLen = 0;
-                    for (let i = 0; i < minLen; i++) {
-                        if (oldNorm[i] === newNorm[i]) commonLen++;
-                        else break;
-                    }
-                    if (commonLen > minLen * 0.6) return true;
-
-                    return false;
-                }
-
-                function emitCaption() {
-                    const text = window._meetBotLastText;
-                    const speaker = window._meetBotLastSpeakerForText || window._meetBotCurrentSpeaker || 'Unknown';
-
-                    if (!text) return;
-
-                    // Check if this is a refinement of the last emitted caption
-                    const lastEmitted = window._meetBotLastEmittedText;
-                    const lastId = window._meetBotLastEmittedId;
-
-                    if (lastId !== null && isRefinement(lastEmitted, text)) {
-                        // UPDATE existing caption instead of creating new one
-                        window._meetBotCaptions.push({
-                            id: lastId,
-                            speaker: speaker,
-                            text: text,
-                            ts: Date.now(),
-                            isUpdate: true  // Signal to update, not append
-                        });
-                        console.log('[MeetBot] Caption UPDATED:', speaker, text.substring(0, 50));
-                    } else {
-                        // NEW caption entry
-                        const newId = ++window._meetBotCaptionIdCounter;
-                        window._meetBotCaptions.push({
-                            id: newId,
-                            speaker: speaker,
-                            text: text,
-                            ts: Date.now(),
-                            isUpdate: false
-                        });
-                        window._meetBotLastEmittedId = newId;
-                        console.log('[MeetBot] Caption NEW:', speaker, text.substring(0, 50));
-                    }
-                    window._meetBotLastEmittedText = text;
-                }
-
-                const observer = new MutationObserver((mutations) => {
-                    const container = findCaptionContainer();
-                    if (!container) return;
-
-                    // Always try to get the current speaker
-                    const speaker = getSpeaker(container);
-                    if (speaker) {
-                        window._meetBotCurrentSpeaker = speaker;
-                        // Store the speaker associated with the current text being built
-                        window._meetBotLastSpeakerForText = speaker;
-                    }
-
-                    const captionDiv = findCaptionTextDiv(container);
-                    if (!captionDiv) return;
-
-                    const fullText = (captionDiv.textContent || '').trim();
-                    if (!fullText) return;
-
-                    // Detect speaker change - force new caption
-                    const lastSpeaker = window._meetBotLastSpeakerForText;
-                    if (speaker && lastSpeaker && speaker !== lastSpeaker) {
-                        // Speaker changed - emit previous caption and start fresh
-                        if (window._meetBotDebounceTimer) {
-                            clearTimeout(window._meetBotDebounceTimer);
-                            emitCaption();
-                        }
-                        window._meetBotLastEmittedText = '';
-                        window._meetBotLastEmittedId = null;
-                        window._meetBotLastSpeakerForText = speaker;
-                    }
-
-                    // Text changed - reset debounce timer
-                    window._meetBotLastText = fullText;
-
-                    if (window._meetBotDebounceTimer) {
-                        clearTimeout(window._meetBotDebounceTimer);
-                    }
-
-                    // Wait 400ms of no changes before emitting (allows corrections to settle)
-                    // Reduced from 800ms for faster wake word detection
-                    window._meetBotDebounceTimer = setTimeout(emitCaption, 400);
-                });
-
-                observer.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    characterData: true
-                });
-
-                window._meetBotObserver = observer;
-                console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
-            }
-        """
-        )
-
-        # Start polling for new captions (track task for cleanup)
-        self._caption_poll_task = asyncio.create_task(self._poll_captions())
-        logger.info("Caption capture started")
-
-    async def _poll_captions(self) -> None:
-        """Poll for settled/corrected captions from the JS observer buffer."""
-        # Track caption IDs to their index in buffer for updates
-        caption_id_to_index: dict[int, int] = {}
-
-        while self._caption_observer_running and self.page:
-            try:
-                # Fetch and clear the caption buffer - these are already debounced/corrected
-                captions = await self.page.evaluate(
-                    """
-                    () => {
-                        const c = window._meetBotCaptions || [];
-                        window._meetBotCaptions = [];
-                        return c;
-                    }
-                """
-                )
-
-                for cap in captions:
-                    speaker = cap.get("speaker", "Unknown")
-                    text = cap.get("text", "")
-                    ts = cap.get("ts", 0)
-                    cap_id = cap.get("id", 0)
-                    is_update = cap.get("isUpdate", False)
-
-                    if not text.strip():
-                        continue
-
-                    # Determine if this is truly an update (JS says update AND we've seen this ID before)
-                    is_true_update = is_update and cap_id in caption_id_to_index
-
-                    entry = CaptionEntry(
-                        speaker=speaker,
-                        text=text.strip(),
-                        timestamp=(
-                            datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
-                        ),
-                        caption_id=cap_id,
-                        is_update=is_true_update,
-                    )
-
-                    if entry.is_update:
-                        # UPDATE existing caption in buffer
-                        idx = caption_id_to_index[cap_id]
-                        if self.state and 0 <= idx < len(self.state.caption_buffer):
-                            self.state.caption_buffer[idx] = entry
-                            logger.debug(f"Caption UPDATE [{speaker}] {text[:50]}...")
-                        # Also notify callback with updated entry (for live display)
-                        if self._caption_callback:
-                            self._caption_callback(entry)
-                    else:
-                        # NEW caption entry
-                        if self.state:
-                            caption_id_to_index[cap_id] = len(self.state.caption_buffer)
-                            self.state.caption_buffer.append(entry)
-                            # Trim old entries when buffer exceeds max size
-                            if len(self.state.caption_buffer) > MAX_CAPTION_BUFFER:
-                                trim_count = (
-                                    len(self.state.caption_buffer) - MAX_CAPTION_BUFFER
-                                )
-                                self.state.caption_buffer = self.state.caption_buffer[
-                                    trim_count:
-                                ]
-                                # Rebuild index mapping after trim
-                                caption_id_to_index = {
-                                    e.caption_id: i
-                                    for i, e in enumerate(self.state.caption_buffer)
-                                }
-                        if self._caption_callback:
-                            self._caption_callback(entry)
-                        logger.debug(f"Caption NEW [{speaker}] {text[:50]}...")
-
-                await asyncio.sleep(0.5)  # Poll every 500ms
-
-            except Exception as e:
-                error_msg = str(e)
-                # Detect browser/page closure
-                if (
-                    "Target closed" in error_msg
-                    or "Target page, context or browser has been closed" in error_msg
-                    or "Browser has been closed" in error_msg
-                ):
-                    logger.warning(
-                        f"[Caption poll] Browser closed detected: {error_msg}"
-                    )
-                    self._browser_closed = True
-                    if self.state:
-                        self.state.joined = False
-                    break
-                logger.debug(f"Caption poll error: {e}")
-                await asyncio.sleep(1)
+        """Start capturing captions via DOM observation. Delegates to MeetCaptions."""
+        await self._captions.start_caption_capture(callback)
 
     async def stop_caption_capture(self) -> None:
-        """Stop capturing captions."""
-        self._caption_observer_running = False
-        self._caption_callback = None
-
-        # Cancel the polling task if it exists
-        if self._caption_poll_task and not self._caption_poll_task.done():
-            self._caption_poll_task.cancel()
-            try:
-                await asyncio.wait_for(self._caption_poll_task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-            self._caption_poll_task = None
-
-        if self.page:
-            try:
-                await self.page.evaluate(
-                    """
-                    () => {
-                        if (window._meetBotObserver) {
-                            window._meetBotObserver.disconnect();
-                        }
-                    }
-                """
-                )
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in stop_caption_capture (observer disconnect): {e}"
-                )
-
-        logger.info("Caption capture stopped")
+        """Stop capturing captions. Delegates to MeetCaptions."""
+        await self._captions.stop_caption_capture()
 
     async def get_captions(self) -> list[CaptionEntry]:
-        """Get all captured captions."""
-        if self.state:
-            return self.state.caption_buffer.copy()
-        return []
+        """Get all captured captions. Delegates to MeetCaptions."""
+        return await self._captions.get_captions()
 
     async def leave_meeting(self) -> bool:
         """Leave the current meeting."""
@@ -3254,343 +2621,13 @@ class GoogleMeetController:
 
         return False
 
-    async def get_participants(self) -> list[dict]:  # noqa: C901
-        """
-        Scrape the participant list from Google Meet UI.
-
-        Uses accessibility attributes (aria-label, role) which are stable across
-        Google's CSS obfuscation. Opens the People panel if needed, extracts
-        participant names, then closes the panel.
-
-        Returns:
-            List of dicts with 'name' and optionally 'email' for each participant.
-            Returns empty list if not in a meeting or scraping fails.
-        """
-        if not self.page or not self.state or not self.state.joined:
-            return []
-
-        participants = []
-        panel_was_opened = False
-
-        # Words that indicate UI elements, not participant names
-        ui_keywords = [
-            "mute",
-            "unmute",
-            "pin",
-            "unpin",
-            "remove",
-            "more options",
-            "more actions",
-            "turn of",
-            "turn on",
-            "present",
-            "presentation",
-            "screen",
-            "camera",
-            "microphone",
-            "admit",
-            "deny",
-            "waiting",
-        ]
-
-        def is_valid_name(name: str) -> bool:
-            """Check if a string looks like a valid participant name."""
-            if not name or len(name) < 2 or len(name) > 100:
-                return False
-            name_lower = name.lower()
-            # Filter out UI element labels
-            if any(kw in name_lower for kw in ui_keywords):
-                return False
-            # Filter out strings that are just "(You)" or similar
-            if name_lower in ["(you)", "you", "me"]:
-                return False
-            return True
-
-        def clean_name(name: str) -> str:
-            """Clean up a participant name."""
-            # Remove "(You)" suffix for self
-            if "(You)" in name:
-                name = name.replace("(You)", "").strip()
-            # Remove "Meeting host" or similar suffixes
-            for suffix in ["Meeting host", "Host", "Co-host", "Presentation"]:
-                if name.endswith(suffix):
-                    name = name[: -len(suffix)].strip()
-            return name.strip()
-
-        try:
-            # First check if People panel is already open by looking for the
-            # participant list container (uses stable aria-label)
-            panel_open = False
-            try:
-                # Look for the "In call" region which contains participants
-                panel = await self.page.wait_for_selector(
-                    '[role="region"][aria-label="In call"], '
-                    '[role="list"][aria-label="Participants"]',
-                    timeout=500,
-                )
-                if panel and await panel.is_visible():
-                    panel_open = True
-            except Exception as e:
-                logger.debug(f"Suppressed error in get_participants (panel check): {e}")
-
-            # If panel not open, click the People button to open it
-            if not panel_open:
-                # Use only stable attributes (aria-*, data-*, role) - NOT generated class names
-                people_button_selectors = [
-                    "[data-avatar-count]",  # Badge showing participant avatars
-                    '[aria-label="Show everyone"]',
-                    '[aria-label="People"]',
-                    '[data-tooltip="Show everyone"]',
-                    '[role="button"][aria-label*="People" i]',
-                    '[role="button"][aria-label*="participant" i]',
-                ]
-
-                for selector in people_button_selectors:
-                    try:
-                        btn = await self.page.wait_for_selector(selector, timeout=1000)
-                        if btn and await btn.is_visible():
-                            await btn.click()
-                            panel_was_opened = True
-                            await asyncio.sleep(1.5)  # Wait for panel animation
-                            break
-                    except Exception:
-                        continue
-
-            # Primary method: Use JavaScript to extract from accessibility tree
-            # This is the most reliable as it uses stable ARIA attributes
-            js_participants = await self.page.evaluate(
-                """
-                () => {
-                    const participants = [];
-                    const seen = new Set();
-
-                    // UI keywords to filter out (lowercase)
-                    const uiKeywords = [
-                        'mute', 'unmute', 'pin', 'unpin', 'remove', 'more options',
-                        'more actions', 'turn of', 'turn on', 'present', 'presentation',
-                        'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting',
-                        'contributors', 'in the meeting', 'waiting to join'
-                    ];
-
-                    function isValidName(name) {
-                        if (!name || name.length < 2 || name.length > 100) return false;
-                        const lower = name.toLowerCase();
-                        if (uiKeywords.some(kw => lower.includes(kw))) return false;
-                        if (['(you)', 'you', 'me'].includes(lower)) return false;
-                        // Filter out numbers only (like "2" for participant count)
-                        if (/^\\d+$/.test(name)) return false;
-                        return true;
-                    }
-
-                    function cleanName(name) {
-                        // Remove "(You)" suffix
-                        name = name.replace(/\\s*\\(You\\)\\s*/g, '').trim();
-                        // Remove "Meeting host" suffix
-                        name = name.replace(/\\s*Meeting host\\s*/gi, '').trim();
-                        return name;
-                    }
-
-                    function addParticipant(name, email = null) {
-                        name = cleanName(name);
-                        if (isValidName(name) && !seen.has(name)) {
-                            seen.add(name);
-                            participants.push({ name, email });
-                        }
-                    }
-
-                    // ALL METHODS USE STABLE ATTRIBUTES ONLY (aria-*, data-*, role)
-                    // NEVER use generated class names like .zWGUib, .fdZ55, etc.
-
-                    // Method 1 (BEST): role="listitem" with aria-label contains the name
-                    // Example: <div role="listitem" aria-label="David O Neill" ...>
-                    const listItems = document.querySelectorAll('[role="listitem"][aria-label]');
-                    listItems.forEach(item => {
-                        const name = item.getAttribute('aria-label');
-                        if (name) {
-                            addParticipant(name);
-                        }
-                    });
-
-                    // Method 2: data-participant-id elements have aria-label with name
-                    if (participants.length === 0) {
-                        const participantItems = document.querySelectorAll('[data-participant-id][aria-label]');
-                        participantItems.forEach(item => {
-                            const name = item.getAttribute('aria-label');
-                            if (name) {
-                                addParticipant(name);
-                            }
-                        });
-                    }
-
-                    // Method 3: Find participant list by aria-label="Participants"
-                    if (participants.length === 0) {
-                        const list = document.querySelector('[role="list"][aria-label="Participants"]');
-                        if (list) {
-                            const items = list.querySelectorAll('[role="listitem"][aria-label]');
-                            items.forEach(item => {
-                                const name = item.getAttribute('aria-label');
-                                if (name) {
-                                    addParticipant(name);
-                                }
-                            });
-                        }
-                    }
-
-                    // Method 4: Find the "In call" region and extract from listitems
-                    if (participants.length === 0) {
-                        const region = document.querySelector('[role="region"][aria-label="In call"]');
-                        if (region) {
-                            const items = region.querySelectorAll('[role="listitem"][aria-label]');
-                            items.forEach(item => {
-                                const name = item.getAttribute('aria-label');
-                                if (name) {
-                                    addParticipant(name);
-                                }
-                            });
-                        }
-                    }
-
-                    // Method 5: data-participant-id without aria-label - check nested aria-label
-                    if (participants.length === 0) {
-                        const participantItems = document.querySelectorAll('[data-participant-id]');
-                        participantItems.forEach(item => {
-                            // Look for nested element with aria-label
-                            const labeled = item.querySelector('[aria-label]');
-                            if (labeled) {
-                                const name = labeled.getAttribute('aria-label');
-                                if (name) {
-                                    addParticipant(name);
-                                }
-                            }
-                        });
-                    }
-
-                    return participants;
-                }
-            """
-            )
-
-            if js_participants:
-                participants = js_participants
-                logger.debug(
-                    f"JavaScript extraction found {len(participants)} participants"
-                )
-
-            # Fallback: Try Playwright selectors if JS extraction failed
-            if not participants:
-                try:
-                    # Use role-based selectors
-                    elements = await self.page.query_selector_all(
-                        '[role="listitem"][aria-label]'
-                    )
-                    for el in elements:
-                        try:
-                            name = await el.get_attribute("aria-label")
-                            if name:
-                                name = clean_name(name)
-                                if is_valid_name(name):
-                                    if not any(p["name"] == name for p in participants):
-                                        participants.append(
-                                            {"name": name, "email": None}
-                                        )
-                        except Exception:
-                            continue
-                except Exception as e:
-                    logger.debug(f"Playwright fallback failed: {e}")
-
-            # Secondary fallback: data-participant-id elements
-            if not participants:
-                try:
-                    elements = await self.page.query_selector_all(
-                        "[data-participant-id]"
-                    )
-                    for el in elements:
-                        try:
-                            name = await el.get_attribute("aria-label")
-                            if name:
-                                name = clean_name(name)
-                                if is_valid_name(name):
-                                    if not any(p["name"] == name for p in participants):
-                                        participants.append(
-                                            {"name": name, "email": None}
-                                        )
-                        except Exception:
-                            continue
-                except Exception as e:
-                    logger.debug(f"data-participant-id fallback failed: {e}")
-
-            # Update state with participant list
-            if self.state:
-                self.state.participants = [p["name"] for p in participants]
-
-            logger.info(f"[{self._instance_id}] Found {len(participants)} participants")
-
-        except Exception as e:
-            logger.error(f"[{self._instance_id}] Failed to get participants: {e}")
-
-        finally:
-            # Close the panel if we opened it
-            if panel_was_opened:
-                try:
-                    await self.page.keyboard.press("Escape")
-                    await asyncio.sleep(0.3)  # Brief wait for panel to close
-                except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in get_participants (panel close): {e}"
-                    )
-
-        return participants
+    async def get_participants(self) -> list[dict]:
+        """Get participant list. Delegates to MeetParticipants."""
+        return await self._participants.get_participants()
 
     async def get_participant_count(self) -> int:
-        """
-        Get the number of participants in the meeting.
-
-        This is a lightweight alternative to get_participants() that just
-        reads the participant count from the UI without opening the panel.
-
-        Returns:
-            Number of participants, or 0 if unavailable.
-        """
-        if not self.page or not self.state or not self.state.joined:
-            return 0
-
-        try:
-            # Try to find participant count in the UI
-            count_selectors = [
-                "[data-participant-count]",
-                ".rua5Nb",  # Participant count badge
-                '[aria-label*="participant" i]',
-            ]
-
-            for selector in count_selectors:
-                try:
-                    el = await self.page.wait_for_selector(selector, timeout=500)
-                    if el:
-                        # Try data attribute first
-                        count_str = await el.get_attribute("data-participant-count")
-                        if count_str:
-                            return int(count_str)
-
-                        # Try text content
-                        text = await el.text_content()
-                        if text:
-                            # Extract number from text like "5 participants" or just "5"
-                            import re
-
-                            match = re.search(r"(\d+)", text)
-                            if match:
-                                return int(match.group(1))
-                except Exception:
-                    continue
-
-            # Fallback: count from state if we've scraped before
-            if self.state and self.state.participants:
-                return len(self.state.participants)
-
-        except Exception as e:
-            logger.debug(f"Failed to get participant count: {e}")
-
-        return 0
+        """Get participant count. Delegates to MeetParticipants."""
+        return await self._participants.get_participant_count()
 
     async def close(self, restore_browser_audio: bool = False) -> None:
         """Close the browser and cleanup resources.
