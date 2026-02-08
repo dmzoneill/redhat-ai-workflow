@@ -20,8 +20,22 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from services.slack.dbus_formatters import (
+    check_search_rate_limit,
+    format_command_list,
+    format_email_lookup_found,
+    format_email_lookup_not_found,
+    format_persona_test_error,
+    format_persona_test_result,
+    format_photo_path_response,
+    format_search_results,
+    format_slack_config,
+    format_user_match_with_photo,
+    record_search,
+)
+from services.slack.dbus_history import MessageHistory, MessageRecord
 
 # Check for dbus availability
 try:
@@ -45,116 +59,20 @@ DBUS_OBJECT_PATH = "/com/aiworkflow/BotSlack"
 DBUS_INTERFACE_NAME = "com.aiworkflow.BotSlack"
 
 
-@dataclass
-class MessageRecord:
-    """Record of a processed message."""
-
-    id: str
-    timestamp: str
-    channel_id: str
-    channel_name: str
-    user_id: str
-    user_name: str
-    text: str
-    intent: str
-    classification: str
-    response: str
-    status: str  # pending, approved, rejected, sent, skipped
-    created_at: float
-    processed_at: float | None = None
-    thread_ts: str | None = None  # Thread timestamp for replies
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    def to_json(self) -> str:
-        return json.dumps(self.to_dict())
-
-
-class MessageHistory:
-    """Stores message history for querying."""
-
-    def __init__(self, max_size: int = 1000, max_pending: int = 100):
-        self.max_size = max_size
-        self.max_pending = max_pending  # Prevent unbounded memory growth
-        self.messages: list[MessageRecord] = []
-        self.pending_approvals: dict[str, MessageRecord] = {}
-
-    def add(self, record: MessageRecord):
-        """Add a message record."""
-        self.messages.append(record)
-        if len(self.messages) > self.max_size:
-            self.messages.pop(0)
-
-        if record.status == "pending":
-            # Enforce max pending limit - remove oldest pending if over limit
-            if len(self.pending_approvals) >= self.max_pending:
-                oldest_id = next(iter(self.pending_approvals))
-                self.pending_approvals.pop(oldest_id, None)
-            self.pending_approvals[record.id] = record
-
-    def get_pending(self) -> list[MessageRecord]:
-        """Get messages pending approval."""
-        return list(self.pending_approvals.values())
-
-    def approve(self, message_id: str) -> MessageRecord | None:
-        """Approve a pending message."""
-        if message_id in self.pending_approvals:
-            record = self.pending_approvals.pop(message_id)
-            record.status = "approved"
-            record.processed_at = time.time()
-            return record
-        return None
-
-    def reject(self, message_id: str) -> MessageRecord | None:
-        """Reject a pending message."""
-        if message_id in self.pending_approvals:
-            record = self.pending_approvals.pop(message_id)
-            record.status = "rejected"
-            record.processed_at = time.time()
-            return record
-        return None
-
-    def get_history(
-        self,
-        limit: int = 50,
-        channel_id: str = "",
-        user_id: str = "",
-        status: str = "",
-    ) -> list[MessageRecord]:
-        """Get message history with optional filters."""
-        result = self.messages.copy()
-
-        if channel_id:
-            result = [m for m in result if m.channel_id == channel_id]
-        if user_id:
-            result = [m for m in result if m.user_id == user_id]
-        if status:
-            result = [m for m in result if m.status == status]
-
-        return result[-limit:]
-
-    def get_stats(self) -> dict:
-        """Get message statistics."""
-        total = len(self.messages)
-        by_status = {}
-        by_classification = {}
-        by_intent = {}
-
-        for m in self.messages:
-            by_status[m.status] = by_status.get(m.status, 0) + 1
-            by_classification[m.classification] = (
-                by_classification.get(m.classification, 0) + 1
-            )
-            by_intent[m.intent] = by_intent.get(m.intent, 0) + 1
-
-        return {
-            "total": total,
-            "pending_approvals": len(self.pending_approvals),
-            "by_status": by_status,
-            "by_classification": by_classification,
-            "by_intent": by_intent,
-        }
+# MessageRecord and MessageHistory are imported from dbus_history.py
+# They are re-exported here to maintain backward compatibility for
+# external imports like: from services.slack.dbus import MessageRecord
+__all__ = [
+    "MessageRecord",
+    "MessageHistory",
+    "SlackPersonaDBusInterface",
+    "SlackDaemonWithDBus",
+    "SlackAgentClient",
+    "DBUS_SERVICE_NAME",
+    "DBUS_OBJECT_PATH",
+    "DBUS_INTERFACE_NAME",
+    "DBUS_AVAILABLE",
+]
 
 
 if DBUS_AVAILABLE:
@@ -819,35 +737,9 @@ if DBUS_AVAILABLE:
             try:
                 user = await self.daemon.state_db.find_user_by_email(email)
                 if user:
-                    # Check for cached photo
-                    from pathlib import Path
-
-                    photo_dir = Path.home() / ".cache" / "aa-workflow" / "photos"
-                    photo_path = photo_dir / f"{user['user_id']}.jpg"
-
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "found": True,
-                            "user_id": user["user_id"],
-                            "user_name": user["user_name"],
-                            "display_name": user["display_name"],
-                            "real_name": user["real_name"],
-                            "email": user["email"],
-                            "avatar_url": user["avatar_url"],
-                            "photo_path": (
-                                str(photo_path) if photo_path.exists() else ""
-                            ),
-                        }
-                    )
+                    return json.dumps(format_email_lookup_found(user))
                 else:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "found": False,
-                            "email": email,
-                        }
-                    )
+                    return json.dumps(format_email_lookup_not_found(email))
             except Exception as e:
                 logger.error(f"LookupUserByEmail error: {e}")
                 return json.dumps({"success": False, "error": str(e)})
@@ -881,28 +773,7 @@ if DBUS_AVAILABLE:
                     name, threshold=threshold, limit=5
                 )
 
-                # Add photo paths
-                from pathlib import Path
-
-                photo_dir = Path.home() / ".cache" / "aa-workflow" / "photos"
-
-                results = []
-                for user in users:
-                    photo_path = photo_dir / f"{user['user_id']}.jpg"
-                    results.append(
-                        {
-                            "user_id": user["user_id"],
-                            "user_name": user["user_name"],
-                            "display_name": user["display_name"],
-                            "real_name": user["real_name"],
-                            "email": user["email"],
-                            "avatar_url": user["avatar_url"],
-                            "photo_path": (
-                                str(photo_path) if photo_path.exists() else ""
-                            ),
-                            "match_score": user.get("match_score", 0),
-                        }
-                    )
+                results = [format_user_match_with_photo(u) for u in users]
 
                 return json.dumps(
                     {
@@ -930,20 +801,8 @@ if DBUS_AVAILABLE:
             Returns:
                 JSON with photo_path (empty string if not cached)
             """
-            from pathlib import Path
-
             try:
-                photo_dir = Path.home() / ".cache" / "aa-workflow" / "photos"
-                photo_path = photo_dir / f"{user_id}.jpg"
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "user_id": user_id,
-                        "photo_path": str(photo_path) if photo_path.exists() else "",
-                        "exists": photo_path.exists(),
-                    }
-                )
+                return json.dumps(format_photo_path_response(user_id))
             except Exception as e:
                 logger.error(f"GetUserPhotoPath error: {e}")
                 return json.dumps({"success": False, "error": str(e), "photo_path": ""})
@@ -1232,52 +1091,23 @@ if DBUS_AVAILABLE:
             max_results = min(max_results, 50) if max_results > 0 else 20
 
             try:
-                # Check rate limits
-                now = time.time()
-
                 # Initialize rate limit tracking if needed
                 if not hasattr(self.daemon, "_search_rate_limit"):
                     self.daemon._search_rate_limit = {
                         "last_search": 0,
                         "daily_count": 0,
-                        "daily_reset": now,
+                        "daily_reset": time.time(),
                     }
 
                 rl = self.daemon._search_rate_limit
 
-                # Reset daily count if it's a new day
-                if now - rl["daily_reset"] > 86400:  # 24 hours
-                    rl["daily_count"] = 0
-                    rl["daily_reset"] = now
-
-                # Check per-search rate limit (5 seconds)
-                if now - rl["last_search"] < 5:
-                    wait_time = 5 - (now - rl["last_search"])
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": f"Rate limited. Please wait {wait_time:.1f} seconds.",
-                            "rate_limited": True,
-                            "wait_seconds": wait_time,
-                            "messages": [],
-                        }
-                    )
-
-                # Check daily limit (20 searches)
-                if rl["daily_count"] >= 20:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Daily search limit (20) reached. Try again tomorrow.",
-                            "rate_limited": True,
-                            "daily_limit_reached": True,
-                            "messages": [],
-                        }
-                    )
+                # Check rate limits
+                rate_limit_error = check_search_rate_limit(rl)
+                if rate_limit_error:
+                    return json.dumps(rate_limit_error)
 
                 # Update rate limit tracking
-                rl["last_search"] = now
-                rl["daily_count"] += 1
+                record_search(rl)
 
                 # Perform the search
                 results = await self.daemon.session.search_messages(
@@ -1285,28 +1115,8 @@ if DBUS_AVAILABLE:
                     count=max_results,
                 )
 
-                messages = results.get("messages", {}).get("matches", [])
-
                 return json.dumps(
-                    {
-                        "success": True,
-                        "query": query,
-                        "count": len(messages),
-                        "total": results.get("messages", {}).get("total", 0),
-                        "messages": [
-                            {
-                                "text": m.get("text", ""),
-                                "user": m.get("user", ""),
-                                "username": m.get("username", ""),
-                                "channel_id": m.get("channel", {}).get("id", ""),
-                                "channel_name": m.get("channel", {}).get("name", ""),
-                                "ts": m.get("ts", ""),
-                                "permalink": m.get("permalink", ""),
-                            }
-                            for m in messages
-                        ],
-                        "searches_remaining_today": 20 - rl["daily_count"],
-                    }
+                    format_search_results(query, results, rl["daily_count"])
                 )
             except Exception as e:
                 logger.error(f"SearchMessages error: {e}")
@@ -1749,21 +1559,9 @@ if DBUS_AVAILABLE:
                 registry = get_registry()
                 commands = registry.list_commands()
 
-                result = []
-                for cmd in commands:
-                    result.append(
-                        {
-                            "name": cmd.name,
-                            "description": cmd.description,
-                            "type": cmd.command_type.value,
-                            "category": cmd.category,
-                            "contextual": cmd.contextual,
-                            "examples": cmd.examples[:3] if cmd.examples else [],
-                            "inputs": cmd.inputs[:5] if cmd.inputs else [],
-                        }
-                    )
-
-                return json.dumps({"success": True, "commands": result})
+                return json.dumps(
+                    {"success": True, "commands": format_command_list(commands)}
+                )
             except Exception as e:
                 logger.error(f"GetCommandList error: {e}")
                 return json.dumps({"success": False, "error": str(e), "commands": []})
@@ -1775,24 +1573,9 @@ if DBUS_AVAILABLE:
                 from scripts.common.config_loader import load_config
 
                 config = load_config()
-                slack_config = config.get("slack", {})
-
-                # Extract relevant config sections
-                result = {
-                    "listener": slack_config.get("listener", {}),
-                    "watched_channels": slack_config.get("listener", {}).get(
-                        "watched_channels", []
-                    ),
-                    "alert_channels": slack_config.get("listener", {}).get(
-                        "alert_channels", {}
-                    ),
-                    "user_classification": slack_config.get("user_classification", {}),
-                    "commands": slack_config.get("commands", {}),
-                    "research": slack_config.get("research", {}),
-                    "debug_mode": slack_config.get("debug_mode", False),
-                }
-
-                return json.dumps({"success": True, "config": result})
+                return json.dumps(
+                    {"success": True, "config": format_slack_config(config)}
+                )
             except Exception as e:
                 logger.error(f"GetConfig error: {e}")
                 return json.dumps({"success": False, "error": str(e)})
@@ -2085,29 +1868,7 @@ if DBUS_AVAILABLE:
                 Path to cached photo if it exists, or empty string
             """
             try:
-                from pathlib import Path
-
-                photo_dir = Path.home() / ".cache" / "aa-workflow" / "photos"
-                photo_path = photo_dir / f"{user_id}.jpg"
-
-                if photo_path.exists():
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "user_id": user_id,
-                            "photo_path": str(photo_path),
-                            "exists": True,
-                        }
-                    )
-                else:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "user_id": user_id,
-                            "photo_path": "",
-                            "exists": False,
-                        }
-                    )
+                return json.dumps(format_photo_path_response(user_id))
             except Exception as e:
                 logger.error(f"GetPhotoPath error: {e}")
                 return json.dumps({"success": False, "error": str(e)})
@@ -2131,7 +1892,6 @@ if DBUS_AVAILABLE:
             """
             try:
                 import sys
-                from pathlib import Path
 
                 # Add project root to path for imports
                 project_root = Path(__file__).parent.parent.parent
@@ -2159,95 +1919,17 @@ if DBUS_AVAILABLE:
                     include_inscope=True,
                 )
 
-                # Build response with status info
-                slack_source = context.get_source("slack")
-                code_source = context.get_source("code")
-                inscope_source = context.get_source("inscope")
-                jira_source = context.get_source("jira")
-                memory_source = context.get_source("memory")
-
-                return json.dumps(
-                    {
-                        "query": query,
-                        "elapsed_ms": context.total_latency_ms,
-                        "total_results": context.total_results,
-                        "formatted": context.formatted,
-                        "sources": [
-                            {
-                                "source": s.source,
-                                "found": s.found,
-                                "count": s.count,
-                                "error": s.error,
-                                "latency_ms": s.latency_ms,
-                                "results": (
-                                    s.results[:3] if s.results else []
-                                ),  # Limit results for UI
-                            }
-                            for s in context.sources
-                        ],
-                        "sources_used": [s.source for s in context.sources if s.found],
-                        "status": {
-                            "slack_persona": {
-                                "synced": slack_source.found if slack_source else False,
-                                "total_messages": (
-                                    slack_source.count if slack_source else 0
-                                ),
-                                "error": slack_source.error if slack_source else None,
-                            },
-                            "code_search": {
-                                "indexed": code_source.found if code_source else False,
-                                "chunks": code_source.count if code_source else 0,
-                                "error": code_source.error if code_source else None,
-                            },
-                            "inscope": {
-                                "authenticated": (
-                                    inscope_source.found if inscope_source else False
-                                ),
-                                "assistants": (
-                                    20 if inscope_source and inscope_source.found else 0
-                                ),
-                                "error": (
-                                    inscope_source.error if inscope_source else None
-                                ),
-                            },
-                        },
-                        "project": "automation-analytics-backend",
-                    }
-                )
+                return json.dumps(format_persona_test_result(query, context))
             except ImportError as e:
                 logger.error(f"RunPersonaTest import error: {e}")
                 return json.dumps(
-                    {
-                        "query": query,
-                        "error": f"Context injector not available: {e}",
-                        "elapsed_ms": 0,
-                        "total_results": 0,
-                        "sources": [],
-                        "sources_used": [],
-                        "status": {
-                            "slack_persona": {"synced": False, "error": str(e)},
-                            "code_search": {"indexed": False, "error": str(e)},
-                            "inscope": {"authenticated": False, "error": str(e)},
-                        },
-                    }
+                    format_persona_test_error(
+                        query, f"Context injector not available: {e}"
+                    )
                 )
             except Exception as e:
                 logger.error(f"RunPersonaTest error: {e}")
-                return json.dumps(
-                    {
-                        "query": query,
-                        "error": str(e),
-                        "elapsed_ms": 0,
-                        "total_results": 0,
-                        "sources": [],
-                        "sources_used": [],
-                        "status": {
-                            "slack_persona": {"synced": False, "error": str(e)},
-                            "code_search": {"indexed": False, "error": str(e)},
-                            "inscope": {"authenticated": False, "error": str(e)},
-                        },
-                    }
-                )
+                return json.dumps(format_persona_test_error(query, str(e)))
 
         # ==================== Signals ====================
 
