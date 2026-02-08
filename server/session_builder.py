@@ -23,6 +23,8 @@ from typing import Optional
 
 import yaml
 
+from server.utils import load_config
+
 # Workspace paths
 WORKSPACE_ROOT = Path(__file__).parent.parent
 PERSONAS_DIR = WORKSPACE_ROOT / "personas"
@@ -30,12 +32,16 @@ SKILLS_DIR = WORKSPACE_ROOT / "skills"
 MEMORY_DIR = WORKSPACE_ROOT / "memory"
 CONFIG_FILE = WORKSPACE_ROOT / "config.json"
 
+# Load limits from config with hardcoded fallbacks
+_config = load_config()
+_limits = _config.get("limits", {})
+
 # Token estimation: average characters per token for English text
-CHARS_PER_TOKEN = 4
+CHARS_PER_TOKEN = _limits.get("chars_per_token", 4)
 
 # Token count thresholds for context size warnings
-TOKEN_WARNING_THRESHOLD = 50_000
-TOKEN_DANGER_THRESHOLD = 100_000
+TOKEN_WARNING_THRESHOLD = _limits.get("token_warning_threshold", 50_000)
+TOKEN_DANGER_THRESHOLD = _limits.get("token_danger_threshold", 100_000)
 
 
 def estimate_tokens(text: str) -> int:

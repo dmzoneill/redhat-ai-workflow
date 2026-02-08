@@ -1047,7 +1047,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                         },
@@ -1078,7 +1078,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                         },
@@ -1106,7 +1106,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                         },
@@ -1133,7 +1133,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                         },
@@ -1163,7 +1163,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                             "repositories": {"myproj": {"path": str(project_path)}},
@@ -1186,7 +1186,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                             "repositories": {"proj": {"path": "/nonexistent"}},
@@ -1218,7 +1218,7 @@ class TestLoadProjectKnowledge:
             with patch.object(session_tools, "_get_current_persona", return_value=None):
                 with patch.object(session_tools, "KNOWLEDGE_DIR", tmp_path):
                     with patch(
-                        "tool_modules.aa_workflow.src.session_tools.load_config",
+                        "server.utils.load_config",
                         return_value={
                             "agent": {"default_persona": "researcher"},
                         },
@@ -1546,7 +1546,7 @@ def _session_start_patches(workspace=None):
             return_value=workspace,
         ),
         "load_config": patch(
-            "tool_modules.aa_workflow.src.session_tools.load_config",
+            "server.utils.load_config",
             return_value={"agent": {"default_persona": "researcher"}},
         ),
         "load_chat_async": patch.object(

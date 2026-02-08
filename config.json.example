@@ -194,7 +194,8 @@
   },
   "konflux": {
     "kubeconfig": "/home/YOUR_USER/.kube/config.konflux",
-    "cluster": "your-konflux-cluster.example.com"
+    "cluster": "your-konflux-cluster.example.com",
+    "namespace": "your-tenant"
   },
   "namespaces": {
     "stage": {
@@ -774,6 +775,7 @@
   "sprint": {
     "description": "Sprint Bot Autopilot configuration - defines workflow, status mappings, and bot behavior. NOTE: enabled state is in state.json",
     "auto_approve": false,
+    "max_timeline_entries": 50,
     "max_concurrent_issues": 1,
     "default_persona": "researcher",
 
@@ -1173,7 +1175,8 @@
     "flake8": {
       "max_line_length": 100,
       "ignore": "E501,W503,E203",
-      "exclude": ".git,__pycache__,migrations,venv,.venv"
+      "exclude": ".git,__pycache__,migrations,venv,.venv",
+      "blocking_codes": ["F401", "F811", "F821", "F822", "F823", "E999"]
     }
   },
   "testing": {
@@ -1370,6 +1373,17 @@
       "enabled": true,
       "sources": ["git", "jira", "gitlab", "github"]
     }
+  },
+  "limits": {
+    "max_cursor_tools": 128,
+    "chars_per_token": 4,
+    "token_warning_threshold": 50000,
+    "token_danger_threshold": 100000,
+    "max_running_skills": 100,
+    "max_skill_age_seconds": 3600,
+    "session_stale_hours": 24,
+    "cache_ttl": 300,
+    "debounce_delay": 2.0
   },
   "slop_bot": {
     "description": "Slop Bot - Continuous code quality monitoring with named parallel analysis loops",

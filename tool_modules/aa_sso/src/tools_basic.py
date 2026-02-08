@@ -343,14 +343,15 @@ async def fill_sso_form(
         try:
             await page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in fill_sso_form/find_element primary: {e}")
         for alt in alternatives:
             try:
                 await page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed error in fill_sso_form/find_element alt: {e}")
                 continue
         return primary  # Return primary and let it fail with proper error
 
@@ -412,14 +413,19 @@ def fill_sso_form_sync(
         try:
             page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in fill_sso_form_sync/find_element primary: {e}"
+            )
         for alt in alternatives:
             try:
                 page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in fill_sso_form_sync/find_element alt: {e}"
+                )
                 continue
         return primary  # Return primary and let it fail with proper error
 

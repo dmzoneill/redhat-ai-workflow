@@ -66,8 +66,18 @@ def get_default_persona() -> str:
         return "researcher"
 
 
-# Session stale timeout (hours) - sessions inactive for longer are cleaned up
-SESSION_STALE_HOURS = 24
+# Load session stale timeout from config with hardcoded fallback
+def _load_session_stale_hours() -> int:
+    try:
+        from server.utils import load_config
+
+        cfg = load_config()
+        return cfg.get("limits", {}).get("session_stale_hours", 24)
+    except Exception:
+        return 24
+
+
+SESSION_STALE_HOURS = _load_session_stale_hours()
 
 # Maximum entries in tool_filter_cache per session to prevent memory leaks
 MAX_FILTER_CACHE_SIZE = 50

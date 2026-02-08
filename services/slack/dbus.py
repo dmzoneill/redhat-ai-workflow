@@ -143,7 +143,9 @@ class MessageHistory:
 
         for m in self.messages:
             by_status[m.status] = by_status.get(m.status, 0) + 1
-            by_classification[m.classification] = by_classification.get(m.classification, 0) + 1
+            by_classification[m.classification] = (
+                by_classification.get(m.classification, 0) + 1
+            )
             by_intent[m.intent] = by_intent.get(m.intent, 0) + 1
 
         return {
@@ -186,7 +188,11 @@ if DBUS_AVAILABLE:
 
             stats = {
                 "running": self.daemon.is_running,
-                "uptime": (time.time() - self.daemon.start_time if self.daemon.start_time else 0),
+                "uptime": (
+                    time.time() - self.daemon.start_time
+                    if self.daemon.start_time
+                    else 0
+                ),
                 "messages_processed": self.daemon.messages_processed,
                 "messages_responded": self.daemon.messages_responded,
                 "pending_approvals": len(self.daemon.history.pending_approvals),
@@ -215,8 +221,25 @@ if DBUS_AVAILABLE:
         def ApproveMessage(self, message_id: "s") -> "s":
             """Approve a pending message and send it."""
             loop = self.daemon._event_loop
-            future = asyncio.run_coroutine_threadsafe(self.daemon.approve_message(message_id), loop)
-            result = future.result(timeout=30)
+            future = asyncio.run_coroutine_threadsafe(
+                self.daemon.approve_message(message_id), loop
+            )
+            # WARNING: future.result() blocks the D-Bus thread until the coroutine
+            # completes or the timeout expires. This is acceptable for short-lived
+            # approve operations, but a hung event loop would block D-Bus for up to
+            # 30 seconds, preventing other D-Bus method calls from being served.
+            try:
+                result = future.result(timeout=30)
+            except TimeoutError:
+                logger.error(
+                    f"ApproveMessage timed out after 30s for message_id={message_id}"
+                )
+                return json.dumps(
+                    {"success": False, "error": "Approval timed out after 30 seconds"}
+                )
+            except Exception as e:
+                logger.error(f"ApproveMessage failed for message_id={message_id}: {e}")
+                return json.dumps({"success": False, "error": str(e)})
             return json.dumps(result)
 
         @method()
@@ -231,12 +254,27 @@ if DBUS_AVAILABLE:
         def ApproveAll(self) -> "s":
             """Approve all pending messages."""
             loop = self.daemon._event_loop
-            future = asyncio.run_coroutine_threadsafe(self.daemon.approve_all_pending(), loop)
-            result = future.result(timeout=60)
+            future = asyncio.run_coroutine_threadsafe(
+                self.daemon.approve_all_pending(), loop
+            )
+            # WARNING: future.result() blocks the D-Bus thread. See ApproveMessage
+            # for rationale. The longer 60s timeout is needed for batch approvals.
+            try:
+                result = future.result(timeout=60)
+            except TimeoutError:
+                logger.error("ApproveAll timed out after 60s")
+                return json.dumps(
+                    {"success": False, "error": "Approval timed out after 60 seconds"}
+                )
+            except Exception as e:
+                logger.error(f"ApproveAll failed: {e}")
+                return json.dumps({"success": False, "error": str(e)})
             return json.dumps(result)
 
         @method()
-        def GetHistory(self, limit: "i", channel_id: "s", user_id: "s", status: "s") -> "s":
+        def GetHistory(
+            self, limit: "i", channel_id: "s", user_id: "s", status: "s"
+        ) -> "s":
             """Get message history with optional filters."""
             history = self.daemon.history.get_history(
                 limit=limit,
@@ -268,20 +306,34 @@ if DBUS_AVAILABLE:
                         thread_ts=thread_ts if thread_ts else None,
                         typing_delay=True,
                     )
-                    logger.info(f"D-Bus SendMessage completed: ts={result.get('ts', 'unknown')}")
+                    logger.info(
+                        f"D-Bus SendMessage completed: ts={result.get('ts', 'unknown')}"
+                    )
                     return result
                 except Exception as e:
                     logger.error(f"D-Bus SendMessage failed: {e}")
                     return {"success": False, "error": str(e)}
 
-            # Schedule the task
-            asyncio.run_coroutine_threadsafe(do_send(), loop)
+            # Schedule the task and track it so unhandled exceptions are logged
+            future = asyncio.run_coroutine_threadsafe(do_send(), loop)
+
+            def _on_send_done(fut):
+                """Log any unhandled exception from the fire-and-forget send task."""
+                exc = fut.exception()
+                if exc is not None:
+                    logger.error(f"D-Bus SendMessage background task failed: {exc}")
+
+            future.add_done_callback(_on_send_done)
 
             # Return immediately - the message will be sent asynchronously
-            return json.dumps({"success": True, "message": "Message send scheduled", "async": True})
+            return json.dumps(
+                {"success": True, "message": "Message send scheduled", "async": True}
+            )
 
         @method()
-        async def SendMessageRich(self, channel_id: "s", text: "s", thread_ts: "s", reply_broadcast: "b") -> "s":
+        async def SendMessageRich(
+            self, channel_id: "s", text: "s", thread_ts: "s", reply_broadcast: "b"
+        ) -> "s":
             """
             Send a message using the web client API format with rich text blocks.
 
@@ -376,10 +428,18 @@ if DBUS_AVAILABLE:
                 JSON array of matching channels with id, name, purpose, etc.
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "channels": []})
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "State DB not available",
+                        "channels": [],
+                    }
+                )
 
             try:
-                channels = await self.daemon.state_db.find_channels(query=query, limit=500)
+                channels = await self.daemon.state_db.find_channels(
+                    query=query, limit=500
+                )
                 return json.dumps(
                     {
                         "success": True,
@@ -411,13 +471,17 @@ if DBUS_AVAILABLE:
                 JSON with search results including channel id, name, purpose, etc.
             """
             if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available", "channels": []})
+                return json.dumps(
+                    {"success": False, "error": "Session not available", "channels": []}
+                )
 
             # Cap count at 100 for safety
             count = min(max(count, 1), 100) if count > 0 else 30
 
             try:
-                result = await self.daemon.session.search_channels_and_cache(query, count)
+                result = await self.daemon.session.search_channels_and_cache(
+                    query, count
+                )
                 return json.dumps(result)
             except Exception as e:
                 logger.error(f"SearchChannels error: {e}")
@@ -451,7 +515,9 @@ if DBUS_AVAILABLE:
 
             try:
                 # Search channels
-                result = await self.daemon.session.search_channels_and_cache(query, count)
+                result = await self.daemon.session.search_channels_and_cache(
+                    query, count
+                )
 
                 if not result.get("success"):
                     return json.dumps(result)
@@ -497,7 +563,9 @@ if DBUS_AVAILABLE:
                 JSON array of matching users with id, name, email, etc.
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "users": []})
+                return json.dumps(
+                    {"success": False, "error": "State DB not available", "users": []}
+                )
 
             try:
                 users = await self.daemon.state_db.find_users(query=query, limit=500)
@@ -532,7 +600,9 @@ if DBUS_AVAILABLE:
                 JSON with search results including user id, name, email, title, etc.
             """
             if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available", "users": []})
+                return json.dumps(
+                    {"success": False, "error": "Session not available", "users": []}
+                )
 
             # Cap count at 100 for safety
             count = min(max(count, 1), 100) if count > 0 else 30
@@ -582,7 +652,11 @@ if DBUS_AVAILABLE:
 
                 users_to_cache = []
                 for u in result.get("users", []):
-                    if u.get("user_id") and not u.get("is_bot") and not u.get("deleted"):
+                    if (
+                        u.get("user_id")
+                        and not u.get("is_bot")
+                        and not u.get("deleted")
+                    ):
                         users_to_cache.append(
                             CachedUser(
                                 user_id=u["user_id"],
@@ -620,7 +694,9 @@ if DBUS_AVAILABLE:
                 JSON with profile sections and extracted fields (email, title, etc.)
             """
             if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available", "profile": {}})
+                return json.dumps(
+                    {"success": False, "error": "Session not available", "profile": {}}
+                )
 
             try:
                 result = await self.daemon.session.get_user_profile_details(user_id)
@@ -646,7 +722,9 @@ if DBUS_AVAILABLE:
                 JSON with the constructed avatar URL
             """
             if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available", "url": ""})
+                return json.dumps(
+                    {"success": False, "error": "Session not available", "url": ""}
+                )
 
             try:
                 # Default size to 512 if not specified
@@ -675,7 +753,13 @@ if DBUS_AVAILABLE:
                 JSON array of channels with id, name, purpose, etc.
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "channels": []})
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "State DB not available",
+                        "channels": [],
+                    }
+                )
 
             try:
                 channels = await self.daemon.state_db.get_my_channels(limit=100)
@@ -699,7 +783,9 @@ if DBUS_AVAILABLE:
                 JSON array of groups with id, handle, name, members.
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "groups": []})
+                return json.dumps(
+                    {"success": False, "error": "State DB not available", "groups": []}
+                )
 
             try:
                 groups = await self.daemon.state_db.get_all_groups()
@@ -749,7 +835,9 @@ if DBUS_AVAILABLE:
                             "real_name": user["real_name"],
                             "email": user["email"],
                             "avatar_url": user["avatar_url"],
-                            "photo_path": str(photo_path) if photo_path.exists() else "",
+                            "photo_path": (
+                                str(photo_path) if photo_path.exists() else ""
+                            ),
                         }
                     )
                 else:
@@ -780,14 +868,18 @@ if DBUS_AVAILABLE:
                 JSON with list of matching users sorted by match score
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "users": []})
+                return json.dumps(
+                    {"success": False, "error": "State DB not available", "users": []}
+                )
 
             try:
                 # Default threshold if not specified
                 if threshold <= 0:
                     threshold = 0.7
 
-                users = await self.daemon.state_db.find_user_by_name_fuzzy(name, threshold=threshold, limit=5)
+                users = await self.daemon.state_db.find_user_by_name_fuzzy(
+                    name, threshold=threshold, limit=5
+                )
 
                 # Add photo paths
                 from pathlib import Path
@@ -805,7 +897,9 @@ if DBUS_AVAILABLE:
                             "real_name": user["real_name"],
                             "email": user["email"],
                             "avatar_url": user["avatar_url"],
-                            "photo_path": str(photo_path) if photo_path.exists() else "",
+                            "photo_path": (
+                                str(photo_path) if photo_path.exists() else ""
+                            ),
                             "match_score": user.get("match_score", 0),
                         }
                     )
@@ -922,7 +1016,9 @@ if DBUS_AVAILABLE:
                 JSON with refresh status and count of channels cached.
             """
             if not self.daemon.session or not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "Session or State DB not available"})
+                return json.dumps(
+                    {"success": False, "error": "Session or State DB not available"}
+                )
 
             try:
                 # Import here to avoid circular imports
@@ -993,7 +1089,9 @@ if DBUS_AVAILABLE:
 
                 expanded_path = os.path.expanduser(file_path)
 
-                result = await self.daemon.state_db.import_channels_from_sidebar(expanded_path)
+                result = await self.daemon.state_db.import_channels_from_sidebar(
+                    expanded_path
+                )
                 return json.dumps(result)
             except Exception as e:
                 logger.error(f"ImportSidebarChannels error: {e}")
@@ -1008,7 +1106,9 @@ if DBUS_AVAILABLE:
                 JSON array of DM info (channel_id, name, display_name, type)
             """
             if not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "State DB not available", "dms": []})
+                return json.dumps(
+                    {"success": False, "error": "State DB not available", "dms": []}
+                )
 
             try:
                 dms = await self.daemon.state_db.get_sidebar_dms()
@@ -1029,7 +1129,9 @@ if DBUS_AVAILABLE:
                 JSON with refresh status and count of users cached.
             """
             if not self.daemon.session or not self.daemon.state_db:
-                return json.dumps({"success": False, "error": "Session or State DB not available"})
+                return json.dumps(
+                    {"success": False, "error": "Session or State DB not available"}
+                )
 
             try:
                 # Import here to avoid circular imports
@@ -1065,7 +1167,9 @@ if DBUS_AVAILABLE:
                                 real_name=profile.get("real_name", ""),
                                 email=profile.get("email", ""),
                                 gitlab_username="",  # Not available from Slack
-                                avatar_url=profile.get("image_72", profile.get("image_48", "")),
+                                avatar_url=profile.get(
+                                    "image_72", profile.get("image_48", "")
+                                ),
                             )
                         )
 
@@ -1120,7 +1224,9 @@ if DBUS_AVAILABLE:
                 JSON with search results or rate limit error.
             """
             if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available", "messages": []})
+                return json.dumps(
+                    {"success": False, "error": "Session not available", "messages": []}
+                )
 
             # Cap max_results at 50 for safety
             max_results = min(max_results, 50) if max_results > 0 else 20
@@ -1207,7 +1313,9 @@ if DBUS_AVAILABLE:
                 return json.dumps({"success": False, "error": str(e), "messages": []})
 
         @method()
-        async def GetThreadReplies(self, channel_id: "s", thread_ts: "s", limit: "i") -> "s":
+        async def GetThreadReplies(
+            self, channel_id: "s", thread_ts: "s", limit: "i"
+        ) -> "s":
             """
             Get thread replies using the enhanced web client API.
 
@@ -1236,7 +1344,9 @@ if DBUS_AVAILABLE:
 
             try:
                 limit = min(max(limit, 1), 100)  # Clamp to 1-100
-                result = await self.daemon.session.get_thread_replies_full(channel_id, thread_ts, limit)
+                result = await self.daemon.session.get_thread_replies_full(
+                    channel_id, thread_ts, limit
+                )
 
                 if not result.get("ok"):
                     return json.dumps(
@@ -1299,7 +1409,9 @@ if DBUS_AVAILABLE:
                 )
 
             try:
-                result = await self.daemon.session.get_thread_context(channel_id, thread_ts)
+                result = await self.daemon.session.get_thread_context(
+                    channel_id, thread_ts
+                )
 
                 if not result.get("ok"):
                     return json.dumps(
@@ -1412,7 +1524,9 @@ if DBUS_AVAILABLE:
                 # Clamp count to reasonable limits
                 count = max(1, min(count, 500))
 
-                result = await self.daemon.session.list_channel_members_and_cache(channel_id, count)
+                result = await self.daemon.session.list_channel_members_and_cache(
+                    channel_id, count
+                )
                 return json.dumps(result)
             except Exception as e:
                 logger.error(f"ListChannelMembers error: {e}")
@@ -1426,7 +1540,9 @@ if DBUS_AVAILABLE:
                 )
 
         @method()
-        async def CheckChannelMembership(self, channel_id: "s", user_ids_json: "s") -> "s":
+        async def CheckChannelMembership(
+            self, channel_id: "s", user_ids_json: "s"
+        ) -> "s":
             """
             Check which users from a list are members of a channel.
 
@@ -1461,7 +1577,9 @@ if DBUS_AVAILABLE:
                         }
                     )
 
-                result = await self.daemon.session.check_channel_membership(channel_id, user_ids)
+                result = await self.daemon.session.check_channel_membership(
+                    channel_id, user_ids
+                )
 
                 if not result.get("ok"):
                     return json.dumps(
@@ -1662,8 +1780,12 @@ if DBUS_AVAILABLE:
                 # Extract relevant config sections
                 result = {
                     "listener": slack_config.get("listener", {}),
-                    "watched_channels": slack_config.get("listener", {}).get("watched_channels", []),
-                    "alert_channels": slack_config.get("listener", {}).get("alert_channels", {}),
+                    "watched_channels": slack_config.get("listener", {}).get(
+                        "watched_channels", []
+                    ),
+                    "alert_channels": slack_config.get("listener", {}).get(
+                        "alert_channels", {}
+                    ),
                     "user_classification": slack_config.get("user_classification", {}),
                     "commands": slack_config.get("commands", {}),
                     "research": slack_config.get("research", {}),
@@ -1753,7 +1875,12 @@ if DBUS_AVAILABLE:
             Rate limited to ~1 request/second to avoid detection.
             """
             try:
-                from src.background_sync import BackgroundSync, SyncConfig, get_background_sync, set_background_sync
+                from src.background_sync import (
+                    BackgroundSync,
+                    SyncConfig,
+                    get_background_sync,
+                    set_background_sync,
+                )
 
                 existing = get_background_sync()
                 if existing and existing.stats.is_running:
@@ -1930,7 +2057,9 @@ if DBUS_AVAILABLE:
                 if "download_photos" in updates:
                     sync.config.download_photos = bool(updates["download_photos"])
                 if "max_members_per_channel" in updates:
-                    sync.config.max_members_per_channel = int(updates["max_members_per_channel"])
+                    sync.config.max_members_per_channel = int(
+                        updates["max_members_per_channel"]
+                    )
 
                 return json.dumps(
                     {
@@ -2050,7 +2179,9 @@ if DBUS_AVAILABLE:
                                 "count": s.count,
                                 "error": s.error,
                                 "latency_ms": s.latency_ms,
-                                "results": s.results[:3] if s.results else [],  # Limit results for UI
+                                "results": (
+                                    s.results[:3] if s.results else []
+                                ),  # Limit results for UI
                             }
                             for s in context.sources
                         ],
@@ -2058,7 +2189,9 @@ if DBUS_AVAILABLE:
                         "status": {
                             "slack_persona": {
                                 "synced": slack_source.found if slack_source else False,
-                                "total_messages": slack_source.count if slack_source else 0,
+                                "total_messages": (
+                                    slack_source.count if slack_source else 0
+                                ),
                                 "error": slack_source.error if slack_source else None,
                             },
                             "code_search": {
@@ -2067,9 +2200,15 @@ if DBUS_AVAILABLE:
                                 "error": code_source.error if code_source else None,
                             },
                             "inscope": {
-                                "authenticated": inscope_source.found if inscope_source else False,
-                                "assistants": 20 if inscope_source and inscope_source.found else 0,
-                                "error": inscope_source.error if inscope_source else None,
+                                "authenticated": (
+                                    inscope_source.found if inscope_source else False
+                                ),
+                                "assistants": (
+                                    20 if inscope_source and inscope_source.found else 0
+                                ),
+                                "error": (
+                                    inscope_source.error if inscope_source else None
+                                ),
                             },
                         },
                         "project": "automation-analytics-backend",
@@ -2385,7 +2524,9 @@ class SlackAgentClient:
 
         try:
             self._bus = await MessageBus().connect()
-            introspection = await self._bus.introspect(DBUS_SERVICE_NAME, DBUS_OBJECT_PATH)
+            introspection = await self._bus.introspect(
+                DBUS_SERVICE_NAME, DBUS_OBJECT_PATH
+            )
             self._proxy = self._bus.get_proxy_object(
                 DBUS_SERVICE_NAME,
                 DBUS_OBJECT_PATH,
@@ -2450,7 +2591,9 @@ class SlackAgentClient:
         result = await interface.call_get_history(limit, channel_id, user_id, status)
         return json.loads(result)
 
-    async def send_message(self, channel_id: str, text: str, thread_ts: str = "") -> dict:
+    async def send_message(
+        self, channel_id: str, text: str, thread_ts: str = ""
+    ) -> dict:
         """Send a message to Slack."""
         interface = self._get_interface()
         result = await interface.call_send_message(channel_id, text, thread_ts)
@@ -2596,13 +2739,17 @@ class SlackAgentClient:
         result = await interface.call_get_user_profile(user_id)
         return json.loads(result)
 
-    async def get_avatar_url(self, user_id: str, avatar_hash: str, size: int = 512) -> dict:
+    async def get_avatar_url(
+        self, user_id: str, avatar_hash: str, size: int = 512
+    ) -> dict:
         """Construct a Slack avatar URL from user ID and avatar hash."""
         interface = self._get_interface()
         result = await interface.call_get_avatar_url(user_id, avatar_hash, size)
         return json.loads(result)
 
-    async def get_thread_replies(self, channel_id: str, thread_ts: str, limit: int = 50) -> dict:
+    async def get_thread_replies(
+        self, channel_id: str, thread_ts: str, limit: int = 50
+    ) -> dict:
         """Get thread replies with full message data."""
         interface = self._get_interface()
         result = await interface.call_get_thread_replies(channel_id, thread_ts, limit)
@@ -2623,7 +2770,9 @@ class SlackAgentClient:
     ) -> dict:
         """Send a message using the web client API format with rich text blocks."""
         interface = self._get_interface()
-        result = await interface.call_send_message_rich(channel_id, text, thread_ts, reply_broadcast)
+        result = await interface.call_send_message_rich(
+            channel_id, text, thread_ts, reply_broadcast
+        )
         return json.loads(result)
 
     async def get_app_commands(self, summarize: bool = True) -> dict:
@@ -2654,7 +2803,9 @@ class SlackAgentClient:
     ) -> dict:
         """Get message history for a channel with optional time range."""
         interface = self._get_interface()
-        result = await interface.call_get_channel_history(channel_id, limit, oldest, latest, simplify)
+        result = await interface.call_get_channel_history(
+            channel_id, limit, oldest, latest, simplify
+        )
         return json.loads(result)
 
     async def check_channel_membership(
@@ -2665,7 +2816,9 @@ class SlackAgentClient:
         """Check which users from a list are members of a channel."""
         interface = self._get_interface()
         user_ids_json = json.dumps(user_ids)
-        result = await interface.call_check_channel_membership(channel_id, user_ids_json)
+        result = await interface.call_check_channel_membership(
+            channel_id, user_ids_json
+        )
         return json.loads(result)
 
     # ==================== User Lookup ====================

@@ -19,8 +19,19 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Debounce delay in seconds
-DEBOUNCE_DELAY = 2.0
+
+# Debounce delay in seconds - loaded from config with fallback
+def _load_debounce_delay() -> float:
+    try:
+        from server.utils import load_config
+
+        cfg = load_config()
+        return float(cfg.get("limits", {}).get("debounce_delay", 2.0))
+    except Exception:
+        return 2.0
+
+
+DEBOUNCE_DELAY = _load_debounce_delay()
 
 
 class JsonFileManager:

@@ -12,17 +12,21 @@ import time
 from typing import Optional
 
 from server.usage_pattern_storage import UsagePatternStorage
+from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
 # Cache TTL in seconds (5 minutes)
-CACHE_TTL = 300
+_config = load_config()
+CACHE_TTL = _config.get("limits", {}).get("cache_ttl", 300)
 
 
 class UsagePatternChecker:
     """Check learned usage patterns before tool execution."""
 
-    def __init__(self, storage: Optional[UsagePatternStorage] = None, cache_ttl: int = CACHE_TTL):
+    def __init__(
+        self, storage: Optional[UsagePatternStorage] = None, cache_ttl: int = CACHE_TTL
+    ):
         """Initialize checker.
 
         Args:
@@ -75,19 +79,26 @@ class UsagePatternChecker:
 
         if tool_patterns is None:
             # Cache miss - load from storage
-            tool_patterns = self.storage.get_patterns_for_tool(tool_name, min_confidence=min_confidence)
+            tool_patterns = self.storage.get_patterns_for_tool(
+                tool_name, min_confidence=min_confidence
+            )
             # Cache the results
             self._cache_patterns(tool_name, min_confidence, tool_patterns)
 
         if not tool_patterns:
-            logger.debug(f"No patterns found for {tool_name} (min_conf: {min_confidence:.0%})")
+            logger.debug(
+                f"No patterns found for {tool_name} (min_conf: {min_confidence:.0%})"
+            )
             return result
 
         # Check each pattern
         for pattern in tool_patterns:
             if self._matches_mistake_pattern(params, pattern, context):
                 # Pattern matched!
-                logger.info(f"Pattern matched: {pattern['id']} for {tool_name} " f"(conf: {pattern['confidence']:.0%})")
+                logger.info(
+                    f"Pattern matched: {pattern['id']} for {tool_name} "
+                    f"(conf: {pattern['confidence']:.0%})"
+                )
 
                 # Generate warning
                 warning = self._generate_warning(pattern)
@@ -116,7 +127,9 @@ class UsagePatternChecker:
 
         return result
 
-    def _matches_mistake_pattern(self, params: dict, pattern: dict, context: dict) -> bool:
+    def _matches_mistake_pattern(
+        self, params: dict, pattern: dict, context: dict
+    ) -> bool:
         """Check if current params match a learned mistake pattern.
 
         Args:
@@ -168,7 +181,8 @@ class UsagePatternChecker:
             pattern = validation["regex"]
             if not re.match(pattern, str(param_value)):
                 logger.debug(
-                    f"Parameter '{param_name}' value '{param_value}' " f"does not match expected pattern '{pattern}'"
+                    f"Parameter '{param_name}' value '{param_value}' "
+                    f"does not match expected pattern '{pattern}'"
                 )
                 return True
 
@@ -224,7 +238,9 @@ class UsagePatternChecker:
         # Default: Can't reliably detect incorrect parameter before execution
         return False
 
-    def _match_workflow_sequence(self, params: dict, mistake: dict, context: dict) -> bool:
+    def _match_workflow_sequence(
+        self, params: dict, mistake: dict, context: dict
+    ) -> bool:
         """Check if workflow sequence error is likely.
 
         Args:
@@ -250,10 +266,15 @@ class UsagePatternChecker:
                 return False
 
         # No prerequisite found in recent calls
-        logger.debug(f"Workflow sequence issue: missing prerequisite {missing_steps}, " f"recent calls: {recent_tools}")
+        logger.debug(
+            f"Workflow sequence issue: missing prerequisite {missing_steps}, "
+            f"recent calls: {recent_tools}"
+        )
         return True
 
-    def _match_missing_prerequisite(self, params: dict, mistake: dict, context: dict) -> bool:
+    def _match_missing_prerequisite(
+        self, params: dict, mistake: dict, context: dict
+    ) -> bool:
         """Check if prerequisite is likely missing.
 
         Args:
@@ -319,7 +340,9 @@ class UsagePatternChecker:
 
         return warning
 
-    def get_prevention_summary(self, tool_name: str, min_confidence: float = 0.75) -> str:
+    def get_prevention_summary(
+        self, tool_name: str, min_confidence: float = 0.75
+    ) -> str:
         """Get a summary of prevention patterns for a tool.
 
         Args:
@@ -329,7 +352,9 @@ class UsagePatternChecker:
         Returns:
             Summary string or empty if no patterns
         """
-        patterns = self.storage.get_patterns_for_tool(tool_name, min_confidence=min_confidence)
+        patterns = self.storage.get_patterns_for_tool(
+            tool_name, min_confidence=min_confidence
+        )
 
         if not patterns:
             return ""
@@ -341,7 +366,9 @@ class UsagePatternChecker:
             summary += f"{i}. **{pattern['root_cause']}** ({pattern['confidence']:.0%} confidence)\n"
             summary += f"   Observations: {pattern['observations']}\n"
             if pattern.get("success_after_prevention", 0) > 0:
-                success_rate = pattern["success_after_prevention"] / pattern["observations"]
+                success_rate = (
+                    pattern["success_after_prevention"] / pattern["observations"]
+                )
                 summary += f"   Prevention success rate: {success_rate:.0%}\n"
             summary += "\n"
 
@@ -353,7 +380,9 @@ class UsagePatternChecker:
         self._cache_timestamp = None
         logger.debug("Pattern cache cleared")
 
-    def _get_cached_patterns(self, tool_name: str, min_confidence: float) -> Optional[list[dict]]:
+    def _get_cached_patterns(
+        self, tool_name: str, min_confidence: float
+    ) -> Optional[list[dict]]:
         """Get cached patterns for a tool.
 
         Args:
@@ -370,7 +399,9 @@ class UsagePatternChecker:
         # Check if cache is expired
         age = time.time() - self._cache_timestamp
         if age > self._cache_ttl:
-            logger.debug(f"Pattern cache expired (age: {age:.1f}s, TTL: {self._cache_ttl}s)")
+            logger.debug(
+                f"Pattern cache expired (age: {age:.1f}s, TTL: {self._cache_ttl}s)"
+            )
             self.clear_cache()
             return None
 
@@ -385,7 +416,9 @@ class UsagePatternChecker:
 
         return cached
 
-    def _cache_patterns(self, tool_name: str, min_confidence: float, patterns: list[dict]) -> None:
+    def _cache_patterns(
+        self, tool_name: str, min_confidence: float, patterns: list[dict]
+    ) -> None:
         """Cache patterns for a tool.
 
         Args:
@@ -409,4 +442,7 @@ class UsagePatternChecker:
         cache_key = (tool_name, min_confidence)
         self._pattern_cache[cache_key] = patterns
 
-        logger.debug(f"Cached {len(patterns)} patterns for {tool_name} " f"(min_conf: {min_confidence:.0%})")
+        logger.debug(
+            f"Cached {len(patterns)} patterns for {tool_name} "
+            f"(min_conf: {min_confidence:.0%})"
+        )

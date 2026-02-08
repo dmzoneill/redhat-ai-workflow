@@ -16,6 +16,7 @@ Provides workflow coordination and local development tools:
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -53,6 +54,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
 
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}
+_recent_issues_lock = threading.Lock()
 _ISSUE_DEDUP_SECONDS = 3600  # Don't create duplicate issues within 1 hour
 _MAX_RECENT_ISSUES = 100  # Prevent unbounded memory growth
 

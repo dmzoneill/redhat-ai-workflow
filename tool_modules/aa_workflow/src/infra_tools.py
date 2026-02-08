@@ -27,10 +27,28 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 from server.tool_registry import ToolRegistry
 from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_output
 
+
 # File-based state for VPN connection debouncing
 # Uses file lock + timestamp file to coordinate across multiple process/module instances
-_VPN_LOCK_FILE = Path("/tmp/aa_workflow_vpn.lock")
-_VPN_STATE_FILE = Path("/tmp/aa_workflow_vpn_state")
+# Paths are read from config.json "paths" section with fallbacks to /tmp
+def _get_infra_path(key: str, default: str) -> Path:
+    """Read an infrastructure file path from config.json with fallback."""
+    try:
+        config = load_config()
+        paths = config.get("paths", {})
+        configured = paths.get(key)
+        if configured:
+            return Path(configured)
+    except Exception:
+        pass
+    return Path(default)
+
+
+import tempfile  # noqa: E402
+
+_tmp = tempfile.gettempdir()
+_VPN_LOCK_FILE = _get_infra_path("vpn_lock_file", f"{_tmp}/aa_workflow_vpn.lock")
+_VPN_STATE_FILE = _get_infra_path("vpn_state_file", f"{_tmp}/aa_workflow_vpn_state")
 _VPN_DEBOUNCE_SECONDS = (
     30  # Don't reconnect within 30 seconds of last successful connect
 )
@@ -211,8 +229,8 @@ async def _check_vpn_connected() -> bool:
 
 
 # File-based state for kube_login debouncing (per cluster)
-_KUBE_LOCK_FILE = Path("/tmp/aa_workflow_kube.lock")
-_KUBE_STATE_FILE = Path("/tmp/aa_workflow_kube_state")
+_KUBE_LOCK_FILE = _get_infra_path("kube_lock_file", f"{_tmp}/aa_workflow_kube.lock")
+_KUBE_STATE_FILE = _get_infra_path("kube_state_file", f"{_tmp}/aa_workflow_kube_state")
 _KUBE_DEBOUNCE_SECONDS = 60  # Don't re-login within 60 seconds of last successful login
 
 

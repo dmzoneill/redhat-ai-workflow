@@ -48,7 +48,9 @@ def load_config() -> Dict[str, Any]:
             return {}
 
 
-def get_config_section(section: str, default: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_config_section(
+    section: str, default: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Get a specific section from config.json using ConfigManager.
 
@@ -277,25 +279,39 @@ def get_quay_url() -> str:
 
 
 def get_konflux_namespace() -> str:
-    """Get Konflux namespace from config."""
+    """Get Konflux namespace from config.
+
+    Priority:
+    1. repositories.automation-analytics-backend.konflux_namespace
+    2. konflux.namespace
+    3. Default: aap-aa-tenant
+    """
     config = load_config()
     repos = config.get("repositories", {})
     backend = repos.get("automation-analytics-backend", {})
     if backend.get("konflux_namespace"):
         return str(backend["konflux_namespace"])
-    return "aap-aa-tenant"
+    return str(config.get("konflux", {}).get("namespace", "aap-aa-tenant"))
 
 
 def get_stage_namespace() -> str:
     """Get stage namespace from config."""
     config = load_config()
-    return str(config.get("namespaces", {}).get("stage", {}).get("main", "tower-analytics-stage"))
+    return str(
+        config.get("namespaces", {})
+        .get("stage", {})
+        .get("main", "tower-analytics-stage")
+    )
 
 
 def get_prod_namespace() -> str:
     """Get prod namespace from config."""
     config = load_config()
-    return str(config.get("namespaces", {}).get("production", {}).get("main", "tower-analytics-prod"))
+    return str(
+        config.get("namespaces", {})
+        .get("production", {})
+        .get("main", "tower-analytics-prod")
+    )
 
 
 def get_jira_project() -> str:
@@ -415,7 +431,9 @@ def validate_commit_message(message: str) -> tuple[bool, List[str]]:
     _issue_key, commit_type, _scope, description = match.groups()
 
     if commit_type not in valid_types:
-        issues.append(f"Invalid commit type '{commit_type}'. Valid types: {', '.join(valid_types)}")
+        issues.append(
+            f"Invalid commit type '{commit_type}'. Valid types: {', '.join(valid_types)}"
+        )
 
     if not description or len(description.strip()) < 3:
         issues.append("Commit description is too short (min 3 characters)")
@@ -439,7 +457,9 @@ def get_default_branch() -> str:
 def get_flake8_ignore_codes() -> str:
     """Get flake8 ignore codes from config."""
     config = load_config()
-    return str(config.get("linting", {}).get("flake8", {}).get("ignore", "E501,W503,E203"))
+    return str(
+        config.get("linting", {}).get("flake8", {}).get("ignore", "E501,W503,E203")
+    )
 
 
 def get_flake8_max_line_length() -> int:
@@ -448,7 +468,22 @@ def get_flake8_max_line_length() -> int:
     return int(config.get("linting", {}).get("flake8", {}).get("max_line_length", 100))
 
 
-# Blocking flake8 codes - these are static (semantic, not configurable)
+def get_flake8_blocking_codes() -> List[str]:
+    """Get flake8 blocking codes from config.
+
+    These are error codes that should always block (e.g., syntax errors,
+    undefined names). Configurable via linting.flake8.blocking_codes.
+    """
+    config = load_config()
+    codes = config.get("linting", {}).get("flake8", {}).get("blocking_codes")
+    if codes and isinstance(codes, list):
+        return list(codes)
+    return ["F401", "F811", "F821", "F822", "F823", "E999"]
+
+
+# Module-level constant for backward compatibility. Consumers that import
+# FLAKE8_BLOCKING_CODES directly will get the default list at import time.
+# Prefer calling get_flake8_blocking_codes() for runtime config resolution.
 FLAKE8_BLOCKING_CODES: List[str] = ["F401", "F811", "F821", "F822", "F823", "E999"]
 
 

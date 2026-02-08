@@ -478,4 +478,5 @@ def set_memory_interface(interface: MemoryInterface) -> None:
     Used by server/main.py to set up the interface with WebSocket.
     """
     global _memory_interface
-    _memory_interface = interface
+    with _memory_interface_lock:
+        _memory_interface = interface

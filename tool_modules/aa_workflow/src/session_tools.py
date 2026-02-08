@@ -1909,28 +1909,40 @@ After loading context, ask what the user wants to work on today."""
 
         Provides a systematic approach to production debugging.
         """
-        return """# Production Debugging Guide
+        # Read namespace names from config.json
+        try:
+            from server.utils import load_config
+
+            cfg = load_config()
+            ns_cfg = cfg.get("namespaces", {}).get("production", {})
+            prod_ns = ns_cfg.get("main", "tower-analytics-prod")
+            prod_billing_ns = ns_cfg.get("billing", "tower-analytics-prod-billing")
+        except Exception:
+            prod_ns = "tower-analytics-prod"
+            prod_billing_ns = "tower-analytics-prod-billing"
+
+        return f"""# Production Debugging Guide
 
 ## 1. Gather Context
-- Which namespace? (tower-analytics-prod or tower-analytics-prod-billing)
+- Which namespace? ({prod_ns} or {prod_billing_ns})
 - Any specific alert that fired?
 - When did the issue start?
 
 ## 2. Check Pod Health
 ```
-kubectl_get_pods(namespace="tower-analytics-prod", environment="prod")
+kubectl_get_pods(namespace="{prod_ns}", environment="prod")
 ```
 Look for: CrashLoopBackOff, OOMKilled, Pending, high restarts
 
 ## 3. Check Events
 ```
-kubectl_get_events(namespace="tower-analytics-prod", environment="prod")
+kubectl_get_events(namespace="{prod_ns}", environment="prod")
 ```
 Look for: Warning, Error, FailedScheduling
 
 ## 4. Check Logs
 ```
-kubectl_logs(pod="<pod-name>", namespace="tower-analytics-prod", environment="prod", tail=100)
+kubectl_logs(pod="<pod-name>", namespace="{prod_ns}", environment="prod", tail=100)
 ```
 Grep for: error, exception, fatal, timeout
 

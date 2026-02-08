@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
+from server.utils import load_config
+
 logger = logging.getLogger(__name__)
 
 # Storage paths - centralized in server.paths
@@ -60,7 +62,9 @@ class SprintIssue:
     created: str = ""
 
     # Maximum timeline entries to prevent unbounded memory growth
-    MAX_TIMELINE_ENTRIES: ClassVar[int] = 50
+    MAX_TIMELINE_ENTRIES: ClassVar[int] = (
+        load_config().get("sprint", {}).get("max_timeline_entries", 50)
+    )
 
     def add_timeline_event(self, event: TimelineEvent) -> None:
         """Add a timeline event, trimming old entries if needed."""

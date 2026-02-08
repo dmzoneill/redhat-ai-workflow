@@ -548,13 +548,35 @@ class SkillAutoHealer:
 
             # Call oc login using asyncio subprocess
             kubeconfig = f"~/.kube/config.{cluster[0]}"
-            cluster_urls = {
+
+            # Read cluster API URLs from config.json with hardcoded fallbacks
+            _fallback_urls = {
                 "stage": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
                 "ephemeral": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
                 "prod": "api.crcp01ue1.o9m8.p1.openshiftapps.com:6443",
                 "konflux": "api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443",
             }
-            url = cluster_urls.get(cluster, cluster_urls["stage"])
+            try:
+                from server.utils import load_config
+
+                config = load_config()
+                clusters_cfg = config.get("clusters", {})
+                # Map short names to config keys
+                _cfg_key_map = {
+                    "stage": "stage",
+                    "ephemeral": "ephemeral",
+                    "prod": "production",
+                    "konflux": "konflux",
+                }
+                cfg_key = _cfg_key_map.get(cluster, cluster)
+                cfg_url = clusters_cfg.get(cfg_key, {}).get("api_url", "")
+                if cfg_url:
+                    # Strip https:// prefix if present (we add it below)
+                    url = cfg_url.replace("https://", "").replace("http://", "")
+                else:
+                    url = _fallback_urls.get(cluster, _fallback_urls["stage"])
+            except Exception:
+                url = _fallback_urls.get(cluster, _fallback_urls["stage"])
 
             proc = await asyncio.create_subprocess_exec(
                 "oc",

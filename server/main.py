@@ -27,9 +27,11 @@ from fastmcp import FastMCP
 
 # Import shared path resolution utilities
 from .tool_paths import PROJECT_DIR, get_tools_file_path
+from .utils import load_config
 
 # Cursor IDE has a hard limit on the number of MCP tools it can handle
-MAX_CURSOR_TOOLS = 128
+_config = load_config()
+MAX_CURSOR_TOOLS = _config.get("limits", {}).get("max_cursor_tools", 128)
 
 
 def load_agent_config(agent_name: str) -> list[str] | None:
