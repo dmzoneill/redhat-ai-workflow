@@ -187,7 +187,10 @@ def _search_for_tool(tool_name: str) -> dict | None:
                         "end_line": end_line,
                         "func_name": tool_name,
                     }
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _search_for_tool scanning {tools_file}: {e}"
+                )
                 continue
 
     return None
@@ -349,7 +352,8 @@ def wrap_all_tools(server, tools_module) -> int:
     try:
         with open(source_file) as f:
             full_source = f.read()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in wrap_all_tools reading source: {e}")
         return 0
 
     # Find all async def functions that look like tools
@@ -566,8 +570,10 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                 from tool_modules.aa_workflow.src.agent_stats import record_tool_call
 
                 record_tool_call(_name, success, duration_ms)
-            except Exception:
-                pass  # Don't let stats tracking break tools
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in stats tracking for {_name}: {e}"
+                )  # Don't let stats tracking break tools
 
             # Track activity in session (for UI display)
             try:
@@ -590,7 +596,9 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                         # Save periodically (every 10 calls) to avoid too many writes
                         if session.tool_call_count % 10 == 0:
                             WorkspaceRegistry.save_to_disk()
-            except Exception:
-                pass  # Don't let session tracking break tools
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in session tracking for {_name}: {e}"
+                )  # Don't let session tracking break tools
 
     return wrapper

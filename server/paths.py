@@ -12,8 +12,15 @@ from pathlib import Path
 # Base directory for all state
 AA_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
 
-# Ensure directory exists on import
-AA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+def ensure_config_dir() -> None:
+    """Create the config directory if it doesn't exist.
+
+    Call this explicitly before writing to any state file under AA_CONFIG_DIR.
+    Previously this ran on import, which caused side effects during import time.
+    """
+    AA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # =============================================================================
 # Core State Files
@@ -66,7 +73,9 @@ SLACK_STATE_DB_FILE = AA_CONFIG_DIR / "slack_state.db"
 
 # DEPRECATED: Old sprint state file (replaced by SPRINT_STATE_FILE_V2)
 SPRINT_STATE_FILE = AA_CONFIG_DIR / "sprint_state.json"  # DEPRECATED
-SPRINT_HISTORY_FILE = AA_CONFIG_DIR / "sprint_history.json"  # Still used for historical data
+SPRINT_HISTORY_FILE = (
+    AA_CONFIG_DIR / "sprint_history.json"
+)  # Still used for historical data
 
 # The unified state file is the single source of truth for sprint data
 # Access via: workspace_states.json -> sprint section

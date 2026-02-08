@@ -24,6 +24,7 @@ Usage:
 """
 
 import logging
+import threading
 import time
 import uuid
 from typing import Any
@@ -451,6 +452,7 @@ class MemoryInterface:
 
 # Singleton instance for easy access
 _memory_interface: MemoryInterface | None = None
+_memory_interface_lock = threading.Lock()
 
 
 def get_memory_interface() -> MemoryInterface:
@@ -462,7 +464,9 @@ def get_memory_interface() -> MemoryInterface:
     global _memory_interface
 
     if _memory_interface is None:
-        _memory_interface = MemoryInterface()
+        with _memory_interface_lock:
+            if _memory_interface is None:
+                _memory_interface = MemoryInterface()
 
     return _memory_interface
 

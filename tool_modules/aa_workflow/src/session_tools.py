@@ -392,8 +392,8 @@ def _load_environment_status(lines: list[str]) -> None:
                 lines.append(f"- {item}")
             lines.append("")
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _load_environment_status: {e}")
 
 
 def _load_session_history(lines: list[str]) -> None:
@@ -412,8 +412,8 @@ def _load_session_history(lines: list[str]) -> None:
             for entry in entries[-5:]:
                 lines.append(f"- [{entry.get('time', '?')}] {entry.get('action', '?')}")
             lines.append("")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _load_session_history: {e}")
 
 
 def _load_persona_info(lines: list[str], agent: str) -> None:
@@ -427,8 +427,8 @@ def _load_persona_info(lines: list[str], agent: str) -> None:
         if loader:
             current_persona = loader.current_persona
             loaded_modules = list(loader.loaded_modules)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _load_persona_info: {e}")
 
     if agent:
         agent_file = PERSONAS_DIR / f"{agent}.md"
@@ -507,8 +507,8 @@ def _load_learned_patterns(lines: list[str]) -> None:
             lines.append("*Use `memory_read('learned/patterns')` for details*")
             lines.append("")
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _load_learned_patterns: {e}")
 
 
 def _detect_project_from_cwd() -> str | None:
@@ -519,7 +519,8 @@ def _detect_project_from_cwd() -> str | None:
 
     try:
         cwd = Path.cwd().resolve()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_project_from_cwd: {e}")
         return None
 
     repositories = config.get("repositories", {})
@@ -542,8 +543,8 @@ def _get_current_persona() -> str | None:
         loader = get_loader()
         if loader:
             return loader.current_persona
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _get_current_persona: {e}")
     return None
 
 
@@ -847,8 +848,8 @@ async def _session_start_impl(  # noqa: C901
                     from .notification_emitter import notify_session_resumed
 
                     notify_session_resumed(session_id, name or chat_session.name)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed error in notify_session_resumed: {e}")
             else:
                 # Session not found - list available sessions
                 available = list(workspace.sessions.keys())
@@ -890,8 +891,8 @@ async def _session_start_impl(  # noqa: C901
                 from .notification_emitter import notify_session_created
 
                 notify_session_created(session_id, name or None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in notify_session_created: {e}")
 
         else:
             # For resumed sessions, update project if explicitly provided
@@ -1268,8 +1269,10 @@ def register_session_tools(  # noqa: C901
                             val = getattr(rc.meta, attr)
                             if not callable(val):
                                 lines.append(f"**meta.{attr}:** `{val}`")
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(
+                                f"Suppressed error in debug_mcp_roots meta attr: {e}"
+                            )
                 if hasattr(rc, "request") and rc.request:
                     lines.append(f"**request type:** `{type(rc.request).__name__}`")
                     req_attrs = [a for a in dir(rc.request) if not a.startswith("_")]
@@ -1448,8 +1451,8 @@ def register_session_tools(  # noqa: C901
                 notify_session_updated(
                     target_session_id, f"Project changed to {project}"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in notify_session_updated: {e}")
 
             # Trigger session daemon to reload from disk so UI updates
             try:
@@ -1611,8 +1614,10 @@ def register_session_tools(  # noqa: C901
                             f"Messages: {chat_content['message_count']}, "
                             f"Tool calls: {chat_content['summary']['tool_calls']}",
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in jira_attach_session logging: {e}"
+                        )
 
             except ImportError as e:
                 lines.append(f"## Error\n\n❌ Could not import Jira tools: {e}")

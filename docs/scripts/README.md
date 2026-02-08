@@ -64,7 +64,8 @@ graph LR
 |--------|---------|-------|
 | `integration_test.py` | Run integration tests | `python integration_test.py` |
 | `skill_test_runner.py` | Test skill execution | `python skill_test_runner.py` |
-| `slack_test.py` | Test Slack integration | `python slack_test.py` |
+| `slack_smoke_test.py` | Test Slack integration | `python slack_smoke_test.py` |
+| `slack_export_test.py` | Test Slack export | `python slack_export_test.py` |
 | `claude_agent.py` | Claude agent for Slack | Used by slack_daemon |
 | `get_slack_creds.py` | Get Slack credentials | `python get_slack_creds.py` |
 

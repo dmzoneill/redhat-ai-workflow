@@ -34,6 +34,8 @@ import asyncio
 import atexit
 import json
 import logging
+import os
+import signal
 import time
 import urllib.parse
 import urllib.request
@@ -159,7 +161,9 @@ class SSOStrategy:
     popup_close_timeout: int = 30000  # Max wait for popup to close
 
     # Callback URL handling (for sites with intermediate redirects)
-    callback_url_patterns: list[str] = field(default_factory=list)  # e.g., ["setsession", "signin"]
+    callback_url_patterns: list[str] = field(
+        default_factory=list
+    )  # e.g., ["setsession", "signin"]
     final_redirect_url: str = ""  # Force navigate here if callback doesn't redirect
 
 
@@ -257,7 +261,10 @@ def get_sso_credentials(headless: bool = True) -> tuple[str, str]:
     # Read auth token
     token_path = Path.home() / ".cache" / "redhatter" / "auth_token"
     if not token_path.exists():
-        raise RuntimeError(f"Auth token not found at {token_path}. " "Ensure redhatter service is running.")
+        raise RuntimeError(
+            f"Auth token not found at {token_path}. "
+            "Ensure redhatter service is running."
+        )
 
     token = token_path.read_text().strip()
     if not token:
@@ -471,7 +478,9 @@ class SSOAuthenticator:
             screenshot_dir: Directory for error screenshots
         """
         self.headless = headless
-        self.screenshot_dir = screenshot_dir or Path.home() / ".cache" / "sso" / "screenshots"
+        self.screenshot_dir = (
+            screenshot_dir or Path.home() / ".cache" / "sso" / "screenshots"
+        )
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
 
         self._browser: Optional[Browser] = None
@@ -527,7 +536,9 @@ class SSOAuthenticator:
 
                 # Execute appropriate flow
                 if strategy.flow_type == FlowType.INLINE_REDIRECT:
-                    result = await self._flow_inline_redirect(strategy, username, password)
+                    result = await self._flow_inline_redirect(
+                        strategy, username, password
+                    )
                 elif strategy.flow_type == FlowType.POPUP:
                     result = await self._flow_popup(strategy, username, password)
                 elif strategy.flow_type == FlowType.OAUTH_CHAIN:
@@ -585,7 +596,9 @@ class SSOAuthenticator:
             if "net::ERR_ABORTED" not in str(e):
                 raise
             logger.warning(f"Navigation aborted (expected for SSO): {e}")
-            await self._page.wait_for_load_state("domcontentloaded", timeout=strategy.navigation_timeout)
+            await self._page.wait_for_load_state(
+                "domcontentloaded", timeout=strategy.navigation_timeout
+            )
 
         await asyncio.sleep(2)  # Wait for potential redirect
 
@@ -597,7 +610,10 @@ class SSOAuthenticator:
 
         if not on_sso:
             # Check if already authenticated
-            if strategy.success_url_pattern and strategy.success_url_pattern in current_url:
+            if (
+                strategy.success_url_pattern
+                and strategy.success_url_pattern in current_url
+            ):
                 logger.info("Already authenticated - session exists")
                 return SSOResult(
                     success=True,
@@ -617,7 +633,11 @@ class SSOAuthenticator:
             await self._wait_for_redirect(strategy)
 
         final_url = self._page.url
-        success = strategy.success_url_pattern in final_url if strategy.success_url_pattern else True
+        success = (
+            strategy.success_url_pattern in final_url
+            if strategy.success_url_pattern
+            else True
+        )
 
         return SSOResult(
             success=success,
@@ -689,12 +709,16 @@ class SSOAuthenticator:
             # Check if popup is SSO page
             if any(pattern in popup_url for pattern in strategy.sso_url_patterns):
                 # Fill credentials in popup
-                await self._fill_sso_form(strategy.selectors, username, password, page=popup)
+                await self._fill_sso_form(
+                    strategy.selectors, username, password, page=popup
+                )
 
                 # Wait for popup to close
                 logger.info("Waiting for popup to close...")
                 try:
-                    await popup.wait_for_event("close", timeout=strategy.popup_close_timeout)
+                    await popup.wait_for_event(
+                        "close", timeout=strategy.popup_close_timeout
+                    )
                     logger.info("Popup closed - authentication successful")
                 except Exception:
                     logger.warning("Popup did not close within timeout")
@@ -705,7 +729,11 @@ class SSOAuthenticator:
             await asyncio.sleep(2)
 
         final_url = self._page.url
-        success = strategy.success_url_pattern in final_url if strategy.success_url_pattern else True
+        success = (
+            strategy.success_url_pattern in final_url
+            if strategy.success_url_pattern
+            else True
+        )
 
         return SSOResult(
             success=success,
@@ -821,13 +849,18 @@ class SSOAuthenticator:
 
             # Check for callback URLs that need handling
             if strategy.callback_url_patterns:
-                if any(pattern in current_url for pattern in strategy.callback_url_patterns):
+                if any(
+                    pattern in current_url for pattern in strategy.callback_url_patterns
+                ):
                     logger.info(f"On callback URL: {current_url}")
                     # Wait for redirect away from callback
                     continue
 
             # Check if we've reached target
-            if strategy.success_url_pattern and strategy.success_url_pattern in current_url:
+            if (
+                strategy.success_url_pattern
+                and strategy.success_url_pattern in current_url
+            ):
                 logger.info(f"Reached target URL: {current_url}")
                 return
 
@@ -838,7 +871,9 @@ class SSOAuthenticator:
 
         # Timeout - try final redirect if configured
         if strategy.final_redirect_url:
-            logger.warning(f"Redirect timeout, forcing navigation to: {strategy.final_redirect_url}")
+            logger.warning(
+                f"Redirect timeout, forcing navigation to: {strategy.final_redirect_url}"
+            )
             await self._page.goto(
                 strategy.final_redirect_url,
                 wait_until="networkidle",
@@ -986,6 +1021,7 @@ _browser_playwright = None  # Playwright instance
 _browser_instance: Optional[Browser] = None  # Browser instance
 _browser_context: Optional[BrowserContext] = None  # Browser context
 _browser_page: Optional[Page] = None  # Active page
+_browser_pid: Optional[int] = None  # Browser process PID for atexit cleanup
 
 # Screenshot output directory
 BROWSER_SNAPSHOT_DIR = Path("/tmp/browser_snapshots")
@@ -1022,12 +1058,22 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
         from playwright.async_api import async_playwright as _async_playwright
     except ImportError:
         raise RuntimeError(
-            "Playwright is not installed. " "Install it with: uv add playwright && playwright install chromium"
+            "Playwright is not installed. "
+            "Install it with: uv add playwright && playwright install chromium"
         )
+
+    global _browser_pid
 
     logger.info(f"Launching browser (headless={headless})")
     _browser_playwright = await _async_playwright().start()
     _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
+    # Store browser PID for synchronous atexit cleanup
+    try:
+        _browser_pid = (
+            _browser_instance.process.pid if _browser_instance.process else None
+        )
+    except Exception:
+        _browser_pid = None
     _browser_context = await _browser_instance.new_context(
         viewport={"width": 1280, "height": 720},
     )
@@ -1039,7 +1085,7 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
 
 async def _close_browser() -> None:
     """Close the persistent browser session and clean up resources."""
-    global _browser_playwright, _browser_instance, _browser_context, _browser_page
+    global _browser_playwright, _browser_instance, _browser_context, _browser_page, _browser_pid
 
     if _browser_instance is not None:
         try:
@@ -1057,20 +1103,25 @@ async def _close_browser() -> None:
     _browser_instance = None
     _browser_context = None
     _browser_page = None
+    _browser_pid = None
     logger.info("Browser session closed")
 
 
 def _cleanup_browser_sync() -> None:
-    """Synchronous atexit handler to clean up browser on process exit."""
-    if _browser_instance is not None:
+    """Synchronous atexit handler to clean up browser on process exit.
+
+    Uses PID-based kill instead of async calls to avoid issues with
+    closed or running event loops at interpreter shutdown.
+    """
+    global _browser_pid
+    if _browser_pid is not None:
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(_close_browser())
-            else:
-                loop.run_until_complete(_close_browser())
-        except Exception:
+            os.kill(_browser_pid, signal.SIGTERM)
+        except OSError:
+            # Process already exited
             pass
+        finally:
+            _browser_pid = None
 
 
 atexit.register(_cleanup_browser_sync)
@@ -1286,7 +1337,8 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
                 TextContent(
                     type="text",
                     text=(
-                        f"Invalid wait_for value: {wait_for!r}. " f"Must be one of: {', '.join(valid_wait_conditions)}"
+                        f"Invalid wait_for value: {wait_for!r}. "
+                        f"Must be one of: {', '.join(valid_wait_conditions)}"
                     ),
                 )
             ]
@@ -1487,7 +1539,10 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=(f"Invalid state value: {state!r}. " f"Must be one of: {', '.join(valid_states)}"),
+                    text=(
+                        f"Invalid state value: {state!r}. "
+                        f"Must be one of: {', '.join(valid_states)}"
+                    ),
                 )
             ]
 

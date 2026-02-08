@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test script for Slack message export.
 
-Run with: python scripts/test_slack_export.py
+Run with: python scripts/slack_export_test.py
 
 This tests the export functionality directly without going through MCP.
 """
@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack" / "src"))
 
-from server.utils import load_config
+from server.utils import load_config  # noqa: E402
 
 
 async def test_export():
@@ -36,7 +36,7 @@ async def test_export():
         print("   Make sure slack.auth.xoxc_token is set")
         return
 
-    print(f"✅ Found Slack credentials")
+    print("Found Slack credentials")
     print(f"   Workspace: {auth.get('workspace_id', 'unknown')}")
 
     # Create session

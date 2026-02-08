@@ -33,11 +33,16 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-# Add project root to path
+# Add project root to path (only when running as script)
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+if __name__ == "__main__" and str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status  # noqa: E402
+from scripts.common.dbus_base import (  # noqa: E402
+    DBUS_AVAILABLE,
+    check_daemon_health,
+    check_daemon_status,
+)
 
 # Services to check
 DBUS_SERVICES = ["slack", "cron", "meet"]
@@ -234,7 +239,9 @@ async def fix_unhealthy_services(results: dict, verbose: bool = False) -> dict:
                 else:
                     failed.append(service)
                     if verbose:
-                        print(f"  ❌ {service} still unhealthy: {new_health.get('message')}")
+                        print(
+                            f"  ❌ {service} still unhealthy: {new_health.get('message')}"
+                        )
             else:
                 failed.append(service)
                 if verbose:
@@ -261,7 +268,9 @@ async def watch_services(interval: int = 30, verbose: bool = True):
                 statuses.append(f"{service}:{status}")
 
             # Ollama count
-            ollama_healthy = sum(1 for h in results["ollama"].values() if h.get("healthy"))
+            ollama_healthy = sum(
+                1 for h in results["ollama"].values() if h.get("healthy")
+            )
             statuses.append(f"ollama:{ollama_healthy}/4")
 
             overall = "✅" if results["overall_healthy"] else "❌"
@@ -323,7 +332,11 @@ def print_results(results: dict, json_output: bool = False):
     print()
 
     # Overall
-    overall = "✅ All services healthy" if results["overall_healthy"] else "❌ Some services unhealthy"
+    overall = (
+        "✅ All services healthy"
+        if results["overall_healthy"]
+        else "❌ Some services unhealthy"
+    )
     print(f"Overall: {overall}")
     print()
 

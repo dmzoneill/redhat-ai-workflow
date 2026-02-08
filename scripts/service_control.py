@@ -23,12 +23,18 @@ import json
 import sys
 from pathlib import Path
 
-# Add project root to path - must be before local imports
+# Add project root to path (only when running as script)
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+if __name__ == "__main__" and str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Local imports after path setup
-from scripts.common.dbus_base import DBUS_AVAILABLE, check_daemon_health, check_daemon_status, get_client  # noqa: E402
+from scripts.common.dbus_base import (  # noqa: E402
+    DBUS_AVAILABLE,
+    check_daemon_health,
+    check_daemon_status,
+    get_client,
+)
 
 SERVICES = ["slack", "cron", "meet", "sprint"]
 
@@ -75,7 +81,9 @@ async def cmd_status(args):
             elif service == "sprint":
                 print(f"   Issues: {status.get('total_issues', 0)}")
                 print(f"   Processed: {status.get('issues_processed', 0)}")
-                print(f"   Working Hours: {'Yes' if status.get('within_working_hours') else 'No'}")
+                print(
+                    f"   Working Hours: {'Yes' if status.get('within_working_hours') else 'No'}"
+                )
         else:
             error = status.get("error", "Not running")
             print(f"❌ {service.upper()}: {error}")
@@ -272,7 +280,9 @@ async def cmd_fix(args):
             if new_health.get("healthy", False):
                 print(f"   ✅ {service.upper()}: Recovered!")
             else:
-                print(f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}")
+                print(
+                    f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}"
+                )
         except subprocess.TimeoutExpired:
             print("   ⚠️  Restart timed out")
         except Exception as e:
@@ -291,7 +301,9 @@ async def main():
 
     # status command
     status_parser = subparsers.add_parser("status", help="Show service status")
-    status_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
+    status_parser.add_argument(
+        "service", nargs="?", choices=SERVICES, help="Service name"
+    )
 
     # stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a service")
@@ -309,13 +321,21 @@ async def main():
 
     # json command
     json_parser = subparsers.add_parser("json", help="Output raw JSON status")
-    json_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
+    json_parser.add_argument(
+        "service", nargs="?", choices=SERVICES, help="Service name"
+    )
 
     # health command
     health_parser = subparsers.add_parser("health", help="Perform health checks")
-    health_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
-    health_parser.add_argument("-v", "--verbose", action="store_true", help="Show all checks")
-    health_parser.add_argument("--no-fix", action="store_true", help="Don't show fix tip")
+    health_parser.add_argument(
+        "service", nargs="?", choices=SERVICES, help="Service name"
+    )
+    health_parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show all checks"
+    )
+    health_parser.add_argument(
+        "--no-fix", action="store_true", help="Don't show fix tip"
+    )
 
     # fix command
     fix_parser = subparsers.add_parser("fix", help="Attempt to fix unhealthy services")

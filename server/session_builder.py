@@ -30,13 +30,20 @@ SKILLS_DIR = WORKSPACE_ROOT / "skills"
 MEMORY_DIR = WORKSPACE_ROOT / "memory"
 CONFIG_FILE = WORKSPACE_ROOT / "config.json"
 
+# Token estimation: average characters per token for English text
+CHARS_PER_TOKEN = 4
+
+# Token count thresholds for context size warnings
+TOKEN_WARNING_THRESHOLD = 50_000
+TOKEN_DANGER_THRESHOLD = 100_000
+
 
 def estimate_tokens(text: str) -> int:
     """
-    Rough token estimation (4 chars per token average).
+    Rough token estimation (CHARS_PER_TOKEN chars per token average).
     For accurate counts, use tiktoken or similar.
     """
-    return len(text) // 4
+    return len(text) // CHARS_PER_TOKEN
 
 
 class SessionBuilder:
@@ -365,8 +372,8 @@ class SessionBuilder:
         return {
             "sections": self.token_counts.copy(),
             "total": total,
-            "warning": total > 50000,
-            "danger": total > 100000,
+            "warning": total > TOKEN_WARNING_THRESHOLD,
+            "danger": total > TOKEN_DANGER_THRESHOLD,
         }
 
     def preview(self) -> dict:

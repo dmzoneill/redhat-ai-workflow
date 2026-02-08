@@ -19,9 +19,10 @@ import re
 import sys
 from pathlib import Path
 
-# Add project root to path
+# Add project root to path (only when running as script)
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+if __name__ == "__main__" and str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import yaml  # noqa: E402
 
@@ -136,7 +137,10 @@ def validate_compute_syntax(skill: dict) -> list[str]:
         try:
             ast.parse(clean_code)
         except SyntaxError as e:
-            errors.append(f"Step '{step_name}': Python syntax error in compute block: " f"line {e.lineno}: {e.msg}")
+            errors.append(
+                f"Step '{step_name}': Python syntax error in compute block: "
+                f"line {e.lineno}: {e.msg}"
+            )
     return errors
 
 
@@ -148,9 +152,13 @@ def validate_steps_not_in_outputs(skill: dict) -> list[str]:
             continue
         name = output.get("name", "unnamed")
         if "tool" in output:
-            errors.append(f"Output '{name}' has 'tool:' key - should be in steps, not outputs")
+            errors.append(
+                f"Output '{name}' has 'tool:' key - should be in steps, not outputs"
+            )
         if "compute" in output:
-            errors.append(f"Output '{name}' has 'compute:' key - should be in steps, not outputs")
+            errors.append(
+                f"Output '{name}' has 'compute:' key - should be in steps, not outputs"
+            )
     return errors
 
 
@@ -255,13 +263,21 @@ def validate_unique_step_names(skill: dict) -> list[str]:
     for i, step in enumerate(skill.get("steps", [])):
         name = step.get("name")
         if name and name in seen:
-            errors.append(f"Duplicate step name '{name}' at positions {seen[name]} and {i}")
+            errors.append(
+                f"Duplicate step name '{name}' at positions {seen[name]} and {i}"
+            )
         if name:
             seen[name] = i
     return errors
 
 
-VALID_LINK_TYPES = {"depends_on", "validates", "validated_by", "chains_to", "provides_context_for"}
+VALID_LINK_TYPES = {
+    "depends_on",
+    "validates",
+    "validated_by",
+    "chains_to",
+    "provides_context_for",
+}
 
 
 def validate_links_structure(skill: dict) -> list[str]:
@@ -278,14 +294,17 @@ def validate_links_structure(skill: dict) -> list[str]:
     for key, value in links.items():
         if key not in VALID_LINK_TYPES:
             errors.append(
-                f"links: unknown link type '{key}' " f"(must be one of: {', '.join(sorted(VALID_LINK_TYPES))})"
+                f"links: unknown link type '{key}' "
+                f"(must be one of: {', '.join(sorted(VALID_LINK_TYPES))})"
             )
         if not isinstance(value, list):
             errors.append(f"links.{key}: must be a list, got {type(value).__name__}")
         else:
             for item in value:
                 if not isinstance(item, str):
-                    errors.append(f"links.{key}: items must be strings, got {type(item).__name__}: {item}")
+                    errors.append(
+                        f"links.{key}: items must be strings, got {type(item).__name__}: {item}"
+                    )
 
     return errors
 
@@ -327,7 +346,9 @@ def validate_links_consistency(all_skills: dict[str, dict]) -> list[str]:
             if not isinstance(refs, list):
                 continue
             if skill_name in refs:
-                warnings.append(f"'{skill_name}': links.{link_type} references itself (warning)")
+                warnings.append(
+                    f"'{skill_name}': links.{link_type} references itself (warning)"
+                )
 
         # Check validates <-> validated_by consistency
         for validated in links.get("validates", []):
@@ -501,7 +522,8 @@ def main():
     # Link statistics
     skills_with_links = sum(1 for s in all_skills.values() if s.get("links"))
     total_link_refs = sum(
-        sum(len(v) for v in s.get("links", {}).values() if isinstance(v, list)) for s in all_skills.values()
+        sum(len(v) for v in s.get("links", {}).values() if isinstance(v, list))
+        for s in all_skills.values()
     )
 
     # Summary

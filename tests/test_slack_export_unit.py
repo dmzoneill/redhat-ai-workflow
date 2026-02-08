@@ -1,6 +1,6 @@
 """Unit tests for scripts/common/slack_export.py
 
-Named test_slack_export_unit.py to avoid conflict with existing test_slack_export.py.
+Named test_slack_export_unit.py to clearly distinguish from scripts/slack_export_test.py (manual smoke test).
 """
 
 import json

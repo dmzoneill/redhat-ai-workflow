@@ -193,7 +193,7 @@ check-env:
 # Quick smoke test - validates credentials and sends a test DM to yourself
 slack-test:
 	@printf "\033[36mRunning Slack smoke test...\033[0m\n\n"
-	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_test.py
+	cd $(PROJECT_ROOT) && $(PYTHON) scripts/slack_smoke_test.py
 
 slack-daemon: check-env
 	@printf "\033[36mStarting Slack daemon (foreground)...\033[0m\n"

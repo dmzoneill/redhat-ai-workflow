@@ -99,7 +99,9 @@ async def main():
         else:
             print(f"   ❌ Failed to send: {result.get('error', 'Unknown error')}")
             if result.get("error") == "invalid_auth":
-                print("      → Your tokens may have expired. Get fresh ones from browser.")
+                print(
+                    "      → Your tokens may have expired. Get fresh ones from browser."
+                )
             elif result.get("error") == "channel_not_found":
                 print("      → Could not open DM. Try sending to a channel instead.")
 

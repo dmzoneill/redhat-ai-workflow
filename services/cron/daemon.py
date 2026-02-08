@@ -93,8 +93,12 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "jobs_executed": self._jobs_executed,
             "jobs_failed": self._jobs_failed,
             "enabled": self._scheduler.config.enabled if self._scheduler else False,
-            "execution_mode": self._scheduler.config.execution_mode if self._scheduler else "unknown",
-            "timezone": self._scheduler.config.timezone if self._scheduler else "unknown",
+            "execution_mode": (
+                self._scheduler.config.execution_mode if self._scheduler else "unknown"
+            ),
+            "timezone": (
+                self._scheduler.config.timezone if self._scheduler else "unknown"
+            ),
         }
 
         if self._scheduler:
@@ -104,7 +108,9 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     jobs.append(
                         {
                             "name": job.id,
-                            "next_run": str(job.next_run_time) if job.next_run_time else None,
+                            "next_run": (
+                                str(job.next_run_time) if job.next_run_time else None
+                            ),
                         }
                     )
             stats["jobs"] = jobs
@@ -219,7 +225,9 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 jobs.append(
                     {
                         "name": job.id,
-                        "next_run": str(job.next_run_time) if job.next_run_time else None,
+                        "next_run": (
+                            str(job.next_run_time) if job.next_run_time else None
+                        ),
                     }
                 )
         return {"jobs": jobs}
@@ -227,7 +235,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     async def _handle_get_history(self, limit: int = 20, **kwargs) -> dict:
         """Handle D-Bus request to get execution history."""
         if not self._scheduler:
-            return {"success": False, "history": [], "error": "Scheduler not initialized"}
+            return {
+                "success": False,
+                "history": [],
+                "error": "Scheduler not initialized",
+            }
 
         history = self._scheduler.execution_log.get_recent(limit=limit)
         return {"success": True, "history": history}
@@ -242,7 +254,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if self._scheduler:
                 self._scheduler.config.reload()
 
-            return {"success": True, "enabled": enabled, "message": f"Scheduler {'enabled' if enabled else 'disabled'}"}
+            return {
+                "success": True,
+                "enabled": enabled,
+                "message": f"Scheduler {'enabled' if enabled else 'disabled'}",
+            }
         except Exception as e:
             logger.error(f"Failed to toggle scheduler: {e}")
             return {"success": False, "error": str(e)}
@@ -294,7 +310,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 "section": section,
                 "key": key,
                 "value": value,
-                "message": f"Updated config: {section}.{key}" if key else f"Updated config: {section}",
+                "message": (
+                    f"Updated config: {section}.{key}"
+                    if key
+                    else f"Updated config: {section}"
+                ),
             }
         except Exception as e:
             logger.error(f"Failed to update config {section}.{key}: {e}")
@@ -330,59 +350,81 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _build_state_dict(self) -> dict:
+        """Build the cron state dictionary from scheduler data.
+
+        This is the single source of truth for cron state structure,
+        used by both _handle_get_state() and _write_state().
+
+        Returns:
+            Cron state dictionary with jobs, history, and metadata.
+        """
+        from server.state_manager import state as state_manager
+
+        scheduled_jobs = {}
+        for job in self._scheduler.scheduler.get_jobs():
+            if job.id != "_config_watcher":
+                scheduled_jobs[job.id] = {
+                    "next_run": (
+                        job.next_run_time.isoformat() if job.next_run_time else None
+                    ),
+                }
+
+        jobs = []
+        for job_config in self._scheduler.config.jobs:
+            job_name = job_config.get("name", "")
+            scheduled = scheduled_jobs.get(job_name, {})
+
+            config_enabled = job_config.get("enabled", True)
+            runtime_state = state_manager.get("jobs", job_name, {})
+            if isinstance(runtime_state, dict) and "enabled" in runtime_state:
+                is_enabled = runtime_state["enabled"]
+            else:
+                is_enabled = config_enabled
+
+            jobs.append(
+                {
+                    "name": job_name,
+                    "description": job_config.get("description", ""),
+                    "skill": job_config.get("skill", ""),
+                    "cron": job_config.get("cron", ""),
+                    "trigger": job_config.get("trigger", "cron"),
+                    "persona": job_config.get("persona", ""),
+                    "enabled": is_enabled,
+                    "notify": job_config.get("notify", []),
+                    "next_run": scheduled.get("next_run"),
+                }
+            )
+
+        history = self._scheduler.execution_log.get_recent(20)
+
+        return {
+            "enabled": (
+                self._scheduler.config.enabled if self._scheduler.config else True
+            ),
+            "timezone": (
+                str(self._scheduler.config.timezone)
+                if self._scheduler.config
+                else "UTC"
+            ),
+            "execution_mode": (
+                self._scheduler.config.execution_mode
+                if self._scheduler.config
+                else "claude_cli"
+            ),
+            "jobs": jobs,
+            "history": history,
+            "total_history": len(history),
+            "updated_at": datetime.now().isoformat(),
+        }
+
     async def _handle_get_state(self, **kwargs) -> dict:
         """Get full cron state for UI."""
         if not self._scheduler:
             return {"success": False, "error": "Scheduler not initialized"}
 
         try:
-            from server.state_manager import state as state_manager
-
-            scheduled_jobs = {}
-            for job in self._scheduler.scheduler.get_jobs():
-                if job.id != "_config_watcher":
-                    scheduled_jobs[job.id] = {
-                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
-                    }
-
-            jobs = []
-            for job_config in self._scheduler.config.jobs:
-                job_name = job_config.get("name", "")
-                scheduled = scheduled_jobs.get(job_name, {})
-
-                config_enabled = job_config.get("enabled", True)
-                runtime_state = state_manager.get("jobs", job_name, {})
-                if isinstance(runtime_state, dict) and "enabled" in runtime_state:
-                    is_enabled = runtime_state["enabled"]
-                else:
-                    is_enabled = config_enabled
-
-                jobs.append(
-                    {
-                        "name": job_name,
-                        "description": job_config.get("description", ""),
-                        "skill": job_config.get("skill", ""),
-                        "cron": job_config.get("cron", ""),
-                        "trigger": job_config.get("trigger", "cron"),
-                        "persona": job_config.get("persona", ""),
-                        "enabled": is_enabled,
-                        "notify": job_config.get("notify", []),
-                        "next_run": scheduled.get("next_run"),
-                    }
-                )
-
-            history = self._scheduler.execution_log.get_recent(20)
-
-            cron_state = {
-                "enabled": self._scheduler.config.enabled if self._scheduler.config else True,
-                "timezone": str(self._scheduler.config.timezone) if self._scheduler.config else "UTC",
-                "execution_mode": self._scheduler.config.execution_mode if self._scheduler.config else "claude_cli",
-                "jobs": jobs,
-                "history": history,
-                "total_history": len(history),
-                "updated_at": datetime.now().isoformat(),
-            }
-
+            cron_state = self._build_state_dict()
             return {"success": True, "state": cron_state}
 
         except Exception as e:
@@ -417,7 +459,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     async def startup(self):
         """Initialize daemon resources."""
         await super().startup()
-        from tool_modules.aa_workflow.src.scheduler import get_scheduler, init_scheduler, start_scheduler
+        from tool_modules.aa_workflow.src.scheduler import (
+            get_scheduler,
+            init_scheduler,
+            start_scheduler,
+        )
 
         print("=" * 60)
         print("Cron Scheduler Daemon")
@@ -509,55 +555,12 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return
 
         try:
-            from server.state_manager import state as state_manager
-
-            scheduled_jobs = {}
-            for job in self._scheduler.scheduler.get_jobs():
-                if job.id != "_config_watcher":
-                    scheduled_jobs[job.id] = {
-                        "next_run": job.next_run_time.isoformat() if job.next_run_time else None,
-                    }
-
-            jobs = []
-            for job_config in self._scheduler.config.jobs:
-                job_name = job_config.get("name", "")
-                scheduled = scheduled_jobs.get(job_name, {})
-
-                config_enabled = job_config.get("enabled", True)
-                runtime_state = state_manager.get("jobs", job_name, {})
-                if isinstance(runtime_state, dict) and "enabled" in runtime_state:
-                    is_enabled = runtime_state["enabled"]
-                else:
-                    is_enabled = config_enabled
-
-                jobs.append(
-                    {
-                        "name": job_name,
-                        "description": job_config.get("description", ""),
-                        "skill": job_config.get("skill", ""),
-                        "cron": job_config.get("cron", ""),
-                        "trigger": job_config.get("trigger", "cron"),
-                        "persona": job_config.get("persona", ""),
-                        "enabled": is_enabled,
-                        "notify": job_config.get("notify", []),
-                        "next_run": scheduled.get("next_run"),
-                    }
-                )
-
-            history = self._scheduler.execution_log.get_recent(20)
-
-            cron_state = {
-                "enabled": self._scheduler.config.enabled if self._scheduler.config else True,
-                "timezone": str(self._scheduler.config.timezone) if self._scheduler.config else "UTC",
-                "execution_mode": self._scheduler.config.execution_mode if self._scheduler.config else "claude_cli",
-                "jobs": jobs,
-                "history": history,
-                "total_history": len(history),
-                "updated_at": datetime.now().isoformat(),
-            }
+            cron_state = self._build_state_dict()
 
             CRON_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="cron_state_", dir=CRON_STATE_FILE.parent)
+            temp_fd, temp_path = tempfile.mkstemp(
+                suffix=".tmp", prefix="cron_state_", dir=CRON_STATE_FILE.parent
+            )
             try:
                 with os.fdopen(temp_fd, "w") as f:
                     json.dump(cron_state, f, indent=2, default=str)

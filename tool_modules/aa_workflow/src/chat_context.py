@@ -145,7 +145,9 @@ async def get_chat_state_async(ctx: "Context") -> dict:
     }
 
 
-async def get_project_work_state_path_async(ctx: "Context", project: str | None = None) -> Path:
+async def get_project_work_state_path_async(
+    ctx: "Context", project: str | None = None
+) -> Path:
     """Get the path to the project-specific work state file (async).
 
     Args:
@@ -186,7 +188,8 @@ def _detect_project_from_cwd() -> str | None:
 
     try:
         cwd = Path.cwd().resolve()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_project_from_cwd: {e}")
         return None
 
     repositories = config.get("repositories", {})
@@ -237,8 +240,8 @@ def get_chat_project() -> str:
         project = get_project_sync()
         if project and project != DEFAULT_PROJECT:
             return project
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in get_chat_project workspace lookup: {e}")
 
     # Fall back to legacy global state
     if _chat_state["project"]:
@@ -277,8 +280,8 @@ def set_chat_project(project: str) -> bool:
         state = WorkspaceRegistry.get_or_create("default")
         state.project = project
         state.is_auto_detected = False
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in set_chat_project workspace update: {e}")
 
     return True
 
@@ -292,8 +295,8 @@ def set_chat_issue(issue_key: str) -> None:
 
         state = WorkspaceRegistry.get_or_create("default")
         state.issue_key = issue_key
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in set_chat_issue workspace update: {e}")
 
 
 def get_chat_issue() -> str | None:
@@ -304,8 +307,8 @@ def get_chat_issue() -> str | None:
         state = WorkspaceRegistry.get("default")
         if state and state.issue_key:
             return state.issue_key
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in get_chat_issue workspace lookup: {e}")
 
     return _chat_state.get("issue_key")
 
@@ -319,8 +322,8 @@ def set_chat_branch(branch: str) -> None:
 
         state = WorkspaceRegistry.get_or_create("default")
         state.branch = branch
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in set_chat_branch workspace update: {e}")
 
 
 def get_chat_branch() -> str | None:
@@ -331,8 +334,8 @@ def get_chat_branch() -> str | None:
         state = WorkspaceRegistry.get("default")
         if state and state.branch:
             return state.branch
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in get_chat_branch workspace lookup: {e}")
 
     return _chat_state.get("branch")
 
@@ -352,12 +355,16 @@ def get_chat_state() -> dict:
                 "project": state.project or get_chat_project(),
                 "issue_key": state.issue_key or _chat_state.get("issue_key"),
                 "branch": state.branch or _chat_state.get("branch"),
-                "started_at": state.started_at.isoformat() if state.started_at else _chat_state.get("started_at"),
+                "started_at": (
+                    state.started_at.isoformat()
+                    if state.started_at
+                    else _chat_state.get("started_at")
+                ),
                 "is_default": state.project is None and not state.is_auto_detected,
                 "is_auto_detected": state.is_auto_detected,
             }
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in get_chat_state workspace lookup: {e}")
 
     return {
         "project": get_chat_project(),
@@ -488,7 +495,9 @@ async def _project_context_impl(
         lines.append(f"\n*Workspace: {state.workspace_uri}*")
 
     lines.append("\n---")
-    lines.append("**Switch project:** `project_context(project='automation-analytics-backend')`")
+    lines.append(
+        "**Switch project:** `project_context(project='automation-analytics-backend')`"
+    )
 
     return [TextContent(type="text", text="\n".join(lines))]
 

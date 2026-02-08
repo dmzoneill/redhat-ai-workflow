@@ -175,8 +175,8 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                             }
                         )
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _check_known_issues_sync: {e}")
 
     return matches
 
@@ -1006,7 +1006,8 @@ class SkillExecutor:
                     else:
                         return match.group(0)
                 return str(value) if value is not None else ""
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed error in template variable resolution: {e}")
                 return match.group(0)
 
         return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
@@ -1632,8 +1633,8 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug(f"Suppressed error in recording failed tool stats: {e2}")
             return {"success": False, "error": str(e)}
 
     async def _load_and_execute_module_tool(
@@ -1690,8 +1691,10 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception:
-                pass
+            except Exception as e2:
+                logger.debug(
+                    f"Suppressed error in recording failed module tool stats: {e2}"
+                )
             return {
                 "success": False,
                 "error": str(e),
@@ -1770,8 +1773,10 @@ class SkillExecutor:
                                 agent_stats.record_tool_call(
                                     tool_name, True, duration_ms
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(
+                                    f"Suppressed error in recording retry tool stats: {e}"
+                                )
 
                             return self._format_tool_result(retry_result, duration)
                         except Exception as retry_e:
@@ -2069,8 +2074,8 @@ class SkillExecutor:
                         else "vpn_connect()"
                     )
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed error in notify_auto_heal_triggered: {e}")
 
                 retry_result = await self._attempt_auto_heal(
                     heal_type, cluster, tool, step, output_lines
@@ -2115,8 +2120,10 @@ class SkillExecutor:
                         )
 
                         notify_auto_heal_succeeded(step_name, heal_type)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in notify_auto_heal_succeeded: {e}"
+                        )
 
                     self.step_results.append(
                         {
@@ -2160,8 +2167,10 @@ class SkillExecutor:
                         )
 
                         notify_auto_heal_failed(step_name, error_msg[:100])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in notify_auto_heal_failed: {e}"
+                        )
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -2246,8 +2255,8 @@ class SkillExecutor:
                 )
 
                 notify_step_failed(skill_name, step_name, error_msg[:150])
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in notify_step_failed: {e}")
 
             self.step_results.append(
                 {
@@ -2272,8 +2281,8 @@ class SkillExecutor:
                         parsed[key.strip().lower().replace(" ", "_")] = val.strip()
                 if parsed:
                     self.context[f"{output_name}_parsed"] = parsed
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in result text parsing: {e}")
 
     def _detect_soft_failure(self, result_text: str) -> tuple[bool, str | None]:
         """Detect if a successful tool result actually contains an error (soft failure).
@@ -2741,8 +2750,8 @@ class SkillExecutor:
                 from .skill_execution_events import set_emitter
 
                 set_emitter(None)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in clearing event emitter: {e}")
 
         # Emit skill complete event (WebSocket)
         if self.ws_server and self.ws_server.is_running:

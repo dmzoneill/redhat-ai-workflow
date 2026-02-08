@@ -173,7 +173,9 @@ class PersonaLoader:
             return []
 
         try:
-            spec = importlib.util.spec_from_file_location(f"aa_{module_name}_tools_dynamic", tools_file)
+            spec = importlib.util.spec_from_file_location(
+                f"aa_{module_name}_tools_dynamic", tools_file
+            )
             if spec is None or spec.loader is None:
                 return []
 
@@ -187,7 +189,9 @@ class PersonaLoader:
 
             # Validate module structure before calling register_tools
             if not is_tool_module(module):
-                logger.warning(f"Module {module_name} does not implement ToolModuleProtocol")
+                logger.warning(
+                    f"Module {module_name} does not implement ToolModuleProtocol"
+                )
                 return []
 
             # Log any validation warnings (non-fatal)
@@ -219,7 +223,9 @@ class PersonaLoader:
         """Remove all tools from a specific module."""
         async with self._state_lock:
             tools_to_remove = [
-                name for name, mod in self._tool_to_module.items() if mod == module_name and name not in CORE_TOOLS
+                name
+                for name, mod in self._tool_to_module.items()
+                if mod == module_name and name not in CORE_TOOLS
             ]
 
             for tool_name in tools_to_remove:
@@ -277,11 +283,13 @@ class PersonaLoader:
         if not config:
             # Emit failure notification
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import notify_persona_failed
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_persona_failed,
+                )
 
                 notify_persona_failed(persona_name, "Persona not found")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in notify_persona_failed: {e}")
             return {
                 "success": False,
                 "error": f"Persona not found: {persona_name}",
@@ -361,7 +369,9 @@ class PersonaLoader:
 
         # Emit toast notification for persona load
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import notify_persona_loaded
+            from tool_modules.aa_workflow.src.notification_emitter import (
+                notify_persona_loaded,
+            )
 
             notify_persona_loaded(persona_name, len(loaded_tools))
         except Exception as e:
@@ -414,7 +424,8 @@ class PersonaLoader:
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             return workspace_state.persona
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in get_workspace_persona: {e}")
             if self.current_persona:
                 return self.current_persona
             # Fall back to config default
@@ -423,7 +434,10 @@ class PersonaLoader:
 
                 cfg = load_config()
                 return cfg.get("agent", {}).get("default_persona", "researcher")
-            except Exception:
+            except Exception as e2:
+                logger.debug(
+                    f"Suppressed error in get_workspace_persona config fallback: {e2}"
+                )
                 return "researcher"
 
     async def set_workspace_persona(self, ctx: "Context", persona_name: str) -> None:

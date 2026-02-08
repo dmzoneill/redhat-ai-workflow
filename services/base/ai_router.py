@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -213,7 +214,9 @@ class AIModelRouter:
                 return name
 
         # No backend available
-        raise LLMUnavailableError("No LLM backend available. Install one of: claude, gemini, codex, opencode")
+        raise LLMUnavailableError(
+            "No LLM backend available. Install one of: claude, gemini, codex, opencode"
+        )
 
     async def analyze(
         self,
@@ -242,7 +245,9 @@ class AIModelRouter:
         if backend:
             availability = await self.check_availability()
             if not availability.get(backend):
-                raise LLMUnavailableError(f"Requested backend '{backend}' is not available")
+                raise LLMUnavailableError(
+                    f"Requested backend '{backend}' is not available"
+                )
             selected_backend = backend
         else:
             selected_backend = await self.get_best_backend()
@@ -305,7 +310,9 @@ If no issues found, return: {{"findings": [], "done": true}}
                 proc.kill()
                 await proc.wait()
                 latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-                logger.error(f"{selected_backend} analysis timed out after {cmd_timeout}s")
+                logger.error(
+                    f"{selected_backend} analysis timed out after {cmd_timeout}s"
+                )
                 return LLMResponse(
                     text="",
                     backend=selected_backend,
@@ -329,7 +336,9 @@ If no issues found, return: {{"findings": [], "done": true}}
 
             # Parse response
             response_text = stdout.decode().strip()
-            logger.debug(f"{selected_backend} response ({latency_ms}ms): {response_text[:200]}...")
+            logger.debug(
+                f"{selected_backend} response ({latency_ms}ms): {response_text[:200]}..."
+            )
 
             # Try to parse as JSON
             findings = []
@@ -404,7 +413,9 @@ If no issues found, return: {{"findings": [], "done": true}}
 
         errors = []
         for backend in available_backends[:max_retries]:
-            response = await self.analyze(prompt, task, backend=backend, timeout=timeout)
+            response = await self.analyze(
+                prompt, task, backend=backend, timeout=timeout
+            )
             if response.success:
                 return response
             errors.append(f"{backend}: {response.error}")
@@ -414,6 +425,7 @@ If no issues found, return: {{"findings": [], "done": true}}
 
 # Global router instance
 _router: Optional[AIModelRouter] = None
+_router_lock = threading.Lock()
 
 
 def get_ai_router(preferred_backend: Optional[str] = None) -> AIModelRouter:
@@ -428,5 +440,7 @@ def get_ai_router(preferred_backend: Optional[str] = None) -> AIModelRouter:
     """
     global _router
     if _router is None:
-        _router = AIModelRouter(preferred_backend=preferred_backend)
+        with _router_lock:
+            if _router is None:
+                _router = AIModelRouter(preferred_backend=preferred_backend)
     return _router

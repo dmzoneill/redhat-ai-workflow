@@ -38,12 +38,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-# Add project root to path
+# Add project root to path (only when running as script)
 PROJECT_ROOT = Path(__file__).parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-if str(PROJECT_ROOT / "tool_modules") not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT / "tool_modules"))
+if __name__ == "__main__":
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    if str(PROJECT_ROOT / "tool_modules") not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT / "tool_modules"))
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,9 @@ class ContextInjector:
         if self._slack_available is not None:
             return self._slack_available
         try:
-            from tool_modules.aa_slack_persona.src.sync import SlackPersonaSync  # noqa: F401
+            from tool_modules.aa_slack_persona.src.sync import (  # noqa: F401
+                SlackPersonaSync,
+            )
 
             self._slack_available = True
         except ImportError:
@@ -138,7 +141,9 @@ class ContextInjector:
         if self._code_available is not None:
             return self._code_available
         try:
-            from tool_modules.aa_code_search.src.tools_basic import _search_code  # noqa: F401
+            from tool_modules.aa_code_search.src.tools_basic import (  # noqa: F401
+                _search_code,
+            )
 
             self._code_available = True
         except ImportError:
@@ -154,7 +159,10 @@ class ContextInjector:
             # Also check if we have auth configured
             import asyncio
 
-            from tool_modules.aa_inscope.src.tools_basic import _get_auth_token, _inscope_ask_impl  # noqa: F401
+            from tool_modules.aa_inscope.src.tools_basic import (  # noqa: F401
+                _get_auth_token,
+                _inscope_ask_impl,
+            )
 
             token = asyncio.get_event_loop().run_until_complete(_get_auth_token())
             self._inscope_available = token is not None
@@ -247,7 +255,10 @@ class ContextInjector:
             )
 
         try:
-            from tool_modules.aa_code_search.src.tools_basic import _get_index_stats, _search_code
+            from tool_modules.aa_code_search.src.tools_basic import (
+                _get_index_stats,
+                _search_code,
+            )
 
             # Check if project is indexed
             stats = _get_index_stats(self.project)
@@ -368,7 +379,11 @@ class ContextInjector:
                             {
                                 "key": key,
                                 "status": "lookup_failed",
-                                "error": result.stderr[:ERROR_SNIPPET_LENGTH] if result.stderr else "Unknown error",
+                                "error": (
+                                    result.stderr[:ERROR_SNIPPET_LENGTH]
+                                    if result.stderr
+                                    else "Unknown error"
+                                ),
                             }
                         )
 
@@ -449,7 +464,9 @@ class ContextInjector:
                     if any(word in pattern_text for word in query_lower.split()):
                         relevant_patterns.append(
                             {
-                                "pattern": p.get("pattern", "")[:PATTERN_DISPLAY_LENGTH],
+                                "pattern": p.get("pattern", "")[
+                                    :PATTERN_DISPLAY_LENGTH
+                                ],
                                 "fix": p.get("fix", "")[:PATTERN_DISPLAY_LENGTH],
                             }
                         )
@@ -599,7 +616,9 @@ class ContextInjector:
                 name = r.get("name", "")
                 relevance = r.get("relevance", 0)
                 preview = r.get("preview", "")
-                lines.append(f"**{name}** in `{file_path}:{line_range}` ({relevance}% relevant):")
+                lines.append(
+                    f"**{name}** in `{file_path}:{line_range}` ({relevance}% relevant):"
+                )
                 lines.append(f"```\n{preview}\n```")
                 lines.append("")
             sections.append("\n".join(lines))
@@ -662,7 +681,9 @@ class ContextInjector:
         if not sections:
             return ""
 
-        header = f"# Knowledge Context (gathered in {context.total_latency_ms:.0f}ms)\n\n"
+        header = (
+            f"# Knowledge Context (gathered in {context.total_latency_ms:.0f}ms)\n\n"
+        )
         return header + "\n\n".join(sections)
 
     def gather_context(
@@ -794,7 +815,11 @@ class ContextInjector:
         start = time.time()
 
         try:
-            from services.memory_abstraction import MemoryInterface, SourceFilter, get_memory_interface
+            from services.memory_abstraction import (
+                MemoryInterface,
+                SourceFilter,
+                get_memory_interface,
+            )
 
             # Get or create memory interface
             try:
@@ -806,7 +831,9 @@ class ContextInjector:
             # Build source filters
             source_filters = None
             if sources:
-                source_filters = [SourceFilter(name=s, project=self.project) for s in sources]
+                source_filters = [
+                    SourceFilter(name=s, project=self.project) for s in sources
+                ]
 
             # Query memory abstraction
             result = await memory.query(
@@ -859,7 +886,9 @@ class ContextInjector:
 
 
 # Convenience function
-def get_context_for_query(query: str, project: str = "automation-analytics-backend") -> str:
+def get_context_for_query(
+    query: str, project: str = "automation-analytics-backend"
+) -> str:
     """
     Quick way to get formatted context for a query.
 
@@ -876,7 +905,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Test context injection")
     parser.add_argument("--query", required=True, help="Query to test")
-    parser.add_argument("--project", default="automation-analytics-backend", help="Project name")
+    parser.add_argument(
+        "--project", default="automation-analytics-backend", help="Project name"
+    )
     args = parser.parse_args()
 
     injector = ContextInjector(project=args.project)
