@@ -372,7 +372,14 @@ class TestGetChatState:
     def test_from_legacy_state(self, mock_config):
         chat_context._chat_state["project"] = "backend"
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
-            mock_registry.get.side_effect = Exception("no registry")
+            mock_registry.get.return_value = None
+            mock_registry.get_or_create.return_value = MagicMock(
+                project="backend",
+                issue_key=None,
+                branch=None,
+                started_at=None,
+                is_auto_detected=False,
+            )
             result = chat_context.get_chat_state()
         assert result["project"] == "backend"
 
@@ -401,10 +408,15 @@ class TestGetProjectWorkStatePath:
 
     def test_auto_project(self, mock_config):
         chat_context._chat_state["project"] = "backend"
-        with patch(
-            "tool_modules.aa_workflow.src.constants.MEMORY_DIR",
-            Path("/tmp/memory"),
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.constants.MEMORY_DIR",
+                Path("/tmp/memory"),
+            ),
+            patch("server.workspace_state.WorkspaceRegistry") as mock_reg,
         ):
+            mock_reg.get.return_value = None
+            mock_reg.get_or_create.return_value = MagicMock(project="backend")
             result = chat_context.get_project_work_state_path()
         assert "backend" in str(result)
 
@@ -420,10 +432,15 @@ class TestGetProjectStateDir:
 
     def test_auto_project(self, mock_config):
         chat_context._chat_state["project"] = "backend"
-        with patch(
-            "tool_modules.aa_workflow.src.constants.MEMORY_DIR",
-            Path("/tmp/memory"),
+        with (
+            patch(
+                "tool_modules.aa_workflow.src.constants.MEMORY_DIR",
+                Path("/tmp/memory"),
+            ),
+            patch("server.workspace_state.WorkspaceRegistry") as mock_reg,
         ):
+            mock_reg.get.return_value = None
+            mock_reg.get_or_create.return_value = MagicMock(project="backend")
             result = chat_context.get_project_state_dir()
         assert "backend" in str(result)
 
