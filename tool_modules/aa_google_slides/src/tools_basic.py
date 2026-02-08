@@ -16,19 +16,22 @@ Setup:
 3. Run google_slides_status() to verify authentication
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastmcp import FastMCP
+logger = logging.getLogger(__name__)
+
+from fastmcp import FastMCP  # noqa: E402
 
 # Setup project path for server imports (must be before server imports)
-from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+from tool_modules.common import PROJECT_ROOT  # noqa: E402
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from server.tool_registry import ToolRegistry
-from server.utils import load_config
+from server.tool_registry import ToolRegistry  # noqa: E402
+from server.utils import load_config  # noqa: E402
 
 if TYPE_CHECKING:
     from googleapiclient.discovery import Resource
@@ -80,8 +83,8 @@ def _try_load_oauth_token(credentials_cls, scopes):
     if TOKEN_FILE.exists():
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_load_oauth_token: {e}")
     return None
 
 
@@ -93,8 +96,8 @@ def _try_refresh_credentials(creds, request_cls):
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
             return creds
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_refresh_credentials: {e}")
     return None
 
 
@@ -102,9 +105,11 @@ def _try_service_account(service_account, scopes):
     """Try to load service account credentials."""
     if SERVICE_ACCOUNT_FILE.exists():
         try:
-            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=scopes)
-        except Exception:
-            pass
+            return service_account.Credentials.from_service_account_file(
+                str(SERVICE_ACCOUNT_FILE), scopes=scopes
+            )
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_service_account: {e}")
     return None
 
 
@@ -114,7 +119,9 @@ def _try_oauth_flow(scopes):
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow
 
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(CREDENTIALS_FILE), scopes
+            )
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             with open(TOKEN_FILE, "w") as f:
@@ -353,7 +360,9 @@ async def _google_slides_get_impl(
         return "❌ Google Slides service not available"
 
     try:
-        presentation = service.presentations().get(presentationId=presentation_id).execute()
+        presentation = (
+            service.presentations().get(presentationId=presentation_id).execute()
+        )
 
         title = presentation.get("title", "Untitled")
         slides = presentation.get("slides", [])
@@ -388,7 +397,9 @@ async def _google_slides_get_impl(
                         text_content = shape["text"].get("textElements", [])
                         for text_elem in text_content:
                             if "textRun" in text_elem:
-                                content = text_elem["textRun"].get("content", "").strip()
+                                content = (
+                                    text_elem["textRun"].get("content", "").strip()
+                                )
                                 if content and len(content) < 100:
                                     slide_title = content[:50]
                                     break
@@ -428,7 +439,11 @@ async def _google_slides_create_impl(
             if drive_error:
                 return f"❌ {drive_error}"
 
-            copied = drive_service.files().copy(fileId=template_id, body={"name": title}).execute()
+            copied = (
+                drive_service.files()
+                .copy(fileId=template_id, body={"name": title})
+                .execute()
+            )
             presentation_id = copied.get("id")
         else:
             # Create blank presentation
@@ -518,12 +533,16 @@ async def _google_slides_add_slide_impl(
             requests[0]["createSlide"]["insertionIndex"] = insert_at
 
         # Execute slide creation
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         # If title or body provided, add text
         if title or body:
             # Get the slide to find placeholder IDs
-            presentation = service.presentations().get(presentationId=presentation_id).execute()
+            presentation = (
+                service.presentations().get(presentationId=presentation_id).execute()
+            )
 
             text_requests = []
             for slide in presentation.get("slides", []):
@@ -572,7 +591,9 @@ async def _google_slides_add_slide_impl(
             lines.append(f"**Body:** {body[:50]}...")
 
         lines.append("")
-        lines.append(f"**Edit:** https://docs.google.com/presentation/d/{presentation_id}/edit")
+        lines.append(
+            f"**Edit:** https://docs.google.com/presentation/d/{presentation_id}/edit"
+        )
 
         return "\n".join(lines)
 
@@ -620,7 +641,9 @@ async def _google_slides_update_text_impl(
             }
         )
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Text Updated**",
@@ -653,7 +676,9 @@ async def _google_slides_delete_slide_impl(
     try:
         requests = [{"deleteObject": {"objectId": slide_id}}]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Slide Deleted**",
@@ -725,7 +750,9 @@ async def _google_slides_add_text_box_impl(
             },
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Text Box Added**",
@@ -761,7 +788,11 @@ async def _google_slides_export_pdf_impl(
         # Get presentation title for filename
         slides_service, _ = get_slides_service()
         if slides_service:
-            presentation = slides_service.presentations().get(presentationId=presentation_id).execute()
+            presentation = (
+                slides_service.presentations()
+                .get(presentationId=presentation_id)
+                .execute()
+            )
             title = presentation.get("title", "presentation")
         else:
             title = "presentation"
@@ -773,7 +804,9 @@ async def _google_slides_export_pdf_impl(
             output_path = f"{safe_title}.pdf"
 
         # Export as PDF
-        request = drive_service.files().export_media(fileId=presentation_id, mimeType="application/pdf")
+        request = drive_service.files().export_media(
+            fileId=presentation_id, mimeType="application/pdf"
+        )
 
         # Download the file
         from io import BytesIO
@@ -873,7 +906,9 @@ async def _google_slides_build_from_outline_impl(
                     {
                         "createSlide": {
                             "objectId": slide_id,
-                            "slideLayoutReference": {"predefinedLayout": "SECTION_HEADER"},
+                            "slideLayoutReference": {
+                                "predefinedLayout": "SECTION_HEADER"
+                            },
                         }
                     }
                 )
@@ -895,7 +930,9 @@ async def _google_slides_build_from_outline_impl(
             return "❌ No valid slides found in outline. Use # for sections, ## for slide titles."
 
         # Execute all requests
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Slides Built from Outline**",
@@ -926,7 +963,9 @@ async def _google_slides_get_slide_impl(
         return "❌ Google Slides service not available"
 
     try:
-        presentation = service.presentations().get(presentationId=presentation_id).execute()
+        presentation = (
+            service.presentations().get(presentationId=presentation_id).execute()
+        )
 
         # Find the slide
         target_slide = None
@@ -969,10 +1008,16 @@ async def _google_slides_get_slide_impl(
                     text_content = []
                     for te in shape["text"].get("textElements", []):
                         if "textRun" in te:
-                            text_content.append(te["textRun"].get("content", "").strip())
+                            text_content.append(
+                                te["textRun"].get("content", "").strip()
+                            )
                     if text_content:
                         preview = " ".join(text_content)[:80]
-                        details = f'Text: "{preview}..."' if len(preview) >= 80 else f'Text: "{preview}"'
+                        details = (
+                            f'Text: "{preview}..."'
+                            if len(preview) >= 80
+                            else f'Text: "{preview}"'
+                        )
 
             elif "image" in elem:
                 elem_type = "image"
@@ -1064,7 +1109,9 @@ async def _google_slides_add_image_impl(
             }
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Image Added**",
@@ -1119,7 +1166,11 @@ async def _google_slides_add_image_from_drive_impl(
         element_id = f"image_{uuid.uuid4().hex[:8]}"
 
         # Get the Drive file's web content link
-        file_info = drive_service.files().get(fileId=drive_file_id, fields="webContentLink,name,mimeType").execute()
+        file_info = (
+            drive_service.files()
+            .get(fileId=drive_file_id, fields="webContentLink,name,mimeType")
+            .execute()
+        )
 
         # For images in Drive, we need to use the export link format
         # or make the file publicly accessible
@@ -1151,7 +1202,9 @@ async def _google_slides_add_image_from_drive_impl(
             }
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Image Added from Drive**",
@@ -1228,7 +1281,9 @@ async def _google_slides_upload_image_impl(
 
         uploaded_file = (
             drive_service.files()
-            .create(body=file_metadata, media_body=media, fields="id,name,webContentLink")
+            .create(
+                body=file_metadata, media_body=media, fields="id,name,webContentLink"
+            )
             .execute()
         )
 
@@ -1241,11 +1296,14 @@ async def _google_slides_upload_image_impl(
         ).execute()
 
         # Now add to slide
-        result = await _google_slides_add_image_from_drive_impl(presentation_id, slide_id, file_id, x, y, width, height)
+        result = await _google_slides_add_image_from_drive_impl(
+            presentation_id, slide_id, file_id, x, y, width, height
+        )
 
         if result.startswith("✅"):
             return result.replace(
-                "**Image Added from Drive**", f"**Image Uploaded & Added**\n\n**Uploaded:** `{local_path.name}` → Drive"
+                "**Image Added from Drive**",
+                f"**Image Uploaded & Added**\n\n**Uploaded:** `{local_path.name}` → Drive",
             )
         return result
 
@@ -1278,7 +1336,9 @@ async def _google_slides_replace_image_impl(
             }
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Image Replaced**",
@@ -1311,7 +1371,9 @@ async def _google_slides_delete_element_impl(
     try:
         requests = [{"deleteObject": {"objectId": element_id}}]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Element Deleted**",
@@ -1351,7 +1413,9 @@ async def _google_slides_move_slide_impl(
             }
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Slide Moved**",
@@ -1395,7 +1459,9 @@ async def _google_slides_duplicate_slide_impl(
             }
         ]
 
-        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
+        service.presentations().batchUpdate(
+            presentationId=presentation_id, body={"requests": requests}
+        ).execute()
 
         lines = [
             "✅ **Slide Duplicated**",
@@ -1506,7 +1572,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             New slide ID and confirmation
         """
-        return await _google_slides_add_slide_impl(presentation_id, layout, title, body, insert_at)
+        return await _google_slides_add_slide_impl(
+            presentation_id, layout, title, body, insert_at
+        )
 
     @registry.tool()
     async def google_slides_update_text(
@@ -1527,7 +1595,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of text update
         """
-        return await _google_slides_update_text_impl(presentation_id, object_id, text, replace_all)
+        return await _google_slides_update_text_impl(
+            presentation_id, object_id, text, replace_all
+        )
 
     @registry.tool()
     async def google_slides_delete_slide(
@@ -1571,7 +1641,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             New text box element ID
         """
-        return await _google_slides_add_text_box_impl(presentation_id, slide_id, text, x, y, width, height)
+        return await _google_slides_add_text_box_impl(
+            presentation_id, slide_id, text, x, y, width, height
+        )
 
     @registry.tool()
     async def google_slides_export_pdf(
@@ -1654,7 +1726,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             New image element ID
         """
-        return await _google_slides_add_image_impl(presentation_id, slide_id, image_url, x, y, width, height)
+        return await _google_slides_add_image_impl(
+            presentation_id, slide_id, image_url, x, y, width, height
+        )
 
     @registry.tool()
     async def google_slides_add_image_from_drive(
@@ -1712,7 +1786,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             New image element ID
         """
-        return await _google_slides_upload_image_impl(presentation_id, slide_id, local_path, x, y, width, height)
+        return await _google_slides_upload_image_impl(
+            presentation_id, slide_id, local_path, x, y, width, height
+        )
 
     @registry.tool()
     async def google_slides_replace_image(
@@ -1731,7 +1807,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of replacement
         """
-        return await _google_slides_replace_image_impl(presentation_id, image_id, new_image_url)
+        return await _google_slides_replace_image_impl(
+            presentation_id, image_id, new_image_url
+        )
 
     @registry.tool()
     async def google_slides_delete_element(
@@ -1767,7 +1845,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of move
         """
-        return await _google_slides_move_slide_impl(presentation_id, slide_id, new_index)
+        return await _google_slides_move_slide_impl(
+            presentation_id, slide_id, new_index
+        )
 
     @registry.tool()
     async def google_slides_duplicate_slide(

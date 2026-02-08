@@ -241,7 +241,9 @@ class GPUColorConverter:
         try:
             import pyopencl as cl
         except ImportError:
-            raise ImportError("pyopencl required for GPU acceleration. Install with: uv add pyopencl")
+            raise ImportError(
+                "pyopencl required for GPU acceleration. Install with: uv add pyopencl"
+            )
 
         self.width = width
         self.height = height
@@ -295,7 +297,9 @@ class GPUColorConverter:
         cl.enqueue_copy(self.queue, self.bgr_buf, bgr_frame)
 
         # Run kernel
-        self.kernel.set_args(self.bgr_buf, self.yuyv_buf, np.int32(self.width), np.int32(self.height))
+        self.kernel.set_args(
+            self.bgr_buf, self.yuyv_buf, np.int32(self.width), np.int32(self.height)
+        )
         cl.enqueue_nd_range_kernel(self.queue, self.kernel, self.global_size, None)
 
         # Download from GPU
@@ -467,7 +471,9 @@ class UltraLowCPURenderer:
         try:
             import pyopencl as cl
         except ImportError:
-            raise ImportError("pyopencl required for ultra-low CPU mode. Install with: uv add pyopencl")
+            raise ImportError(
+                "pyopencl required for ultra-low CPU mode. Install with: uv add pyopencl"
+            )
 
         self.width = config.width
         self.height = config.height
@@ -543,7 +549,9 @@ class UltraLowCPURenderer:
         cl.enqueue_copy(self.queue, self.base_gpu, frame)
         self.queue.finish()
 
-    def render_frame(self, t: float, progress_fraction: float, audio_bars: np.ndarray = None) -> np.ndarray:
+    def render_frame(
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+    ) -> np.ndarray:
         """
         Render a frame on GPU and return YUYV data.
 
@@ -566,7 +574,12 @@ class UltraLowCPURenderer:
             use_audio = 1
 
         self.kernel.set_args(
-            self.base_gpu, self.yuyv_gpu, self.audio_gpu, np.float32(t), np.int32(progress_pixels), np.int32(use_audio)
+            self.base_gpu,
+            self.yuyv_gpu,
+            self.audio_gpu,
+            np.float32(t),
+            np.int32(progress_pixels),
+            np.int32(use_audio),
         )
         cl.enqueue_nd_range_kernel(self.queue, self.kernel, self.global_size, None)
         cl.enqueue_copy(self.queue, self.yuyv_host, self.yuyv_gpu)
@@ -674,7 +687,12 @@ class StreamingRenderer(UltraLowCPURenderer):
     }}
     """
 
-    def __init__(self, config: "VideoConfig", use_intel: bool = True, enable_streaming: bool = False):
+    def __init__(
+        self,
+        config: "VideoConfig",
+        use_intel: bool = True,
+        enable_streaming: bool = False,
+    ):
         """
         Initialize streaming renderer.
 
@@ -706,7 +724,9 @@ class StreamingRenderer(UltraLowCPURenderer):
             progress_h=self.progress_h,
             mirror_output=1 if self.mirror_output else 0,
         )
-        prg_bgra = cl.Program(self.ctx, bgra_kernel_src).build(options=["-cl-fast-relaxed-math"])
+        prg_bgra = cl.Program(self.ctx, bgra_kernel_src).build(
+            options=["-cl-fast-relaxed-math"]
+        )
         self.kernel_bgra = cl.Kernel(prg_bgra, "render_frame_bgra")
 
         # Allocate BGRA buffer
@@ -716,7 +736,9 @@ class StreamingRenderer(UltraLowCPURenderer):
 
         self.global_size_bgra = (self.width, self.height)
 
-        logger.info(f"StreamingRenderer initialized (streaming={'enabled' if enable_streaming else 'disabled'})")
+        logger.info(
+            f"StreamingRenderer initialized (streaming={'enabled' if enable_streaming else 'disabled'})"
+        )
 
     def start_streaming(self, signaling_port: int = 8765, v4l2_device: str = None):
         """
@@ -762,7 +784,9 @@ class StreamingRenderer(UltraLowCPURenderer):
             self._streaming_pipeline = None
             logger.info("Streaming stopped")
 
-    def render_frame_bgra(self, t: float, progress_fraction: float, audio_bars: np.ndarray = None) -> np.ndarray:
+    def render_frame_bgra(
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+    ) -> np.ndarray:
         """
         Render a frame on GPU and return BGRA data.
 
@@ -787,15 +811,24 @@ class StreamingRenderer(UltraLowCPURenderer):
             use_audio = 1
 
         self.kernel_bgra.set_args(
-            self.base_gpu, self.bgra_gpu, self.audio_gpu, np.float32(t), np.int32(progress_pixels), np.int32(use_audio)
+            self.base_gpu,
+            self.bgra_gpu,
+            self.audio_gpu,
+            np.float32(t),
+            np.int32(progress_pixels),
+            np.int32(use_audio),
         )
-        cl.enqueue_nd_range_kernel(self.queue, self.kernel_bgra, self.global_size_bgra, None)
+        cl.enqueue_nd_range_kernel(
+            self.queue, self.kernel_bgra, self.global_size_bgra, None
+        )
         cl.enqueue_copy(self.queue, self.bgra_host, self.bgra_gpu)
         self.queue.finish()
 
         return self.bgra_host
 
-    def render_and_stream(self, t: float, progress_fraction: float, audio_bars: np.ndarray = None) -> np.ndarray:
+    def render_and_stream(
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+    ) -> np.ndarray:
         """
         Render frame and push to streaming pipeline.
 
@@ -854,7 +887,9 @@ def get_npu_stats() -> list[str]:
         stats.append(f"RUNTIME: {runtime.upper()}")
 
         # Active time
-        active_ms = int((npu_path / "power" / "runtime_active_time").read_text().strip())
+        active_ms = int(
+            (npu_path / "power" / "runtime_active_time").read_text().strip()
+        )
         active_sec = active_ms / 1000
         stats.append(f"ACTIVE TIME: {active_sec:.1f}s")
 
@@ -865,8 +900,9 @@ def get_npu_stats() -> list[str]:
         stats.append(f"TEMP: {random.randint(42, 58)}C")
         stats.append(f"UTILIZATION: {random.randint(35, 85)}%")
 
-    except Exception:
+    except Exception as e:
         # Fallback fake stats if NPU not available
+        logger.debug(f"Suppressed error in get_npu_stats: {e}")
         stats = [
             "NPU FREQ: 1400/1400 MHz",
             "NPU BUSY TIME: 12.34s",
@@ -1161,7 +1197,9 @@ class ResearchVideoGenerator:
         # Build ffmpeg filter graph
         filter_complex = self._build_filter_graph(attendees)
 
-        total_duration = len(attendees) * self.config.duration_per_person + 3  # +3 for intro/outro
+        total_duration = (
+            len(attendees) * self.config.duration_per_person + 3
+        )  # +3 for intro/outro
 
         cmd = [
             "ffmpeg",
@@ -1224,20 +1262,26 @@ class ResearchVideoGenerator:
 
         logger.info("🎬 Starting real-time research video stream")
         logger.info(f"📋 {total_attendees} attendees to analyze")
-        logger.info(f"📺 Output: {video_device} @ {config.width}x{config.height} {config.fps}fps")
+        logger.info(
+            f"📺 Output: {video_device} @ {config.width}x{config.height} {config.fps}fps"
+        )
 
         self._running = True
         iteration = 0
 
         while self._running:
             iteration += 1
-            logger.info(f"🔄 Starting iteration {iteration} through {total_attendees} attendees")
+            logger.info(
+                f"🔄 Starting iteration {iteration} through {total_attendees} attendees"
+            )
 
             for idx, attendee in enumerate(attendees):
                 if not self._running:
                     break
 
-                logger.info(f"🔍 [{idx + 1}/{total_attendees}] Analyzing: {attendee.name}")
+                logger.info(
+                    f"🔍 [{idx + 1}/{total_attendees}] Analyzing: {attendee.name}"
+                )
                 await self._stream_single_attendee(
                     attendee=attendee,
                     video_device=video_device,
@@ -1304,15 +1348,21 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = random.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
-        findings = random.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
+        tools = random.sample(
+            RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS))
+        )
+        findings = random.sample(
+            FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS))
+        )
         assessment = random.choice(THREAT_ASSESSMENTS)
 
         # Build filter graph
         filters = []
 
         # Header
-        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
+        filters.append(
+            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15"
+        )
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
             f":fontcolor={config.text_color}:x=30:y=55"
@@ -1413,15 +1463,21 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = random.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
-        findings = random.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
+        tools = random.sample(
+            RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS))
+        )
+        findings = random.sample(
+            FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS))
+        )
         assessment = random.choice(THREAT_ASSESSMENTS)
 
         # Build filter graph for this single attendee
         filters = []
 
         # Header with attendee count
-        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
+        filters.append(
+            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15"
+        )
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
             f":fontcolor={config.text_color}:x=30:y=55"
@@ -1438,7 +1494,8 @@ class ResearchVideoGenerator:
 
         # Vertical green line divider
         filters.append(
-            f"drawbox=x={right_col_x}:y={right_col_top}:w=2:h={right_col_height}" f":color={config.text_color}:t=fill"
+            f"drawbox=x={right_col_x}:y={right_col_top}:w=2:h={right_col_height}"
+            f":color={config.text_color}:t=fill"
         )
 
         # 4 sections in right column, ~110px each
@@ -1447,7 +1504,10 @@ class ResearchVideoGenerator:
 
         # Section 1: JIRA ISSUE TRACKER
         sec1_y = right_col_top + 5
-        filters.append("drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec1_y}")
+        filters.append(
+            "drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan"
+            f":x={section_x}:y={sec1_y}"
+        )
         jira_items = [
             "VELOCITY: 42",
             "BLOCKERS: 3",
@@ -1462,7 +1522,10 @@ class ResearchVideoGenerator:
 
         # Section 2: SLACK SIGINT MODULE
         sec2_y = sec1_y + section_height
-        filters.append("drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec2_y}")
+        filters.append(
+            "drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan"
+            f":x={section_x}:y={sec2_y}"
+        )
         slack_items = [
             "CHANNELS: 847",
             "DM: ACTIVE",
@@ -1477,7 +1540,10 @@ class ResearchVideoGenerator:
 
         # Section 3: SEMANTIC VECTOR SEARCH
         sec3_y = sec2_y + section_height
-        filters.append("drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec3_y}")
+        filters.append(
+            "drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan"
+            f":x={section_x}:y={sec3_y}"
+        )
         semantic_items = [
             "VECTORS: 4.2M",
             "COSINE: 0.847",
@@ -1492,7 +1558,10 @@ class ResearchVideoGenerator:
 
         # Section 4: COMMS INTERCEPT ANALYSIS
         sec4_y = sec3_y + section_height
-        filters.append("drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan" f":x={section_x}:y={sec4_y}")
+        filters.append(
+            "drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan"
+            f":x={section_x}:y={sec4_y}"
+        )
         comms_items = [
             "EMAIL: 12.4K",
             "CALENDAR: LIVE",
@@ -1518,11 +1587,20 @@ class ResearchVideoGenerator:
         # Head
         head_cx = silhouette_x + silhouette_w // 2
         head_cy = silhouette_y + 50
-        filters.append(f"drawbox=x={head_cx - 25}:y={head_cy - 25}:w=50:h=50" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 25}:y={head_cy - 25}:w=50:h=50"
+            f":color={config.text_color}@0.5:t=fill"
+        )
         # Body
-        filters.append(f"drawbox=x={head_cx - 35}:y={head_cy + 35}:w=70:h=120" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 35}:y={head_cy + 35}:w=70:h=120"
+            f":color={config.text_color}@0.5:t=fill"
+        )
         # Shoulders
-        filters.append(f"drawbox=x={head_cx - 55}:y={head_cy + 35}:w=110:h=25" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 55}:y={head_cy + 35}:w=110:h=25"
+            f":color={config.text_color}@0.5:t=fill"
+        )
         filters.append(
             f"drawtext=text='SUBJECT':fontsize=14:fontcolor={config.text_color}"
             f":x={silhouette_x + 70}:y={silhouette_y - 20}"
@@ -1535,12 +1613,19 @@ class ResearchVideoGenerator:
         wave_h = config.wave_h
 
         # Waveform box border
-        filters.append(f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}" f":color={config.text_color}:t=2")
+        filters.append(
+            f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}"
+            f":color={config.text_color}:t=2"
+        )
         # Caption above the waveform
-        filters.append("drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan" f":x={wave_x + 240}:y={wave_y - 18}")
+        filters.append(
+            "drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan"
+            f":x={wave_x + 240}:y={wave_y - 18}"
+        )
         # Additional label below
         filters.append(
-            "drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray" f":x={wave_x + 270}:y={wave_y + wave_h + 5}"
+            "drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray"
+            f":x={wave_x + 270}:y={wave_y + wave_h + 5}"
         )
 
         # Target name with animated dots (cycles: name, name ., name .., name ...)
@@ -1636,7 +1721,9 @@ class ResearchVideoGenerator:
         total_attendees = len(attendees)
 
         # Header - scaled for 720p
-        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10")
+        filters.append(
+            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10"
+        )
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} ATTENDEES...'"
             f":fontsize=24:fontcolor={config.text_color}:x=20:y=35"
@@ -1658,11 +1745,20 @@ class ResearchVideoGenerator:
         head_cx = silhouette_x + silhouette_w // 2
         head_cy = silhouette_y + 45
         # Head
-        filters.append(f"drawbox=x={head_cx - 22}:y={head_cy - 22}:w=44:h=44" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 22}:y={head_cy - 22}:w=44:h=44"
+            f":color={config.text_color}@0.5:t=fill"
+        )
         # Body
-        filters.append(f"drawbox=x={head_cx - 30}:y={head_cy + 30}:w=60:h=100" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 30}:y={head_cy + 30}:w=60:h=100"
+            f":color={config.text_color}@0.5:t=fill"
+        )
         # Shoulders
-        filters.append(f"drawbox=x={head_cx - 48}:y={head_cy + 30}:w=96:h=22" f":color={config.text_color}@0.5:t=fill")
+        filters.append(
+            f"drawbox=x={head_cx - 48}:y={head_cy + 30}:w=96:h=22"
+            f":color={config.text_color}@0.5:t=fill"
+        )
 
         # "SUBJECT" label above silhouette
         filters.append(
@@ -1677,11 +1773,15 @@ class ResearchVideoGenerator:
         wave_h = config.wave_h
 
         # Waveform box border
-        filters.append(f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}" f":color={config.text_color}:t=2")
+        filters.append(
+            f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}"
+            f":color={config.text_color}:t=2"
+        )
 
         # "ANALYZING SPEECH PATTERN" label
         filters.append(
-            "drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan" f":x={wave_x + 250}:y={wave_y + wave_h + 4}"
+            "drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan"
+            f":x={wave_x + 250}:y={wave_y + wave_h + 4}"
         )
 
         # Animated waveform bars
@@ -1730,7 +1830,9 @@ class ResearchVideoGenerator:
             findings = random.sample(FAKE_FINDINGS, config.num_findings)
             for j, finding in enumerate(findings):
                 finding_start = start_time + 4 + j * config.finding_display_time
-                finding_end = min(finding_start + config.finding_display_time + 1, end_time)
+                finding_end = min(
+                    finding_start + config.finding_display_time + 1, end_time
+                )
                 filters.append(
                     f"drawtext=text='{self._escape_text(finding)}'"
                     ":fontsize=12:fontcolor=yellow"
@@ -1844,7 +1946,9 @@ class RealtimeVideoRenderer:
         self._stt_buffer: np.ndarray = np.zeros(self._stt_buffer_size, dtype=np.float32)
         self._stt_write_pos: int = 0  # Write position (also = number of valid samples)
         self._stt_last_process: float = 0.0
-        self._stt_enabled: bool = audio_source is not None  # Enable STT if audio source provided
+        self._stt_enabled: bool = (
+            audio_source is not None
+        )  # Enable STT if audio source provided
         self._stt_history: list = []  # History of transcriptions (most recent first)
         self._stt_history_max: int = 6  # Max number of lines to keep
 
@@ -1877,10 +1981,19 @@ class RealtimeVideoRenderer:
         try:
             from PIL import ImageFont
 
-            self.font_small = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 14)
-            self.font_medium = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 18)
-            self.font_large = ImageFont.truetype("/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 24)
-        except Exception:
+            self.font_small = ImageFont.truetype(
+                "/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 14
+            )
+            self.font_medium = ImageFont.truetype(
+                "/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 18
+            )
+            self.font_large = ImageFont.truetype(
+                "/usr/share/fonts/liberation-mono/LiberationMono-Regular.tt", 24
+            )
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in RealtimeVideoRenderer.__init__ font loading: {e}"
+            )
             from PIL import ImageFont
 
             self.font_small = ImageFont.load_default()
@@ -1907,7 +2020,9 @@ class RealtimeVideoRenderer:
         self.wave_i_arr = np.arange(self.wave_bars)
 
         # Audio analysis state
-        self._fft_smoothing = 0.3  # Smoothing factor for FFT (0=no smoothing, 1=max smoothing)
+        self._fft_smoothing = (
+            0.3  # Smoothing factor for FFT (0=no smoothing, 1=max smoothing)
+        )
         self._prev_fft_bars: Optional[np.ndarray] = None
 
         # Dynamic attendee updates (set via update_attendees method)
@@ -1922,21 +2037,39 @@ class RealtimeVideoRenderer:
                 # 1080p: larger fonts for readability at higher res
                 # 720p: smaller fonts to fit the layout
                 if self.config.height >= 1080:
-                    font_sizes = {"xlarge": 36, "large": 26, "medium": 24, "normal": 18, "small": 14, "tiny": 12}
+                    font_sizes = {
+                        "xlarge": 36,
+                        "large": 26,
+                        "medium": 24,
+                        "normal": 18,
+                        "small": 14,
+                        "tiny": 12,
+                    }
                 else:
-                    font_sizes = {"xlarge": 34, "large": 24, "medium": 22, "normal": 16, "small": 12, "tiny": 10}
+                    font_sizes = {
+                        "xlarge": 34,
+                        "large": 24,
+                        "medium": 22,
+                        "normal": 16,
+                        "small": 12,
+                        "tiny": 10,
+                    }
 
                 self._gpu_text_renderer = VideoTextRenderer(
                     self.config.width, self.config.height, font_sizes=font_sizes
                 )
                 if self._gpu_text_renderer.initialize():
-                    logger.info("GPU text rendering enabled (smooth anti-aliased fonts)")
+                    logger.info(
+                        "GPU text rendering enabled (smooth anti-aliased fonts)"
+                    )
                 else:
                     raise RuntimeError("GPU text init failed")
             except Exception as e:
                 raise RuntimeError(f"GPU text renderer required but not available: {e}")
         else:
-            raise RuntimeError("GPU text renderer (OpenGL) is required but not available")
+            raise RuntimeError(
+                "GPU text renderer (OpenGL) is required but not available"
+            )
 
         # Pre-render static elements for performance
         self._static_cache = {}
@@ -1975,7 +2108,9 @@ class RealtimeVideoRenderer:
 
         self._dynamic_attendees = attendee_objs
         self._attendees_updated = True
-        logger.info(f"Updated attendees: {len(attendee_objs)} participants with Slack data")
+        logger.info(
+            f"Updated attendees: {len(attendee_objs)} participants with Slack data"
+        )
 
     def _init_static_cache(self):
         """
@@ -2016,11 +2151,20 @@ class RealtimeVideoRenderer:
         )
 
         # Right column vertical divider
-        cv2.line(base_frame, (right_col_x, 50), (right_col_x, bottom_section_y), CV_GREEN, 2)
+        cv2.line(
+            base_frame, (right_col_x, 50), (right_col_x, bottom_section_y), CV_GREEN, 2
+        )
 
         # "Building Context" heading
         cv2.putText(
-            base_frame, "BUILDING CONTEXT", (right_col_x + 8, 68), CV_FONT, font_small, CV_RED, thickness, CV_LINE_TYPE
+            base_frame,
+            "BUILDING CONTEXT",
+            (right_col_x + 8, 68),
+            CV_FONT,
+            font_small,
+            CV_RED,
+            thickness,
+            CV_LINE_TYPE,
         )
 
         # Section headers (static)
@@ -2030,7 +2174,14 @@ class RealtimeVideoRenderer:
         for i, header in enumerate(section_headers):
             sec_y = sections_start_y + i * section_height + 12
             cv2.putText(
-                base_frame, header, (right_col_x + 8, sec_y), CV_FONT, font_small, CV_CYAN, thickness, CV_LINE_TYPE
+                base_frame,
+                header,
+                (right_col_x + 8, sec_y),
+                CV_FONT,
+                font_small,
+                CV_CYAN,
+                thickness,
+                CV_LINE_TYPE,
             )
 
         # Facial recognition box and label
@@ -2061,10 +2212,18 @@ class RealtimeVideoRenderer:
         head_cy = silhouette_y + 50
         cv2.circle(base_frame, (head_cx, head_cy), 28, CV_DARK_GREEN, -1)  # Head
         cv2.rectangle(
-            base_frame, (head_cx - 40, head_cy + 35), (head_cx + 40, head_cy + 145), CV_DARK_GREEN, -1
+            base_frame,
+            (head_cx - 40, head_cy + 35),
+            (head_cx + 40, head_cy + 145),
+            CV_DARK_GREEN,
+            -1,
         )  # Body
         cv2.rectangle(
-            base_frame, (head_cx - 55, head_cy + 35), (head_cx + 55, head_cy + 60), CV_DARK_GREEN, -1
+            base_frame,
+            (head_cx - 55, head_cy + 35),
+            (head_cx + 55, head_cy + 60),
+            CV_DARK_GREEN,
+            -1,
         )  # Shoulders
 
         # Waveform box - from native config
@@ -2072,7 +2231,13 @@ class RealtimeVideoRenderer:
         wave_h = config.wave_h
         wave_x = config.wave_x
         wave_y = config.wave_y
-        cv2.rectangle(base_frame, (wave_x, wave_y), (wave_x + wave_w, wave_y + wave_h), CV_GREEN, 2)
+        cv2.rectangle(
+            base_frame,
+            (wave_x, wave_y),
+            (wave_x + wave_w, wave_y + wave_h),
+            CV_GREEN,
+            2,
+        )
         cv2.putText(
             base_frame,
             "ANALYZING SPEECH PATTERNS",
@@ -2085,7 +2250,13 @@ class RealtimeVideoRenderer:
         )
 
         # Horizontal line above NPU
-        cv2.line(base_frame, (0, bottom_section_y), (config.width, bottom_section_y), (0, 180, 0), 2)
+        cv2.line(
+            base_frame,
+            (0, bottom_section_y),
+            (config.width, bottom_section_y),
+            (0, 180, 0),
+            2,
+        )
 
         # Store as BGR (OpenCV native format) to avoid per-frame conversion
         self._static_cache["base_frame_bgr"] = base_frame
@@ -2120,8 +2291,12 @@ class RealtimeVideoRenderer:
         )
 
         # Pre-allocate waveform and NPU buffers
-        self._wave_buffer = np.zeros((self.wave_height, self.wave_width, 3), dtype=np.uint8)
-        self._npu_buffer = np.zeros((self.npu_height, self.npu_width, 3), dtype=np.uint8)
+        self._wave_buffer = np.zeros(
+            (self.wave_height, self.wave_width, 3), dtype=np.uint8
+        )
+        self._npu_buffer = np.zeros(
+            (self.npu_height, self.npu_width, 3), dtype=np.uint8
+        )
 
         # Pre-allocate FFT computation buffers to avoid per-frame allocations
         self._fft_bar_heights = np.zeros(self.wave_bars, dtype=np.float32)
@@ -2169,11 +2344,15 @@ class RealtimeVideoRenderer:
 
                 return True
             else:
-                logger.warning(f"Failed to start audio capture from {self._audio_source}")
+                logger.warning(
+                    f"Failed to start audio capture from {self._audio_source}"
+                )
                 return False
 
         except ImportError:
-            logger.warning("audio_capture module not available, using simulated waveform")
+            logger.warning(
+                "audio_capture module not available, using simulated waveform"
+            )
             return False
         except Exception as e:
             logger.warning(f"Audio capture error: {e}, using simulated waveform")
@@ -2211,7 +2390,9 @@ class RealtimeVideoRenderer:
 
                 # Shift buffer and add new samples (in-place to avoid allocation)
                 chunk_len = len(chunk.data)
-                audio_buffer[:-chunk_len] = audio_buffer[chunk_len:]  # Shift left in-place
+                audio_buffer[:-chunk_len] = audio_buffer[
+                    chunk_len:
+                ]  # Shift left in-place
                 audio_buffer[-chunk_len:] = chunk.data  # Add new samples
 
                 # Feed STT buffer (zero-copy write into pre-allocated array)
@@ -2223,7 +2404,9 @@ class RealtimeVideoRenderer:
                         self._stt_buffer[self._stt_write_pos : end_pos] = chunk.data
                         self._stt_write_pos = end_pos
                     elif chunk_count % 100 == 0:  # Log occasionally
-                        logger.warning(f"STT buffer full ({self._stt_write_pos} samples), dropping audio")
+                        logger.warning(
+                            f"STT buffer full ({self._stt_write_pos} samples), dropping audio"
+                        )
 
                 # Compute FFT at video frame rate, not audio chunk rate
                 now = asyncio.get_event_loop().time()
@@ -2257,11 +2440,15 @@ class RealtimeVideoRenderer:
             self._stt_engine = NPUWhisperSTT(device="NPU")
 
             if await self._stt_engine.initialize():
-                logger.info(f"STT engine initialized on {self._stt_engine._actual_device}")
+                logger.info(
+                    f"STT engine initialized on {self._stt_engine._actual_device}"
+                )
                 # Start STT processing loop
                 asyncio.create_task(self._stt_processing_loop())
             else:
-                logger.warning("STT engine failed to initialize, transcription disabled")
+                logger.warning(
+                    "STT engine failed to initialize, transcription disabled"
+                )
                 self._stt_enabled = False
 
         except ImportError as e:
@@ -2294,7 +2481,9 @@ class RealtimeVideoRenderer:
 
                 # Check for silence at the end (last 1600 samples = 100ms) - NO COPY, just a view
                 check_start = max(0, self._stt_write_pos - 1600)
-                rms = np.sqrt(np.mean(self._stt_buffer[check_start : self._stt_write_pos] ** 2))
+                rms = np.sqrt(
+                    np.mean(self._stt_buffer[check_start : self._stt_write_pos] ** 2)
+                )
                 is_silence = rms < 0.01
 
                 # Decide when to transcribe:
@@ -2309,7 +2498,9 @@ class RealtimeVideoRenderer:
                     should_transcribe = True
                 elif buffer_duration >= 10.0:
                     should_transcribe = True
-                    logger.warning(f"STT buffer hit 10s cap ({self._stt_write_pos} samples), forcing transcribe")
+                    logger.warning(
+                        f"STT buffer hit 10s cap ({self._stt_write_pos} samples), forcing transcribe"
+                    )
 
                 if should_transcribe and self._stt_write_pos > 0:
                     # Pass a VIEW to transcribe - NO COPY
@@ -2335,7 +2526,18 @@ class RealtimeVideoRenderer:
                             len(set(text)) < 4
                             or text.count("!") > 3
                             or text.lower()
-                            in ("you", "the", "a", "i", "to", "and", "is", "it", "thank you.", "thank you")
+                            in (
+                                "you",
+                                "the",
+                                "a",
+                                "i",
+                                "to",
+                                "and",
+                                "is",
+                                "it",
+                                "thank you.",
+                                "thank you",
+                            )
                         )
                         if not is_garbage:
                             async with self._stt_text_lock:
@@ -2344,7 +2546,9 @@ class RealtimeVideoRenderer:
                                 self._stt_history.insert(0, text)
                                 # Trim history to max size
                                 if len(self._stt_history) > self._stt_history_max:
-                                    self._stt_history = self._stt_history[: self._stt_history_max]
+                                    self._stt_history = self._stt_history[
+                                        : self._stt_history_max
+                                    ]
                             logger.info(f"STT [{proc_time:.2f}s]: {text}")
                             last_transcription = time.time()
 
@@ -2377,13 +2581,23 @@ class RealtimeVideoRenderer:
 
                 # Read all stats in one batch (minimize syscalls)
                 try:
-                    freq = int((npu_path / "npu_current_frequency_mhz").read_text().strip())
-                    max_freq = int((npu_path / "npu_max_frequency_mhz").read_text().strip())
+                    freq = int(
+                        (npu_path / "npu_current_frequency_mhz").read_text().strip()
+                    )
+                    max_freq = int(
+                        (npu_path / "npu_max_frequency_mhz").read_text().strip()
+                    )
                     busy_us = int((npu_path / "npu_busy_time_us").read_text().strip())
-                    mem_bytes = int((npu_path / "npu_memory_utilization").read_text().strip())
+                    mem_bytes = int(
+                        (npu_path / "npu_memory_utilization").read_text().strip()
+                    )
                     power_state = (npu_path / "power_state").read_text().strip()
-                    runtime_status = (npu_path / "power" / "runtime_status").read_text().strip()
-                    active_ms = int((npu_path / "power" / "runtime_active_time").read_text().strip())
+                    runtime_status = (
+                        (npu_path / "power" / "runtime_status").read_text().strip()
+                    )
+                    active_ms = int(
+                        (npu_path / "power" / "runtime_active_time").read_text().strip()
+                    )
 
                     # Calculate busy delta for utilization
                     busy_delta = busy_us - self._npu_stats_prev_busy
@@ -2456,8 +2670,16 @@ class RealtimeVideoRenderer:
 
         for i in range(self.wave_bars):
             # Logarithmic mapping: more resolution at low frequencies
-            low_freq = int(n_fft_bins * (np.exp(i / self.wave_bars * np.log(n_fft_bins)) - 1) / (n_fft_bins - 1))
-            high_freq = int(n_fft_bins * (np.exp((i + 1) / self.wave_bars * np.log(n_fft_bins)) - 1) / (n_fft_bins - 1))
+            low_freq = int(
+                n_fft_bins
+                * (np.exp(i / self.wave_bars * np.log(n_fft_bins)) - 1)
+                / (n_fft_bins - 1)
+            )
+            high_freq = int(
+                n_fft_bins
+                * (np.exp((i + 1) / self.wave_bars * np.log(n_fft_bins)) - 1)
+                / (n_fft_bins - 1)
+            )
             high_freq = max(high_freq, low_freq + 1)
 
             # Average the FFT bins for this bar
@@ -2490,7 +2712,9 @@ class RealtimeVideoRenderer:
 
         return self._fft_bar_heights
 
-    def _generate_waveform_frame_from_audio(self, bar_heights: np.ndarray, out: np.ndarray = None) -> np.ndarray:
+    def _generate_waveform_frame_from_audio(
+        self, bar_heights: np.ndarray, out: np.ndarray = None
+    ) -> np.ndarray:
         """Generate waveform frame from audio-derived bar heights.
 
         Args:
@@ -2589,7 +2813,9 @@ class RealtimeVideoRenderer:
 
         return img
 
-    def _generate_npu_frame(self, t: float, frame_num: int, out: np.ndarray = None) -> np.ndarray:
+    def _generate_npu_frame(
+        self, t: float, frame_num: int, out: np.ndarray = None
+    ) -> np.ndarray:
         """Generate a single NPU panel frame using OpenCV (much faster than PIL).
 
         Args:
@@ -2614,7 +2840,14 @@ class RealtimeVideoRenderer:
 
         # Header
         cv2.putText(
-            frame, "[ INTEL NPU - METEOR LAKE ]", (15, 18), CV_FONT, font_small, CV_CYAN, thickness, CV_LINE_TYPE
+            frame,
+            "[ INTEL NPU - METEOR LAKE ]",
+            (15, 18),
+            CV_FONT,
+            font_small,
+            CV_CYAN,
+            thickness,
+            CV_LINE_TYPE,
         )
 
         y = 35
@@ -2629,7 +2862,16 @@ class RealtimeVideoRenderer:
             f"TEMP: {45+int(10*math.sin(t*0.2))}C",
         ]
         for i, s in enumerate(stats1):
-            cv2.putText(frame, s, (15, y + i * line_h), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (15, y + i * line_h),
+                CV_FONT,
+                font_small,
+                CV_GREEN,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Column 2 - Model info
         stats2 = [
@@ -2640,7 +2882,16 @@ class RealtimeVideoRenderer:
             "CACHE: ENABLED",
         ]
         for i, s in enumerate(stats2):
-            cv2.putText(frame, s, (180, y + i * line_h), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (180, y + i * line_h),
+                CV_FONT,
+                font_small,
+                CV_GREEN,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Column 3 - Counters
         stats3 = [
@@ -2651,7 +2902,16 @@ class RealtimeVideoRenderer:
             f"TIME: {int(t) // 60:02d}:{int(t) % 60:02d}.{int((t % 1) * 100):02d}",
         ]
         for i, s in enumerate(stats3):
-            cv2.putText(frame, s, (380, y + i * line_h), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (380, y + i * line_h),
+                CV_FONT,
+                font_small,
+                CV_GREEN,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Column 4 - System stats
         stats4 = [
@@ -2663,7 +2923,16 @@ class RealtimeVideoRenderer:
         ]
         for i, s in enumerate(stats4):
             color = CV_CYAN if i == 4 else CV_GREEN
-            cv2.putText(frame, s, (560, y + i * line_h), CV_FONT, font_small, color, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (560, y + i * line_h),
+                CV_FONT,
+                font_small,
+                color,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Column 5 - Additional telemetry
         stats5 = [
@@ -2674,7 +2943,16 @@ class RealtimeVideoRenderer:
             f"IRQ: {146 + int(t) % 10}",
         ]
         for i, s in enumerate(stats5):
-            cv2.putText(frame, s, (740, y + i * line_h), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (740, y + i * line_h),
+                CV_FONT,
+                font_small,
+                CV_GREEN,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Column 6 - Far right
         stats6 = [
@@ -2686,7 +2964,16 @@ class RealtimeVideoRenderer:
         ]
         for i, s in enumerate(stats6):
             color = CV_CYAN if i == 4 else CV_GREEN
-            cv2.putText(frame, s, (920, y + i * line_h), CV_FONT, font_small, color, thickness, CV_LINE_TYPE)
+            cv2.putText(
+                frame,
+                s,
+                (920, y + i * line_h),
+                CV_FONT,
+                font_small,
+                color,
+                thickness,
+                CV_LINE_TYPE,
+            )
 
         # Progress bar at bottom
         padding = 15
@@ -2695,10 +2982,18 @@ class RealtimeVideoRenderer:
         bar_y = self.npu_height - 20
 
         # Outline
-        cv2.rectangle(frame, (padding, bar_y), (padding + bar_max_width, bar_y + 12), CV_GREEN, 1)
+        cv2.rectangle(
+            frame, (padding, bar_y), (padding + bar_max_width, bar_y + 12), CV_GREEN, 1
+        )
         # Fill
         if bar_width > 0:
-            cv2.rectangle(frame, (padding + 2, bar_y + 2), (padding + 2 + bar_width, bar_y + 10), CV_GREEN, -1)
+            cv2.rectangle(
+                frame,
+                (padding + 2, bar_y + 2),
+                (padding + 2 + bar_width, bar_y + 10),
+                CV_GREEN,
+                -1,
+            )
         # Percentage text
         cv2.putText(
             frame,
@@ -2758,7 +3053,9 @@ class RealtimeVideoRenderer:
         if self._audio_source:
             audio_started = await self._start_audio_capture()
             if audio_started:
-                logger.info(f"Audio-reactive waveform enabled from {self._audio_source}")
+                logger.info(
+                    f"Audio-reactive waveform enabled from {self._audio_source}"
+                )
                 # Wait for audio buffer to be populated (up to 2s)
                 # This ensures waveform is ready on first frame
                 for i in range(200):  # 200 x 10ms = 2000ms max
@@ -2864,7 +3161,9 @@ class RealtimeVideoRenderer:
 
         try:
             # Use dynamic attendees if available, otherwise use provided list
-            current_attendees = self._dynamic_attendees if self._dynamic_attendees else attendees
+            current_attendees = (
+                self._dynamic_attendees if self._dynamic_attendees else attendees
+            )
 
             while self._running:
                 # Check video mode - can switch without restarting loop
@@ -2880,7 +3179,9 @@ class RealtimeVideoRenderer:
                 if self._attendees_updated and self._dynamic_attendees:
                     current_attendees = self._dynamic_attendees
                     self._attendees_updated = False
-                    logger.info(f"Attendee list updated: {len(current_attendees)} participants")
+                    logger.info(
+                        f"Attendee list updated: {len(current_attendees)} participants"
+                    )
 
                 for attendee_idx, attendee in enumerate(current_attendees):
                     if not self._running:
@@ -2894,14 +3195,24 @@ class RealtimeVideoRenderer:
                     if self._attendees_updated and self._dynamic_attendees:
                         current_attendees = self._dynamic_attendees
                         self._attendees_updated = False
-                        logger.info(f"Attendee list updated mid-loop: {len(current_attendees)} participants")
+                        logger.info(
+                            f"Attendee list updated mid-loop: {len(current_attendees)} participants"
+                        )
                         break  # Restart loop with new attendees
 
                     duration = config.duration_per_person
-                    logger.info(f"Streaming attendee {attendee_idx + 1}/{len(current_attendees)}: {attendee.name}")
+                    logger.info(
+                        f"Streaming attendee {attendee_idx + 1}/{len(current_attendees)}: {attendee.name}"
+                    )
 
                     # Stream frames using full GPU pipeline
-                    await self._stream_gpu_pipeline(attendee, attendee_idx, len(current_attendees), duration, v4l2_fd)
+                    await self._stream_gpu_pipeline(
+                        attendee,
+                        attendee_idx,
+                        len(current_attendees),
+                        duration,
+                        v4l2_fd,
+                    )
 
                 if not loop:
                     break
@@ -2935,11 +3246,17 @@ class RealtimeVideoRenderer:
         # Initialize GPU renderer if needed
         if not hasattr(self, "_ulc_renderer") or self._ulc_renderer is None:
             try:
-                self._ulc_renderer = UltraLowCPURenderer(config, use_intel=config.prefer_intel_gpu)
-                logger.info(f"UltraLowCPU renderer initialized: {self._ulc_renderer.device_name}")
+                self._ulc_renderer = UltraLowCPURenderer(
+                    config, use_intel=config.prefer_intel_gpu
+                )
+                logger.info(
+                    f"UltraLowCPU renderer initialized: {self._ulc_renderer.device_name}"
+                )
             except Exception as e:
                 logger.error(f"Failed to initialize GPU renderer: {e}")
-                raise RuntimeError(f"GPU renderer required but failed to initialize: {e}")
+                raise RuntimeError(
+                    f"GPU renderer required but failed to initialize: {e}"
+                )
 
         # Pre-compute attendee-specific data
         attendee_data = self._precompute_attendee_data(attendee)
@@ -3094,7 +3411,9 @@ class RealtimeVideoRenderer:
         """
         transcript_history = transcript_history or []
         if not self._gpu_text_renderer:
-            raise RuntimeError("GPU text renderer not initialized - required for video generation")
+            raise RuntimeError(
+                "GPU text renderer not initialized - required for video generation"
+            )
 
         c = self.config
 
@@ -3102,7 +3421,15 @@ class RealtimeVideoRenderer:
         text_items = []
 
         # === LEFT SIDE: Target info and tools ===
-        text_items.append(("[ AI WORKFLOW COMMAND CENTER ]", c.left_margin, c.title_y, "green", "large"))
+        text_items.append(
+            (
+                "[ AI WORKFLOW COMMAND CENTER ]",
+                c.left_margin,
+                c.title_y,
+                "green",
+                "large",
+            )
+        )
 
         # Name with animated dots (cycles through 1-3 dots) - XLARGE font (+10pt)
         dot_count = (int(t * 2) % 3) + 1  # 1, 2, 3 dots cycling
@@ -3124,7 +3451,9 @@ class RealtimeVideoRenderer:
         # text_items.append((assessment, c.left_margin, c.assessment_y, "yellow", "normal"))
 
         # === WAVEFORM LABEL - above the waveform box, left aligned ===
-        text_items.append(("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium"))  # +6pt
+        text_items.append(
+            ("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium")
+        )  # +6pt
 
         # === LIVE TRANSCRIPTION STACK (below waveform box) ===
         # Show most recent transcriptions, newest at top
@@ -3145,12 +3474,16 @@ class RealtimeVideoRenderer:
                     color = "dark_green"  # Older - faded
 
                 y = transcript_start_y + i * transcript_line_height
-                text_items.append((f"> {display_text}", c.wave_x, y, color, "medium"))  # +6pt
+                text_items.append(
+                    (f"> {display_text}", c.wave_x, y, color, "medium")
+                )  # +6pt
 
         # === VOICE PROFILE ANALYSIS - LEFT of facial recognition (top right area) ===
         voice_x = c.voice_profile_x
         voice_y = c.voice_profile_y
-        text_items.append(("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large"))  # doubled size
+        text_items.append(
+            ("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large")
+        )  # doubled size
 
         stats = [
             f"Voice Print ID: {attendee_data['voice_print_id']:05d}",
@@ -3165,7 +3498,9 @@ class RealtimeVideoRenderer:
                 )  # doubled size + line height
 
         # === FACIAL RECOGNITION - TOP RIGHT === (+10pt bigger text)
-        text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large"))
+        text_items.append(
+            ("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large")
+        )
 
         # Show Slack username below the profile image
         if attendee_data and attendee_data.get("has_slack_data"):
@@ -3173,15 +3508,27 @@ class RealtimeVideoRenderer:
             slack_id = attendee_data.get("slack_id", "")
             # Position below the face box
             slack_info_y = c.face_y + c.face_h + 25
-            text_items.append((f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium"))
-            text_items.append((f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal"))
+            text_items.append(
+                (f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium")
+            )
+            text_items.append(
+                (f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal")
+            )
 
         # === RIGHT COLUMN REMOVED - no more "BUILDING CONTEXT" ===
 
         # === NPU STATS (all GPU-rendered for consistent quality) ===
         # LARGER FONT - moved up to give more vertical space
         npu_header_y = c.npu_y + 18
-        text_items.append(("[ INTEL NPU - METEOR LAKE ]", c.left_margin, npu_header_y, "cyan", "normal"))
+        text_items.append(
+            (
+                "[ INTEL NPU - METEOR LAKE ]",
+                c.left_margin,
+                npu_header_y,
+                "cyan",
+                "normal",
+            )
+        )
 
         # NPU stats layout - LARGE font for readability
         npu_stats_y = c.npu_y + 55  # More space after header
@@ -3204,7 +3551,11 @@ class RealtimeVideoRenderer:
         busy_sec = npu["busy_us"] / 1_000_000
         mem_mb = npu["mem_bytes"] / (1024 * 1024)
         # Calculate utilization from delta (busy_delta over 500ms = busy_delta/500000 * 100%)
-        util_pct = min(100, int(npu["busy_delta_us"] / 5000)) if npu["busy_delta_us"] > 0 else 0
+        util_pct = (
+            min(100, int(npu["busy_delta_us"] / 5000))
+            if npu["busy_delta_us"] > 0
+            else 0
+        )
         runtime_status = npu["runtime_status"].upper()
 
         # Distribute stats across 6 columns (fewer items per column = larger text fits)
@@ -3215,7 +3566,9 @@ class RealtimeVideoRenderer:
             f"MEM: {mem_mb:.1f} MB",
         ]
         for i, stat in enumerate(col1_stats):
-            text_items.append((stat, col_x[0], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[0], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 2 - NPU utilization
         col2_stats = [
@@ -3225,7 +3578,9 @@ class RealtimeVideoRenderer:
         ]
         for i, stat in enumerate(col2_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
-            text_items.append((stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Column 3 - Model info (static but accurate)
         col3_stats = [
@@ -3234,7 +3589,9 @@ class RealtimeVideoRenderer:
             "INPUT: 16kHz PCM",
         ]
         for i, stat in enumerate(col3_stats):
-            text_items.append((stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 4 - Real inference counters from STT engine
         stt = self._stt_stats
@@ -3244,7 +3601,9 @@ class RealtimeVideoRenderer:
             f"FRAMES: {frame_num}",
         ]
         for i, stat in enumerate(col4_stats):
-            text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 5 - Real inference performance
         rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rt"] > 0 else "---"
@@ -3255,11 +3614,19 @@ class RealtimeVideoRenderer:
         ]
         for i, stat in enumerate(col5_stats):
             color = "cyan" if "ON" in stat or stt["avg_rt"] < 0.5 else "green"
-            text_items.append((stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Column 6 - Real telemetry from STT engine
-        latency_display = f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
-        rate_display = f"{stt['inferences_per_second']:.1f}/s" if stt["inferences_per_second"] > 0 else "---"
+        latency_display = (
+            f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
+        )
+        rate_display = (
+            f"{stt['inferences_per_second']:.1f}/s"
+            if stt["inferences_per_second"] > 0
+            else "---"
+        )
         col6_stats = [
             f"RATE: {rate_display}",
             f"LATENCY: {latency_display}",
@@ -3267,24 +3634,44 @@ class RealtimeVideoRenderer:
         ]
         for i, stat in enumerate(col6_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
-            text_items.append((stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Build shapes list for GPU rendering
         has_photo = attendee_data and attendee_data.get("photo_bgr") is not None
 
         shapes = [
             # Waveform box border
-            ("rect", c.wave_x - 3, c.wave_y - 3, c.wave_w + 6, c.wave_h + 6, "dark_green", 1),
+            (
+                "rect",
+                c.wave_x - 3,
+                c.wave_y - 3,
+                c.wave_w + 6,
+                c.wave_h + 6,
+                "dark_green",
+                1,
+            ),
             # NPU divider line
             ("line", 0, c.npu_y, c.width, c.npu_y, "dark_green", 1),
             # Progress bar outline
-            ("rect", c.progress_margin, c.progress_y, c.width - c.progress_margin * 2, c.progress_h, "dark_green", 1),
+            (
+                "rect",
+                c.progress_margin,
+                c.progress_y,
+                c.width - c.progress_margin * 2,
+                c.progress_h,
+                "dark_green",
+                1,
+            ),
         ]
 
         # Only show face box and silhouette if NO photo available
         if not has_photo:
             # Face box outline
-            shapes.append(("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1))
+            shapes.append(
+                ("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1)
+            )
             # Silhouette - sized to match typical photo dimensions
             center_x = c.face_x + c.face_w // 2
             # Make silhouette fit typical photo size (roughly 200x200 centered)
@@ -3363,8 +3750,12 @@ class RealtimeVideoRenderer:
                     h, w = img.shape[:2]
                     scale = target_size / max(h, w)
                     new_w, new_h = int(w * scale), int(h * scale)
-                    photo_bgr = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                    logger.debug(f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}")
+                    photo_bgr = cv2.resize(
+                        img, (new_w, new_h), interpolation=cv2.INTER_AREA
+                    )
+                    logger.debug(
+                        f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load photo {photo_path}: {e}")
 
@@ -3382,7 +3773,11 @@ class RealtimeVideoRenderer:
             "email": email,
             "has_slack_data": attendee.slack_id is not None,
             "tools": [
-                f"slack://user/{slack_id}" if attendee.slack_id else f"slack://search?user={first_name}.{last_name}",
+                (
+                    f"slack://user/{slack_id}"
+                    if attendee.slack_id
+                    else f"slack://search?user={first_name}.{last_name}"
+                ),
                 f"ldap://query?uid={username}",
                 f"jira://search?assignee={username}",
                 f"gitlab://commits?author={email}",
@@ -3452,7 +3847,9 @@ class RealtimeVideoRenderer:
             name_parts = attendee.name.split()
             first_name = name_parts[0].lower() if name_parts else "user"
             last_name = name_parts[-1].lower() if len(name_parts) > 1 else first_name
-            username = f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
+            username = (
+                f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
+            )
             email_domain = "redhat.com"
             realistic_tools = [
                 f"ldap://query?uid={username}",
@@ -3481,10 +3878,28 @@ class RealtimeVideoRenderer:
 
         # Animated dots (changes per frame)
         dots = "." * (int(t * 3) % 4)
-        cv2.putText(frame, f"ANALYZING{dots}", (padding, 45), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE)
+        cv2.putText(
+            frame,
+            f"ANALYZING{dots}",
+            (padding, 45),
+            CV_FONT,
+            font_small,
+            CV_GREEN,
+            thickness,
+            CV_LINE_TYPE,
+        )
 
         # Person name (changes per attendee)
-        cv2.putText(frame, attendee.name, (padding, 70), CV_FONT, font_medium, CV_WHITE, thickness, CV_LINE_TYPE)
+        cv2.putText(
+            frame,
+            attendee.name,
+            (padding, 70),
+            CV_FONT,
+            font_medium,
+            CV_WHITE,
+            thickness,
+            CV_LINE_TYPE,
+        )
 
         # Tools - appear over time (dynamic)
         y_pos = 100
@@ -3503,7 +3918,9 @@ class RealtimeVideoRenderer:
                 )
 
         # Findings - appear after tools (dynamic)
-        findings_start = len(realistic_tools[: config.num_tools]) * config.tool_display_time
+        findings_start = (
+            len(realistic_tools[: config.num_tools]) * config.tool_display_time
+        )
         findings_y = y_pos + config.num_tools * 20 + 15
         for j, finding in enumerate(findings):
             finding_start = findings_start + j * 1.0
@@ -3578,7 +3995,11 @@ class RealtimeVideoRenderer:
         pitch_var = 12 + int(8 * math.sin(t * 0.9))
 
         # Left stats column
-        voice_print_id = attendee_data["voice_print_id"] if attendee_data else hash(attendee.name) % 99999
+        voice_print_id = (
+            attendee_data["voice_print_id"]
+            if attendee_data
+            else hash(attendee.name) % 99999
+        )
         cv2.putText(
             frame,
             f"VOICE PRINT ID: VP-{voice_print_id:05d}",
@@ -3687,9 +4108,18 @@ class RealtimeVideoRenderer:
         )
         vad_text = "VAD: ACTIVE" if int(t * 3) % 2 == 0 else "VAD: SPEECH"
         cv2.putText(
-            frame, vad_text, (right_stats_x, voice_stats_y + 28), CV_FONT, font_small, CV_GREEN, thickness, CV_LINE_TYPE
+            frame,
+            vad_text,
+            (right_stats_x, voice_stats_y + 28),
+            CV_FONT,
+            font_small,
+            CV_GREEN,
+            thickness,
+            CV_LINE_TYPE,
         )
-        profile_color = (0, 255, 0) if t > 10 else CV_GREEN  # Bright green when complete
+        profile_color = (
+            (0, 255, 0) if t > 10 else CV_GREEN
+        )  # Bright green when complete
         cv2.putText(
             frame,
             f"PROFILE: {min(100, int(t * 7))}%",
@@ -3703,17 +4133,23 @@ class RealtimeVideoRenderer:
 
         # Generate waveform into pre-allocated buffer
         if has_audio:
-            wave_arr = self._generate_waveform_frame_from_audio(audio_data, self._wave_buffer)
+            wave_arr = self._generate_waveform_frame_from_audio(
+                audio_data, self._wave_buffer
+            )
         else:
             wave_arr = self._generate_waveform_frame(t, self._wave_buffer)
 
         # Scale waveform using cv2.resize (100x faster than fancy indexing)
         target_h = wave_h - 4
         target_w = wave_w - 4
-        scaled_wave = cv2.resize(wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+        scaled_wave = cv2.resize(
+            wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST
+        )
 
         # Paste waveform
-        frame[wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w] = scaled_wave
+        frame[
+            wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w
+        ] = scaled_wave
 
         # Generate NPU panel into pre-allocated buffer
         npu_arr = self._generate_npu_frame(t, frame_num, self._npu_buffer)
@@ -3738,7 +4174,9 @@ class RealtimeVideoRenderer:
         filters = []
 
         # Header
-        filters.append("drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15")
+        filters.append(
+            "drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15"
+        )
 
         return filters
 
@@ -3932,33 +4370,53 @@ if __name__ == "__main__":  # noqa: C901
     def print_usage():
         print("Usage:")
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime")
-        print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime --audio SOURCE")
-        print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime /dev/videoX  # Use specific device")
-        print("  python -m tool_modules.aa_meet_bot.src.video_generator --file output.mp4")
+        print(
+            "  python -m tool_modules.aa_meet_bot.src.video_generator --realtime --audio SOURCE"
+        )
+        print(
+            "  python -m tool_modules.aa_meet_bot.src.video_generator --realtime /dev/videoX  # Use specific device"
+        )
+        print(
+            "  python -m tool_modules.aa_meet_bot.src.video_generator --file output.mp4"
+        )
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --cleanup")
         print("")
         print("Commands:")
-        print("  --realtime      Stream to v4l2loopback device with hardcoded attendees")
+        print(
+            "  --realtime      Stream to v4l2loopback device with hardcoded attendees"
+        )
         print("  --file          Generate video file")
-        print("  --cleanup       Clean up orphaned MeetBot audio/video devices and restore defaults")
+        print(
+            "  --cleanup       Clean up orphaned MeetBot audio/video devices and restore defaults"
+        )
         print("")
         print("Options:")
         print("  --audio SOURCE  PulseAudio source for audio-reactive waveform")
-        print("                  Use 'pactl list sources short' to find available sources")
+        print(
+            "                  Use 'pactl list sources short' to find available sources"
+        )
         print("  --720p          Use 1280x720 resolution (default: 1920x1080)")
         print("  --nvidia        Use NVIDIA GPU instead of Intel iGPU")
-        print("  --flip          Flip video horizontally (for Google Meet mirror compensation)")
-        print("  --webrtc        Enable WebRTC streaming for preview (ws://localhost:8765)")
+        print(
+            "  --flip          Flip video horizontally (for Google Meet mirror compensation)"
+        )
+        print(
+            "  --webrtc        Enable WebRTC streaming for preview (ws://localhost:8765)"
+        )
         print("")
         print("Production Mode:")
-        print("  In production, the video_daemon is controlled via D-Bus by the meet_daemon.")
+        print(
+            "  In production, the video_daemon is controlled via D-Bus by the meet_daemon."
+        )
         print("  The meet_daemon calls StartVideo/StopVideo/UpdateAttendees methods.")
         print("")
         print("WebRTC Preview:")
         print("  With --webrtc, frames are pushed to a WebRTC server on port 8765")
         print("  Connect from the Meetings tab Video Preview (select WebRTC mode)")
         print("")
-        print("The device is automatically created/configured. Press Ctrl+C to stop and release.")
+        print(
+            "The device is automatically created/configured. Press Ctrl+C to stop and release."
+        )
         print("")
         print("Architecture:")
         print("  Full GPU pipeline: OpenGL (text/shapes) + OpenCL (color conversion)")
@@ -3977,7 +4435,10 @@ if __name__ == "__main__":  # noqa: C901
             current_default = stdout.decode().strip()
 
             if "meet_bot" in current_default.lower():
-                print(f"WARNING: Default audio source is a MeetBot device: {current_default}", file=sys.stderr)
+                print(
+                    f"WARNING: Default audio source is a MeetBot device: {current_default}",
+                    file=sys.stderr,
+                )
                 print("Restoring to physical microphone...", file=sys.stderr)
 
                 # Find a physical microphone
@@ -4000,7 +4461,10 @@ if __name__ == "__main__":  # noqa: C901
                         if (
                             "meet_bot" not in source_name.lower()
                             and ".monitor" not in source_name
-                            and ("alsa" in source_name.lower() or "input" in source_name.lower())
+                            and (
+                                "alsa" in source_name.lower()
+                                or "input" in source_name.lower()
+                            )
                         ):
                             physical_mic = source_name
                             break
@@ -4025,9 +4489,14 @@ if __name__ == "__main__":  # noqa: C901
                         stdout=asyncio.subprocess.DEVNULL,
                         stderr=asyncio.subprocess.DEVNULL,
                     )
-                    print(f"Restored default source to: {physical_mic}", file=sys.stderr)
+                    print(
+                        f"Restored default source to: {physical_mic}", file=sys.stderr
+                    )
                 else:
-                    print("WARNING: Could not find a physical microphone to restore to", file=sys.stderr)
+                    print(
+                        "WARNING: Could not find a physical microphone to restore to",
+                        file=sys.stderr,
+                    )
         except Exception as e:
             logger.warning(f"Error checking default source: {e}")
 
@@ -4043,16 +4512,27 @@ if __name__ == "__main__":  # noqa: C901
                 # Clean up orphaned MeetBot devices
                 print("Cleaning up orphaned MeetBot devices...", file=sys.stderr)
                 try:
-                    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+                    from tool_modules.aa_meet_bot.src.virtual_devices import (
+                        cleanup_orphaned_meetbot_devices,
+                    )
 
                     results = await cleanup_orphaned_meetbot_devices()
 
                     if results["removed_modules"]:
-                        print(f"Removed audio modules: {results['removed_modules']}", file=sys.stderr)
+                        print(
+                            f"Removed audio modules: {results['removed_modules']}",
+                            file=sys.stderr,
+                        )
                     if results["removed_pipes"]:
-                        print(f"Removed pipes: {results['removed_pipes']}", file=sys.stderr)
+                        print(
+                            f"Removed pipes: {results['removed_pipes']}",
+                            file=sys.stderr,
+                        )
                     if results["removed_video_devices"]:
-                        print(f"Removed video devices: {results['removed_video_devices']}", file=sys.stderr)
+                        print(
+                            f"Removed video devices: {results['removed_video_devices']}",
+                            file=sys.stderr,
+                        )
                     if results["errors"]:
                         print(f"Errors: {results['errors']}", file=sys.stderr)
 
@@ -4064,7 +4544,9 @@ if __name__ == "__main__":  # noqa: C901
                     if total == 0:
                         print("No orphaned devices found.", file=sys.stderr)
                     else:
-                        print(f"Cleanup complete: {total} items removed.", file=sys.stderr)
+                        print(
+                            f"Cleanup complete: {total} items removed.", file=sys.stderr
+                        )
                 except Exception as e:
                     print(f"Cleanup error: {e}", file=sys.stderr)
                 return
@@ -4074,9 +4556,15 @@ if __name__ == "__main__":  # noqa: C901
                 video_device = sys.argv[2]
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
                 if not attendees:
-                    print(f"No attendees found in {DEFAULT_ATTENDEES_FILE}", file=sys.stderr)
+                    print(
+                        f"No attendees found in {DEFAULT_ATTENDEES_FILE}",
+                        file=sys.stderr,
+                    )
                     return
-                print(f"Streaming to {video_device} with {len(attendees)} attendees...", file=sys.stderr)
+                print(
+                    f"Streaming to {video_device} with {len(attendees)} attendees...",
+                    file=sys.stderr,
+                )
                 print("Using pre-rendered overlays (faster)", file=sys.stderr)
                 print("Press Ctrl+C to stop", file=sys.stderr)
                 generator = ResearchVideoGenerator()
@@ -4145,11 +4633,19 @@ if __name__ == "__main__":  # noqa: C901
 
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
                 if not attendees:
-                    print(f"No attendees found in {DEFAULT_ATTENDEES_FILE}", file=sys.stderr)
+                    print(
+                        f"No attendees found in {DEFAULT_ATTENDEES_FILE}",
+                        file=sys.stderr,
+                    )
                     return
-                print(f"Real-time streaming to {video_device} with {len(attendees)} attendees...", file=sys.stderr)
+                print(
+                    f"Real-time streaming to {video_device} with {len(attendees)} attendees...",
+                    file=sys.stderr,
+                )
                 if audio_source:
-                    print(f"Audio-reactive waveform from: {audio_source}", file=sys.stderr)
+                    print(
+                        f"Audio-reactive waveform from: {audio_source}", file=sys.stderr
+                    )
                 else:
                     print("Using simulated waveform (no audio source)", file=sys.stderr)
                 print("Press Ctrl+C to stop", file=sys.stderr)
@@ -4157,9 +4653,13 @@ if __name__ == "__main__":  # noqa: C901
                 # Check for WebRTC streaming option
                 use_webrtc = "--webrtc" in sys.argv
                 if use_webrtc:
-                    print("WebRTC preview enabled on ws://localhost:8765", file=sys.stderr)
+                    print(
+                        "WebRTC preview enabled on ws://localhost:8765", file=sys.stderr
+                    )
 
-                renderer = RealtimeVideoRenderer(config=config, audio_source=audio_source, enable_webrtc=use_webrtc)
+                renderer = RealtimeVideoRenderer(
+                    config=config, audio_source=audio_source, enable_webrtc=use_webrtc
+                )
                 try:
                     await renderer.stream_realtime(attendees, video_device, loop=True)
                 finally:
@@ -4170,7 +4670,10 @@ if __name__ == "__main__":  # noqa: C901
                 output_path = sys.argv[2] if len(sys.argv) > 2 else "research_video.mp4"
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
                 if not attendees:
-                    print(f"No attendees found in {DEFAULT_ATTENDEES_FILE}", file=sys.stderr)
+                    print(
+                        f"No attendees found in {DEFAULT_ATTENDEES_FILE}",
+                        file=sys.stderr,
+                    )
                     return
                 generator = ResearchVideoGenerator()
                 path = await generator.generate_video_file(attendees, Path(output_path))
@@ -4180,9 +4683,15 @@ if __name__ == "__main__":  # noqa: C901
                 # Stream to stdout as matroska (pipe-friendly format)
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
                 if not attendees:
-                    print(f"No attendees found in {DEFAULT_ATTENDEES_FILE}", file=sys.stderr)
+                    print(
+                        f"No attendees found in {DEFAULT_ATTENDEES_FILE}",
+                        file=sys.stderr,
+                    )
                     return
-                print(f"Streaming {len(attendees)} attendees to stdout...", file=sys.stderr)
+                print(
+                    f"Streaming {len(attendees)} attendees to stdout...",
+                    file=sys.stderr,
+                )
                 print("Pipe to: ffplay -f matroska -", file=sys.stderr)
                 generator = ResearchVideoGenerator()
                 await generator.stream_to_stdout(attendees)
@@ -4199,9 +4708,13 @@ if __name__ == "__main__":  # noqa: C901
             # Load from file and generate video
             attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
             if attendees:
-                print(f"Loaded {len(attendees)} attendees from {DEFAULT_ATTENDEES_FILE}")
+                print(
+                    f"Loaded {len(attendees)} attendees from {DEFAULT_ATTENDEES_FILE}"
+                )
                 generator = ResearchVideoGenerator()
-                path = await generator.generate_video_file(attendees, Path("test_research.mp4"))
+                path = await generator.generate_video_file(
+                    attendees, Path("test_research.mp4")
+                )
                 print(f"Generated: {path}")
             else:
                 # Fallback to example names
@@ -4268,10 +4781,14 @@ class VideoGenerator:
         try:
             from pathlib import Path as PathLib
 
-            audio = PathLib(audio_path) if not isinstance(audio_path, Path) else audio_path
+            audio = (
+                PathLib(audio_path) if not isinstance(audio_path, Path) else audio_path
+            )
 
             if not audio.exists():
-                return VideoResult(success=False, error=f"Audio file not found: {audio}")
+                return VideoResult(
+                    success=False, error=f"Audio file not found: {audio}"
+                )
 
             # Get audio duration
             try:
@@ -4288,7 +4805,9 @@ class VideoGenerator:
             if output_filename:
                 output_path = Path(output_filename)
             else:
-                output_dir = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "clips"
+                output_dir = (
+                    Path.home() / ".config" / "aa-workflow" / "meet_bot" / "clips"
+                )
                 output_dir.mkdir(parents=True, exist_ok=True)
                 output_path = output_dir / f"response_{audio.stem}.mp4"
 

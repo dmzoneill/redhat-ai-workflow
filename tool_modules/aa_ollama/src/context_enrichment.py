@@ -293,14 +293,14 @@ def load_persona_prompt(persona_name: str) -> str:
             with open(yaml_path) as f:
                 data = yaml.safe_load(f) or {}
             return data.get("system_prompt", data.get("description", ""))[:500]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in load_persona_prompt yaml: {e}")
 
     if md_path.exists():
         try:
             return md_path.read_text()[:500]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in load_persona_prompt md: {e}")
 
     return ""
 
@@ -355,12 +355,18 @@ def run_semantic_search(
                 if line.startswith("📄 "):
                     if current_snippet:
                         snippets.append(current_snippet)
-                    current_snippet = {"file": line[3:].strip(), "content": "", "relevance": 0}
+                    current_snippet = {
+                        "file": line[3:].strip(),
+                        "content": "",
+                        "relevance": 0,
+                    }
                 elif line.startswith("   Lines "):
                     current_snippet["lines"] = line.strip()
                 elif line.startswith("   Relevance: "):
                     try:
-                        current_snippet["relevance"] = float(line.split(":")[1].strip().rstrip("%")) / 100
+                        current_snippet["relevance"] = (
+                            float(line.split(":")[1].strip().rstrip("%")) / 100
+                        )
                     except (ValueError, IndexError):
                         pass
                 elif current_snippet and line.startswith("   "):

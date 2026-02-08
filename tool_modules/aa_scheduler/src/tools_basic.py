@@ -107,7 +107,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                     cron = croniter(cron_expr, now)
                     next_run = cron.get_next(datetime)
                     lines.append(f"**Next run:** {next_run.strftime('%Y-%m-%d %H:%M')}")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in cron_list: {e}")
                     lines.append("**Next run:** (invalid cron expression)")
 
             elif job.get("trigger") == "poll":
@@ -265,8 +266,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                 cron_iter = croniter(cron, datetime.now())
                 next_run = cron_iter.get_next(datetime)
                 lines.append(f"**Next run:** {next_run.strftime('%Y-%m-%d %H:%M')}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in cron_add: {e}")
         else:
             lines.append(f"**Poll interval:** {poll_interval}")
             if poll_condition:
@@ -350,7 +351,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
         return [
             TextContent(
                 type="text",
-                text=f"{emoji} Job **{name}** is now **{status}**\n\n" "The change takes effect immediately.",
+                text=f"{emoji} Job **{name}** is now **{status}**\n\n"
+                "The change takes effect immediately.",
             )
         ]
 
@@ -416,7 +418,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Job **{name}** executed successfully.\n\n" "Check `cron_status` for execution details.",
+                    text=f"✅ Job **{name}** executed successfully.\n\n"
+                    "Check `cron_status` for execution details.",
                 )
             ]
         else:
@@ -454,7 +457,9 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
 
         if scheduler:
             status = scheduler.get_status()
-            lines.append(f"**Scheduler running:** {'✅ Yes' if status['running'] else '❌ No'}")
+            lines.append(
+                f"**Scheduler running:** {'✅ Yes' if status['running'] else '❌ No'}"
+            )
             lines.append(f"**Cron jobs active:** {status['cron_jobs']}")
             lines.append(f"**Poll jobs active:** {status['poll_jobs']}")
 
@@ -469,7 +474,9 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                     duration = entry.get("duration_ms", 0)
 
                     emoji = "✅" if success else "❌"
-                    lines.append(f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms)")
+                    lines.append(
+                        f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms)"
+                    )
 
                     if not success and entry.get("error"):
                         lines.append(f"  Error: {entry['error'][:100]}")
@@ -509,7 +516,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text="No recent notifications.\n\n" "Notifications will appear here after scheduled jobs run.",
+                    text="No recent notifications.\n\n"
+                    "Notifications will appear here after scheduled jobs run.",
                 )
             ]
 

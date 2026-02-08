@@ -14,10 +14,13 @@ Usage:
 """
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,7 +104,8 @@ class ContextResolver:
                     with open(path) as f:
                         result: Dict[str, Any] = json.load(f)
                         return result
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in _load_config: {e}")
                     continue
         return {}
 

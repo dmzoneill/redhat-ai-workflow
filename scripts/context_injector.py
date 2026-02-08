@@ -824,8 +824,9 @@ class ContextInjector:
             # Get or create memory interface
             try:
                 memory = get_memory_interface()
-            except Exception:
+            except Exception as e:
                 # Fall back to creating a new instance
+                logger.debug(f"Suppressed error in gather_context: {e}")
                 memory = MemoryInterface()
 
             # Build source filters

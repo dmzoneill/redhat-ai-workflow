@@ -15,9 +15,12 @@ Usage:
 """
 
 import ast
+import logging
 import re
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path (only when running as script)
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -76,8 +79,10 @@ def _add_tools_from_nonstandard_files(tools: set[str]) -> None:
                         name = node.name
                         if not name.startswith("_"):
                             tools.add(name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _add_tools_from_nonstandard_files: {e}"
+                )
 
 
 def validate_structure(skill: dict) -> list[str]:

@@ -84,13 +84,13 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in SyncLock.release: {e}")
         if LOCK_FILE.exists():
             try:
                 LOCK_FILE.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in SyncLock.release unlink: {e}")
 
     def __enter__(self):
         return self
@@ -113,7 +113,9 @@ async def run_full_sync(
 
     print("=" * 70)
     print(f"Slack Persona Full Sync - {days} days ({direction})")
-    print(f"Workers: {workers}  |  Delay: {delay}s  |  Threads: {'Yes' if include_threads else 'No'}")
+    print(
+        f"Workers: {workers}  |  Delay: {delay}s  |  Threads: {'Yes' if include_threads else 'No'}"
+    )
     if resume:
         print("Mode: RESUMING from last sync")
     if reset_tracking:
@@ -290,10 +292,16 @@ Examples:
 
     # Mode selection
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument("--full", action="store_true", help="Run full parallel sync")
-    mode_group.add_argument("--incremental", action="store_true", help="Run incremental sync")
+    mode_group.add_argument(
+        "--full", action="store_true", help="Run full parallel sync"
+    )
+    mode_group.add_argument(
+        "--incremental", action="store_true", help="Run incremental sync"
+    )
     mode_group.add_argument("--status", action="store_true", help="Show sync status")
-    mode_group.add_argument("--search", type=str, metavar="QUERY", help="Search for messages")
+    mode_group.add_argument(
+        "--search", type=str, metavar="QUERY", help="Search for messages"
+    )
 
     # Sync parameters
     parser.add_argument(
@@ -322,7 +330,9 @@ Examples:
     )
 
     # Sync control
-    parser.add_argument("--no-threads", action="store_true", help="Exclude thread replies")
+    parser.add_argument(
+        "--no-threads", action="store_true", help="Exclude thread replies"
+    )
     parser.add_argument("--resume", action="store_true", help="Resume interrupted sync")
     parser.add_argument(
         "--reset-tracking",
@@ -331,8 +341,12 @@ Examples:
     )
 
     # Search options
-    parser.add_argument("--limit", type=int, default=5, help="Search result limit (default: 5)")
-    parser.add_argument("--my-only", action="store_true", help="Search only my messages")
+    parser.add_argument(
+        "--limit", type=int, default=5, help="Search result limit (default: 5)"
+    )
+    parser.add_argument(
+        "--my-only", action="store_true", help="Search only my messages"
+    )
 
     args = parser.parse_args()
 

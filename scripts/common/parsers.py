@@ -3,10 +3,13 @@ Common parsers for MCP tool output.
 These functions are used by multiple skills to avoid code duplication.
 """
 
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from scripts.common.config_loader import get_jira_url
+logger = logging.getLogger(__name__)
+
+from scripts.common.config_loader import get_jira_url  # noqa: E402
 
 # Bot patterns for filtering out non-human comments
 BOT_PATTERNS = [
@@ -22,7 +25,9 @@ BOT_PATTERNS = [
 ]
 
 
-def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, Any]]:  # noqa: C901
+def parse_mr_list(
+    output: str, include_author: bool = False
+) -> List[Dict[str, Any]]:  # noqa: C901
     """
     Parse gitlab_mr_list output into structured MR data.
 
@@ -48,7 +53,9 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
         # Try single-line format first: "!1452  project!1452  Title (target-branch) ← (source-branch)"
         # The branch is in the format: (target) ← (source)
         # Target branch can be main, master, or any other branch name
-        single_match = re.search(r"!(\d+)\s+\S+\s+(.+?)\s*\((\w+)\)\s*←\s*\(([^)]+)\)", line)
+        single_match = re.search(
+            r"!(\d+)\s+\S+\s+(.+?)\s*\((\w+)\)\s*←\s*\(([^)]+)\)", line
+        )
         if single_match:
             mr = {
                 "iid": int(single_match.group(1)),
@@ -82,7 +89,9 @@ def parse_mr_list(output: str, include_author: bool = False) -> List[Dict[str, A
             continue
 
         # Multi-line format: Look for IID pattern
-        iid_match = re.search(r"!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)", line, re.IGNORECASE)
+        iid_match = re.search(
+            r"!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)", line, re.IGNORECASE
+        )
         if iid_match:
             # Save previous MR if exists
             if current_mr.get("iid"):
@@ -161,7 +170,9 @@ def parse_namespaces(output: str) -> List[Dict[str, str]]:
         # Parse: ephemeral-xxxxx  expires in 2h 30m
         match = re.search(r"(ephemeral-\w+)\s+.*?(\d+[hm].*?)(?:\s|$)", line)
         if match:
-            namespaces.append({"name": match.group(1), "expires": match.group(2).strip()})
+            namespaces.append(
+                {"name": match.group(1), "expires": match.group(2).strip()}
+            )
         elif "ephemeral-" in line:
             # Fallback: just get the namespace name
             ns_match = re.search(r"(ephemeral-\w+)", line)
@@ -185,7 +196,9 @@ def is_bot_comment(text: str, author: str = "") -> bool:
     return any(re.search(pattern, combined, re.IGNORECASE) for pattern in BOT_PATTERNS)
 
 
-def filter_human_comments(comments: List[Dict[str, Any]], exclude_author: Optional[str] = None) -> List[Dict[str, Any]]:
+def filter_human_comments(
+    comments: List[Dict[str, Any]], exclude_author: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     Filter out bot comments and optionally exclude a specific author.
 
@@ -200,7 +213,9 @@ def filter_human_comments(comments: List[Dict[str, Any]], exclude_author: Option
         c
         for c in comments
         if not is_bot_comment(c.get("text", ""), c.get("author", ""))
-        and (not exclude_author or c.get("author", "").lower() != exclude_author.lower())
+        and (
+            not exclude_author or c.get("author", "").lower() != exclude_author.lower()
+        )
     ]
 
 
@@ -226,13 +241,17 @@ def parse_git_log(output: str) -> List[Dict[str, str]]:
         # Handle markdown formatted output like "- `abc1234 commit message`"
         md_match = re.search(r"`([a-f0-9]{7,})\s+(.+?)`", line)
         if md_match:
-            commits.append({"sha": md_match.group(1)[:7], "message": md_match.group(2)[:60]})
+            commits.append(
+                {"sha": md_match.group(1)[:7], "message": md_match.group(2)[:60]}
+            )
             continue
 
         # Standard git log --oneline format: "abc1234 commit message"
         parts = line.split(" ", 1)
         if len(parts) >= 1 and re.match(r"^[a-f0-9]{7,}$", parts[0]):
-            commits.append({"sha": parts[0][:7], "message": parts[1] if len(parts) > 1 else ""})
+            commits.append(
+                {"sha": parts[0][:7], "message": parts[1] if len(parts) > 1 else ""}
+            )
     return commits
 
 
@@ -323,7 +342,10 @@ def parse_kubectl_pods(output: str) -> List[Dict[str, Any]]:
             }
 
             # Mark health status
-            pod["healthy"] = pod["status"] == "Running" and pod["ready"].split("/")[0] == pod["ready"].split("/")[1]
+            pod["healthy"] = (
+                pod["status"] == "Running"
+                and pod["ready"].split("/")[0] == pod["ready"].split("/")[1]
+            )
             pods.append(pod)
 
     return pods
@@ -376,7 +398,9 @@ def parse_git_conflicts(status_output: str) -> List[Dict[str, str]]:
         elif "both modified" in line.lower():
             match = re.search(r":\s*(.+)$", line)
             if match:
-                conflicts.append({"file": match.group(1).strip(), "type": "both modified"})
+                conflicts.append(
+                    {"file": match.group(1).strip(), "type": "both modified"}
+                )
         elif "both added" in line.lower():
             match = re.search(r":\s*(.+)$", line)
             if match:
@@ -495,7 +519,9 @@ def extract_jira_key(text: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[str, Any]:
+def analyze_mr_status(
+    details: str, my_username: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Analyze MR details for approval status, conflicts, pipeline, and feedback.
 
@@ -530,7 +556,9 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     }
 
     # Check approval status
-    result["is_approved"] = bool(re.search(r"approved|LGTM|:white_check_mark:|✅", details, re.IGNORECASE))
+    result["is_approved"] = bool(
+        re.search(r"approved|LGTM|:white_check_mark:|✅", details, re.IGNORECASE)
+    )
 
     # Check for merge conflicts
     result["has_conflicts"] = bool(
@@ -542,11 +570,15 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     )
 
     # Check for merge commits (should rebase)
-    has_merge_commits = bool(re.search(r"merge branch|merge.*into|merge commit", details, re.IGNORECASE))
+    has_merge_commits = bool(
+        re.search(r"merge branch|merge.*into|merge commit", details, re.IGNORECASE)
+    )
     result["needs_rebase"] = result["has_conflicts"] or has_merge_commits
 
     # Check pipeline status
-    result["pipeline_failed"] = bool(re.search(r"pipeline.*failed|CI.*failed|build.*failed", details, re.IGNORECASE))
+    result["pipeline_failed"] = bool(
+        re.search(r"pipeline.*failed|CI.*failed|build.*failed", details, re.IGNORECASE)
+    )
 
     # Check for unresolved discussions
     result["unresolved"] = bool(
@@ -599,7 +631,9 @@ def analyze_mr_status(details: str, my_username: Optional[str] = None) -> Dict[s
     return result
 
 
-def separate_mrs_by_author(mrs: List[Dict[str, Any]], my_username: str) -> Dict[str, List[Dict[str, Any]]]:
+def separate_mrs_by_author(
+    mrs: List[Dict[str, Any]], my_username: str
+) -> Dict[str, List[Dict[str, Any]]]:
     """
     Separate MRs into own MRs and MRs to review (by others).
 
@@ -648,13 +682,15 @@ def separate_mrs_by_author(mrs: List[Dict[str, Any]], my_username: str) -> Dict[
             # Also add without apostrophe and with underscores
             my_identities.add(full_name.replace("'", ""))
             my_identities.add(full_name.replace(" ", "_"))
-    except Exception:
-        pass  # Fall back to just my_username
+    except Exception as e:
+        logger.debug(f"Suppressed error in separate_mrs_by_author: {e}")
 
     for mr in mrs:
         author = (mr.get("author", "") or "").lower()
         # Check if author matches any of our identities
-        is_mine = any(identity in author or author == identity for identity in my_identities)
+        is_mine = any(
+            identity in author or author == identity for identity in my_identities
+        )
         if is_mine:
             my_mrs.append(mr)
         else:
@@ -760,7 +796,9 @@ def extract_mr_id_from_text(text: str) -> Optional[int]:
         return None
 
     # Try common patterns
-    match = re.search(r"!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)", str(text), re.IGNORECASE)
+    match = re.search(
+        r"!(\d+)|IID[:\s]+(\d+)|mr_id[:\s]+(\d+)", str(text), re.IGNORECASE
+    )
     if match:
         return int(match.group(1) or match.group(2) or match.group(3))
 
@@ -879,7 +917,9 @@ def extract_conflict_files(output: str) -> List[str]:
     files.extend(md_files)
 
     # Git conflict format
-    conflict_files = re.findall(r"CONFLICT \([^)]+\):\s*(?:Merge conflict in\s*)?(\S+)", str(output))
+    conflict_files = re.findall(
+        r"CONFLICT \([^)]+\):\s*(?:Merge conflict in\s*)?(\S+)", str(output)
+    )
     files.extend(conflict_files)
 
     return list(set(files))  # Deduplicate
@@ -934,7 +974,9 @@ def parse_prometheus_alert(message: str) -> Dict[str, Any]:
 
     # Extract alert name (pattern: Alert: NAME [FIRING:N])
     alert_name_match = re.search(r"Alert:\s*([^\[]+)", msg, re.IGNORECASE)
-    alert_name = alert_name_match.group(1).strip() if alert_name_match else "Unknown Alert"
+    alert_name = (
+        alert_name_match.group(1).strip() if alert_name_match else "Unknown Alert"
+    )
 
     # Extract firing count
     firing_match = re.search(r"\[FIRING:(\d+)\]", msg)
@@ -1145,7 +1187,9 @@ def get_next_version(branches: List[str], base_name: str) -> int:
     return max(versions) + 1 if versions else 1
 
 
-def parse_deploy_clowder_ref(content: str, namespace_pattern: str = "tower-analytics-prod") -> Optional[str]:
+def parse_deploy_clowder_ref(
+    content: str, namespace_pattern: str = "tower-analytics-prod"
+) -> Optional[str]:
     """
     Extract ref SHA from deploy-clowder.yml content.
 
@@ -1245,7 +1289,9 @@ def parse_alertmanager_output(text: str) -> List[Dict]:
             match = re.search(r"severity[=:\s]+(\S+)", line, re.IGNORECASE)
             if match:
                 current_alert["severity"] = match.group(1)
-        if current_alert and ("message" in line.lower() or "description" in line.lower()):
+        if current_alert and (
+            "message" in line.lower() or "description" in line.lower()
+        ):
             current_alert["message"] = line.strip()[:100]
 
     if current_alert:
@@ -1270,7 +1316,9 @@ def extract_all_jira_keys(text: str) -> List[str]:
     return re.findall(r"([A-Z]+-\d+)", str(text))
 
 
-def linkify_jira_keys(text: str, jira_url: Optional[str] = None, slack_format: bool = False) -> str:
+def linkify_jira_keys(
+    text: str, jira_url: Optional[str] = None, slack_format: bool = False
+) -> str:
     """
     Replace Jira keys in text with markdown links.
 
@@ -1356,7 +1404,13 @@ def find_full_conflict_marker(content: str, ours: str, theirs: str) -> Optional[
     if not content:
         return None
 
-    pattern = r"(<<<<<<<[^\n]*\n" + re.escape(ours) + r"=======\n" + re.escape(theirs) + r">>>>>>>[^\n]*\n?)"
+    pattern = (
+        r"(<<<<<<<[^\n]*\n"
+        + re.escape(ours)
+        + r"=======\n"
+        + re.escape(theirs)
+        + r">>>>>>>[^\n]*\n?)"
+    )
     match = re.search(pattern, str(content), re.DOTALL)
     return match.group(1) if match else None
 
@@ -1375,7 +1429,9 @@ def split_mr_comments(text: str) -> List[tuple]:
         return []
 
     # Split on comment header pattern
-    comment_blocks = re.split(r"\n(\w+) commented (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", str(text))
+    comment_blocks = re.split(
+        r"\n(\w+) commented (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", str(text)
+    )
 
     comments = []
     idx = 1
@@ -1418,7 +1474,9 @@ def slugify_text(text: str, max_length: int = 40) -> str:
     return slug.strip("-")
 
 
-def find_transition_name(transitions_text: str, target_variations: Optional[List[str]] = None) -> Optional[str]:
+def find_transition_name(
+    transitions_text: str, target_variations: Optional[List[str]] = None
+) -> Optional[str]:
     """
     Find exact transition name from available transitions text.
 
@@ -1445,7 +1503,9 @@ def find_transition_name(transitions_text: str, target_variations: Optional[List
     return None
 
 
-def analyze_review_status(details: str, reviewer_username: str, author: str = "") -> Dict:
+def analyze_review_status(
+    details: str, reviewer_username: str, author: str = ""
+) -> Dict:
     """
     Analyze MR details to determine review workflow status.
 
@@ -1482,7 +1542,9 @@ def analyze_review_status(details: str, reviewer_username: str, author: str = ""
     # Look for author's replies after feedback
     author_replied = False
     if author:
-        author_replied = bool(re.search(rf"{author}.*?commented|replied", details, re.IGNORECASE))
+        author_replied = bool(
+            re.search(rf"{author}.*?commented|replied", details, re.IGNORECASE)
+        )
 
     # Check if already approved
     already_approved = bool(

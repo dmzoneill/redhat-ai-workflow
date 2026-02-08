@@ -138,7 +138,8 @@ def _get_available_skills_description() -> str:
             inputs = [i["name"] for i in data.get("inputs", []) if i.get("required")]
             input_str = f" (inputs: {', '.join(inputs)})" if inputs else ""
             skills.append(f"- {name}: {desc}{input_str}")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in _build_skill_list: {e}")
             skills.append(f"- {f.stem}: (error loading)")
 
     if not skills:
@@ -1423,8 +1424,8 @@ Please verify the image exists before proceeding."""
                         f"Image found!\n\n**Tag:** {tag}\n**Manifest Digest:** sha256:{digest}\n\n"
                         "Use the 64-char digest (without 'sha256:' prefix) as image_tag for bonfire_deploy_aa."
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in _execute_quay: {e}")
 
             return f"Image exists but could not parse digest:\n{result[:500]}"
 
@@ -1465,7 +1466,8 @@ Please verify the image exists before proceeding."""
             import yaml
 
             item = yaml.safe_load(item_str) if isinstance(item_str, str) else item_str
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in _execute_memory_append: {e}")
             item = {"value": item_str}
 
         append_to_list(key, list_path, item)

@@ -10,8 +10,11 @@ Usage:
         print("Invalid structure!")
 """
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     from pydantic import BaseModel, Field, validator
@@ -85,9 +88,15 @@ class DiscoveredWork(BaseModel):
         description="Type: discovered_work, tech_debt, bug, improvement, missing_test, missing_docs, security",
     )
     priority: str = Field("medium", description="Priority: low, medium, high, critical")
-    source_skill: Optional[str] = Field(None, description="Skill that discovered this work")
-    source_issue: Optional[str] = Field(None, description="Issue being worked on when discovered")
-    source_mr: Optional[int] = Field(None, description="MR being reviewed when discovered")
+    source_skill: Optional[str] = Field(
+        None, description="Skill that discovered this work"
+    )
+    source_issue: Optional[str] = Field(
+        None, description="Issue being worked on when discovered"
+    )
+    source_mr: Optional[int] = Field(
+        None, description="MR being reviewed when discovered"
+    )
     file_path: Optional[str] = Field(None, description="File where issue was found")
     line_number: Optional[int] = Field(None, description="Line number if applicable")
     created: str = Field(..., description="ISO timestamp when discovered")
@@ -100,10 +109,14 @@ class FollowUp(BaseModel):
     """A follow-up task or reminder (legacy, use DiscoveredWork for new items)."""
 
     task: str = Field(..., description="Task description")
-    priority: Optional[str] = Field(None, description="Priority level (high/medium/low)")
+    priority: Optional[str] = Field(
+        None, description="Priority level (high/medium/low)"
+    )
     issue_key: Optional[str] = Field(None, description="Related Jira issue key")
     # New fields for compatibility with DiscoveredWork
-    work_type: Optional[str] = Field(None, description="Type if migrated from DiscoveredWork")
+    work_type: Optional[str] = Field(
+        None, description="Type if migrated from DiscoveredWork"
+    )
     source_skill: Optional[str] = Field(None, description="Skill that created this")
     jira_synced: Optional[bool] = Field(None, description="Whether synced to Jira")
 
@@ -112,9 +125,15 @@ class CurrentWork(BaseModel):
     """State of current work - active issues, MRs, follow-ups, discovered work."""
 
     active_issue: Optional[str] = Field("", description="Primary active issue key")
-    active_issues: List[ActiveIssue] = Field(default_factory=list, description="All active issues")
-    open_mrs: List[OpenMR] = Field(default_factory=list, description="Open merge requests")
-    follow_ups: List[FollowUp] = Field(default_factory=list, description="Follow-up tasks (legacy)")
+    active_issues: List[ActiveIssue] = Field(
+        default_factory=list, description="All active issues"
+    )
+    open_mrs: List[OpenMR] = Field(
+        default_factory=list, description="Open merge requests"
+    )
+    follow_ups: List[FollowUp] = Field(
+        default_factory=list, description="Follow-up tasks (legacy)"
+    )
     discovered_work: List[DiscoveredWork] = Field(
         default_factory=list, description="Work discovered during other tasks"
     )
@@ -150,7 +169,9 @@ class EphemeralNamespace(BaseModel):
 class Environments(BaseModel):
     """Environment health tracking."""
 
-    environments: Dict[str, EnvironmentStatus] = Field(default_factory=dict, description="Environment statuses")
+    environments: Dict[str, EnvironmentStatus] = Field(
+        default_factory=dict, description="Environment statuses"
+    )
     ephemeral_namespaces: List[EphemeralNamespace] = Field(
         default_factory=list, description="Active ephemeral namespaces"
     )
@@ -165,7 +186,9 @@ class PatternUsageStats(BaseModel):
 
     times_matched: int = Field(0, description="How many times pattern matched")
     times_fixed: int = Field(0, description="How many times fix succeeded")
-    success_rate: float = Field(0.0, description="Success rate (times_fixed / times_matched)")
+    success_rate: float = Field(
+        0.0, description="Success rate (times_fixed / times_matched)"
+    )
     last_matched: Optional[str] = Field(None, description="ISO timestamp of last match")
 
 
@@ -175,8 +198,12 @@ class ErrorPattern(BaseModel):
     pattern: str = Field(..., description="Error pattern to match")
     meaning: Optional[str] = Field(None, description="What this error means")
     fix: str = Field(..., description="How to fix this error")
-    commands: List[str] = Field(default_factory=list, description="MCP tool commands to run")
-    usage_stats: Optional[PatternUsageStats] = Field(None, description="Usage statistics")
+    commands: List[str] = Field(
+        default_factory=list, description="MCP tool commands to run"
+    )
+    usage_stats: Optional[PatternUsageStats] = Field(
+        None, description="Usage statistics"
+    )
 
 
 class AuthPattern(BaseModel):
@@ -185,8 +212,12 @@ class AuthPattern(BaseModel):
     pattern: str = Field(..., description="Auth error pattern to match")
     meaning: Optional[str] = Field(None, description="What this error means")
     fix: str = Field(..., description="How to fix this auth error")
-    commands: List[str] = Field(default_factory=list, description="MCP tool commands to run")
-    usage_stats: Optional[PatternUsageStats] = Field(None, description="Usage statistics")
+    commands: List[str] = Field(
+        default_factory=list, description="MCP tool commands to run"
+    )
+    usage_stats: Optional[PatternUsageStats] = Field(
+        None, description="Usage statistics"
+    )
 
 
 class BonfirePattern(BaseModel):
@@ -195,8 +226,12 @@ class BonfirePattern(BaseModel):
     pattern: str = Field(..., description="Bonfire error pattern to match")
     meaning: Optional[str] = Field(None, description="What this error means")
     fix: str = Field(..., description="How to fix this error")
-    commands: List[str] = Field(default_factory=list, description="MCP tool commands to run")
-    usage_stats: Optional[PatternUsageStats] = Field(None, description="Usage statistics")
+    commands: List[str] = Field(
+        default_factory=list, description="MCP tool commands to run"
+    )
+    usage_stats: Optional[PatternUsageStats] = Field(
+        None, description="Usage statistics"
+    )
 
 
 class PipelinePattern(BaseModel):
@@ -205,8 +240,12 @@ class PipelinePattern(BaseModel):
     pattern: str = Field(..., description="Pipeline error pattern to match")
     meaning: Optional[str] = Field(None, description="What this error means")
     fix: str = Field(..., description="How to fix this error")
-    commands: List[str] = Field(default_factory=list, description="MCP tool commands to run")
-    usage_stats: Optional[PatternUsageStats] = Field(None, description="Usage statistics")
+    commands: List[str] = Field(
+        default_factory=list, description="MCP tool commands to run"
+    )
+    usage_stats: Optional[PatternUsageStats] = Field(
+        None, description="Usage statistics"
+    )
 
 
 class JiraCLIPattern(BaseModel):
@@ -220,12 +259,24 @@ class JiraCLIPattern(BaseModel):
 class Patterns(BaseModel):
     """Learned error patterns for auto-remediation."""
 
-    auth_patterns: List[AuthPattern] = Field(default_factory=list, description="Authentication patterns")
-    error_patterns: List[ErrorPattern] = Field(default_factory=list, description="Generic error patterns")
-    bonfire_patterns: List[BonfirePattern] = Field(default_factory=list, description="Bonfire-specific patterns")
-    pipeline_patterns: List[PipelinePattern] = Field(default_factory=list, description="CI/CD pipeline patterns")
-    jira_cli_patterns: List[JiraCLIPattern] = Field(default_factory=list, description="Jira CLI patterns")
-    last_updated: Optional[str] = Field(None, description="ISO timestamp of last update")
+    auth_patterns: List[AuthPattern] = Field(
+        default_factory=list, description="Authentication patterns"
+    )
+    error_patterns: List[ErrorPattern] = Field(
+        default_factory=list, description="Generic error patterns"
+    )
+    bonfire_patterns: List[BonfirePattern] = Field(
+        default_factory=list, description="Bonfire-specific patterns"
+    )
+    pipeline_patterns: List[PipelinePattern] = Field(
+        default_factory=list, description="CI/CD pipeline patterns"
+    )
+    jira_cli_patterns: List[JiraCLIPattern] = Field(
+        default_factory=list, description="Jira CLI patterns"
+    )
+    last_updated: Optional[str] = Field(
+        None, description="ISO timestamp of last update"
+    )
 
 
 class ToolFix(BaseModel):
@@ -236,14 +287,20 @@ class ToolFix(BaseModel):
     root_cause: str = Field(..., description="Why the error occurred")
     fix_applied: str = Field(..., description="How to fix it")
     date_learned: str = Field(..., description="Date learned (YYYY-MM-DD)")
-    times_prevented: int = Field(0, description="How many times this fix prevented errors")
+    times_prevented: int = Field(
+        0, description="How many times this fix prevented errors"
+    )
 
 
 class ToolFixes(BaseModel):
     """Manual tool fixes saved by users."""
 
-    tool_fixes: List[ToolFix] = Field(default_factory=list, description="Saved tool fixes")
-    common_mistakes: Dict[str, str] = Field(default_factory=dict, description="Common mistakes to avoid")
+    tool_fixes: List[ToolFix] = Field(
+        default_factory=list, description="Saved tool fixes"
+    )
+    common_mistakes: Dict[str, str] = Field(
+        default_factory=dict, description="Common mistakes to avoid"
+    )
 
 
 # Schema Registry
@@ -332,7 +389,9 @@ def get_schema_template(key: str) -> Optional[str]:
         elif key == "state/environments":
             example = Environments(
                 environments={
-                    "stage": EnvironmentStatus(status="healthy", last_checked="2026-01-09T14:00:00", issues=[])
+                    "stage": EnvironmentStatus(
+                        status="healthy", last_checked="2026-01-09T14:00:00", issues=[]
+                    )
                 },
                 ephemeral_namespaces=[],
                 last_checked="2026-01-09T14:00:00",
@@ -369,5 +428,6 @@ def get_schema_template(key: str) -> Optional[str]:
 
         return yaml.dump(example.dict(), default_flow_style=False, sort_keys=False)
 
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in get_schema_template: {e}")
         return None

@@ -688,7 +688,8 @@ class SSOAuthenticator:
                         strategy.popup_trigger_selector,
                         timeout=3000,
                     )
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in _flow_popup: {e}")
                     logger.info("Sign-in button not found - already authenticated")
                     return SSOResult(
                         success=True,
@@ -726,7 +727,8 @@ class SSOAuthenticator:
                         "close", timeout=strategy.popup_close_timeout
                     )
                     logger.info("Popup closed - authentication successful")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in _flow_popup popup close: {e}")
                     logger.warning("Popup did not close within timeout")
 
             # Refresh main page to get authenticated state
@@ -827,8 +829,8 @@ class SSOAuthenticator:
         try:
             await page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _find_element primary: {e}")
 
         # Try alternatives
         for alt in alternatives:
@@ -836,7 +838,8 @@ class SSOAuthenticator:
                 await page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed error in _find_element alt: {e}")
                 continue
 
         # Return primary and let it fail with proper error
@@ -936,7 +939,8 @@ class SSOAuthenticator:
                         token = value
                         logger.info(f"Found token in {storage_type}['{key}']")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in _extract_jwt: {e}")
                     continue
             if token:
                 break
@@ -1056,7 +1060,8 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
             # Verify the browser is still alive by checking the page URL
             _ = _browser_page.url
             return _browser_page
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in _get_or_create_browser: {e}")
             logger.warning("Browser session expired, creating new one")
             await _close_browser()
 
@@ -1078,7 +1083,8 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
         _browser_pid = (
             _browser_instance.process.pid if _browser_instance.process else None
         )
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in _get_or_create_browser PID: {e}")
         _browser_pid = None
     _browser_context = await _browser_instance.new_context(
         viewport={"width": 1280, "height": 720},

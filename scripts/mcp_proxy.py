@@ -54,6 +54,7 @@ Environment variables:
 """
 
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -61,6 +62,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Configuration - watch all important project directories
 # NOTE: Don't include memory/ - it's written to during skill execution
@@ -100,7 +103,11 @@ DEBUG = os.environ.get("MCP_PROXY_DEBUG", "").lower() in ("1", "true", "yes")
 NO_WATCH = os.environ.get("MCP_PROXY_NO_WATCH", "").lower() in ("1", "true", "yes")
 # NO_DAEMONS is now True by default - daemons run independently and don't need restart
 # Set MCP_PROXY_RESTART_DAEMONS=1 to re-enable daemon restarts
-NO_DAEMONS = os.environ.get("MCP_PROXY_RESTART_DAEMONS", "").lower() not in ("1", "true", "yes")
+NO_DAEMONS = os.environ.get("MCP_PROXY_RESTART_DAEMONS", "").lower() not in (
+    "1",
+    "true",
+    "yes",
+)
 
 # Systemd user services to restart on reload
 # NOTE: These are now DISABLED by default. The daemons (cron, slack, meet) run
@@ -255,13 +262,18 @@ class HotReloadProxy:
                     bufsize=0,  # Unbuffered
                 )
                 self.restart_count += 1
-                log(f"Server started (PID: {self.process.pid}, restart #{self.restart_count})")
+                log(
+                    f"Server started (PID: {self.process.pid}, restart #{self.restart_count})"
+                )
 
                 # On restart: discard stale pending messages and re-initialize
                 # The old session's messages would fail with "not initialized" error
                 if is_restart:
                     if self.pending_input:
-                        log(f"Discarding {len(self.pending_input)} stale message(s) from old session", force=True)
+                        log(
+                            f"Discarding {len(self.pending_input)} stale message(s) from old session",
+                            force=True,
+                        )
                         self.pending_input.clear()
 
                     # Reset session state
@@ -270,11 +282,16 @@ class HotReloadProxy:
                     # Replay the cached initialize request to the new server
                     # This re-establishes the MCP session transparently
                     if self.cached_initialize_request and self.process.stdin:
-                        log("Replaying cached initialize request to new server", force=True)
+                        log(
+                            "Replaying cached initialize request to new server",
+                            force=True,
+                        )
                         try:
                             self.process.stdin.write(self.cached_initialize_request)
                             self.process.stdin.flush()
-                            self.awaiting_reinit = False  # We've sent init, just waiting for response
+                            self.awaiting_reinit = (
+                                False  # We've sent init, just waiting for response
+                            )
                             log("Initialize request sent to new server ✓", force=True)
                         except OSError as e:
                             log(f"Failed to replay initialize: {e}", force=True)
@@ -282,7 +299,10 @@ class HotReloadProxy:
                     else:
                         # No cached request, need Cursor to re-initialize
                         self.awaiting_reinit = True
-                        log("No cached initialize request, awaiting re-init from Cursor", force=True)
+                        log(
+                            "No cached initialize request, awaiting re-init from Cursor",
+                            force=True,
+                        )
                 else:
                     # Initial start - session not yet initialized
                     self.session_initialized = False
@@ -302,7 +322,8 @@ class HotReloadProxy:
         try:
             msg = json.loads(data.decode())
             return msg.get("method"), msg.get("id")
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in _parse_jsonrpc_method: {e}")
             return None, None
 
     def _is_initialize_request(self, data: bytes) -> bool:
@@ -367,7 +388,9 @@ class HotReloadProxy:
 
                     if is_init_request:
                         log("→ Received initialize request from Cursor")
-                        self.awaiting_reinit = False  # Got the re-init we were waiting for
+                        self.awaiting_reinit = (
+                            False  # Got the re-init we were waiting for
+                        )
                         # Cache this for replay on future restarts
                         self.cached_initialize_request = message
                         log("Cached initialize request for future restarts")
@@ -389,13 +412,19 @@ class HotReloadProxy:
                             if self.awaiting_reinit and not is_safe:
                                 method, msg_id = self._parse_jsonrpc_method(line)
                                 if method:
-                                    log(f"⏳ Dropping {method} (awaiting re-initialization)", force=True)
+                                    log(
+                                        f"⏳ Dropping {method} (awaiting re-initialization)",
+                                        force=True,
+                                    )
                                     # Send error response if it has an id (is a request)
                                     if msg_id is not None:
                                         error_response = {
                                             "jsonrpc": "2.0",
                                             "id": msg_id,
-                                            "error": {"code": -32002, "message": "Server restarting, please retry"},
+                                            "error": {
+                                                "code": -32002,
+                                                "message": "Server restarting, please retry",
+                                            },
                                         }
                                         self._send_to_cursor(error_response)
                                 continue
@@ -404,7 +433,10 @@ class HotReloadProxy:
                             # since Cursor is clearly communicating with us
                             if self.awaiting_reinit and is_safe:
                                 method, _ = self._parse_jsonrpc_method(line)
-                                log(f"✓ Received {method} during reinit - connection restored", force=True)
+                                log(
+                                    f"✓ Received {method} during reinit - connection restored",
+                                    force=True,
+                                )
                                 self.awaiting_reinit = False
 
                             # Forward the message
@@ -440,7 +472,9 @@ class HotReloadProxy:
         """
         log("stdout forwarder started")
         buffer = b""
-        sent_tools_changed_for_restart = 0  # Track which restart we sent notification for
+        sent_tools_changed_for_restart = (
+            0  # Track which restart we sent notification for
+        )
 
         while not self.shutting_down:
             # Get current process reference
@@ -468,17 +502,28 @@ class HotReloadProxy:
                             # (contains "result" with "serverInfo" or "capabilities")
                             try:
                                 msg = json.loads(line.decode())
-                                if "result" in msg and isinstance(msg.get("result"), dict):
+                                if "result" in msg and isinstance(
+                                    msg.get("result"), dict
+                                ):
                                     result = msg["result"]
-                                    if "serverInfo" in result or "capabilities" in result:
+                                    if (
+                                        "serverInfo" in result
+                                        or "capabilities" in result
+                                    ):
                                         log("← Server sent initialize response")
 
                                         # After restart, we replayed the cached initialize request
                                         # Don't forward this response to Cursor (it didn't send the request)
                                         # Instead, send the initialized notification to complete handshake
                                         # Then send tools_changed to trigger Cursor to refresh
-                                        if current_restart > 1 and sent_tools_changed_for_restart < current_restart:
-                                            sent_tools_changed_for_restart = current_restart
+                                        if (
+                                            current_restart > 1
+                                            and sent_tools_changed_for_restart
+                                            < current_restart
+                                        ):
+                                            sent_tools_changed_for_restart = (
+                                                current_restart
+                                            )
 
                                             # Send initialized notification to server to complete handshake
                                             initialized_notification = {
@@ -486,14 +531,23 @@ class HotReloadProxy:
                                                 "method": "notifications/initialized",
                                             }
                                             try:
-                                                init_data = json.dumps(initialized_notification) + "\n"
+                                                init_data = (
+                                                    json.dumps(initialized_notification)
+                                                    + "\n"
+                                                )
                                                 if self.process and self.process.stdin:
-                                                    self.process.stdin.write(init_data.encode())
+                                                    self.process.stdin.write(
+                                                        init_data.encode()
+                                                    )
                                                     self.process.stdin.flush()
-                                                    log("→ Sent initialized notification to server")
+                                                    log(
+                                                        "→ Sent initialized notification to server"
+                                                    )
                                                     self.session_initialized = True
                                             except OSError as e:
-                                                log(f"Failed to send initialized notification: {e}")
+                                                log(
+                                                    f"Failed to send initialized notification: {e}"
+                                                )
 
                                             # Small delay then send tools_changed to Cursor
                                             time.sleep(0.1)
@@ -555,7 +609,11 @@ class HotReloadProxy:
                 for dirpath, dirnames, filenames in os.walk(watch_path):
                     # Prune directories IN PLACE to prevent descending into them
                     # This is the key optimization - we never even open these dirs
-                    dirnames[:] = [d for d in dirnames if d not in skip_dirs and not d.endswith(".egg-info")]
+                    dirnames[:] = [
+                        d
+                        for d in dirnames
+                        if d not in skip_dirs and not d.endswith(".egg-info")
+                    ]
 
                     # Check files in this directory
                     for filename in filenames:
@@ -616,7 +674,10 @@ class HotReloadProxy:
 
             # Debounce: restart after DEBOUNCE_SECONDS of no changes
             if needs_restart and (time.time() - last_change_time) > DEBOUNCE_SECONDS:
-                log(f"Reloading after {len(changed_files_batch)} file change(s)...", force=True)
+                log(
+                    f"Reloading after {len(changed_files_batch)} file change(s)...",
+                    force=True,
+                )
                 self.start_server(restart_daemons_too=True)
                 needs_restart = False
                 changed_files_batch.clear()
@@ -629,7 +690,10 @@ class HotReloadProxy:
                 # If the session is broken, Cursor may need to be manually refreshed.
                 self._notify_tools_changed()
 
-                log("Server reloaded ✓ - Cursor may need manual refresh if tools don't appear", force=True)
+                log(
+                    "Server reloaded ✓ - Cursor may need manual refresh if tools don't appear",
+                    force=True,
+                )
 
         log("File watcher stopped")
 
@@ -644,7 +708,8 @@ class HotReloadProxy:
                 try:
                     self.process.terminate()
                     self.process.wait(timeout=5)
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Suppressed error in shutdown handler: {e}")
                     if self.process:
                         self.process.kill()
             sys.exit(0)
@@ -658,9 +723,15 @@ class HotReloadProxy:
             sys.exit(1)
 
         # Start forwarding threads
-        stdin_thread = threading.Thread(target=self.forward_stdin, name="stdin-forwarder", daemon=True)
-        stdout_thread = threading.Thread(target=self.forward_stdout, name="stdout-forwarder", daemon=True)
-        watch_thread = threading.Thread(target=self.watch_files, name="file-watcher", daemon=True)
+        stdin_thread = threading.Thread(
+            target=self.forward_stdin, name="stdin-forwarder", daemon=True
+        )
+        stdout_thread = threading.Thread(
+            target=self.forward_stdout, name="stdout-forwarder", daemon=True
+        )
+        watch_thread = threading.Thread(
+            target=self.watch_files, name="file-watcher", daemon=True
+        )
 
         stdin_thread.start()
         stdout_thread.start()
@@ -679,7 +750,8 @@ class HotReloadProxy:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=5)
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Suppressed error in run cleanup: {e}")
                 if self.process:
                     self.process.kill()
 
@@ -745,20 +817,38 @@ def main():
         print("Usage: mcp_proxy.py [OPTIONS] -- <server command>", file=sys.stderr)
         print("", file=sys.stderr)
         print("Options:", file=sys.stderr)
-        print("  --cwd DIR         Working directory for server (default: current)", file=sys.stderr)
-        print("  --watch PATH      Additional path to watch (can be repeated)", file=sys.stderr)
-        print("  --debounce SECS   Debounce time in seconds (default: 3.0)", file=sys.stderr)
+        print(
+            "  --cwd DIR         Working directory for server (default: current)",
+            file=sys.stderr,
+        )
+        print(
+            "  --watch PATH      Additional path to watch (can be repeated)",
+            file=sys.stderr,
+        )
+        print(
+            "  --debounce SECS   Debounce time in seconds (default: 3.0)",
+            file=sys.stderr,
+        )
         print("  --debug           Enable debug logging", file=sys.stderr)
         print("  --no-watch        Disable file watching", file=sys.stderr)
-        print("  --restart-daemons Restart daemons on reload (disabled by default)", file=sys.stderr)
+        print(
+            "  --restart-daemons Restart daemons on reload (disabled by default)",
+            file=sys.stderr,
+        )
         print("", file=sys.stderr)
         print("Example:", file=sys.stderr)
-        print("  mcp_proxy.py --cwd /path/to/project -- uv run python -m server", file=sys.stderr)
+        print(
+            "  mcp_proxy.py --cwd /path/to/project -- uv run python -m server",
+            file=sys.stderr,
+        )
         print("", file=sys.stderr)
         print("Environment variables:", file=sys.stderr)
         print("  MCP_PROXY_DEBUG=1           Enable debug logging", file=sys.stderr)
         print("  MCP_PROXY_NO_WATCH=1        Disable file watching", file=sys.stderr)
-        print("  MCP_PROXY_RESTART_DAEMONS=1 Restart daemons on reload (disabled by default)", file=sys.stderr)
+        print(
+            "  MCP_PROXY_RESTART_DAEMONS=1 Restart daemons on reload (disabled by default)",
+            file=sys.stderr,
+        )
         print("  MCP_PROXY_DEBOUNCE=3.0      Debounce time in seconds", file=sys.stderr)
         sys.exit(1)
 
@@ -766,7 +856,10 @@ def main():
     log(f"Server command: {' '.join(server_cmd)}", force=True)
     log(f"Watch paths: {len(watch_paths)} directories/files", force=True)
     log(f"Debounce: {DEBOUNCE_SECONDS}s", force=True)
-    log(f"Daemon restart: {'disabled (default)' if NO_DAEMONS else 'enabled'}", force=True)
+    log(
+        f"Daemon restart: {'disabled (default)' if NO_DAEMONS else 'enabled'}",
+        force=True,
+    )
 
     proxy = HotReloadProxy(server_cmd, watch_paths, working_dir)
     proxy.run()
