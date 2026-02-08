@@ -63,28 +63,8 @@ USAGE_ERROR_TYPES = {
     },
 }
 
-# Infrastructure error patterns (from Layer 3)
-AUTH_PATTERNS = [
-    "unauthorized",
-    "401",
-    "forbidden",
-    "403",
-    "token expired",
-    "authentication required",
-    "not authorized",
-    "the server has asked for the client to provide credentials",
-]
-
-NETWORK_PATTERNS = [
-    "no route to host",
-    "connection refused",
-    "network unreachable",
-    "timeout",
-    "dial tcp",
-    "connection reset",
-    "eof",
-    "cannot connect",
-]
+# Infrastructure error patterns (from Layer 3) - canonical source in error_patterns.py
+from server.error_patterns import AUTH_PATTERNS, NETWORK_PATTERNS  # noqa: E402
 
 
 def is_infrastructure_error(error_message: str) -> bool:

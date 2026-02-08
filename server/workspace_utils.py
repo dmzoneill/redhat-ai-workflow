@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastmcp import Context
 
-from .workspace_state import DEFAULT_PROJECT, ChatSession, WorkspaceRegistry, WorkspaceState
+from .workspace_state import (
+    DEFAULT_PROJECT,
+    ChatSession,
+    WorkspaceRegistry,
+    WorkspaceState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +163,9 @@ async def set_workspace_project(ctx: "Context", project: str) -> bool:
         state.project = project
         state.is_auto_detected = False
         state.clear_filter_cache()
-        logger.info(f"Set project to '{project}' for workspace {state.workspace_uri} (no active session)")
+        logger.info(
+            f"Set project to '{project}' for workspace {state.workspace_uri} (no active session)"
+        )
 
     # Persist the change to disk
     WorkspaceRegistry.save_to_disk()
@@ -234,8 +241,9 @@ async def get_workspace_state_dict(ctx: "Context") -> dict:
 async def is_tool_active_for_workspace(ctx: "Context", tool_module: str) -> bool:
     """Check if a tool module is active for the current workspace.
 
-    Note: This now always returns True since we no longer track individual tools.
-    Tool availability is determined by the loaded persona's modules.
+    .. deprecated::
+        Always returns True. Tool availability is now managed by the persona
+        loader. Callers should be updated to remove this check.
 
     Args:
         ctx: MCP Context
@@ -244,7 +252,14 @@ async def is_tool_active_for_workspace(ctx: "Context", tool_module: str) -> bool
     Returns:
         True (tool availability is now managed by persona loader)
     """
-    # We no longer track individual active tools - persona determines available tools
+    import warnings
+
+    warnings.warn(
+        "is_tool_active_for_workspace() always returns True and will be removed. "
+        "Tool availability is managed by the persona loader.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return True
 
 
@@ -268,7 +283,9 @@ async def ensure_session_exists(ctx: "Context", export: bool = True) -> ChatSess
     session = state.get_active_session()
 
     if not session:
-        logger.info(f"No active session, auto-creating for workspace {state.workspace_uri}")
+        logger.info(
+            f"No active session, auto-creating for workspace {state.workspace_uri}"
+        )
         session = state.create_session(name="Auto-created")
 
         # NOTE: We no longer export here to avoid race conditions with other services

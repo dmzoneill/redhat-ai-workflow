@@ -54,12 +54,27 @@ Usage:
 
 from .adapter_protocol import BaseAdapter, SourceAdapter
 from .classifier import IntentClassifier
-from .discovery import discover_adapter_modules, discover_and_load_all_adapters, get_adapter_info, list_adapters
+from .discovery import (
+    discover_adapter_modules,
+    discover_and_load_all_adapters,
+    get_adapter_info,
+    list_adapters,
+)
 from .formatter import ResultFormatter
 from .interface import MemoryInterface, get_memory_interface, set_memory_interface
 from .merger import ResultMerger
-from .models import AdapterResult, HealthStatus, IntentClassification, MemoryItem, QueryResult, SourceFilter
-from .registry import ADAPTER_MANIFEST, AdapterInfo, memory_adapter
+from .models import (  # noqa: F401
+    LATENCY_FAST,
+    LATENCY_SLOW,
+    AdapterInfo,
+    AdapterResult,
+    HealthStatus,
+    IntentClassification,
+    MemoryItem,
+    QueryResult,
+    SourceFilter,
+)
+from .registry import ADAPTER_MANIFEST, memory_adapter
 from .router import QueryRouter
 
 __all__ = [

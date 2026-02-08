@@ -7,6 +7,7 @@ Provides tools for:
 - knowledge_query: Query specific knowledge sections
 """
 
+import copy
 import json
 import logging
 from datetime import datetime
@@ -100,7 +101,9 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
 
     # Check for significant changes before saving
     old_knowledge = _load_knowledge(persona, project)
-    notifications = _check_for_significant_changes(old_knowledge, knowledge, project, persona)
+    notifications = _check_for_significant_changes(
+        old_knowledge, knowledge, project, persona
+    )
 
     try:
         # Update metadata
@@ -143,7 +146,9 @@ def _check_for_significant_changes(
     new_confidence = new_meta.get("confidence", 0)
 
     if old_confidence < CONFIDENCE_MILESTONE <= new_confidence:
-        notifications.append(f"🎉 Knowledge confidence reached {new_confidence:.0%} for {project}/{persona}!")
+        notifications.append(
+            f"🎉 Knowledge confidence reached {new_confidence:.0%} for {project}/{persona}!"
+        )
 
     # Check learning count milestones
     old_learnings = len(old_knowledge.get("learned_from_tasks", []))
@@ -151,15 +156,22 @@ def _check_for_significant_changes(
 
     if new_learnings > old_learnings:
         # Check for milestone (every 5 learnings)
-        if new_learnings // SIGNIFICANT_LEARNING_COUNT > old_learnings // SIGNIFICANT_LEARNING_COUNT:
-            notifications.append(f"📈 {new_learnings} learnings recorded for {project}/{persona}")
+        if (
+            new_learnings // SIGNIFICANT_LEARNING_COUNT
+            > old_learnings // SIGNIFICANT_LEARNING_COUNT
+        ):
+            notifications.append(
+                f"📈 {new_learnings} learnings recorded for {project}/{persona}"
+            )
 
     # Check gotchas count
     old_gotchas = len(old_knowledge.get("gotchas", []))
     new_gotchas = len(new_knowledge.get("gotchas", []))
 
     if new_gotchas > old_gotchas:
-        notifications.append(f"⚠️ New gotcha added for {project}/{persona} (total: {new_gotchas})")
+        notifications.append(
+            f"⚠️ New gotcha added for {project}/{persona} (total: {new_gotchas})"
+        )
 
     return notifications
 
@@ -168,7 +180,9 @@ def _emit_knowledge_notification(message: str, project: str, persona: str) -> No
     """Emit a knowledge notification (can be extended to Slack, etc.)."""
     try:
         # Log to session
-        session_file = MEMORY_DIR / "sessions" / f"{datetime.now().strftime('%Y-%m-%d')}.yaml"
+        session_file = (
+            MEMORY_DIR / "sessions" / f"{datetime.now().strftime('%Y-%m-%d')}.yaml"
+        )
         if session_file.exists():
             with open(session_file) as f:
                 session = yaml.safe_load(f) or {}
@@ -339,7 +353,9 @@ def _scan_project_structure(project_path: Path) -> dict:
             with open(project_path / "pyproject.toml", "rb") as f:
                 pyproject = tomllib.load(f)
             deps = pyproject.get("project", {}).get("dependencies", [])
-            result["dependencies"] = [d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]]
+            result["dependencies"] = [
+                d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]
+            ]
         except Exception:
             pass
 
@@ -390,19 +406,32 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
     # Determine project type and patterns based on config files
     patterns = {"coding": [], "testing": [], "deployment": []}
 
-    if "pyproject.toml" in structure["config_files"] or "setup.py" in structure["config_files"]:
-        patterns["coding"].append({"pattern": "Python project", "location": "pyproject.toml"})
+    if (
+        "pyproject.toml" in structure["config_files"]
+        or "setup.py" in structure["config_files"]
+    ):
+        patterns["coding"].append(
+            {"pattern": "Python project", "location": "pyproject.toml"}
+        )
         if structure["test_files"]:
-            patterns["testing"].append({"pattern": "pytest test suite", "example": "pytest tests/"})
+            patterns["testing"].append(
+                {"pattern": "pytest test suite", "example": "pytest tests/"}
+            )
 
     if "package.json" in structure["config_files"]:
-        patterns["coding"].append({"pattern": "Node.js/JavaScript project", "location": "package.json"})
+        patterns["coding"].append(
+            {"pattern": "Node.js/JavaScript project", "location": "package.json"}
+        )
 
     if ".gitlab-ci.yml" in structure["config_files"]:
-        patterns["deployment"].append({"pattern": "GitLab CI/CD", "notes": "Pipeline defined in .gitlab-ci.yml"})
+        patterns["deployment"].append(
+            {"pattern": "GitLab CI/CD", "notes": "Pipeline defined in .gitlab-ci.yml"}
+        )
 
     if "Dockerfile" in structure["config_files"]:
-        patterns["deployment"].append({"pattern": "Docker containerization", "notes": "Dockerfile present"})
+        patterns["deployment"].append(
+            {"pattern": "Docker containerization", "notes": "Dockerfile present"}
+        )
 
     # Build the knowledge structure
     knowledge = {
@@ -450,7 +479,9 @@ def _format_knowledge_summary(knowledge: dict) -> str:
     if arch.get("key_modules"):
         lines.append("### 📁 Key Modules")
         for module in arch["key_modules"][:5]:
-            lines.append(f"- **{module.get('path', '?')}**: {module.get('purpose', '')}")
+            lines.append(
+                f"- **{module.get('path', '?')}**: {module.get('purpose', '')}"
+            )
         lines.append("")
 
     if arch.get("dependencies"):
@@ -476,7 +507,9 @@ def _format_knowledge_summary(knowledge: dict) -> str:
     if gotchas:
         lines.append(f"### ⚠️ Gotchas ({len(gotchas)})")
         for gotcha in gotchas[:3]:
-            lines.append(f"- **{gotcha.get('issue', '?')}**: {gotcha.get('solution', '')}")
+            lines.append(
+                f"- **{gotcha.get('issue', '?')}**: {gotcha.get('solution', '')}"
+            )
         lines.append("")
 
     # Learned from tasks
@@ -484,7 +517,9 @@ def _format_knowledge_summary(knowledge: dict) -> str:
     if learned:
         lines.append(f"### 📝 Learned from Tasks ({len(learned)})")
         for item in learned[-3:]:  # Show most recent
-            lines.append(f"- [{item.get('date', '?')}] {item.get('task', '?')}: {item.get('learning', '')[:100]}")
+            lines.append(
+                f"- [{item.get('date', '?')}] {item.get('task', '?')}: {item.get('learning', '')[:100]}"
+            )
         lines.append("")
 
     return "\n".join(lines)
@@ -651,11 +686,15 @@ async def _knowledge_scan_impl(
             new_patterns = new_knowledge.get("patterns", {}).get(category, [])
             # Deduplicate by pattern text
             existing_texts = {p.get("pattern", "") for p in existing_patterns}
-            merged = existing_patterns + [p for p in new_patterns if p.get("pattern", "") not in existing_texts]
+            merged = existing_patterns + [
+                p for p in new_patterns if p.get("pattern", "") not in existing_texts
+            ]
             new_knowledge["patterns"][category] = merged
 
         # Increase confidence if we had existing knowledge
-        new_knowledge["metadata"]["confidence"] = min(existing.get("metadata", {}).get("confidence", 0.3) + 0.1, 1.0)
+        new_knowledge["metadata"]["confidence"] = min(
+            existing.get("metadata", {}).get("confidence", 0.3) + 0.1, 1.0
+        )
 
     _save_knowledge(persona, project, new_knowledge)
 
@@ -726,7 +765,9 @@ async def _knowledge_update_impl(
             target[final_key] = parsed_content
 
         # Increase confidence slightly on manual updates
-        knowledge["metadata"]["confidence"] = min(knowledge.get("metadata", {}).get("confidence", 0.5) + 0.05, 1.0)
+        knowledge["metadata"]["confidence"] = min(
+            knowledge.get("metadata", {}).get("confidence", 0.5) + 0.05, 1.0
+        )
 
         _save_knowledge(persona, project, knowledge)
 
@@ -862,7 +903,7 @@ async def _knowledge_learn_impl(
     knowledge = _load_knowledge(persona, project)
     if not knowledge:
         # Create minimal knowledge structure
-        knowledge = dict(DEFAULT_KNOWLEDGE_SCHEMA)
+        knowledge = copy.deepcopy(DEFAULT_KNOWLEDGE_SCHEMA)
         knowledge["metadata"]["project"] = project
         knowledge["metadata"]["persona"] = persona
 
@@ -906,7 +947,9 @@ async def _knowledge_learn_impl(
         target[final_key] = entry
 
     # Increase confidence
-    knowledge["metadata"]["confidence"] = min(knowledge.get("metadata", {}).get("confidence", 0.5) + 0.02, 1.0)
+    knowledge["metadata"]["confidence"] = min(
+        knowledge.get("metadata", {}).get("confidence", 0.5) + 0.02, 1.0
+    )
 
     _save_knowledge(persona, project, knowledge)
 
@@ -959,9 +1002,15 @@ async def _knowledge_list_impl() -> list[TextContent]:
                     with open(kf) as f:
                         data = yaml.safe_load(f) or {}
                     confidence = data.get("metadata", {}).get("confidence", 0)
-                    confidence_emoji = "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
-                    last_updated = data.get("metadata", {}).get("last_updated", "?")[:10]
-                    lines.append(f"- **{project}** {confidence_emoji} {confidence:.0%} (updated: {last_updated})")
+                    confidence_emoji = (
+                        "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
+                    )
+                    last_updated = data.get("metadata", {}).get("last_updated", "?")[
+                        :10
+                    ]
+                    lines.append(
+                        f"- **{project}** {confidence_emoji} {confidence:.0%} (updated: {last_updated})"
+                    )
                 except Exception:
                     lines.append(f"- **{project}** ❓")
             lines.append("")

@@ -26,23 +26,7 @@ from typing import cast
 from fastmcp import FastMCP
 
 # Import shared path resolution utilities
-from .tool_paths import PROJECT_DIR, TOOL_MODULES_DIR, get_tools_file_path
-
-
-def get_available_modules() -> set[str]:
-    """
-    Dynamically discover available tool modules from the tool_modules directory.
-
-    Uses the same discovery logic as persona_loader to ensure consistency.
-    """
-    from .persona_loader import get_available_modules as _get_available_modules
-
-    return _get_available_modules()
-
-
-def is_valid_module(module_name: str) -> bool:
-    """Check if a module name is valid (exists in tool_modules)."""
-    return module_name in get_available_modules()
+from .tool_paths import PROJECT_DIR, get_tools_file_path
 
 
 def load_agent_config(agent_name: str) -> list[str] | None:
@@ -59,30 +43,6 @@ def load_agent_config(agent_name: str) -> list[str] | None:
         return cast(list[str], config.get("tools", []))
     except Exception:
         return None
-
-
-def get_tool_module(name: str):
-    """Dynamically load a tool module."""
-    module_dir = TOOL_MODULES_DIR / f"aa_{name}"
-    if not module_dir.exists():
-        return None
-
-    # Add to path if needed
-    src_path = str(module_dir)
-    if src_path not in sys.path:
-        sys.path.insert(0, src_path)
-
-    # Import the tools module
-    from importlib import import_module
-
-    try:
-        return import_module("src.tools")
-    except ImportError:
-        return None
-    finally:
-        # Clean up path to avoid conflicts
-        if src_path in sys.path:
-            sys.path.remove(src_path)
 
 
 def setup_logging() -> logging.Logger:
@@ -137,7 +97,9 @@ def _get_tool_names_sync(server: FastMCP) -> set[str]:
     return tool_names
 
 
-def _load_single_tool_module(tool_name: str, server: FastMCP, tools_before: set[str] | None = None) -> list[str]:
+def _load_single_tool_module(
+    tool_name: str, server: FastMCP, tools_before: set[str] | None = None
+) -> list[str]:
     """
     Load a single tool module and register its tools.
 
@@ -198,7 +160,9 @@ def _register_debug_for_module(server: FastMCP, tool_name: str):
     if not tools_file.exists():
         return
 
-    spec = importlib.util.spec_from_file_location(f"aa_{tool_name}_tools_debug", tools_file)
+    spec = importlib.util.spec_from_file_location(
+        f"aa_{tool_name}_tools_debug", tools_file
+    )
     if spec and spec.loader:
         module = importlib.util.module_from_spec(spec)
         wrap_all_tools(server, module)
@@ -223,6 +187,8 @@ def create_mcp_server(
     server = FastMCP(name)
 
     # Get available modules dynamically
+    from .persona_loader import get_available_modules
+
     available_modules = get_available_modules()
 
     # Determine which tools to load
@@ -239,7 +205,9 @@ def create_mcp_server(
 
     for module_name in tools:
         if module_name not in available_modules:
-            logger.warning(f"Unknown tool module: {module_name}. Available: {sorted(available_modules)}")
+            logger.warning(
+                f"Unknown tool module: {module_name}. Available: {sorted(available_modules)}"
+            )
             continue
 
         try:
@@ -268,7 +236,9 @@ def create_mcp_server(
         # Wrap all tools at runtime to add debug hints on failure
         wrapped_count = wrap_server_tools_runtime(server)
 
-        logger.info(f"Registered debug_tool and wrapped {wrapped_count} tools for auto-fixing")
+        logger.info(
+            f"Registered debug_tool and wrapped {wrapped_count} tools for auto-fixing"
+        )
     except Exception as e:
         logger.warning(f"Could not register debug_tool: {e}")
 
@@ -280,7 +250,8 @@ def create_mcp_server(
         loader.loaded_modules = set(loaded_modules)
         loader._tool_to_module = tool_to_module.copy()
         logger.info(
-            f"Initialized PersonaLoader: {len(loader.loaded_modules)} modules, " f"{len(loader._tool_to_module)} tools"
+            f"Initialized PersonaLoader: {len(loader.loaded_modules)} modules, "
+            f"{len(loader._tool_to_module)} tools"
         )
     except Exception as e:
         logger.warning(f"Could not initialize persona loader: {e}")
@@ -295,7 +266,9 @@ def create_mcp_server(
     except Exception as e:
         logger.warning(f"Could not restore workspace sessions: {e}")
 
-    logger.info(f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}")
+    logger.info(
+        f"Server ready with tools from {len(loaded_modules)} modules: {loaded_modules}"
+    )
     return server
 
 
@@ -332,9 +305,14 @@ async def init_scheduler(server: FastMCP) -> bool:
     _log("init_scheduler called")
 
     try:
-        from tool_modules.aa_workflow.src.notification_engine import init_notification_engine, send_notification
+        from tool_modules.aa_workflow.src.notification_engine import (
+            init_notification_engine,
+            send_notification,
+        )
         from tool_modules.aa_workflow.src.poll_engine import init_poll_engine
-        from tool_modules.aa_workflow.src.scheduler import init_scheduler as init_cron_scheduler
+        from tool_modules.aa_workflow.src.scheduler import (
+            init_scheduler as init_cron_scheduler,
+        )
         from tool_modules.aa_workflow.src.scheduler import start_scheduler
 
         from .state_manager import state as state_manager
@@ -345,7 +323,9 @@ async def init_scheduler(server: FastMCP) -> bool:
 
         scheduler_enabled = state_manager.is_service_enabled("scheduler")
         if not scheduler_enabled:
-            logger.info("Scheduler disabled in state.json (will start config watcher only)")
+            logger.info(
+                "Scheduler disabled in state.json (will start config watcher only)"
+            )
 
         # Initialize notification engine
         init_notification_engine(server=server, config=config)
@@ -438,7 +418,9 @@ async def stop_scheduler():
 
     try:
         from tool_modules.aa_workflow.src.poll_engine import get_poll_engine
-        from tool_modules.aa_workflow.src.scheduler import stop_scheduler as stop_cron_scheduler
+        from tool_modules.aa_workflow.src.scheduler import (
+            stop_scheduler as stop_cron_scheduler,
+        )
 
         await stop_cron_scheduler()
 
@@ -474,17 +456,25 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
         ws_server = await start_websocket_server()
         logger.info("WebSocket server started for real-time updates")
     except ImportError:
-        logger.debug("WebSocket server not available (websockets package not installed)")
+        logger.debug(
+            "WebSocket server not available (websockets package not installed)"
+        )
     except Exception as e:
         logger.warning(f"Failed to start WebSocket server: {e}")
 
     # Initialize Memory Abstraction Layer
     try:
-        from services.memory_abstraction import MemoryInterface, discover_and_load_all_adapters, set_memory_interface
+        from services.memory_abstraction import (
+            MemoryInterface,
+            discover_and_load_all_adapters,
+            set_memory_interface,
+        )
 
         # Discover and load all memory adapters
         adapters = discover_and_load_all_adapters()
-        logger.info(f"Discovered {len(adapters)} memory adapters: {list(adapters.keys())}")
+        logger.info(
+            f"Discovered {len(adapters)} memory adapters: {list(adapters.keys())}"
+        )
 
         # Create memory interface with WebSocket for events
         memory = MemoryInterface(adapters=adapters, websocket_server=ws_server)
@@ -520,9 +510,13 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
 def main():
     """Main entry point with tool selection."""
     # Get available modules for help text
+    from .persona_loader import get_available_modules
+
     available = sorted(get_available_modules())
     # Show base modules (without _basic/_extra suffixes) for cleaner help
-    base_modules = sorted({m.replace("_basic", "").replace("_extra", "") for m in available})
+    base_modules = sorted(
+        {m.replace("_basic", "").replace("_extra", "") for m in available}
+    )
 
     parser = argparse.ArgumentParser(
         description="AA Modular MCP Server",
@@ -580,7 +574,9 @@ Examples:
         tools = load_agent_config(args.agent)
         if tools is None:
             logger.error(f"Agent config not found: {args.agent}")
-            logger.info("Available agents: devops, developer, incident, release, universal")
+            logger.info(
+                "Available agents: devops, developer, incident, release, universal"
+            )
             sys.exit(1)
         server_name = args.name or f"aa-{args.agent}"
         logger.info(f"Loading agent '{args.agent}' with {len(tools)} modules: {tools}")
@@ -603,10 +599,14 @@ Examples:
             # Fallback to workflow only if developer persona missing
             tools = ["workflow"]
             server_name = args.name or "aa_workflow"
-            logger.info("Starting in dynamic mode - use persona_load() to switch personas")
+            logger.info(
+                "Starting in dynamic mode - use persona_load() to switch personas"
+            )
         else:
             server_name = args.name or f"aa-{default_agent}"
-            logger.info(f"Loading default agent '{default_agent}' with {len(tools)} modules: {tools}")
+            logger.info(
+                f"Loading default agent '{default_agent}' with {len(tools)} modules: {tools}"
+            )
 
     try:
         server = create_mcp_server(name=server_name, tools=tools)

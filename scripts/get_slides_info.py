@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Get Google Slides presentation info."""
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "/home/daoneill/src/redhat-ai-workflow")
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tool_modules.aa_google_slides.src.tools_basic import get_slides_service  # noqa: E402
+from tool_modules.aa_google_slides.src.tools_basic import (  # noqa: E402
+    get_slides_service,
+)
 
 PRESENTATION_ID = "179sD9l3SNJIqvUMKlaF0An-ttAx7yLLTUoj-xKdjos8"
 

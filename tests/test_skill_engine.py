@@ -2066,7 +2066,8 @@ class TestModuleLevelHelpers:
 
     def test_check_known_issues_sync_no_files(self):
         with patch(
-            "tool_modules.aa_workflow.src.skill_engine.SKILLS_DIR", Path("/nonexistent")
+            "tool_modules.aa_workflow.src.skill_engine.PROJECT_ROOT",
+            Path("/nonexistent"),
         ):
             matches = _check_known_issues_sync("some_tool", "some error")
             assert matches == []
@@ -2075,10 +2076,7 @@ class TestModuleLevelHelpers:
         """Create a temp patterns file and verify matching."""
         import yaml
 
-        # SKILLS_DIR.parent / "memory" / "learned" is the path used,
-        # so set SKILLS_DIR to tmp_path / "skills" so parent = tmp_path
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
+        # PROJECT_ROOT / "memory" / "learned" is the path used
         patterns_dir = tmp_path / "memory" / "learned"
         patterns_dir.mkdir(parents=True)
         patterns_file = patterns_dir / "patterns.yaml"
@@ -2099,7 +2097,7 @@ class TestModuleLevelHelpers:
                 }
             )
         )
-        with patch("tool_modules.aa_workflow.src.skill_engine.SKILLS_DIR", skills_dir):
+        with patch("tool_modules.aa_workflow.src.skill_engine.PROJECT_ROOT", tmp_path):
             matches = _check_known_issues_sync("", "connection timeout occurred")
             assert len(matches) >= 1
             assert matches[0]["pattern"] == "timeout"
@@ -2108,8 +2106,6 @@ class TestModuleLevelHelpers:
         """Check tool_fixes.yaml matching."""
         import yaml
 
-        skills_dir = tmp_path / "skills"
-        skills_dir.mkdir()
         patterns_dir = tmp_path / "memory" / "learned"
         patterns_dir.mkdir(parents=True)
         # Create empty patterns.yaml
@@ -2128,7 +2124,7 @@ class TestModuleLevelHelpers:
                 }
             )
         )
-        with patch("tool_modules.aa_workflow.src.skill_engine.SKILLS_DIR", skills_dir):
+        with patch("tool_modules.aa_workflow.src.skill_engine.PROJECT_ROOT", tmp_path):
             # Match by tool name
             matches = _check_known_issues_sync("bonfire_deploy", "")
             assert len(matches) >= 1

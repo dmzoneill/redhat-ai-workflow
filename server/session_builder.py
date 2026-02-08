@@ -24,7 +24,7 @@ from typing import Optional
 import yaml
 
 # Workspace paths
-WORKSPACE_ROOT = Path.home() / "src" / "redhat-ai-workflow"
+WORKSPACE_ROOT = Path(__file__).parent.parent
 PERSONAS_DIR = WORKSPACE_ROOT / "personas"
 SKILLS_DIR = WORKSPACE_ROOT / "skills"
 MEMORY_DIR = WORKSPACE_ROOT / "memory"
@@ -121,7 +121,9 @@ class SessionBuilder:
                 context += "### Inputs\n"
                 for inp in skill["inputs"]:
                     req = " (required)" if inp.get("required") else ""
-                    context += f"- **{inp['name']}**{req}: {inp.get('description', '')}\n"
+                    context += (
+                        f"- **{inp['name']}**{req}: {inp.get('description', '')}\n"
+                    )
                 context += "\n"
 
             if skill.get("steps"):
@@ -168,7 +170,9 @@ class SessionBuilder:
                         data = json.loads(content)
 
                     context = f"## Memory: {memory_path}\n\n"
-                    context += f"```yaml\n{yaml.dump(data, default_flow_style=False)}\n```\n\n"
+                    context += (
+                        f"```yaml\n{yaml.dump(data, default_flow_style=False)}\n```\n\n"
+                    )
 
                     # Add to existing memory or create new section
                     if "memory" not in self.context_sections:
@@ -450,4 +454,8 @@ if __name__ == "__main__":
     print(json.dumps(preview["tokens"], indent=2))
     print()
     print("=== Prompt Preview ===")
-    print(preview["prompt"][:2000] + "..." if len(preview["prompt"]) > 2000 else preview["prompt"])
+    print(
+        preview["prompt"][:2000] + "..."
+        if len(preview["prompt"]) > 2000
+        else preview["prompt"]
+    )

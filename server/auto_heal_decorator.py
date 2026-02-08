@@ -21,31 +21,9 @@ import os
 from functools import wraps
 from typing import Callable, Literal
 
+from server.error_patterns import AUTH_PATTERNS, NETWORK_PATTERNS
+
 logger = logging.getLogger(__name__)
-
-# Error patterns for detection
-AUTH_PATTERNS = [
-    "unauthorized",
-    "401",
-    "forbidden",
-    "403",
-    "token expired",
-    "authentication required",
-    "not authorized",
-    "permission denied",
-    "the server has asked for the client to provide credentials",
-]
-
-NETWORK_PATTERNS = [
-    "no route to host",
-    "connection refused",
-    "network unreachable",
-    "timeout",
-    "dial tcp",
-    "connection reset",
-    "eof",
-    "cannot connect",
-]
 
 ClusterType = Literal["stage", "prod", "ephemeral", "konflux", "auto"]
 
@@ -124,7 +102,9 @@ async def _run_kube_login(cluster: str) -> bool:
             short = short[0]
 
         kubeconfig_suffix = {"s": ".s", "p": ".p", "e": ".e", "k": ".k"}
-        kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}")
+        kubeconfig = os.path.expanduser(
+            f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}"
+        )
 
         # Step 1: Check if existing credentials are stale
         if os.path.exists(kubeconfig):
@@ -185,7 +165,9 @@ async def _run_vpn_connect() -> bool:
         vpn_script = paths.get("vpn_connect_script")
 
         if not vpn_script:
-            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+            vpn_script = os.path.expanduser(
+                "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+            )
         else:
             vpn_script = os.path.expanduser(vpn_script)
 
@@ -204,7 +186,9 @@ async def _run_vpn_connect() -> bool:
             return False
         else:
             # Fallback to nmcli with common VPN connection names
-            logger.info(f"Auto-heal: VPN script not found at {vpn_script}, trying nmcli fallback")
+            logger.info(
+                f"Auto-heal: VPN script not found at {vpn_script}, trying nmcli fallback"
+            )
             vpn_names = [
                 "Red Hat Global VPN",
                 "Red Hat VPN",
@@ -217,7 +201,9 @@ async def _run_vpn_connect() -> bool:
                     timeout=30,
                 )
                 if success:
-                    logger.info(f"Auto-heal: vpn_connect successful via nmcli ({vpn_name})")
+                    logger.info(
+                        f"Auto-heal: vpn_connect successful via nmcli ({vpn_name})"
+                    )
                     return True
 
             logger.warning("Auto-heal: All VPN connection attempts failed")
@@ -237,7 +223,9 @@ def _update_rolling_stats(data: dict, today: str, this_week: str) -> None:
         data["stats"] = {}
 
     # Total counters (only for recent window)
-    data["stats"]["total_failures"] = min(data["stats"].get("total_failures", 0) + 1, 1000)
+    data["stats"]["total_failures"] = min(
+        data["stats"].get("total_failures", 0) + 1, 1000
+    )
     data["stats"]["auto_fixed"] = min(data["stats"].get("auto_fixed", 0) + 1, 1000)
 
     # Daily stats
@@ -352,11 +340,17 @@ def _convert_result_to_string(result: any) -> str:
     return str(result)
 
 
-async def _apply_auto_heal_fix(failure_type: str, cluster: ClusterType, tool_name: str, result_str: str) -> bool:
+async def _apply_auto_heal_fix(
+    failure_type: str, cluster: ClusterType, tool_name: str, result_str: str
+) -> bool:
     """Apply auto-heal fix based on failure type."""
     if failure_type == "auth":
-        target_cluster = cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
-        logger.info(f"Auto-heal: {tool_name} auth failure, running kube_login({target_cluster})")
+        target_cluster = (
+            cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
+        )
+        logger.info(
+            f"Auto-heal: {tool_name} auth failure, running kube_login({target_cluster})"
+        )
         return await _run_kube_login(target_cluster)
     elif failure_type == "network":
         logger.info(f"Auto-heal: {tool_name} network failure, running vpn_connect()")
@@ -372,7 +366,9 @@ async def _handle_retry_with_heal(
     result_str: str,
 ) -> bool:
     """Handle retry with auto-heal fix application and logging."""
-    fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, result_str)
+    fix_applied = await _apply_auto_heal_fix(
+        failure_type, cluster, tool_name, result_str
+    )
 
     if not fix_applied:
         logger.warning(f"Auto-heal: fix for {tool_name} failed, giving up")
@@ -463,12 +459,16 @@ def auto_heal(
 
                     if failure_type not in retry_on:
                         # Not a retryable failure type
-                        logger.debug(f"Auto-heal: {tool_name} failed with non-retryable type: {failure_type}")
+                        logger.debug(
+                            f"Auto-heal: {tool_name} failed with non-retryable type: {failure_type}"
+                        )
                         return result
 
                     if attempt >= max_retries:
                         # Out of retries
-                        logger.warning(f"Auto-heal: {tool_name} failed after {attempt + 1} attempts")
+                        logger.warning(
+                            f"Auto-heal: {tool_name} failed after {attempt + 1} attempts"
+                        )
                         return result
 
                     # Apply fix and log
@@ -478,7 +478,9 @@ def auto_heal(
 
                     if not fix_success:
                         return result
-                    logger.info(f"Auto-heal: retrying {tool_name} (attempt {attempt + 2}/{max_retries + 1})")
+                    logger.info(
+                        f"Auto-heal: retrying {tool_name} (attempt {attempt + 2}/{max_retries + 1})"
+                    )
 
                 except Exception as e:
                     # Handle exceptions (not just error messages in output)
@@ -486,7 +488,9 @@ def auto_heal(
                     failure_type, _ = _detect_failure_type(error_str)
 
                     if failure_type in retry_on and attempt < max_retries:
-                        fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, error_str)
+                        fix_applied = await _apply_auto_heal_fix(
+                            failure_type, cluster, tool_name, error_str
+                        )
                         if fix_applied:
                             await asyncio.sleep(1)
                             continue

@@ -119,38 +119,6 @@ def workspace_tool(required_modules: list[str] | None = None):
     return decorator
 
 
-def workspace_aware(func: F) -> F:
-    """Decorator to mark a tool as workspace-aware.
-
-    This is a lighter decorator that doesn't enforce module access,
-    but ensures the tool has access to workspace state.
-
-    The decorated function can access workspace state via:
-        state = await WorkspaceRegistry.get_for_ctx(ctx)
-
-    Args:
-        func: The tool function to decorate
-
-    Returns:
-        Decorated function
-
-    Example:
-        @registry.tool()
-        @workspace_aware
-        async def my_tool(ctx: Context, ...) -> str:
-            from server.workspace_state import WorkspaceRegistry
-            state = await WorkspaceRegistry.get_for_ctx(ctx)
-            project = state.project
-            ...
-    """
-
-    @functools.wraps(func)
-    async def wrapper(ctx: "Context", *args, **kwargs):
-        return await func(ctx, *args, **kwargs)
-
-    return wrapper  # type: ignore
-
-
 async def check_workspace_access(
     ctx: "Context",
     required_modules: list[str],
@@ -191,7 +159,8 @@ async def check_workspace_access(
 
     suggested = _suggest_persona(missing[0])
     error = (
-        f"❌ Required module(s) not loaded: {', '.join(missing)}\n\n" f"Run `persona_load('{suggested}')` to enable."
+        f"❌ Required module(s) not loaded: {', '.join(missing)}\n\n"
+        f"Run `persona_load('{suggested}')` to enable."
     )
     return False, error
 

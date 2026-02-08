@@ -11,10 +11,7 @@ from server.main import (
     _load_single_tool_module,
     _register_debug_for_module,
     create_mcp_server,
-    get_available_modules,
-    get_tool_module,
     init_scheduler,
-    is_valid_module,
     load_agent_config,
     main,
     run_mcp_server,
@@ -37,35 +34,6 @@ class TestSetupLogging:
         setup_logging()
         root = logging.getLogger()
         assert len(root.handlers) >= 1
-
-
-# ────────────────────────────────────────────────────────────────────
-# get_available_modules / is_valid_module
-# ────────────────────────────────────────────────────────────────────
-
-
-class TestGetAvailableModules:
-    def test_returns_set(self):
-        with patch(
-            "server.persona_loader.get_available_modules", return_value={"git", "jira"}
-        ):
-            result = get_available_modules()
-        assert isinstance(result, set)
-        assert result == {"git", "jira"}
-
-
-class TestIsValidModule:
-    def test_valid(self):
-        with patch(
-            "server.persona_loader.get_available_modules", return_value={"git", "jira"}
-        ):
-            assert is_valid_module("git") is True
-
-    def test_invalid(self):
-        with patch(
-            "server.persona_loader.get_available_modules", return_value={"git", "jira"}
-        ):
-            assert is_valid_module("nonexistent") is False
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -405,66 +373,6 @@ class TestCreateMcpServer:
             mock_loader.return_value = MagicMock()
             server = create_mcp_server(tools=["git"])
         assert server is not None
-
-
-# ────────────────────────────────────────────────────────────────────
-# get_tool_module
-# ────────────────────────────────────────────────────────────────────
-
-
-class TestGetToolModule:
-    def test_returns_none_for_nonexistent_dir(self):
-        with patch("server.main.TOOL_MODULES_DIR", Path("/nonexistent")):
-            result = get_tool_module("no_such_module")
-        assert result is None
-
-    def test_loads_module_from_existing_dir(self, tmp_path):
-        # Create directory structure: aa_test/ with src/tools.py
-        mod_dir = tmp_path / "aa_test"
-        mod_dir.mkdir()
-        src_dir = mod_dir / "src"
-        src_dir.mkdir()
-        (src_dir / "__init__.py").write_text("")
-        (src_dir / "tools.py").write_text("LOADED = True\n")
-
-        with patch("server.main.TOOL_MODULES_DIR", tmp_path):
-            # The function tries import_module("src.tools") which needs
-            # the module dir on sys.path. But we're testing path handling.
-            # Import will likely fail since it's a bare module, so test the
-            # ImportError path returns None.
-            result = get_tool_module("test")
-
-        # Either None (ImportError) or a module
-        assert result is None or hasattr(result, "LOADED")
-
-    def test_returns_none_on_import_error(self, tmp_path):
-        # Create dir but no src/tools.py -> ImportError
-        mod_dir = tmp_path / "aa_broken"
-        mod_dir.mkdir()
-        # Remove any cached src.tools from previous test
-        import sys as _sys
-
-        _sys.modules.pop("src.tools", None)
-        _sys.modules.pop("src", None)
-
-        with patch("server.main.TOOL_MODULES_DIR", tmp_path):
-            result = get_tool_module("broken")
-
-        assert result is None
-
-    def test_cleans_up_sys_path(self, tmp_path):
-        import sys
-
-        mod_dir = tmp_path / "aa_pathtest"
-        mod_dir.mkdir()
-
-        src_path = str(mod_dir)
-        assert src_path not in sys.path
-
-        with patch("server.main.TOOL_MODULES_DIR", tmp_path):
-            get_tool_module("pathtest")
-
-        assert src_path not in sys.path
 
 
 # ────────────────────────────────────────────────────────────────────

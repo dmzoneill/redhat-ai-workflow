@@ -9,7 +9,6 @@ from server.workspace_tools import (
     _suggest_persona,
     check_workspace_access,
     get_workspace_context,
-    workspace_aware,
     workspace_tool,
 )
 
@@ -207,33 +206,6 @@ class TestWorkspaceTool:
             result = await my_tool(ctx, 1, 2, c=3)
 
         assert result == 6
-
-
-# ────────────────────────────────────────────────────────────────────
-# workspace_aware decorator
-# ────────────────────────────────────────────────────────────────────
-
-
-class TestWorkspaceAware:
-    @pytest.mark.asyncio
-    async def test_passes_through(self):
-        """workspace_aware simply wraps without access checks."""
-
-        @workspace_aware
-        async def my_tool(ctx, value):
-            return f"got:{value}"
-
-        ctx = _mock_ctx()
-        result = await my_tool(ctx, "abc")
-        assert result == "got:abc"
-
-    @pytest.mark.asyncio
-    async def test_preserves_function_name(self):
-        @workspace_aware
-        async def cool_tool(ctx):
-            pass
-
-        assert cool_tool.__name__ == "cool_tool"
 
 
 # ────────────────────────────────────────────────────────────────────

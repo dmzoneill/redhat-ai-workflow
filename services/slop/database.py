@@ -255,6 +255,27 @@ class SlopDatabase:
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
 
+        # Whitelist allowed columns to prevent SQL injection
+        ALLOWED_ORDER_COLUMNS = {
+            "detected_at",
+            "severity",
+            "category",
+            "status",
+            "file",
+            "loop",
+            "detected_at DESC",
+            "detected_at ASC",
+            "severity DESC",
+            "severity ASC",
+            "category DESC",
+            "category ASC",
+            "status DESC",
+            "status ASC",
+            "file DESC",
+            "file ASC",
+        }
+        if order_by not in ALLOWED_ORDER_COLUMNS:
+            order_by = "detected_at DESC"
         query += f" ORDER BY {order_by} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
@@ -353,22 +374,30 @@ class SlopDatabase:
             stats["total"] = row["count"]
 
         # By loop
-        async with self._db.execute("SELECT loop, COUNT(*) as count FROM findings GROUP BY loop") as cursor:
+        async with self._db.execute(
+            "SELECT loop, COUNT(*) as count FROM findings GROUP BY loop"
+        ) as cursor:
             async for row in cursor:
                 stats["by_loop"][row["loop"]] = row["count"]
 
         # By category
-        async with self._db.execute("SELECT category, COUNT(*) as count FROM findings GROUP BY category") as cursor:
+        async with self._db.execute(
+            "SELECT category, COUNT(*) as count FROM findings GROUP BY category"
+        ) as cursor:
             async for row in cursor:
                 stats["by_category"][row["category"]] = row["count"]
 
         # By severity
-        async with self._db.execute("SELECT severity, COUNT(*) as count FROM findings GROUP BY severity") as cursor:
+        async with self._db.execute(
+            "SELECT severity, COUNT(*) as count FROM findings GROUP BY severity"
+        ) as cursor:
             async for row in cursor:
                 stats["by_severity"][row["severity"]] = row["count"]
 
         # By status
-        async with self._db.execute("SELECT status, COUNT(*) as count FROM findings GROUP BY status") as cursor:
+        async with self._db.execute(
+            "SELECT status, COUNT(*) as count FROM findings GROUP BY status"
+        ) as cursor:
             async for row in cursor:
                 stats["by_status"][row["status"]] = row["count"]
 
@@ -441,7 +470,9 @@ class SlopDatabase:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
-    async def get_loop_history(self, loop_name: Optional[str] = None, limit: int = 10) -> list[dict]:
+    async def get_loop_history(
+        self, loop_name: Optional[str] = None, limit: int = 10
+    ) -> list[dict]:
         """Get loop run history."""
         if not self._initialized:
             await self.initialize()

@@ -445,12 +445,19 @@ class TestGetWorkspaceStateDict:
 
 class TestIsToolActiveForWorkspace:
     @pytest.mark.asyncio
-    async def test_always_returns_true(self):
+    async def test_always_returns_true_with_deprecation_warning(self):
         from server.workspace_utils import is_tool_active_for_workspace
 
         ctx = _mock_ctx()
-        result = await is_tool_active_for_workspace(ctx, "k8s")
-        assert result is True
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = await is_tool_active_for_workspace(ctx, "k8s")
+            assert result is True
+            assert len(w) == 1
+            assert issubclass(w[0].category, DeprecationWarning)
+            assert "always returns True" in str(w[0].message)
 
 
 # ────────────────────────────────────────────────────────────────────

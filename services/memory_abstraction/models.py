@@ -138,7 +138,9 @@ class AdapterResult:
     items: list[MemoryItem] = field(default_factory=list)  # Result items
     error: str | None = None  # Error message if query failed
     latency_ms: float = 0.0  # Query latency in milliseconds
-    _found: bool | None = field(default=None, repr=False)  # Optional explicit found flag
+    _found: bool | None = field(
+        default=None, repr=False
+    )  # Optional explicit found flag
 
     @property
     def found(self) -> bool:
@@ -183,8 +185,12 @@ class QueryResult:
 
     query: str  # Original query
     intent: IntentClassification  # Intent classification (always included)
-    sources_queried: list[str] = field(default_factory=list)  # Sources that were searched
-    items: list[MemoryItem] = field(default_factory=list)  # Results, sorted by relevance
+    sources_queried: list[str] = field(
+        default_factory=list
+    )  # Sources that were searched
+    items: list[MemoryItem] = field(
+        default_factory=list
+    )  # Results, sorted by relevance
     total_count: int = 0  # Total matches (items may be truncated)
     latency_ms: float = 0.0  # Total query time
     errors: dict[str, str] = field(default_factory=dict)  # Source -> error message
@@ -231,6 +237,11 @@ class HealthStatus:
         }
 
 
+# Latency class constants
+LATENCY_FAST = "fast"  # <2s - local operations, vector DBs
+LATENCY_SLOW = "slow"  # >2s - external APIs, AI queries
+
+
 @dataclass
 class AdapterInfo:
     """
@@ -246,6 +257,7 @@ class AdapterInfo:
     capabilities: set[str]  # {"query", "store", "search"}
     intent_keywords: list[str]  # For routing: ["function", "class"]
     priority: int = 50  # Higher = preferred when multiple match
+    latency_class: str = LATENCY_FAST  # "fast" (<2s) or "slow" (>2s)
     source_file: str = ""  # Path to adapter source file
     adapter_class: type | None = None  # The adapter class itself
 
@@ -258,5 +270,11 @@ class AdapterInfo:
             "capabilities": list(self.capabilities),
             "intent_keywords": self.intent_keywords,
             "priority": self.priority,
+            "latency_class": self.latency_class,
             "source_file": self.source_file,
         }
+
+    @property
+    def is_fast(self) -> bool:
+        """Check if this adapter is fast (suitable for bootstrap)."""
+        return self.latency_class == LATENCY_FAST

@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import cast
 
+from server.error_patterns import AUTH_PATTERNS
+
 logger = logging.getLogger(__name__)
 
 
@@ -323,10 +325,14 @@ async def refresh_cluster_auth(environment: str) -> bool:
         True if refresh succeeded, False otherwise.
     """
     short_name = get_cluster_short_name(environment)
-    logger.info(f"Refreshing {environment} auth via kube-clean {short_name} && kube {short_name}")
+    logger.info(
+        f"Refreshing {environment} auth via kube-clean {short_name} && kube {short_name}"
+    )
 
     # First clean stale config
-    clean_success, _, clean_stderr = await run_cmd_shell(["kube-clean", short_name], timeout=30)
+    clean_success, _, clean_stderr = await run_cmd_shell(
+        ["kube-clean", short_name], timeout=30
+    )
     if not clean_success:
         logger.warning(f"kube-clean {short_name} failed: {clean_stderr}")
         # Continue anyway - kube might still work
@@ -341,7 +347,9 @@ async def refresh_cluster_auth(environment: str) -> bool:
         return False
 
 
-async def ensure_cluster_auth(environment: str, auto_refresh: bool = True) -> tuple[bool, str]:
+async def ensure_cluster_auth(
+    environment: str, auto_refresh: bool = True
+) -> tuple[bool, str]:
     """Ensure cluster authentication is valid, optionally refreshing if needed.
 
     Args:
@@ -393,7 +401,9 @@ def get_env_config(environment: str, service: str) -> dict:
 
     # Ensure kubeconfig is resolved
     if "kubeconfig" in env_config:
-        env_config["kubeconfig"] = os.path.expanduser(cast(str, env_config["kubeconfig"]))
+        env_config["kubeconfig"] = os.path.expanduser(
+            cast(str, env_config["kubeconfig"])
+        )
     else:
         env_config["kubeconfig"] = get_kubeconfig(environment)
 
@@ -823,19 +833,8 @@ def is_auth_error(output: str) -> bool:
     Returns:
         True if this is an authentication error
     """
-    auth_patterns = [
-        "provide credentials",
-        "unauthorized",
-        "token expired",
-        "token has expired",
-        "login required",
-        "must be logged in",
-        "No valid authentication",
-        "401",
-        "403 forbidden",
-    ]
     output_lower = output.lower()
-    return any(pattern.lower() in output_lower for pattern in auth_patterns)
+    return any(pattern.lower() in output_lower for pattern in AUTH_PATTERNS)
 
 
 def get_auth_hint(environment: str) -> str:

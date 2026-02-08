@@ -201,9 +201,15 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         results = []
 
         try:
-            workspace_storage = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+            workspace_storage = (
+                Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+            )
             if not workspace_storage.exists():
-                return {"results": [], "query": query, "error": "Cursor storage not found"}
+                return {
+                    "results": [],
+                    "query": query,
+                    "error": "Cursor storage not found",
+                }
 
             query_lower = query.lower()
             query_pattern = re.compile(re.escape(query), re.IGNORECASE)
@@ -238,7 +244,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     # Use context manager to ensure connection is always closed
                     with sqlite3.connect(str(db_path)) as conn:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
+                        cursor.execute(
+                            "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
+                        )
                         row = cursor.fetchone()
 
                     if not row or not row[0]:
@@ -291,7 +299,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                                     "project": project,
                                     "workspace_uri": folder_uri,
                                     "name_match": name_match,
-                                    "content_matches": content_matches[:3],  # Limit snippets
+                                    "content_matches": content_matches[
+                                        :3
+                                    ],  # Limit snippets
                                     "match_count": len(content_matches),
                                     "last_updated": composer.get("lastUpdatedAt"),
                                 }
@@ -410,7 +420,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 local_path = repo.get("path", "")
                 if local_path:
                     self._configured_paths.add(str(Path(local_path).resolve()))
-            logger.info(f"Loaded {len(self._configured_paths)} configured repository paths")
+            logger.info(
+                f"Loaded {len(self._configured_paths)} configured repository paths"
+            )
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
             self._configured_paths = set()
@@ -418,7 +430,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     def _compute_state_hash(self) -> str:
         """Compute a hash of the current Cursor session state."""
         try:
-            workspace_storage = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+            workspace_storage = (
+                Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+            )
             if not workspace_storage.exists():
                 return ""
 
@@ -462,8 +476,12 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         This is called once at startup and cached to avoid iterating
         106+ directories every second.
         """
-        self._workspace_storage_map: dict[str, Path] = {}  # workspace_uri -> storage_dir
-        workspace_storage = Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+        self._workspace_storage_map: dict[str, Path] = (
+            {}
+        )  # workspace_uri -> storage_dir
+        workspace_storage = (
+            Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+        )
 
         if not workspace_storage.exists():
             return
@@ -493,7 +511,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             except (json.JSONDecodeError, OSError):
                 continue
 
-        logger.info(f"Built workspace storage map: {len(self._workspace_storage_map)} configured workspaces")
+        logger.info(
+            f"Built workspace storage map: {len(self._workspace_storage_map)} configured workspaces"
+        )
 
     def _get_active_session_ids(self) -> tuple[dict[str, str | None], int]:
         """Get active session IDs from Cursor's workspace databases (fast, lightweight).
@@ -508,7 +528,10 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         total_session_count = 0
 
         # Build map if not exists
-        if not hasattr(self, "_workspace_storage_map") or not self._workspace_storage_map:
+        if (
+            not hasattr(self, "_workspace_storage_map")
+            or not self._workspace_storage_map
+        ):
             self._build_workspace_storage_map()
 
         # Initialize session count cache if needed
@@ -527,14 +550,18 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 cached_mtime = self._db_mtimes.get(str(db_path), 0)
                 if stat.st_mtime == cached_mtime:
                     # DB unchanged, use cached session count
-                    total_session_count += self._workspace_session_counts.get(folder_uri, 0)
+                    total_session_count += self._workspace_session_counts.get(
+                        folder_uri, 0
+                    )
                     continue
 
                 # Use sqlite3 module directly (faster than subprocess)
                 # Use context manager to ensure connection is always closed
                 with sqlite3.connect(str(db_path)) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT value FROM ItemTable WHERE key = 'composer.composerData'")
+                    cursor.execute(
+                        "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
+                    )
                     row = cursor.fetchone()
 
                 if row and row[0]:
@@ -547,7 +574,11 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
                     # Count non-archived, non-draft sessions
                     all_composers = composer_data.get("allComposers", [])
-                    active_count = sum(1 for c in all_composers if not c.get("isArchived") and not c.get("isDraft"))
+                    active_count = sum(
+                        1
+                        for c in all_composers
+                        if not c.get("isArchived") and not c.get("isDraft")
+                    )
                     total_session_count += active_count
 
                     # Cache the session count for this workspace
@@ -575,7 +606,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._recent_active_sessions.insert(0, active_session_id)
 
         # Trim to max size
-        self._recent_active_sessions = self._recent_active_sessions[: self._recent_session_count]
+        self._recent_active_sessions = self._recent_active_sessions[
+            : self._recent_session_count
+        ]
 
         # Track last active
         self._last_active_session_id = active_session_id
@@ -595,9 +628,13 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             changed = False
 
             # Check for session count changes (sessions added or deleted)
-            if self._last_session_count >= 0 and session_count != self._last_session_count:
+            if (
+                self._last_session_count >= 0
+                and session_count != self._last_session_count
+            ):
                 logger.info(
-                    f"Session count changed: {self._last_session_count} -> {session_count}, " f"triggering full sync"
+                    f"Session count changed: {self._last_session_count} -> {session_count}, "
+                    f"triggering full sync"
                 )
                 # Trigger a full sync to update the registry with adds/removes
                 await self._do_sync()
@@ -608,7 +645,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # Check for active session changes
             for _workspace_uri, session_id in active_sessions.items():
                 if session_id and session_id != self._last_active_session_id:
-                    logger.debug(f"Active session changed: {session_id[:8] if session_id else 'None'}")
+                    logger.debug(
+                        f"Active session changed: {session_id[:8] if session_id else 'None'}"
+                    )
                     self._update_recent_sessions(session_id)
                     changed = True
 
@@ -641,7 +680,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 WorkspaceRegistry.load_from_disk()
 
             # Sync only recent sessions (never pass None - that triggers full scan)
-            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=self._recent_active_sessions)
+            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
+                session_ids=self._recent_active_sessions
+            )
 
             # Get all workspace states and sessions for state file
             all_states = WorkspaceRegistry.get_all_as_dict()
@@ -668,7 +709,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             self._sync_count += 1
             self._last_sync_time = time.time()
-            logger.debug(f"Recent sync: {len(self._recent_active_sessions)} sessions, {sync_result}")
+            logger.debug(
+                f"Recent sync: {len(self._recent_active_sessions)} sessions, {sync_result}"
+            )
             self.record_successful_operation()
 
             return sync_result
@@ -698,10 +741,16 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             # Get all session IDs
             all_sessions = WorkspaceRegistry.get_all_sessions()
-            all_session_ids = [s.get("session_id") for s in all_sessions if s.get("session_id")]
+            all_session_ids = [
+                s.get("session_id") for s in all_sessions if s.get("session_id")
+            ]
 
             # Exclude recent sessions (already synced frequently)
-            background_ids = [sid for sid in all_session_ids if sid not in self._recent_active_sessions]
+            background_ids = [
+                sid
+                for sid in all_session_ids
+                if sid not in self._recent_active_sessions
+            ]
 
             if not background_ids:
                 logger.debug("No background sessions to sync")
@@ -721,10 +770,14 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if not batch_ids:
                 return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
-            logger.debug(f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start})")
+            logger.debug(
+                f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start})"
+            )
 
             # Sync this batch
-            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=batch_ids)
+            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
+                session_ids=batch_ids
+            )
 
             # Get updated states
             all_states = WorkspaceRegistry.get_all_as_dict()
@@ -748,7 +801,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             self._write_state_file(session_state)
 
             self._last_background_sync = time.time()
-            logger.debug(f"Background sync: batch {batch_start}-{batch_end}, {sync_result}")
+            logger.debug(
+                f"Background sync: batch {batch_start}-{batch_end}, {sync_result}"
+            )
 
             return sync_result
 
@@ -877,7 +932,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         SESSION_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
         # Write to temp file then rename (atomic on POSIX)
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="session_state_", dir=SESSION_STATE_FILE.parent)
+        temp_fd, temp_path = tempfile.mkstemp(
+            suffix=".tmp", prefix="session_state_", dir=SESSION_STATE_FILE.parent
+        )
         try:
             with os.fdopen(temp_fd, "w") as f:
                 json.dump(state, f, indent=2, default=str)
@@ -931,7 +988,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         Syncs the last N active sessions with full detail (persona, issue keys, etc).
         """
-        logger.info(f"Starting recent sync loop (interval: {self._recent_sync_interval}s)")
+        logger.info(
+            f"Starting recent sync loop (interval: {self._recent_sync_interval}s)"
+        )
 
         while not self._shutdown_event.is_set():
             try:
@@ -954,7 +1013,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         Processes sessions in batches to avoid CPU spikes.
         """
-        logger.info(f"Starting background sync loop (interval: {self._background_sync_interval}s)")
+        logger.info(
+            f"Starting background sync loop (interval: {self._background_sync_interval}s)"
+        )
 
         while not self._shutdown_event.is_set():
             try:
@@ -1042,7 +1103,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("System wake detected - triggering session refresh")
         try:
             # Trigger immediate sync of recent sessions
-            await self._sync_recent_sessions()
+            await self._do_recent_sync()
             logger.info("Post-wake session refresh complete")
         except Exception as e:
             logger.error(f"Error refreshing sessions after wake: {e}")

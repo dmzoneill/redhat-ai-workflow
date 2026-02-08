@@ -11,6 +11,7 @@ import yaml
 from mcp.types import TextContent
 
 from tool_modules.aa_workflow.src import meta_tools as mt
+from tool_modules.aa_workflow.src import skill_engine as se
 
 # ==================== Fixtures ====================
 
@@ -20,7 +21,8 @@ def temp_memory_dir(tmp_path):
     """Create a temporary memory directory for known issues checking."""
     learned_dir = tmp_path / "learned"
     learned_dir.mkdir()
-    with patch.object(mt, "PROJECT_ROOT", tmp_path):
+    # Patch PROJECT_ROOT in skill_engine where _check_known_issues_sync lives
+    with patch.object(se, "PROJECT_ROOT", tmp_path):
         yield tmp_path
 
 

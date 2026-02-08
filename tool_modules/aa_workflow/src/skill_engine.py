@@ -118,7 +118,9 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     tool_lower = tool_name.lower() if tool_name else ""
 
     try:
-        patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+        memory_dir = PROJECT_ROOT / "memory" / "learned"
+
+        patterns_file = memory_dir / "patterns.yaml"
         if patterns_file.exists():
             with open(patterns_file) as f:
                 patterns = yaml.safe_load(f) or {}
@@ -146,7 +148,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                         )
 
         # Check tool_fixes.yaml
-        fixes_file = SKILLS_DIR.parent / "memory" / "learned" / "tool_fixes.yaml"
+        fixes_file = memory_dir / "tool_fixes.yaml"
         if fixes_file.exists():
             with open(fixes_file) as f:
                 fixes = yaml.safe_load(f) or {}
@@ -551,37 +553,8 @@ class SkillExecutor:
                 logger.info(
                     f"Event emitter initialized for skill: {skill_name} (workspace: {workspace_uri}, source: {source})"
                 )
-                # Debug: write to a file to confirm emitter is created
-                from pathlib import Path
-
-                debug_file = (
-                    Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
-                )
-                debug_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(debug_file, "a") as f:
-                    from datetime import datetime
-
-                    skill_name = skill.get("name", "unknown")
-                    f.write(
-                        f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"
-                    )
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
-                # Also write to debug file on failure
-                try:
-                    from datetime import datetime
-                    from pathlib import Path
-
-                    debug_file = (
-                        Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
-                    )
-                    debug_file.parent.mkdir(parents=True, exist_ok=True)
-                    with open(debug_file, "a") as f:
-                        f.write(
-                            f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n"
-                        )
-                except Exception:
-                    pass
 
         # Layer 5: Initialize usage pattern learner
         self.usage_learner = None
@@ -954,8 +927,14 @@ class SkillExecutor:
 
         return pattern.sub(replace, str(text))
 
-    def _linkify_mr_ids(self, text):
-        """Convert MR IDs to clickable links (Slack or Markdown format)."""
+    def _linkify_mr_ids(self, text, project=None):
+        """Convert MR IDs to clickable links (Slack or Markdown format).
+
+        Args:
+            text: Text containing MR IDs like !42
+            project: GitLab project path (e.g. "org/repo"). If not provided,
+                     looks up the first repository's gitlab path from config.
+        """
         import re
 
         if not text:
@@ -965,7 +944,14 @@ class SkillExecutor:
         gitlab_url = self.config.get("gitlab", {}).get(
             "url", "https://gitlab.cee.redhat.com"
         )
-        project = "automation-analytics/automation-analytics-backend"
+        if project is None:
+            # Resolve from config: use the first repository's gitlab path
+            repos = self.config.get("repositories", {})
+            if repos:
+                first_repo = next(iter(repos.values()), {})
+                project = first_repo.get("gitlab", "")
+            if not project:
+                project = "unknown/project"
 
         pattern = re.compile(r"!(\d+)")
 

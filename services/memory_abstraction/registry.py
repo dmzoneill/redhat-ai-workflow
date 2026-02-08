@@ -29,55 +29,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from .models import LATENCY_FAST, LATENCY_SLOW, AdapterInfo
+
 logger = logging.getLogger(__name__)
 
 # Project root for module discovery
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 ADAPTER_FILE = "adapter.py"
-
-
-# Latency class constants
-LATENCY_FAST = "fast"  # <2s - local operations, vector DBs
-LATENCY_SLOW = "slow"  # >2s - external APIs, AI queries
-
-
-@dataclass
-class AdapterInfo:
-    """
-    Metadata about a registered adapter.
-
-    Stored in ADAPTER_MANIFEST when an adapter is registered
-    via the @memory_adapter decorator.
-    """
-
-    name: str  # Unique ID: "code", "slack", "yaml"
-    module: str  # Source module: "code_search", "slack_persona"
-    display_name: str  # Human readable: "Code Search"
-    capabilities: set[str]  # {"query", "store", "search"}
-    intent_keywords: list[str]  # For routing: ["function", "class"]
-    priority: int = 50  # Higher = preferred when multiple match
-    latency_class: str = LATENCY_FAST  # "fast" (<2s) or "slow" (>2s)
-    source_file: str = ""  # Path to adapter source file
-    adapter_class: type | None = None  # The adapter class itself
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary (excluding class reference)."""
-        return {
-            "name": self.name,
-            "module": self.module,
-            "display_name": self.display_name,
-            "capabilities": list(self.capabilities),
-            "intent_keywords": self.intent_keywords,
-            "priority": self.priority,
-            "latency_class": self.latency_class,
-            "source_file": self.source_file,
-        }
-
-    @property
-    def is_fast(self) -> bool:
-        """Check if this adapter is fast (suitable for bootstrap)."""
-        return self.latency_class == LATENCY_FAST
 
 
 @dataclass
@@ -91,7 +50,9 @@ class AdapterManifest:
     adapters: dict[str, AdapterInfo] = field(default_factory=dict)
     modules: dict[str, str] = field(default_factory=dict)  # module -> adapter_name
     _frozen: bool = False
-    _instances: dict[str, object] = field(default_factory=dict)  # Cached adapter instances
+    _instances: dict[str, object] = field(
+        default_factory=dict
+    )  # Cached adapter instances
 
     def register(self, info: AdapterInfo) -> None:
         """Register an adapter in the manifest."""
@@ -106,7 +67,10 @@ class AdapterManifest:
         if info.module:
             self.modules[info.module] = info.name
 
-        logger.debug(f"Registered adapter: {info.name} (module={info.module}, " f"capabilities={info.capabilities})")
+        logger.debug(
+            f"Registered adapter: {info.name} (module={info.module}, "
+            f"capabilities={info.capabilities})"
+        )
 
     def get_adapter(self, name: str) -> AdapterInfo | None:
         """Get adapter info by name."""
@@ -144,18 +108,27 @@ class AdapterManifest:
 
     def list_by_capability(self, capability: str) -> list[str]:
         """List adapters that support a specific capability."""
-        return [name for name, info in self.adapters.items() if capability in info.capabilities]
+        return [
+            name
+            for name, info in self.adapters.items()
+            if capability in info.capabilities
+        ]
 
     def list_by_latency_class(self, latency_class: str) -> list[str]:
         """List adapters by latency class ('fast' or 'slow')."""
-        return [name for name, info in self.adapters.items() if info.latency_class == latency_class]
+        return [
+            name
+            for name, info in self.adapters.items()
+            if info.latency_class == latency_class
+        ]
 
     def list_fast_adapters(self, capability: str | None = None) -> list[str]:
         """List fast adapters, optionally filtered by capability."""
         return [
             name
             for name, info in self.adapters.items()
-            if info.latency_class == LATENCY_FAST and (capability is None or capability in info.capabilities)
+            if info.latency_class == LATENCY_FAST
+            and (capability is None or capability in info.capabilities)
         ]
 
     def list_slow_adapters(self, capability: str | None = None) -> list[str]:
@@ -163,7 +136,8 @@ class AdapterManifest:
         return [
             name
             for name, info in self.adapters.items()
-            if info.latency_class == LATENCY_SLOW and (capability is None or capability in info.capabilities)
+            if info.latency_class == LATENCY_SLOW
+            and (capability is None or capability in info.capabilities)
         ]
 
     def freeze(self) -> None:
