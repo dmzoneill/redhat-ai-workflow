@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 # ==================== BOOTSTRAP CONTEXT ====================
 
 
-async def _get_bootstrap_context(project: str | None, session_name: str | None) -> dict | None:
+async def _get_bootstrap_context(
+    project: str | None, session_name: str | None
+) -> dict | None:
     """Get bootstrap context using the memory abstraction layer.
 
     Queries memory to get:
@@ -121,7 +123,9 @@ async def _get_bootstrap_context(project: str | None, session_name: str | None) 
                         for line in item.content.split("\n"):
                             if line.startswith("- ") and ":" in line:
                                 issue_key = line.split(":")[0].replace("- ", "").strip()
-                                if issue_key.startswith("AAP-") or issue_key.startswith("APPSRE-"):
+                                if issue_key.startswith("AAP-") or issue_key.startswith(
+                                    "APPSRE-"
+                                ):
                                     issues.append(issue_key)
                         bootstrap["current_work"]["active_issues"] = issues
 
@@ -141,7 +145,9 @@ async def _get_bootstrap_context(project: str | None, session_name: str | None) 
                 if len(bootstrap["related_code"]) < 3:
                     code_item = {
                         "summary": item.summary,
-                        "file": item.metadata.get("file_path", item.metadata.get("path", "unknown")),
+                        "file": item.metadata.get(
+                            "file_path", item.metadata.get("path", "unknown")
+                        ),
                         "relevance": item.relevance,
                     }
                     bootstrap["related_code"].append(code_item)
@@ -282,7 +288,9 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
     """
     # Import here to avoid circular imports
     try:
-        from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+        from tool_modules.aa_workflow.src.chat_context import (
+            get_project_work_state_path,
+        )
     except ImportError:
         try:
             from .chat_context import get_project_work_state_path
@@ -291,7 +299,9 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
 
     current_work_file = get_project_work_state_path(project)
     if not current_work_file.exists():
-        lines.append("*No active work tracked for this project. Use `start_work` skill to begin.*\n")
+        lines.append(
+            "*No active work tracked for this project. Use `start_work` skill to begin.*\n"
+        )
         return
 
     try:
@@ -308,14 +318,20 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
             if active:
                 lines.append("### Active Issues")
                 for issue in active:
-                    lines.append(f"- **{issue.get('key', '?')}**: {issue.get('summary', 'No summary')}")
-                    lines.append(f"  Status: {issue.get('status', '?')} | Branch: `{issue.get('branch', '?')}`")
+                    lines.append(
+                        f"- **{issue.get('key', '?')}**: {issue.get('summary', 'No summary')}"
+                    )
+                    lines.append(
+                        f"  Status: {issue.get('status', '?')} | Branch: `{issue.get('branch', '?')}`"
+                    )
                 lines.append("")
 
             if mrs:
                 lines.append("### Open MRs")
                 for mr in mrs:
-                    lines.append(f"- **!{mr.get('id', '?')}**: {mr.get('title', 'No title')}")
+                    lines.append(
+                        f"- **!{mr.get('id', '?')}**: {mr.get('title', 'No title')}"
+                    )
                     lines.append(f"  Pipeline: {mr.get('pipeline_status', '?')}")
                 lines.append("")
 
@@ -323,13 +339,19 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
                 lines.append("### Follow-ups")
                 for fu in followups[:5]:
                     priority = fu.get("priority", "normal")
-                    emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
+                    emoji = (
+                        "🔴"
+                        if priority == "high"
+                        else "🟡" if priority == "medium" else "⚪"
+                    )
                     lines.append(f"- {emoji} {fu.get('task', '?')}")
                 if len(followups) > 5:
                     lines.append(f"*...and {len(followups) - 5} more*")
                 lines.append("")
         else:
-            lines.append("*No active work tracked for this project. Use `start_work` skill to begin.*\n")
+            lines.append(
+                "*No active work tracked for this project. Use `start_work` skill to begin.*\n"
+            )
 
     except Exception as e:
         lines.append(f"*Could not load work state: {e}*\n")
@@ -416,19 +438,25 @@ def _load_persona_info(lines: list[str], agent: str) -> None:
             lines.append("---\n")
             lines.append(agent_file.read_text())
         else:
-            lines.append(f"*Agent '{agent}' not found. Available: devops, developer, incident, release*\n")
+            lines.append(
+                f"*Agent '{agent}' not found. Available: devops, developer, incident, release*\n"
+            )
     elif current_persona:
         lines.append(f"## 🤖 Active Persona: {current_persona}\n")
         if loaded_modules:
             lines.append(f"**Loaded modules:** {', '.join(sorted(loaded_modules))}\n")
         lines.append("Use `persona_load(name)` to switch personas.\n")
     else:
-        if loaded_modules and any(m in loaded_modules for m in ["git", "gitlab", "jira"]):
+        if loaded_modules and any(
+            m in loaded_modules for m in ["git", "gitlab", "jira"]
+        ):
             lines.append("## 🤖 Active Persona: developer (default)\n")
             lines.append(f"**Loaded modules:** {', '.join(sorted(loaded_modules))}\n")
         else:
             lines.append("## 💡 Available Personas\n")
-            lines.append("Load one with `persona_load(name)` or `session_start(agent='name')`:\n")
+            lines.append(
+                "Load one with `persona_load(name)` or `session_start(agent='name')`:\n"
+            )
             lines.append("- **devops** - Infrastructure, monitoring, deployments")
             lines.append("- **developer** - Coding, PRs, code review")
             lines.append("- **incident** - Production issues, triage")
@@ -470,7 +498,9 @@ def _load_learned_patterns(lines: list[str]) -> None:
             if auth_patterns:
                 lines.append(f"- **Authentication**: {len(auth_patterns)} patterns")
             if bonfire_patterns:
-                lines.append(f"- **Bonfire/Ephemeral**: {len(bonfire_patterns)} patterns")
+                lines.append(
+                    f"- **Bonfire/Ephemeral**: {len(bonfire_patterns)} patterns"
+                )
             if pipeline_patterns:
                 lines.append(f"- **Pipelines**: {len(pipeline_patterns)} patterns")
             lines.append("")
@@ -546,10 +576,14 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
 
             metadata = knowledge.get("metadata", {})
             confidence = metadata.get("confidence", 0)
-            confidence_emoji = "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
+            confidence_emoji = (
+                "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
+            )
 
             lines.append(f"## 📚 Project Knowledge: {project}\n")
-            lines.append(f"*Persona: {persona} | Confidence: {confidence_emoji} {confidence:.0%}*\n")
+            lines.append(
+                f"*Persona: {persona} | Confidence: {confidence_emoji} {confidence:.0%}*\n"
+            )
 
             # Show architecture overview if available
             arch = knowledge.get("architecture", {})
@@ -564,17 +598,23 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
             if key_modules:
                 lines.append("**Key Modules:**")
                 for module in key_modules:
-                    lines.append(f"- `{module.get('path', '?')}`: {module.get('purpose', '')}")
+                    lines.append(
+                        f"- `{module.get('path', '?')}`: {module.get('purpose', '')}"
+                    )
                 lines.append("")
 
             # Show gotchas count
             gotchas = knowledge.get("gotchas", [])
             learned = knowledge.get("learned_from_tasks", [])
             if gotchas or learned:
-                lines.append(f"*{len(gotchas)} gotchas, {len(learned)} learnings recorded*")
+                lines.append(
+                    f"*{len(gotchas)} gotchas, {len(learned)} learnings recorded*"
+                )
                 lines.append("")
 
-            lines.append("*Use `knowledge_query()` for details or `knowledge_learn()` to add insights*")
+            lines.append(
+                "*Use `knowledge_query()` for details or `knowledge_learn()` to add insights*"
+            )
             lines.append("")
 
             return project
@@ -606,7 +646,9 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
                 arch = knowledge.get("architecture", {})
                 deps = arch.get("dependencies", [])[:5]
                 if deps:
-                    lines.append(f"**Dependencies:** {', '.join(f'`{d}`' for d in deps)}")
+                    lines.append(
+                        f"**Dependencies:** {', '.join(f'`{d}`' for d in deps)}"
+                    )
                     lines.append("")
 
                 lines.append("*Knowledge will improve as you complete tasks.*")
@@ -738,7 +780,9 @@ async def _detect_project_from_mcp_roots(ctx) -> str | None:
             for project_name, project_config in repositories.items():
                 project_path = project_config.get("path", "")
                 if project_path and root_path.rstrip("/") == project_path.rstrip("/"):
-                    logger.info(f"Detected project '{project_name}' from MCP root: {root_path}")
+                    logger.info(
+                        f"Detected project '{project_name}' from MCP root: {root_path}"
+                    )
                     return project_name
 
         logger.debug("No matching project found for any root")
@@ -762,23 +806,6 @@ async def _session_start_impl(  # noqa: C901
     Uses WorkspaceRegistry for per-workspace state management.
     Creates a new ChatSession or resumes an existing one.
     """
-    # #region agent log
-    import json as _json
-
-    open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-        _json.dumps(
-            {
-                "location": "session_tools.py:_session_start_impl:entry",
-                "message": "session_start called",
-                "data": {"agent": agent, "project": project, "name": name, "resume_session_id": resume_session_id},
-                "timestamp": __import__("time").time() * 1000,
-                "sessionId": "debug-session",
-                "hypothesisId": "C",
-            }
-        )
-        + "\n"
-    )
-    # #endregion
     # Track session start in stats
     from tool_modules.aa_workflow.src.agent_stats import start_session
 
@@ -793,28 +820,6 @@ async def _session_start_impl(  # noqa: C901
 
         # Get workspace state
         workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-        # #region agent log
-        import json as _json
-
-        open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-            _json.dumps(
-                {
-                    "location": "session_tools.py:_session_start_impl:workspace",
-                    "message": "Got workspace from ctx",
-                    "data": {
-                        "workspace_uri": workspace.workspace_uri,
-                        "workspace_project": workspace.project,
-                        "is_auto_detected": workspace.is_auto_detected,
-                        "session_count": len(workspace.sessions),
-                    },
-                    "timestamp": __import__("time").time() * 1000,
-                    "sessionId": "debug-session",
-                    "hypothesisId": "A,C",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
 
         # Check if we're resuming an existing session
         if resume_session_id:
@@ -888,28 +893,6 @@ async def _session_start_impl(  # noqa: C901
             except Exception:
                 pass
 
-            # #region agent log
-            import json as _json
-
-            open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                _json.dumps(
-                    {
-                        "location": "session_tools.py:_session_start_impl:new_session",
-                        "message": "Created new session with project",
-                        "data": {
-                            "session_id": session_id,
-                            "project": session_project,
-                            "is_auto_detected": is_auto_detected,
-                            "explicit_project": project,
-                        },
-                        "timestamp": __import__("time").time() * 1000,
-                        "sessionId": "debug-session",
-                        "hypothesisId": "per-session",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
         else:
             # For resumed sessions, update project if explicitly provided
             if project:
@@ -917,24 +900,9 @@ async def _session_start_impl(  # noqa: C901
                 chat_session.is_project_auto_detected = False
                 # Persist the project change to disk
                 WorkspaceRegistry.save_to_disk()
-                logger.info(f"Updated and persisted project '{project}' for resumed session {session_id}")
-                # #region agent log
-                import json as _json
-
-                open("/home/daoneill/src/redhat-ai-workflow/.cursor/debug.log", "a").write(
-                    _json.dumps(
-                        {
-                            "location": "session_tools.py:_session_start_impl:resume_update_project",
-                            "message": "Updated resumed session project",
-                            "data": {"session_id": session_id, "project": project},
-                            "timestamp": __import__("time").time() * 1000,
-                            "sessionId": "debug-session",
-                            "hypothesisId": "per-session",
-                        }
-                    )
-                    + "\n"
+                logger.info(
+                    f"Updated and persisted project '{project}' for resumed session {session_id}"
                 )
-                # #endregion
 
         # Use the session's project (not workspace's) for the rest of the function
         project = chat_session.project
@@ -948,11 +916,15 @@ async def _session_start_impl(  # noqa: C901
 
         # Add session ID and total session count to output
         total_sessions = workspace.session_count()
-        session_name_info = f" - *{name or chat_session.name}*" if (name or chat_session.name) else ""
+        session_name_info = (
+            f" - *{name or chat_session.name}*" if (name or chat_session.name) else ""
+        )
 
         # Get project info for display
         session_project = chat_session.project or workspace.project or "default"
-        project_source = "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
+        project_source = (
+            "(auto-detected)" if chat_session.is_project_auto_detected else "(explicit)"
+        )
 
         if is_resumed:
             session_line = (
@@ -978,7 +950,8 @@ async def _session_start_impl(  # noqa: C901
             lines.insert(1, session_line)
             lines.insert(2, f"**Project:** {session_project} {project_source}\n")
             lines.insert(
-                3, '⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id="...")` to track YOUR session.\n'
+                3,
+                '⚠️ **SAVE THIS SESSION ID** - Pass it to `session_info(session_id="...")` to track YOUR session.\n',
             )
     else:
         # Fallback to sync version for backward compatibility (no ctx available)
@@ -987,7 +960,9 @@ async def _session_start_impl(  # noqa: C901
         # Detect project from MCP roots if not explicitly provided
         detected_from_roots = None
         if not project:
-            detected_from_roots = await _detect_project_from_mcp_roots(ctx) if ctx else None
+            detected_from_roots = (
+                await _detect_project_from_mcp_roots(ctx) if ctx else None
+            )
             if detected_from_roots:
                 project = detected_from_roots
 
@@ -1050,7 +1025,9 @@ async def _session_start_impl(  # noqa: C901
             intent_name = intent.get("intent", "general")
             confidence = intent.get("confidence", 0)
             confidence_pct = int(confidence * 100)
-            lines.append(f"**Detected Intent:** {intent_name} ({confidence_pct}% confidence)")
+            lines.append(
+                f"**Detected Intent:** {intent_name} ({confidence_pct}% confidence)"
+            )
 
         # Show suggested persona with auto-load logic
         suggested_persona = bootstrap_context.get("suggested_persona")
@@ -1060,7 +1037,9 @@ async def _session_start_impl(  # noqa: C901
             confidence = bootstrap_context.get("persona_confidence", 0)
             if confidence >= 0.8:
                 # Auto-load the suggested persona
-                lines.append(f"**Auto-loading Persona:** {suggested_persona} (confidence: {int(confidence * 100)}%)")
+                lines.append(
+                    f"**Auto-loading Persona:** {suggested_persona} (confidence: {int(confidence * 100)}%)"
+                )
                 try:
                     from server.persona_loader import get_loader
 
@@ -1069,7 +1048,9 @@ async def _session_start_impl(  # noqa: C901
                         await loader.switch_persona(suggested_persona)
                         if ctx:
                             chat_session.persona = suggested_persona
-                        lines.append(f"  ✅ Switched from {current_persona} to {suggested_persona}")
+                        lines.append(
+                            f"  ✅ Switched from {current_persona} to {suggested_persona}"
+                        )
                 except Exception as e:
                     lines.append(f"  ⚠️ Failed to auto-load: {e}")
             else:
@@ -1135,11 +1116,15 @@ async def _session_start_impl(  # noqa: C901
     # Log session start (if function provided)
     if memory_session_log_fn:
         project_info = f", Project: {detected_project}" if detected_project else ""
-        await memory_session_log_fn("Session started", f"Agent: {agent or 'none'}{project_info}")
+        await memory_session_log_fn(
+            "Session started", f"Agent: {agent or 'none'}{project_info}"
+        )
 
     # Export workspace state for VS Code extension
     try:
-        from tool_modules.aa_workflow.src.workspace_exporter import export_workspace_state_async
+        from tool_modules.aa_workflow.src.workspace_exporter import (
+            export_workspace_state_async,
+        )
 
         logger.info("session_start: About to export workspace state")
         result = await export_workspace_state_async(ctx)
@@ -1153,7 +1138,9 @@ async def _session_start_impl(  # noqa: C901
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int:  # noqa: C901
+def register_session_tools(  # noqa: C901
+    server: "FastMCP", memory_session_log_fn=None
+) -> int:
     """Register session tools with the MCP server.
 
     Args:
@@ -1181,7 +1168,13 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             lines.append(f"**Attributes:** `{', '.join(ctx_attrs)}`")
 
             # Check for request_id or other identifiers on ctx
-            for attr in ["request_id", "id", "session_id", "chat_id", "conversation_id"]:
+            for attr in [
+                "request_id",
+                "id",
+                "session_id",
+                "chat_id",
+                "conversation_id",
+            ]:
                 if hasattr(ctx, attr):
                     lines.append(f"**ctx.{attr}:** `{getattr(ctx, attr)}`")
 
@@ -1192,7 +1185,14 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             lines.append(f"**Attributes:** `{', '.join(session_attrs)}`")
 
             # Check for any ID-like attributes on session
-            for attr in ["id", "session_id", "request_id", "client_id", "conversation_id", "chat_id"]:
+            for attr in [
+                "id",
+                "session_id",
+                "request_id",
+                "client_id",
+                "conversation_id",
+                "chat_id",
+            ]:
                 if hasattr(session, attr):
                     val = getattr(session, attr)
                     lines.append(f"**session.{attr}:** `{val}`")
@@ -1205,9 +1205,13 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 lines.append(f"**Attributes:** `{', '.join(params_attrs)}`")
 
                 if params.clientInfo:
-                    lines.append(f"**Client:** `{params.clientInfo.name}` v`{params.clientInfo.version}`")
+                    lines.append(
+                        f"**Client:** `{params.clientInfo.name}` v`{params.clientInfo.version}`"
+                    )
                     # Check for any ID on clientInfo
-                    client_attrs = [a for a in dir(params.clientInfo) if not a.startswith("_")]
+                    client_attrs = [
+                        a for a in dir(params.clientInfo) if not a.startswith("_")
+                    ]
                     lines.append(f"**ClientInfo attrs:** `{', '.join(client_attrs)}`")
 
                 # Check roots capability
@@ -1242,7 +1246,11 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
             # Check for any other interesting session methods
             lines.append("\n## Session Methods\n")
-            methods = [m for m in dir(session) if callable(getattr(session, m, None)) and not m.startswith("_")]
+            methods = [
+                m
+                for m in dir(session)
+                if callable(getattr(session, m, None)) and not m.startswith("_")
+            ]
             lines.append(f"**Methods:** `{', '.join(methods)}`")
 
             # Check request_context for more details
@@ -1282,7 +1290,11 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
     @registry.tool()
     async def session_start(
-        ctx: Context, agent: str = "", project: str = "", name: str = "", session_id: str = ""
+        ctx: Context,
+        agent: str = "",
+        project: str = "",
+        name: str = "",
+        session_id: str = "",
     ) -> list[TextContent]:
         """
         Initialize a new session or resume an existing one.
@@ -1318,11 +1330,15 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             session_start(agent="devops", project="app-interface")  # DevOps on app-interface
             session_start(name="Fixing billing bug")  # Named session for easy identification
         """
-        return await _session_start_impl(ctx, agent, project, name, memory_session_log_fn, session_id)
+        return await _session_start_impl(
+            ctx, agent, project, name, memory_session_log_fn, session_id
+        )
 
     @auto_heal()
     @registry.tool()
-    async def session_set_project(ctx: Context, project: str, session_id: str = "") -> list[TextContent]:
+    async def session_set_project(
+        ctx: Context, project: str, session_id: str = ""
+    ) -> list[TextContent]:
         """Set the project for the current or specified session.
 
         CRITICAL: Claude should call this when it determines which project the user is working on.
@@ -1370,7 +1386,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             workspace = await WorkspaceRegistry.get_for_ctx(ctx)
 
             # Find the target session
-            target_session_id = session_id if session_id else workspace.active_session_id
+            target_session_id = (
+                session_id if session_id else workspace.active_session_id
+            )
 
             if not target_session_id:
                 return [
@@ -1386,14 +1404,17 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text="# Session Not Found\n\n" f"Session `{target_session_id}` not found in workspace.",
+                        text="# Session Not Found\n\n"
+                        f"Session `{target_session_id}` not found in workspace.",
                     )
                 ]
 
             # Update the session's project
             old_project = session.project
             session.project = project
-            session.is_project_auto_detected = False  # Explicitly set, not auto-detected
+            session.is_project_auto_detected = (
+                False  # Explicitly set, not auto-detected
+            )
             session.touch()
 
             # Persist to disk
@@ -1416,13 +1437,17 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             if repo_config.get("jira_project"):
                 lines.append(f"**Jira Project:** `{repo_config['jira_project']}`\n")
 
-            logger.info(f"Updated session {target_session_id} project: {old_project} -> {project}")
+            logger.info(
+                f"Updated session {target_session_id} project: {old_project} -> {project}"
+            )
 
             # Emit notification for toast
             try:
                 from .notification_emitter import notify_session_updated
 
-                notify_session_updated(target_session_id, f"Project changed to {project}")
+                notify_session_updated(
+                    target_session_id, f"Project changed to {project}"
+                )
             except Exception:
                 pass
 
@@ -1480,7 +1505,11 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             jira_attach_session(issue_key="AAP-12345", include_transcript=True)
             jira_attach_session(issue_key="AAP-12345", session_id="abc123")
         """
-        from server.workspace_state import WorkspaceRegistry, format_session_context_for_jira, get_cursor_chat_content
+        from server.workspace_state import (
+            WorkspaceRegistry,
+            format_session_context_for_jira,
+            get_cursor_chat_content,
+        )
 
         lines = []
 
@@ -1502,7 +1531,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
             # Get workspace and session
             workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-            target_session_id = session_id if session_id else workspace.active_session_id
+            target_session_id = (
+                session_id if session_id else workspace.active_session_id
+            )
 
             if not target_session_id:
                 return [
@@ -1526,13 +1557,17 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
             # Extract chat content from Cursor DB
             lines.append("# Attaching Session Context to Jira\n")
-            lines.append(f"**Issue:** [{issue_key}](https://issues.redhat.com/browse/{issue_key})")
+            lines.append(
+                f"**Issue:** [{issue_key}](https://issues.redhat.com/browse/{issue_key})"
+            )
             lines.append(f"**Session:** `{target_session_id[:8]}...`\n")
 
             chat_content = get_cursor_chat_content(target_session_id, max_messages=100)
 
             if chat_content["message_count"] == 0:
-                lines.append("⚠️ **Warning:** No conversation content found in Cursor DB for this session.")
+                lines.append(
+                    "⚠️ **Warning:** No conversation content found in Cursor DB for this session."
+                )
                 lines.append("The session may be new or the chat ID may not match.\n")
 
             # Format for Jira
@@ -1564,7 +1599,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                     lines.append(f"## Result\n\n{result}")
                 else:
                     lines.append(f"## ✅ Success\n\n{result}")
-                    lines.append(f"\n[View on Jira](https://issues.redhat.com/browse/{issue_key})")
+                    lines.append(
+                        f"\n[View on Jira](https://issues.redhat.com/browse/{issue_key})"
+                    )
 
                     # Log to session
                     try:
@@ -1579,7 +1616,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
 
             except ImportError as e:
                 lines.append(f"## Error\n\n❌ Could not import Jira tools: {e}")
-                lines.append("\nMake sure the `developer` or `devops` persona is loaded.")
+                lines.append(
+                    "\nMake sure the `developer` or `devops` persona is loaded."
+                )
 
         except Exception as e:
             import traceback
@@ -1620,7 +1659,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
         try:
             # Get workspace and session
             workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-            target_session_id = session_id if session_id else workspace.active_session_id
+            target_session_id = (
+                session_id if session_id else workspace.active_session_id
+            )
 
             if not target_session_id:
                 return [
@@ -1636,7 +1677,8 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 return [
                     TextContent(
                         type="text",
-                        text="# Session Not Found\n\n" f"Session `{target_session_id}` not found.",
+                        text="# Session Not Found\n\n"
+                        f"Session `{target_session_id}` not found.",
                     )
                 ]
 
@@ -1654,8 +1696,16 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                         "project": session.project,
                         "issue_key": session.issue_key,
                         "branch": session.branch,
-                        "started_at": session.started_at.isoformat() if session.started_at else None,
-                        "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                        "started_at": (
+                            session.started_at.isoformat()
+                            if session.started_at
+                            else None
+                        ),
+                        "last_activity": (
+                            session.last_activity.isoformat()
+                            if session.last_activity
+                            else None
+                        ),
                         "tool_call_count": session.tool_call_count,
                     },
                     "chat": chat_content,
@@ -1679,7 +1729,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             if session.branch:
                 lines.append(f"**Branch:** `{session.branch}`")
             if session.started_at:
-                lines.append(f"**Started:** {session.started_at.strftime('%Y-%m-%d %H:%M')}")
+                lines.append(
+                    f"**Started:** {session.started_at.strftime('%Y-%m-%d %H:%M')}"
+                )
             lines.append("")
 
             # Summary
@@ -1687,7 +1739,9 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
             lines.append("## Summary\n")
             lines.append(f"- **Total Messages:** {chat_content['message_count']}")
             lines.append(f"- **User Messages:** {summary.get('user_messages', 0)}")
-            lines.append(f"- **Assistant Messages:** {summary.get('assistant_messages', 0)}")
+            lines.append(
+                f"- **Assistant Messages:** {summary.get('assistant_messages', 0)}"
+            )
             lines.append(f"- **Tool Calls:** {summary.get('tool_calls', 0)}")
             lines.append(f"- **Code References:** {summary.get('code_changes', 0)}")
 
@@ -1703,10 +1757,16 @@ def register_session_tools(server: "FastMCP", memory_session_log_fn=None) -> int
                 for msg in messages[:50]:  # Limit display
                     role = msg.get("type", "unknown")
                     text = msg.get("text", "")[:500]
-                    timestamp = msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
+                    timestamp = (
+                        msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
+                    )
 
-                    role_emoji = "👤" if role == "user" else "🤖" if role == "assistant" else "⚙️"
-                    lines.append(f"### {role_emoji} {role.title()} {f'({timestamp})' if timestamp else ''}\n")
+                    role_emoji = (
+                        "👤" if role == "user" else "🤖" if role == "assistant" else "⚙️"
+                    )
+                    lines.append(
+                        f"### {role_emoji} {role.title()} {f'({timestamp})' if timestamp else ''}\n"
+                    )
                     lines.append(text)
                     lines.append("")
 

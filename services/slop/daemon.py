@@ -106,7 +106,9 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         stats = {
             "scan_in_progress": self._scan_in_progress,
             "scan_count": self._scan_count,
-            "last_scan_time": self._last_scan_time.isoformat() if self._last_scan_time else None,
+            "last_scan_time": (
+                self._last_scan_time.isoformat() if self._last_scan_time else None
+            ),
             "max_parallel": self._max_parallel,
             "codebase_path": self._codebase_path,
         }
@@ -123,7 +125,9 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         status = {
             "scan_in_progress": self._scan_in_progress,
             "scan_count": self._scan_count,
-            "last_scan_time": self._last_scan_time.isoformat() if self._last_scan_time else None,
+            "last_scan_time": (
+                self._last_scan_time.isoformat() if self._last_scan_time else None
+            ),
         }
 
         if self._orchestrator:
@@ -215,6 +219,9 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Shutdown requested, cleaning up...")
         if self._orchestrator:
             await self._orchestrator.stop_all()
+            # Close the database connection to prevent file descriptor leak
+            if self._orchestrator.database:
+                await self._orchestrator.database.close()
 
         self.is_running = False
         logger.info("Slop Bot daemon stopped")
@@ -264,13 +271,17 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if self._scan_in_progress:
             return {
                 "status": "already_running",
-                "loop_status": self._orchestrator.get_status() if self._orchestrator else {},
+                "loop_status": (
+                    self._orchestrator.get_status() if self._orchestrator else {}
+                ),
             }
 
         asyncio.create_task(self._run_analysis())
         return {
             "status": "started",
-            "loop_status": self._orchestrator.get_status() if self._orchestrator else {},
+            "loop_status": (
+                self._orchestrator.get_status() if self._orchestrator else {}
+            ),
         }
 
     async def _handle_scan_loops(self, loops: list = None) -> dict:
@@ -315,7 +326,9 @@ class SlopDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         status = self._orchestrator.get_status()
         status["scan_in_progress"] = self._scan_in_progress
         status["scan_count"] = self._scan_count
-        status["last_scan_time"] = self._last_scan_time.isoformat() if self._last_scan_time else None
+        status["last_scan_time"] = (
+            self._last_scan_time.isoformat() if self._last_scan_time else None
+        )
         return status
 
     async def _handle_get_findings(
