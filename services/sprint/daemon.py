@@ -1013,8 +1013,10 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             except Exception:
                 try:
                     Path(temp_path).unlink()
-                except OSError:
-                    pass
+                except OSError as e:
+                    logger.debug(
+                        f"Suppressed error in _save_state (temp file cleanup): {e}"
+                    )
                 raise
 
         except Exception as e:

@@ -167,8 +167,15 @@ class ExecutionTracer:
     STATE_MACHINE = {
         WorkflowState.IDLE: [WorkflowState.LOADING],
         WorkflowState.LOADING: [WorkflowState.ANALYZING, WorkflowState.FAILED],
-        WorkflowState.ANALYZING: [WorkflowState.CLASSIFYING, WorkflowState.BLOCKED, WorkflowState.FAILED],
-        WorkflowState.CLASSIFYING: [WorkflowState.CHECKING_ACTIONABLE, WorkflowState.FAILED],
+        WorkflowState.ANALYZING: [
+            WorkflowState.CLASSIFYING,
+            WorkflowState.BLOCKED,
+            WorkflowState.FAILED,
+        ],
+        WorkflowState.CLASSIFYING: [
+            WorkflowState.CHECKING_ACTIONABLE,
+            WorkflowState.FAILED,
+        ],
         WorkflowState.CHECKING_ACTIONABLE: [
             WorkflowState.TRANSITIONING_JIRA,
             WorkflowState.BLOCKED,  # Not actionable
@@ -179,7 +186,11 @@ class ExecutionTracer:
             WorkflowState.RESEARCHING,  # For spikes
             WorkflowState.FAILED,
         ],
-        WorkflowState.STARTING_WORK: [WorkflowState.BUILDING_PROMPT, WorkflowState.BLOCKED, WorkflowState.FAILED],
+        WorkflowState.STARTING_WORK: [
+            WorkflowState.BUILDING_PROMPT,
+            WorkflowState.BLOCKED,
+            WorkflowState.FAILED,
+        ],
         WorkflowState.RESEARCHING: [
             WorkflowState.DOCUMENTING,  # Spike path
             WorkflowState.BUILDING_PROMPT,
@@ -191,15 +202,26 @@ class ExecutionTracer:
             WorkflowState.IMPLEMENTING,  # Background mode
             WorkflowState.FAILED,
         ],
-        WorkflowState.LAUNCHING_CHAT: [WorkflowState.IMPLEMENTING, WorkflowState.FAILED],
+        WorkflowState.LAUNCHING_CHAT: [
+            WorkflowState.IMPLEMENTING,
+            WorkflowState.FAILED,
+        ],
         WorkflowState.IMPLEMENTING: [
             WorkflowState.CREATING_MR,
             WorkflowState.BLOCKED,
             WorkflowState.COMPLETED,  # For spikes that go straight to done
             WorkflowState.FAILED,
         ],
-        WorkflowState.DOCUMENTING: [WorkflowState.CLOSING, WorkflowState.BLOCKED, WorkflowState.FAILED],
-        WorkflowState.CREATING_MR: [WorkflowState.AWAITING_REVIEW, WorkflowState.BLOCKED, WorkflowState.FAILED],
+        WorkflowState.DOCUMENTING: [
+            WorkflowState.CLOSING,
+            WorkflowState.BLOCKED,
+            WorkflowState.FAILED,
+        ],
+        WorkflowState.CREATING_MR: [
+            WorkflowState.AWAITING_REVIEW,
+            WorkflowState.BLOCKED,
+            WorkflowState.FAILED,
+        ],
         WorkflowState.AWAITING_REVIEW: [
             WorkflowState.MERGING,
             WorkflowState.BLOCKED,
@@ -536,7 +558,9 @@ class ExecutionTracer:
         """Save trace to YAML file."""
         try:
             data = self.to_dict()
-            self.trace_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+            self.trace_path.write_text(
+                yaml.dump(data, default_flow_style=False, sort_keys=False)
+            )
             logger.info(f"[Tracer] Saved trace to {self.trace_path}")
             return self.trace_path
         except Exception as e:
@@ -647,14 +671,18 @@ class ExecutionTracer:
             for trans in self.transitions:
                 try:
                     visited_states.add(WorkflowState(trans.to_state))
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    logger.debug(
+                        f"Suppressed error in generate_diagram (state parse): {e}"
+                    )
 
             # Style visited states
             for state in visited_states:
                 if state == self.current_state:
                     # Current state - yellow/orange
-                    lines.append(f"    style {state.value} fill:#FFD700,stroke:#FF8C00,stroke-width:3px")
+                    lines.append(
+                        f"    style {state.value} fill:#FFD700,stroke:#FF8C00,stroke-width:3px"
+                    )
                 elif state in (WorkflowState.COMPLETED,):
                     # Completed - green
                     lines.append(f"    style {state.value} fill:#90EE90,stroke:#228B22")
@@ -772,15 +800,25 @@ class ExecutionTracer:
                 )
 
             if step.inputs:
-                inputs_str = ", ".join(f"{k}={v}" for k, v in list(step.inputs.items())[:3])
-                html_parts.append(f'<div class="timeline-inputs">Inputs: {inputs_str}</div>')
+                inputs_str = ", ".join(
+                    f"{k}={v}" for k, v in list(step.inputs.items())[:3]
+                )
+                html_parts.append(
+                    f'<div class="timeline-inputs">Inputs: {inputs_str}</div>'
+                )
 
             if step.outputs:
-                outputs_str = ", ".join(f"{k}={v}" for k, v in list(step.outputs.items())[:3])
-                html_parts.append(f'<div class="timeline-outputs">Outputs: {outputs_str}</div>')
+                outputs_str = ", ".join(
+                    f"{k}={v}" for k, v in list(step.outputs.items())[:3]
+                )
+                html_parts.append(
+                    f'<div class="timeline-outputs">Outputs: {outputs_str}</div>'
+                )
 
             if step.error:
-                html_parts.append(f'<div class="timeline-error">Error: {step.error}</div>')
+                html_parts.append(
+                    f'<div class="timeline-error">Error: {step.error}</div>'
+                )
 
             if step.chat_id:
                 html_parts.append(

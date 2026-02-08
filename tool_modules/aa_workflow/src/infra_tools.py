@@ -7,6 +7,7 @@ Provides tools for:
 
 import asyncio
 import fcntl
+import logging
 import os
 import time
 from pathlib import Path
@@ -27,6 +28,8 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 from server.tool_registry import ToolRegistry
 from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_output
 
+logger = logging.getLogger(__name__)
+
 
 # File-based state for VPN connection debouncing
 # Uses file lock + timestamp file to coordinate across multiple process/module instances
@@ -39,8 +42,8 @@ def _get_infra_path(key: str, default: str) -> Path:
         configured = paths.get(key)
         if configured:
             return Path(configured)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _get_infra_path: {e}")
     return Path(default)
 
 
@@ -59,8 +62,8 @@ def _get_vpn_last_connect_time() -> float:
     try:
         if _VPN_STATE_FILE.exists():
             return float(_VPN_STATE_FILE.read_text().strip())
-    except (ValueError, OSError):
-        pass
+    except (ValueError, OSError) as e:
+        logger.debug(f"Suppressed error in _get_vpn_last_connect_time: {e}")
     return 0
 
 
@@ -68,8 +71,8 @@ def _set_vpn_last_connect_time(timestamp: float) -> None:
     """Set the last VPN connect time in shared state file."""
     try:
         _VPN_STATE_FILE.write_text(str(timestamp))
-    except OSError:
-        pass
+    except OSError as e:
+        logger.debug(f"Suppressed error in _set_vpn_last_connect_time: {e}")
 
 
 async def _vpn_connect_impl() -> list[TextContent]:
@@ -210,8 +213,10 @@ async def _vpn_connect_impl() -> list[TextContent]:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
                 lock_fd.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _vpn_connect_impl (lock release): {e}"
+                )
 
 
 async def _check_vpn_connected() -> bool:
@@ -224,7 +229,8 @@ async def _check_vpn_connected() -> bool:
             use_shell=False,
         )
         return success and "has address" in stdout
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in _check_vpn_connected: {e}")
         return False
 
 
@@ -242,8 +248,8 @@ def _get_kube_last_login_time(cluster: str) -> float:
 
             state = json.loads(_KUBE_STATE_FILE.read_text())
             return state.get(cluster, 0)
-    except (ValueError, OSError, json.JSONDecodeError):
-        pass
+    except (ValueError, OSError, json.JSONDecodeError) as e:
+        logger.debug(f"Suppressed error in _get_kube_last_login_time: {e}")
     return 0
 
 
@@ -256,12 +262,14 @@ def _set_kube_last_login_time(cluster: str, timestamp: float) -> None:
         if _KUBE_STATE_FILE.exists():
             try:
                 state = json.loads(_KUBE_STATE_FILE.read_text())
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.debug(
+                    f"Suppressed error in _set_kube_last_login_time (read existing): {e}"
+                )
         state[cluster] = timestamp
         _KUBE_STATE_FILE.write_text(json.dumps(state))
-    except OSError:
-        pass
+    except OSError as e:
+        logger.debug(f"Suppressed error in _set_kube_last_login_time (write): {e}")
 
 
 async def _check_kube_connected(cluster: str) -> bool:
@@ -280,7 +288,8 @@ async def _check_kube_connected(cluster: str) -> bool:
             timeout=10,
         )
         return success
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Suppressed error in _check_kube_connected: {e}")
         return False
 
 
@@ -545,8 +554,10 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
                 lock_fd.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _kube_login_impl (lock release): {e}"
+                )
 
 
 def register_infra_tools(server: "FastMCP") -> int:

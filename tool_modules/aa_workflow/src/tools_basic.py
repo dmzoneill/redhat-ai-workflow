@@ -96,22 +96,25 @@ async def create_github_issue(
 
     # Cleanup: remove expired entries and enforce max size
     global _recent_issues
-    _recent_issues = {
-        k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
-    }
-    if len(_recent_issues) > _MAX_RECENT_ISSUES:
-        # Keep only the most recent entries
-        sorted_items = sorted(_recent_issues.items(), key=lambda x: x[1], reverse=True)
-        _recent_issues = dict(sorted_items[:_MAX_RECENT_ISSUES])
+    with _recent_issues_lock:
+        _recent_issues = {
+            k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
+        }
+        if len(_recent_issues) > _MAX_RECENT_ISSUES:
+            # Keep only the most recent entries
+            sorted_items = sorted(
+                _recent_issues.items(), key=lambda x: x[1], reverse=True
+            )
+            _recent_issues = dict(sorted_items[:_MAX_RECENT_ISSUES])
 
-    if fingerprint in _recent_issues:
-        last_created = _recent_issues[fingerprint]
-        if now - last_created < _ISSUE_DEDUP_SECONDS:
-            return {
-                "success": False,
-                "issue_url": None,
-                "message": f"Similar issue recently created (dedup: {fingerprint})",
-            }
+        if fingerprint in _recent_issues:
+            last_created = _recent_issues[fingerprint]
+            if now - last_created < _ISSUE_DEDUP_SECONDS:
+                return {
+                    "success": False,
+                    "issue_url": None,
+                    "message": f"Similar issue recently created (dedup: {fingerprint})",
+                }
 
     # Check for GitHub token
     token = _get_github_token()
@@ -180,7 +183,8 @@ async def create_github_issue(
             if response.status_code == 201:
                 data = response.json()
                 issue_url = data.get("html_url", "")
-                _recent_issues[fingerprint] = now
+                with _recent_issues_lock:
+                    _recent_issues[fingerprint] = now
 
                 logger.info(f"Created GitHub issue: {issue_url}")
                 return {

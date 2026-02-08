@@ -715,8 +715,8 @@ class IssueExecutor:
             )
 
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in execute_issue (notification): {e}")
 
         try:
             import shutil
@@ -844,8 +844,10 @@ class IssueExecutor:
                     )
 
                     notify_sprint_issue_completed(issue_key)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _parse_claude_result (completed notification): {e}"
+                    )
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -883,8 +885,10 @@ class IssueExecutor:
                     )
 
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _parse_claude_result (blocked notification): {e}"
+                    )
                 self._trace_step(
                     tracer,
                     "parse_result",

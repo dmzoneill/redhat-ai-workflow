@@ -15,6 +15,7 @@ Setup:
 3. Run the server once to complete OAuth flow and save token.json
 """
 
+import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,6 +31,8 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
+
+logger = logging.getLogger(__name__)
 
 
 def _get_google_calendar_config_dir() -> Path:
@@ -89,8 +92,8 @@ def _try_load_oauth_token(credentials_cls, scopes):
     if TOKEN_FILE.exists():
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_load_oauth_token: {e}")
     return None
 
 
@@ -102,8 +105,8 @@ def _try_refresh_credentials(creds, request_cls):
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
             return creds
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_refresh_credentials: {e}")
     return None
 
 
@@ -111,9 +114,11 @@ def _try_service_account(service_account, scopes):
     """Try to load service account credentials."""
     if SERVICE_ACCOUNT_FILE.exists():
         try:
-            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=scopes)
-        except Exception:
-            pass
+            return service_account.Credentials.from_service_account_file(
+                str(SERVICE_ACCOUNT_FILE), scopes=scopes
+            )
+        except Exception as e:
+            logger.debug(f"Suppressed error in _try_service_account: {e}")
     return None
 
 
@@ -123,7 +128,9 @@ def _try_oauth_flow(scopes):
         try:
             from google_auth_oauthlib.flow import InstalledAppFlow
 
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(CREDENTIALS_FILE), scopes
+            )
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             with open(TOKEN_FILE, "w") as f:
@@ -203,7 +210,9 @@ def get_freebusy(service, calendars: list[str], start: datetime, end: datetime) 
 
             # Check for errors (user not in domain or calendar not shared)
             if cal_info.get("errors"):
-                busy_info[email] = {"error": cal_info["errors"][0].get("reason", "unknown")}
+                busy_info[email] = {
+                    "error": cal_info["errors"][0].get("reason", "unknown")
+                }
             else:
                 busy_info[email] = cal_info.get("busy", [])
 
@@ -231,8 +240,12 @@ def find_free_slots(
     tz = ZoneInfo(TIMEZONE)
 
     # Set up the meeting window for this date
-    window_start = date.replace(hour=MEETING_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
-    window_end = date.replace(hour=MEETING_END_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz)
+    window_start = date.replace(
+        hour=MEETING_START_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz
+    )
+    window_end = date.replace(
+        hour=MEETING_END_HOUR, minute=0, second=0, microsecond=0, tzinfo=tz
+    )
 
     # Collect all busy periods across all attendees
     all_busy = []
@@ -300,7 +313,9 @@ def find_free_slots(
             {
                 "start": window_start,
                 "end": window_end,
-                "duration_minutes": int((window_end - window_start).total_seconds() / 60),
+                "duration_minutes": int(
+                    (window_end - window_start).total_seconds() / 60
+                ),
             }
         )
 
@@ -395,7 +410,9 @@ def find_existing_meeting(
 # ==================== HELPER FUNCTIONS ====================
 
 
-def _parse_check_dates(date: str, days_ahead: int, tz: ZoneInfo, now: datetime) -> list[datetime] | str:
+def _parse_check_dates(
+    date: str, days_ahead: int, tz: ZoneInfo, now: datetime
+) -> list[datetime] | str:
     """Parse and return dates to check for availability."""
     if date:
         try:
@@ -427,7 +444,10 @@ def _process_day_availability(
     busy_info = get_freebusy(service, calendars_to_check, day_start, day_end)
 
     attendee_error = None
-    if isinstance(busy_info.get(attendee_email), dict) and "error" in busy_info[attendee_email]:
+    if (
+        isinstance(busy_info.get(attendee_email), dict)
+        and "error" in busy_info[attendee_email]
+    ):
         attendee_error = busy_info[attendee_email]["error"]
 
     free_slots = find_free_slots(busy_info, check_date, duration_minutes)
@@ -441,7 +461,9 @@ def _format_availability_output(
 ) -> None:
     """Format the final availability output."""
     if not all_slots:
-        lines.append("❌ No mutual free slots found in the meeting window (15:00-19:00 Irish time)")
+        lines.append(
+            "❌ No mutual free slots found in the meeting window (15:00-19:00 Irish time)"
+        )
         lines.append("")
         lines.append("Consider:")
         lines.append("- Checking more days ahead")
@@ -516,13 +538,17 @@ async def _google_calendar_check_mutual_availability_impl(
             lines.append(f"## {day_name}")
 
             if attendee_error:
-                lines.append(f"⚠️ Could not check {attendee_email}'s calendar: {attendee_error}")
+                lines.append(
+                    f"⚠️ Could not check {attendee_email}'s calendar: {attendee_error}"
+                )
                 lines.append("   (Showing your free slots only)")
 
             for slot in free_slots:
                 start_str = slot["start"].strftime("%H:%M")
                 end_str = slot["end"].strftime("%H:%M")
-                lines.append(f"✅ **{start_str} - {end_str}** ({slot['duration_minutes']} min available)")
+                lines.append(
+                    f"✅ **{start_str} - {end_str}** ({slot['duration_minutes']} min available)"
+                )
                 all_slots.append(
                     {
                         "date": check_date.strftime("%Y-%m-%d"),
@@ -719,7 +745,9 @@ async def _google_calendar_quick_meeting_impl(
                     else:
                         start_time = start_time.astimezone(tz)
                 else:
-                    start_time = datetime.strptime(when[:16], "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+                    start_time = datetime.strptime(when[:16], "%Y-%m-%d %H:%M").replace(
+                        tzinfo=tz
+                    )
 
                 return await _google_calendar_schedule_meeting_impl(
                     title=title,
@@ -733,7 +761,9 @@ async def _google_calendar_quick_meeting_impl(
 
         # Extract time component - look for time after T, space, or "at"
         # Patterns: "15:00", "3pm", "3:30pm", "at 15:00"
-        time_match = re.search(r"(?:T|\s|at\s*)(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)?", when, re.IGNORECASE)
+        time_match = re.search(
+            r"(?:T|\s|at\s*)(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)?", when, re.IGNORECASE
+        )
         if time_match:
             hour = int(time_match.group(1))
             minute = int(time_match.group(2) or 0)
@@ -769,14 +799,18 @@ async def _google_calendar_quick_meeting_impl(
         elif re.match(r"\d{4}-\d{2}-\d{2}", when):
             # Date provided (YYYY-MM-DD) without full ISO time
             try:
-                target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(tzinfo=tz)
+                target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(
+                    tzinfo=tz
+                )
             except ValueError:
                 target_date = now + timedelta(days=1)
         else:
             target_date = now + timedelta(days=1)  # Default to tomorrow
 
         # Build datetime
-        start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz)
+        start_time = target_date.replace(
+            hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz
+        )
 
         return await _google_calendar_schedule_meeting_impl(
             title=title,
@@ -787,7 +821,9 @@ async def _google_calendar_quick_meeting_impl(
         )
 
 
-def _check_duplicate_meeting(service, title: str, attendee_email: str, skip_duplicate_check: bool) -> str | None:
+def _check_duplicate_meeting(
+    service, title: str, attendee_email: str, skip_duplicate_check: bool
+) -> str | None:
     """Check if a meeting for this topic already exists."""
     if skip_duplicate_check:
         return None
@@ -898,7 +934,9 @@ def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
 
     # Check if end time exceeds window
     end_dt = start_dt + timedelta(minutes=duration_minutes)
-    if end_dt.hour > MEETING_END_HOUR or (end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0):
+    if end_dt.hour > MEETING_END_HOUR or (
+        end_dt.hour == MEETING_END_HOUR and end_dt.minute > 0
+    ):
         return None, (
             f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, "
             f"past the {MEETING_END_HOUR}:00 cutoff.\n"
@@ -934,14 +972,18 @@ async def _google_calendar_schedule_meeting_impl(
     now = datetime.now(tz)
 
     # Check for existing meeting before creating a new one
-    duplicate_msg = _check_duplicate_meeting(service, title, attendee_email, skip_duplicate_check)
+    duplicate_msg = _check_duplicate_meeting(
+        service, title, attendee_email, skip_duplicate_check
+    )
     if duplicate_msg:
         return duplicate_msg
 
     # Determine start time
     if not start_time and auto_find_slot:
         # Find next available slot
-        start_dt = _find_next_available_slot(service, now, attendee_email, duration_minutes)
+        start_dt = _find_next_available_slot(
+            service, now, attendee_email, duration_minutes
+        )
         if not start_dt:
             return (
                 f"❌ No mutual free slots found in the next 5 business days.\n"
@@ -951,7 +993,9 @@ async def _google_calendar_schedule_meeting_impl(
             )
     else:
         # Parse and validate provided start time
-        start_dt, error_msg = _parse_and_validate_start_time(start_time, now, duration_minutes)
+        start_dt, error_msg = _parse_and_validate_start_time(
+            start_time, now, duration_minutes
+        )
         if error_msg:
             return error_msg
 
@@ -962,7 +1006,8 @@ async def _google_calendar_schedule_meeting_impl(
         # Build event
         event = {
             "summary": title,
-            "description": description or "Meeting scheduled via AI Workflow assistant.",
+            "description": description
+            or "Meeting scheduled via AI Workflow assistant.",
             "start": {
                 "dateTime": start_dt.isoformat(),
                 "timeZone": TIMEZONE,
@@ -1176,7 +1221,9 @@ async def _google_calendar_list_calendars_impl() -> str:
         lines.append("")
         lines.append("**To list events from a specific calendar:**")
         lines.append("```")
-        lines.append('google_calendar_list_events_from(calendar_id="calendar@group.calendar.google.com")')
+        lines.append(
+            'google_calendar_list_events_from(calendar_id="calendar@group.calendar.google.com")'
+        )
         lines.append("```")
 
         return "\n".join(lines)
@@ -1286,7 +1333,9 @@ async def _google_calendar_list_events_from_impl(
         for day, day_events in events_by_day.items():
             lines.append(f"## {day}")
             for evt in day_events:
-                lines.append(f"- **{evt['time']}** - {evt['summary']}{evt['meet_link']}")
+                lines.append(
+                    f"- **{evt['time']}** - {evt['summary']}{evt['meet_link']}"
+                )
                 if evt["meet_url"]:
                     lines.append(f"  - Meet: {evt['meet_url']}")
             lines.append("")
@@ -1352,10 +1401,16 @@ async def _google_calendar_get_events_with_meet_impl(
 
                 try:
                     if "T" in start:
-                        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
-                        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")).astimezone(tz)
+                        start_dt = datetime.fromisoformat(
+                            start.replace("Z", "+00:00")
+                        ).astimezone(tz)
+                        end_dt = datetime.fromisoformat(
+                            end.replace("Z", "+00:00")
+                        ).astimezone(tz)
                     else:
-                        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=tz)
+                        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(
+                            tzinfo=tz
+                        )
                         end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=tz)
                 except (ValueError, TypeError):
                     continue
@@ -1368,7 +1423,9 @@ async def _google_calendar_get_events_with_meet_impl(
                         "end": end_dt,
                         "meet_url": meet_url,
                         "organizer": event.get("organizer", {}).get("email", ""),
-                        "attendees": [a.get("email", "") for a in event.get("attendees", [])],
+                        "attendees": [
+                            a.get("email", "") for a in event.get("attendees", [])
+                        ],
                         "description": event.get("description", ""),
                     }
                 )
@@ -1384,7 +1441,9 @@ async def _google_calendar_get_events_with_meet_impl(
 
         for evt in meet_events:
             lines.append(f"## {evt['title']}")
-            lines.append(f"- **When:** {evt['start'].strftime('%A %H:%M')} - {evt['end'].strftime('%H:%M')}")
+            lines.append(
+                f"- **When:** {evt['start'].strftime('%A %H:%M')} - {evt['end'].strftime('%H:%M')}"
+            )
             lines.append(f"- **Meet URL:** {evt['meet_url']}")
             lines.append(f"- **Organizer:** {evt['organizer']}")
             if evt["attendees"]:
@@ -1445,7 +1504,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Available time slots that work for both parties
         """
-        return await _google_calendar_check_mutual_availability_impl(attendee_email, date, days_ahead, duration_minutes)
+        return await _google_calendar_check_mutual_availability_impl(
+            attendee_email, date, days_ahead, duration_minutes
+        )
 
     @registry.tool()
     async def google_calendar_find_meeting(
@@ -1468,7 +1529,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Meeting details if found, or confirmation none exists
         """
-        return await _google_calendar_find_meeting_impl(mr_id, jira_key, attendee_email, search_text)
+        return await _google_calendar_find_meeting_impl(
+            mr_id, jira_key, attendee_email, search_text
+        )
 
     @registry.tool()
     async def google_calendar_list_events(
@@ -1512,7 +1575,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Meeting details and Google Meet link
         """
-        return await _google_calendar_quick_meeting_impl(title, attendee_email, when, duration_minutes)
+        return await _google_calendar_quick_meeting_impl(
+            title, attendee_email, when, duration_minutes
+        )
 
     @registry.tool()
     async def google_calendar_status() -> str:
@@ -1561,7 +1626,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of upcoming events from the specified calendar
         """
-        return await _google_calendar_list_events_from_impl(calendar_id, days, max_results)
+        return await _google_calendar_list_events_from_impl(
+            calendar_id, days, max_results
+        )
 
     @registry.tool()
     async def google_calendar_get_events_with_meet(

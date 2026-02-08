@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import re
+import threading
 import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -128,6 +129,7 @@ class GoogleMeetController:
 
     # Class-level counter for unique instance IDs
     _instance_counter = 0
+    _counter_lock = threading.Lock()
     _instances: weakref.WeakValueDictionary[str, "GoogleMeetController"] = (
         weakref.WeakValueDictionary()
     )  # Track all instances; weak refs allow GC of crashed instances
@@ -150,10 +152,10 @@ class GoogleMeetController:
         )
 
         # Unique instance tracking
-        GoogleMeetController._instance_counter += 1
-        self._instance_id = (
-            f"meet-bot-{GoogleMeetController._instance_counter}-{id(self)}"
-        )
+        with GoogleMeetController._counter_lock:
+            GoogleMeetController._instance_counter += 1
+            counter_val = GoogleMeetController._instance_counter
+        self._instance_id = f"meet-bot-{counter_val}-{id(self)}"
         self._browser_pid: Optional[int] = None
         self._created_at = datetime.now()
         self._last_activity = datetime.now()
@@ -1265,8 +1267,10 @@ class GoogleMeetController:
             if self._device_manager:
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in launch_browser (device cleanup): {e}"
+                    )
                 self._device_manager = None
                 self._devices = None
 
@@ -1371,8 +1375,10 @@ class GoogleMeetController:
                     if await locator.count() > 0:
                         sign_in_button = locator
                         logger.info("Found Sign in span")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _handle_sign_in (span search): {e}"
+                    )
 
             if sign_in_button:
                 logger.info("Clicking Sign in button...")
@@ -1796,8 +1802,10 @@ class GoogleMeetController:
                                     f"[JOIN] Found '{btn_text}' button on retry"
                                 )
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in join_meeting (button retry): {e}"
+                        )
 
             if join_button:
                 logger.info("[JOIN] Clicking join button...")
@@ -1840,8 +1848,10 @@ class GoogleMeetController:
                             # Click on the main meeting area to close dialog
                             await self.page.click("body", position={"x": 100, "y": 100})
                             await asyncio.sleep(0.5)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(
+                                f"Suppressed error in join_meeting (dialog dismiss click): {e}"
+                            )
                 except Exception as e:
                     logger.debug(f"No device dialog or error: {e}")
 
@@ -1931,8 +1941,10 @@ class GoogleMeetController:
                     )
                     self.state.captions_enabled = True
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in enable_captions (check existing): {e}"
+                )
 
             # Find the "Turn on captions" button
             try:
@@ -2091,8 +2103,10 @@ class GoogleMeetController:
                 # Try to close any open dropdown
                 try:
                     await self.page.keyboard.press("Escape")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _select_meetbot_camera (escape key): {e}"
+                    )
 
         logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
         return False
@@ -2660,8 +2674,10 @@ class GoogleMeetController:
                             dialog_found = True
                             logger.info(f"Chrome sync dialog detected: {selector}")
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in _dismiss_chrome_sync_dialog (selector check): {e}"
+                        )
 
             if not dialog_found:
                 logger.info("No Chrome sync dialog found")
@@ -2845,8 +2861,10 @@ class GoogleMeetController:
                         )
                         await asyncio.sleep(0.3)
                         return  # Only dismiss one popup at a time
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _dismiss_info_popups (dialog click '{text}'): {e}"
+                    )
 
             # Fallback: try button text without dialog constraint, but only for very safe texts
             for text in ["Got it", "Not now"]:
@@ -2858,8 +2876,10 @@ class GoogleMeetController:
                         logger.info(f"Dismissed popup by clicking '{text}' button")
                         await asyncio.sleep(0.3)
                         return
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _dismiss_info_popups (fallback click '{text}'): {e}"
+                    )
 
         except Exception as e:
             logger.debug(f"Error dismissing info popups: {e}")
@@ -3196,8 +3216,10 @@ class GoogleMeetController:
                     }
                 """
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in stop_caption_capture (observer disconnect): {e}"
+                )
 
         logger.info("Caption capture stopped")
 
@@ -3308,8 +3330,8 @@ class GoogleMeetController:
                 )
                 if panel and await panel.is_visible():
                     panel_open = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed error in get_participants (panel check): {e}")
 
             # If panel not open, click the People button to open it
             if not panel_open:
@@ -3512,8 +3534,10 @@ class GoogleMeetController:
                 try:
                     await self.page.keyboard.press("Escape")
                     await asyncio.sleep(0.3)  # Brief wait for panel to close
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in get_participants (panel close): {e}"
+                    )
 
         return participants
 

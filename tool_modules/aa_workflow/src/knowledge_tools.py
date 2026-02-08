@@ -325,8 +325,10 @@ def _scan_project_structure(project_path: Path) -> dict:
             result["dependencies"] = [
                 d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in _scan_project_structure (pyproject.toml): {e}"
+            )
 
     if "package.json" in result["config_files"]:
         try:
@@ -334,8 +336,10 @@ def _scan_project_structure(project_path: Path) -> dict:
                 pkg = json.load(f)
             deps = list(pkg.get("dependencies", {}).keys())[:20]
             result["dependencies"] = deps
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in _scan_project_structure (package.json): {e}"
+            )
 
     return result
 
@@ -356,8 +360,10 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
                 if p.strip() and not p.startswith("#"):
                     overview = p.strip()[:500]
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in _generate_initial_knowledge (readme): {e}"
+            )
 
     # Build key modules from directory structure
     key_modules = []

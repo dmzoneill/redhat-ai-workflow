@@ -66,6 +66,7 @@ _export_state: dict[str, Any] = {
     "start_time": None,
     "task": None,
 }
+_export_state_lock = asyncio.Lock()
 
 
 def register_tools(server: FastMCP) -> int:  # noqa: C901
@@ -111,31 +112,32 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         """
         global _export_state
 
-        if _export_state["running"]:
-            progress = _export_state["progress"]
-            return (
-                f"⏳ Export already in progress\n"
-                f"Started: {_export_state['start_time']}\n"
-                f"Channels processed: {progress.get('channels_done', 0)}/{progress.get('channels_total', '?')}\n"
-                f"Messages exported: {progress.get('messages', 0)}\n"
-                f"Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
-            )
+        async with _export_state_lock:
+            if _export_state["running"]:
+                progress = _export_state["progress"]
+                return (
+                    f"⏳ Export already in progress\n"
+                    f"Started: {_export_state['start_time']}\n"
+                    f"Channels processed: {progress.get('channels_done', 0)}/{progress.get('channels_total', '?')}\n"
+                    f"Messages exported: {progress.get('messages', 0)}\n"
+                    f"Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
+                )
 
-        # Initialize export state
-        _export_state = {
-            "running": True,
-            "cancelled": False,
-            "progress": {
-                "channels_done": 0,
-                "channels_total": 0,
-                "messages": 0,
-                "my_messages": 0,
-                "errors": [],
-                "current_channel": "",
-            },
-            "start_time": datetime.now().isoformat(),
-            "task": None,
-        }
+            # Initialize export state
+            _export_state = {
+                "running": True,
+                "cancelled": False,
+                "progress": {
+                    "channels_done": 0,
+                    "channels_total": 0,
+                    "messages": 0,
+                    "my_messages": 0,
+                    "errors": [],
+                    "current_channel": "",
+                },
+                "start_time": datetime.now().isoformat(),
+                "task": None,
+            }
 
         try:
             # Ensure style directory exists
@@ -148,7 +150,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
             if not my_user_id:
                 _export_state["running"] = False
-                return "❌ Could not determine your Slack user ID. Check authentication."
+                return (
+                    "❌ Could not determine your Slack user ID. Check authentication."
+                )
 
             # Calculate time range
             now = datetime.now()
@@ -185,25 +189,35 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                     if include_dms:
                         for im in counts.get("ims", []):
                             if isinstance(im, dict):
-                                conversations.append({"id": im.get("id"), "is_im": True})
+                                conversations.append(
+                                    {"id": im.get("id"), "is_im": True}
+                                )
                             else:
                                 conversations.append({"id": im, "is_im": True})
 
                     if include_groups:
                         for mpim in counts.get("mpims", []):
                             if isinstance(mpim, dict):
-                                conversations.append({"id": mpim.get("id"), "is_mpim": True})
+                                conversations.append(
+                                    {"id": mpim.get("id"), "is_mpim": True}
+                                )
                             else:
                                 conversations.append({"id": mpim, "is_mpim": True})
 
                     if include_channels:
                         for channel in counts.get("channels", []):
                             if isinstance(channel, dict):
-                                conversations.append({"id": channel.get("id"), "is_channel": True})
+                                conversations.append(
+                                    {"id": channel.get("id"), "is_channel": True}
+                                )
                             else:
-                                conversations.append({"id": channel, "is_channel": True})
+                                conversations.append(
+                                    {"id": channel, "is_channel": True}
+                                )
 
-                    logger.info(f"Found {len(conversations)} conversations via client.counts")
+                    logger.info(
+                        f"Found {len(conversations)} conversations via client.counts"
+                    )
                 else:
                     logger.warning(f"client.counts failed: {counts.get('error')}")
             except Exception as e:
@@ -214,11 +228,17 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 logger.info("Trying standard conversation APIs...")
                 types_str = ",".join(conv_types)
                 try:
-                    conversations = await session.get_user_conversations(types=types_str, limit=500)
+                    conversations = await session.get_user_conversations(
+                        types=types_str, limit=500
+                    )
                 except Exception as e:
-                    logger.warning(f"get_user_conversations failed: {e}, trying web API")
+                    logger.warning(
+                        f"get_user_conversations failed: {e}, trying web API"
+                    )
                     try:
-                        conversations = await session.get_user_conversations_web(types=types_str, limit=500)
+                        conversations = await session.get_user_conversations_web(
+                            types=types_str, limit=500
+                        )
                     except Exception as e2:
                         logger.warning(f"get_user_conversations_web failed: {e2}")
 
@@ -311,7 +331,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                                         if parent_msg.get("ts") == thread_ts:
                                             reply_to = {
                                                 "user": parent_msg.get("user", ""),
-                                                "text": parent_msg.get("text", "")[:500],
+                                                "text": parent_msg.get("text", "")[
+                                                    :500
+                                                ],
                                             }
                                             break
 
@@ -321,10 +343,14 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                                     "ts": msg_ts,
                                     "channel_type": channel_type,
                                     "channel_id": channel_id,
-                                    "is_thread_reply": bool(thread_ts and thread_ts != msg_ts),
+                                    "is_thread_reply": bool(
+                                        thread_ts and thread_ts != msg_ts
+                                    ),
                                     "reply_to": reply_to,
                                     "reactions": msg.get("reactions", []),
-                                    "has_attachments": bool(msg.get("files") or msg.get("attachments")),
+                                    "has_attachments": bool(
+                                        msg.get("files") or msg.get("attachments")
+                                    ),
                                 }
 
                                 if output_format == "jsonl":
@@ -364,9 +390,13 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                                         )
 
                                         for reply in replies:
-                                            if reply.get("user") == my_user_id and reply.get("text"):
+                                            if reply.get(
+                                                "user"
+                                            ) == my_user_id and reply.get("text"):
                                                 my_messages += 1
-                                                _export_state["progress"]["my_messages"] = my_messages
+                                                _export_state["progress"][
+                                                    "my_messages"
+                                                ] = my_messages
 
                                                 record = {
                                                     "text": reply.get("text", ""),
@@ -377,25 +407,38 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                                                     "thread_ts": thread_ts,
                                                     "reply_to": {
                                                         "user": msg.get("user", ""),
-                                                        "text": msg.get("text", "")[:500],
+                                                        "text": msg.get("text", "")[
+                                                            :500
+                                                        ],
                                                     },
-                                                    "reactions": reply.get("reactions", []),
+                                                    "reactions": reply.get(
+                                                        "reactions", []
+                                                    ),
                                                     "has_attachments": bool(
-                                                        reply.get("files") or reply.get("attachments")
+                                                        reply.get("files")
+                                                        or reply.get("attachments")
                                                     ),
                                                 }
 
                                                 if output_format == "jsonl":
-                                                    f_out.write(json.dumps(record) + "\n")
+                                                    f_out.write(
+                                                        json.dumps(record) + "\n"
+                                                    )
                                                 else:
                                                     import yaml
 
                                                     f_out.write("---\n")
-                                                    yaml.dump(record, f_out, default_flow_style=False)
+                                                    yaml.dump(
+                                                        record,
+                                                        f_out,
+                                                        default_flow_style=False,
+                                                    )
 
                                         await asyncio.sleep(0.3)  # Rate limit
                                     except Exception as e:
-                                        logger.debug(f"Could not fetch thread {thread_ts}: {e}")
+                                        logger.debug(
+                                            f"Could not fetch thread {thread_ts}: {e}"
+                                        )
 
                     except Exception as e:
                         error_msg = f"Error processing {channel_name}: {e}"
@@ -521,10 +564,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Confirmation message
         """
-        if not _export_state["running"]:
-            return "No export in progress to cancel."
+        async with _export_state_lock:
+            if not _export_state["running"]:
+                return "No export in progress to cancel."
 
-        _export_state["cancelled"] = True
+            _export_state["cancelled"] = True
         return (
             "🛑 Export cancellation requested.\n"
             "The export will stop after the current channel completes.\n"

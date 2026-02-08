@@ -161,13 +161,17 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in SingleInstance.release (unlock): {e}"
+                )
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in SingleInstance.release (pid cleanup): {e}"
+                )
         self._acquired = False
 
     def get_running_pid(self) -> Optional[int]:
@@ -183,8 +187,8 @@ class SingleInstance:
                 # Check if process exists
                 os.kill(pid, 0)
                 return pid
-            except (ValueError, OSError):
-                pass
+            except (ValueError, OSError) as e:
+                logger.debug(f"Suppressed error in SingleInstance.get_running_pid: {e}")
         return None
 
     @property
@@ -370,7 +374,9 @@ class BaseDaemon(ABC):
             try:
                 result = await self.health_check()
                 if isinstance(result, dict) and not result.get("healthy", True):
-                    logger.warning(f"Watchdog: Health check failed: {result.get('message', 'unknown')}")
+                    logger.warning(
+                        f"Watchdog: Health check failed: {result.get('message', 'unknown')}"
+                    )
                     return False
             except Exception as e:
                 logger.warning(f"Watchdog: health_check() raised exception: {e}")

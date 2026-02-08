@@ -31,12 +31,22 @@ except ImportError:
 
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_meet_bot.src.audio_output import AudioOutputManager
-from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry, GoogleMeetController
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    CaptionEntry,
+    GoogleMeetController,
+)
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.jira_preloader import get_jira_preloader
 from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder
-from tool_modules.aa_meet_bot.src.meeting_scheduler import MeetingScheduler, init_scheduler
-from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, NotesBotManager, get_bot_manager
+from tool_modules.aa_meet_bot.src.meeting_scheduler import (
+    MeetingScheduler,
+    init_scheduler,
+)
+from tool_modules.aa_meet_bot.src.notes_bot import (
+    NotesBot,
+    NotesBotManager,
+    get_bot_manager,
+)
 from tool_modules.aa_meet_bot.src.notes_database import MeetingNotesDB, init_notes_db
 from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine
 from tool_modules.aa_meet_bot.src.video_generator import get_video_generator
@@ -59,31 +69,37 @@ _bot_manager: Optional[NotesBotManager] = None  # Multi-meeting mode
 _scheduler: Optional[MeetingScheduler] = None
 _notes_db: Optional[MeetingNotesDB] = None
 
+# Lock protecting lazy init of all meet bot globals
+_meet_lock = asyncio.Lock()
+
 
 async def _get_controller() -> GoogleMeetController:
     """Get or create the browser controller."""
     global _controller
-    if _controller is None:
-        _controller = GoogleMeetController()
-        await _controller.initialize()
-    return _controller
+    async with _meet_lock:
+        if _controller is None:
+            _controller = GoogleMeetController()
+            await _controller.initialize()
+        return _controller
 
 
 async def _get_device_manager() -> VirtualDeviceManager:
     """Get or create the device manager."""
     global _device_manager
-    if _device_manager is None:
-        _device_manager = VirtualDeviceManager()
-    return _device_manager
+    async with _meet_lock:
+        if _device_manager is None:
+            _device_manager = VirtualDeviceManager()
+        return _device_manager
 
 
 async def _get_wake_word_manager() -> WakeWordManager:
     """Get or create the wake word manager."""
     global _wake_word_manager
-    if _wake_word_manager is None:
-        _wake_word_manager = WakeWordManager()
-        await _wake_word_manager.initialize()
-    return _wake_word_manager
+    async with _meet_lock:
+        if _wake_word_manager is None:
+            _wake_word_manager = WakeWordManager()
+            await _wake_word_manager.initialize()
+        return _wake_word_manager
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
@@ -107,9 +123,15 @@ async def _meet_bot_status_impl() -> str:
     status = await device_manager.get_status()
 
     lines.append("## Virtual Devices")
-    lines.append(f"- **Audio Sink:** {'✅ Ready' if status.audio_sink_ready else '❌ Not Ready'}")
-    lines.append(f"- **Audio Source:** {'✅ Ready' if status.audio_source_ready else '❌ Not Ready'}")
-    lines.append(f"- **Virtual Camera:** {'✅ Ready' if status.video_device_ready else '❌ Not Ready'}")
+    lines.append(
+        f"- **Audio Sink:** {'✅ Ready' if status.audio_sink_ready else '❌ Not Ready'}"
+    )
+    lines.append(
+        f"- **Audio Source:** {'✅ Ready' if status.audio_source_ready else '❌ Not Ready'}"
+    )
+    lines.append(
+        f"- **Virtual Camera:** {'✅ Ready' if status.video_device_ready else '❌ Not Ready'}"
+    )
     if status.video_device_path:
         lines.append(f"  - Device: {status.video_device_path}")
     lines.append("")
@@ -119,7 +141,9 @@ async def _meet_bot_status_impl() -> str:
         state = _controller.state
         lines.append("## Active Meeting")
         lines.append(f"- **Meeting ID:** {state.meeting_id}")
-        lines.append(f"- **Captions:** {'✅ Enabled' if state.captions_enabled else '❌ Disabled'}")
+        lines.append(
+            f"- **Captions:** {'✅ Enabled' if state.captions_enabled else '❌ Disabled'}"
+        )
         lines.append(f"- **Muted:** {'Yes' if state.muted else 'No'}")
         lines.append(f"- **Captions Captured:** {len(state.caption_buffer)}")
     else:
@@ -152,7 +176,9 @@ async def _meet_bot_setup_devices_impl() -> str:
         lines.append("")
         lines.append("## Devices Created")
         lines.append(f"- Audio Sink: meet_bot_sink (module {status.audio_sink_id})")
-        lines.append(f"- Audio Source: meet_bot_source (module {status.audio_source_id})")
+        lines.append(
+            f"- Audio Source: meet_bot_source (module {status.audio_source_id})"
+        )
         lines.append(f"- Virtual Camera: {status.video_device_path}")
     else:
         lines.append("⚠️ **Some devices failed to initialize**")
@@ -183,7 +209,9 @@ async def _meet_bot_setup_devices_impl() -> str:
             lines.append("## Troubleshooting")
             lines.append("For v4l2loopback, run:")
             lines.append("```bash")
-            lines.append("sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=MeetBot_Camera exclusive_caps=1")
+            lines.append(
+                "sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=MeetBot_Camera exclusive_caps=1"
+            )
             lines.append("```")
 
     return "\n".join(lines)
@@ -218,7 +246,9 @@ async def _meet_bot_approve_meeting_impl(
             _approved_meetings.items(),
             key=lambda x: x[1].get("approved_at", ""),
         )
-        for old_id, _ in sorted_meetings[: len(_approved_meetings) - _MAX_APPROVED_MEETINGS + 1]:
+        for old_id, _ in sorted_meetings[
+            : len(_approved_meetings) - _MAX_APPROVED_MEETINGS + 1
+        ]:
             _approved_meetings.pop(old_id, None)
 
     _approved_meetings[meeting_id] = {
@@ -265,7 +295,9 @@ async def _meet_bot_join_meeting_impl(
     if match:
         mid = match.group(1)
         if mid not in _approved_meetings:
-            return f"❌ Meeting {mid} not approved. Use `meet_bot_approve_meeting` first."
+            return (
+                f"❌ Meeting {mid} not approved. Use `meet_bot_approve_meeting` first."
+            )
 
     # Set up devices first
     device_manager = await _get_device_manager()
@@ -300,11 +332,18 @@ async def _meet_bot_join_meeting_impl(
         if enable_voice:
             # Start the voice interaction pipeline
             try:
-                from tool_modules.aa_meet_bot.src.voice_pipeline import VoicePipelineConfig, get_pipeline_manager
+                from tool_modules.aa_meet_bot.src.voice_pipeline import (
+                    VoicePipelineConfig,
+                    get_pipeline_manager,
+                )
 
                 config = get_config()
                 pipe_path = controller.get_pipe_path()
-                sink_name = controller.get_audio_devices().sink_name if controller.get_audio_devices() else None
+                sink_name = (
+                    controller.get_audio_devices().sink_name
+                    if controller.get_audio_devices()
+                    else None
+                )
 
                 if pipe_path and sink_name:
                     pipeline_config = VoicePipelineConfig(
@@ -325,10 +364,14 @@ async def _meet_bot_join_meeting_impl(
                         controller=controller,
                     )
                     voice_status = f'Enabled (wake word: "{config.wake_word}")'
-                    logger.info(f"[VOICE] Voice pipeline started for meeting {controller.state.meeting_id}")
+                    logger.info(
+                        f"[VOICE] Voice pipeline started for meeting {controller.state.meeting_id}"
+                    )
                 else:
                     voice_status = "Failed (no audio devices)"
-                    logger.warning("[VOICE] Could not start voice pipeline - no audio devices")
+                    logger.warning(
+                        "[VOICE] Could not start voice pipeline - no audio devices"
+                    )
             except Exception as e:
                 voice_status = f"Failed: {e}"
                 logger.error(f"[VOICE] Failed to start voice pipeline: {e}")
@@ -340,7 +383,9 @@ async def _meet_bot_join_meeting_impl(
         )
     else:
         errors = controller.state.errors if controller.state else ["Unknown error"]
-        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
+        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(
+            f"- {e}" for e in errors
+        )
 
 
 async def _meet_bot_leave_meeting_impl() -> str:
@@ -391,7 +436,9 @@ async def _meet_bot_get_captions_impl(
 
     lines = [f"# Recent Captions (last {len(captions)})", ""]
     for cap in captions:
-        lines.append(f"**{cap.speaker}** ({cap.timestamp.strftime('%H:%M:%S')}): {cap.text}")
+        lines.append(
+            f"**{cap.speaker}** ({cap.timestamp.strftime('%H:%M:%S')}): {cap.text}"
+        )
 
     return "\n".join(lines)
 
@@ -523,7 +570,9 @@ async def _meet_bot_respond_impl(
     if not tts_result.success:
         return f"❌ TTS failed: {tts_result.error}"
 
-    lines.append(f"✅ Audio: `{tts_result.audio_path}` ({tts_result.duration_seconds:.2f}s)")
+    lines.append(
+        f"✅ Audio: `{tts_result.audio_path}` ({tts_result.duration_seconds:.2f}s)"
+    )
     lines.append("")
 
     # Step 2: Video
@@ -654,7 +703,9 @@ async def _meet_bot_full_response_impl(
         lines.append(f"❌ TTS failed: {tts_result.error}")
         return "\n".join(lines)
 
-    lines.append(f"✅ Audio: `{tts_result.audio_path}` ({tts_result.duration_seconds:.2f}s)")
+    lines.append(
+        f"✅ Audio: `{tts_result.audio_path}` ({tts_result.duration_seconds:.2f}s)"
+    )
     lines.append("")
 
     # Step 3: Video
@@ -686,39 +737,43 @@ async def _meet_bot_full_response_impl(
 async def _get_notes_db() -> MeetingNotesDB:
     """Get or create the notes database."""
     global _notes_db
-    if _notes_db is None:
-        _notes_db = await init_notes_db()
-    return _notes_db
+    async with _meet_lock:
+        if _notes_db is None:
+            _notes_db = await init_notes_db()
+        return _notes_db
 
 
 async def _get_notes_bot() -> NotesBot:
     """Get or create the notes bot (legacy single-bot mode)."""
     global _notes_bot
-    if _notes_bot is None:
-        bot = NotesBot()
-        success = await bot.initialize()
-        if not success:
-            # Return bot with errors so caller can report them
-            _notes_bot = bot
-        else:
-            _notes_bot = bot
-    return _notes_bot
+    async with _meet_lock:
+        if _notes_bot is None:
+            bot = NotesBot()
+            success = await bot.initialize()
+            if not success:
+                # Return bot with errors so caller can report them
+                _notes_bot = bot
+            else:
+                _notes_bot = bot
+        return _notes_bot
 
 
 async def _get_bot_manager() -> NotesBotManager:
     """Get or create the bot manager for multi-meeting support."""
     global _bot_manager
-    if _bot_manager is None:
-        _bot_manager = get_bot_manager()
-    return _bot_manager
+    async with _meet_lock:
+        if _bot_manager is None:
+            _bot_manager = get_bot_manager()
+        return _bot_manager
 
 
 async def _get_scheduler() -> MeetingScheduler:
     """Get or create the scheduler."""
     global _scheduler
-    if _scheduler is None:
-        _scheduler = await init_scheduler()
-    return _scheduler
+    async with _meet_lock:
+        if _scheduler is None:
+            _scheduler = await init_scheduler()
+        return _scheduler
 
 
 async def _meet_notes_start_scheduler_impl() -> str:
@@ -764,7 +819,9 @@ async def _meet_notes_stop_scheduler_impl() -> str:
 
     await _scheduler.stop()
 
-    return "✅ **Meeting Scheduler Stopped**\n\nThe bot will no longer auto-join meetings."
+    return (
+        "✅ **Meeting Scheduler Stopped**\n\nThe bot will no longer auto-join meetings."
+    )
 
 
 async def _meet_notes_scheduler_status_impl() -> str:
@@ -936,7 +993,9 @@ async def _meet_notes_join_now_impl(
     else:
         if not errors:
             errors = ["Unknown error - check browser controller logs"]
-        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(f"- {e}" for e in errors)
+        return "❌ Failed to join meeting\n\nErrors:\n" + "\n".join(
+            f"- {e}" for e in errors
+        )
 
 
 async def _meet_notes_leave_impl(session_id: str = "") -> str:
@@ -1003,9 +1062,14 @@ async def _meet_notes_leave_all_impl() -> str:
 
     for result in results:
         if "error" in result:
-            lines.append(f"- ❌ {result.get('session_id', 'Unknown')}: {result['error']}")
+            lines.append(
+                f"- ❌ {result.get('session_id', 'Unknown')}: {result['error']}"
+            )
         else:
-            lines.append(f"- ✅ {result.get('title', 'Unknown')} " f"({result.get('captions_captured', 0)} captions)")
+            lines.append(
+                f"- ✅ {result.get('title', 'Unknown')} "
+                f"({result.get('captions_captured', 0)} captions)"
+            )
 
     return "\n".join(lines)
 
@@ -1120,7 +1184,10 @@ async def _meet_notes_force_cleanup_impl() -> str:
 
 async def _meet_notes_cleanup_audio_impl() -> str:
     """Clean up orphaned MeetBot audio devices."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
+    from tool_modules.aa_meet_bot.src.virtual_devices import (
+        cleanup_orphaned_meetbot_devices,
+        get_meetbot_device_count,
+    )
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()
@@ -1190,7 +1257,10 @@ async def _meet_notes_cleanup_audio_impl() -> str:
 
 async def _meet_notes_cleanup_all_devices_impl() -> str:
     """Force cleanup ALL MeetBot audio/video devices, ignoring active sessions."""
-    from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices, get_meetbot_device_count
+    from tool_modules.aa_meet_bot.src.virtual_devices import (
+        cleanup_orphaned_meetbot_devices,
+        get_meetbot_device_count,
+    )
 
     # Get counts before cleanup
     before = await get_meetbot_device_count()
@@ -1247,7 +1317,9 @@ async def _meet_notes_cleanup_all_devices_impl() -> str:
         lines.append("")
 
     total_removed = (
-        len(results["removed_modules"]) + len(results["removed_pipes"]) + len(results.get("removed_video_devices", []))
+        len(results["removed_modules"])
+        + len(results["removed_pipes"])
+        + len(results.get("removed_video_devices", []))
     )
     if total_removed == 0:
         lines.append("✅ No devices found to clean up.")
@@ -1347,7 +1419,9 @@ async def _meet_notes_get_transcript_impl(meeting_id: int) -> str:
         for entry in meeting.transcript:
             if entry.speaker != current_speaker:
                 current_speaker = entry.speaker
-                lines.append(f"\n**{entry.speaker}** ({entry.timestamp.strftime('%H:%M:%S')}):")
+                lines.append(
+                    f"\n**{entry.speaker}** ({entry.timestamp.strftime('%H:%M:%S')}):"
+                )
             lines.append(f"> {entry.text}")
 
     if meeting.summary:
@@ -1498,7 +1572,9 @@ async def _meet_notes_export_state_impl() -> str:
                         if not meet_url:
                             continue
 
-                        start = event["start"].get("dateTime", event["start"].get("date"))
+                        start = event["start"].get(
+                            "dateTime", event["start"].get("date")
+                        )
 
                         upcoming_meetings.append(
                             {
@@ -1506,9 +1582,16 @@ async def _meet_notes_export_state_impl() -> str:
                                 "title": event.get("summary", "No title"),
                                 "url": meet_url,
                                 "startTime": start,
-                                "endTime": event["end"].get("dateTime", event["end"].get("date")),
-                                "organizer": event.get("organizer", {}).get("email", ""),
-                                "attendees": [a.get("email", "") for a in event.get("attendees", [])[:5]],
+                                "endTime": event["end"].get(
+                                    "dateTime", event["end"].get("date")
+                                ),
+                                "organizer": event.get("organizer", {}).get(
+                                    "email", ""
+                                ),
+                                "attendees": [
+                                    a.get("email", "")
+                                    for a in event.get("attendees", [])[:5]
+                                ],
                                 "status": "pending" if cal.auto_join else "pending",
                                 "calendarName": cal.name,
                             }
@@ -1561,7 +1644,9 @@ async def _meet_notes_export_state_impl() -> str:
                 # Get captions from the bot's buffer
                 bot = _bot_manager.get_bot(status.get("session_id", ""))
                 if bot and bot.state.transcript_buffer:
-                    for entry in bot.state.transcript_buffer[-30:]:  # Last 30 per meeting
+                    for entry in bot.state.transcript_buffer[
+                        -30:
+                    ]:  # Last 30 per meeting
                         all_captions.append(
                             {
                                 "speaker": entry.speaker,
@@ -1608,9 +1693,15 @@ async def _meet_notes_export_state_impl() -> str:
             {
                 "id": m.id,
                 "title": m.title,
-                "date": m.scheduled_start.strftime("%Y-%m-%d %H:%M") if m.scheduled_start else "",
+                "date": (
+                    m.scheduled_start.strftime("%Y-%m-%d %H:%M")
+                    if m.scheduled_start
+                    else ""
+                ),
                 "duration": (
-                    int((m.actual_end - m.actual_start).total_seconds() / 60) if m.actual_start and m.actual_end else 0
+                    int((m.actual_end - m.actual_start).total_seconds() / 60)
+                    if m.actual_start and m.actual_end
+                    else 0
                 ),
                 "transcriptCount": len(m.transcript) if m.transcript else 0,
                 "status": m.status,
@@ -1741,7 +1832,9 @@ async def _meet_voice_pipeline_status_impl() -> str:
         lines.append(f"- **Responses:** {stat['responses_generated']}")
         if stat["responses_generated"] > 0:
             lines.append(f"- **Avg Latency:** {stat['avg_latency_ms']:.0f}ms")
-            lines.append(f"- **Min/Max:** {stat['min_latency_ms']:.0f}ms / {stat['max_latency_ms']:.0f}ms")
+            lines.append(
+                f"- **Min/Max:** {stat['min_latency_ms']:.0f}ms / {stat['max_latency_ms']:.0f}ms"
+            )
         lines.append(f"- **Errors:** {stat['errors']}")
         lines.append("")
 
@@ -1775,7 +1868,9 @@ async def _run_startup_cleanup() -> None:
 
         # Check if there are any orphaned devices
         counts = await get_meetbot_device_count()
-        total_devices = counts["module_count"] + counts["pipe_count"] + counts["video_count"]
+        total_devices = (
+            counts["module_count"] + counts["pipe_count"] + counts["video_count"]
+        )
 
         if total_devices == 0:
             logger.info("🔊 MeetBot startup: No orphaned devices found")
@@ -1796,7 +1891,9 @@ async def _run_startup_cleanup() -> None:
         )
 
         if removed_count > 0:
-            logger.info(f"🔊 MeetBot startup: Cleaned up {removed_count} orphaned devices")
+            logger.info(
+                f"🔊 MeetBot startup: Cleaned up {removed_count} orphaned devices"
+            )
         else:
             logger.info("🔊 MeetBot startup: No devices needed cleanup")
 
@@ -1872,7 +1969,9 @@ def register_tools(server: FastMCP) -> int:
 
     # Schedule startup cleanup to run in the background
     # This ensures orphaned devices from previous sessions are cleaned up
-    asyncio.get_event_loop().call_soon(lambda: asyncio.create_task(_run_startup_cleanup()))
+    asyncio.get_event_loop().call_soon(
+        lambda: asyncio.create_task(_run_startup_cleanup())
+    )
 
     # Start periodic cleanup task
     _start_periodic_cleanup()

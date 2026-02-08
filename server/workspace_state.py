@@ -32,6 +32,7 @@ Usage:
 
 import json
 import logging
+import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -90,22 +91,26 @@ PERSIST_FILE = WORKSPACE_STATES_FILE
 
 # Global cache of tool counts per persona (refreshed on session_start/persona_load)
 _persona_tool_counts: dict[str, int] = {}
+_persona_tool_counts_lock = threading.Lock()
 
 
 def get_persona_tool_count(persona: str) -> int:
     """Get cached tool count for a persona."""
-    return _persona_tool_counts.get(persona, 0)
+    with _persona_tool_counts_lock:
+        return _persona_tool_counts.get(persona, 0)
 
 
 def update_persona_tool_count(persona: str, count: int) -> None:
     """Update the cached tool count for a persona."""
-    _persona_tool_counts[persona] = count
+    with _persona_tool_counts_lock:
+        _persona_tool_counts[persona] = count
     logger.debug(f"Updated persona tool count cache: {persona} = {count}")
 
 
 def get_all_persona_tool_counts() -> dict[str, int]:
     """Get all cached persona tool counts."""
-    return _persona_tool_counts.copy()
+    with _persona_tool_counts_lock:
+        return _persona_tool_counts.copy()
 
 
 def _generate_session_id() -> str:
@@ -2267,6 +2272,7 @@ class WorkspaceRegistry:
     _workspaces: dict[str, WorkspaceState] = {}
     _access_count: int = 0  # Counter for periodic cleanup
     _CLEANUP_INTERVAL: int = 100  # Run cleanup every N accesses
+    _registry_lock: threading.Lock = threading.Lock()
 
     @classmethod
     async def get_for_ctx(
@@ -2286,9 +2292,12 @@ class WorkspaceRegistry:
         )
 
         # Periodic cleanup to prevent memory leaks
-        cls._access_count += 1
-        if cls._access_count >= cls._CLEANUP_INTERVAL:
-            cls._access_count = 0
+        with cls._registry_lock:
+            cls._access_count += 1
+            should_cleanup = cls._access_count >= cls._CLEANUP_INTERVAL
+            if should_cleanup:
+                cls._access_count = 0
+        if should_cleanup:
             cleaned = cls.cleanup_stale(max_age_hours=SESSION_STALE_HOURS)
             if cleaned > 0:
                 logger.info(f"Periodic cleanup: removed {cleaned} stale workspace(s)")
@@ -2296,41 +2305,42 @@ class WorkspaceRegistry:
         workspace_uri = await cls._get_workspace_uri(ctx)
         logger.debug(f"Resolved workspace_uri: {workspace_uri}")
 
-        is_new_workspace = workspace_uri not in cls._workspaces
+        with cls._registry_lock:
+            is_new_workspace = workspace_uri not in cls._workspaces
 
-        if is_new_workspace:
-            # Try to restore from disk first (in case server restarted)
-            # This handles the case where restore_if_empty was called but
-            # the workspace URI didn't match any persisted workspaces
-            cls._try_restore_workspace_from_disk(workspace_uri)
+            if is_new_workspace:
+                # Try to restore from disk first (in case server restarted)
+                # This handles the case where restore_if_empty was called but
+                # the workspace URI didn't match any persisted workspaces
+                cls._try_restore_workspace_from_disk(workspace_uri)
 
-            # Check again after potential restore
-            if workspace_uri in cls._workspaces:
-                logger.info(f"Restored workspace {workspace_uri} from disk")
-                is_new_workspace = False
-            else:
-                # Create new workspace state
-                state = WorkspaceState(workspace_uri=workspace_uri)
+                # Check again after potential restore
+                if workspace_uri in cls._workspaces:
+                    logger.info(f"Restored workspace {workspace_uri} from disk")
+                    is_new_workspace = False
+                else:
+                    # Create new workspace state
+                    state = WorkspaceState(workspace_uri=workspace_uri)
 
-                # Auto-detect project from workspace path
-                detected_project = cls._detect_project(workspace_uri)
-                if detected_project:
-                    state.project = detected_project
-                    state.is_auto_detected = True
+                    # Auto-detect project from workspace path
+                    detected_project = cls._detect_project(workspace_uri)
+                    if detected_project:
+                        state.project = detected_project
+                        state.is_auto_detected = True
+                        logger.info(
+                            f"Auto-detected project '{detected_project}' for workspace {workspace_uri}"
+                        )
+
+                    cls._workspaces[workspace_uri] = state
                     logger.info(
-                        f"Auto-detected project '{detected_project}' for workspace {workspace_uri}"
+                        f"Created new workspace state for {workspace_uri}, "
+                        f"registry now has {len(cls._workspaces)} workspace(s)"
                     )
+            else:
+                logger.debug(f"Found existing workspace state for {workspace_uri}")
+                cls._workspaces[workspace_uri].touch()
 
-                cls._workspaces[workspace_uri] = state
-                logger.info(
-                    f"Created new workspace state for {workspace_uri}, "
-                    f"registry now has {len(cls._workspaces)} workspace(s)"
-                )
-        else:
-            logger.debug(f"Found existing workspace state for {workspace_uri}")
-            cls._workspaces[workspace_uri].touch()
-
-        workspace = cls._workspaces[workspace_uri]
+            workspace = cls._workspaces[workspace_uri]
 
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
@@ -2608,15 +2618,16 @@ class WorkspaceRegistry:
         Returns:
             WorkspaceState for the workspace
         """
-        if workspace_uri not in cls._workspaces:
-            state = WorkspaceState(workspace_uri=workspace_uri)
-            detected_project = cls._detect_project(workspace_uri)
-            if detected_project:
-                state.project = detected_project
-                state.is_auto_detected = True
-            cls._workspaces[workspace_uri] = state
+        with cls._registry_lock:
+            if workspace_uri not in cls._workspaces:
+                state = WorkspaceState(workspace_uri=workspace_uri)
+                detected_project = cls._detect_project(workspace_uri)
+                if detected_project:
+                    state.project = detected_project
+                    state.is_auto_detected = True
+                cls._workspaces[workspace_uri] = state
 
-        workspace = cls._workspaces[workspace_uri]
+            workspace = cls._workspaces[workspace_uri]
 
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
@@ -2771,11 +2782,12 @@ class WorkspaceRegistry:
         Returns:
             True if removed, False if not found
         """
-        if workspace_uri in cls._workspaces:
-            del cls._workspaces[workspace_uri]
-            logger.debug(f"Removed workspace state for {workspace_uri}")
-            return True
-        return False
+        with cls._registry_lock:
+            if workspace_uri in cls._workspaces:
+                del cls._workspaces[workspace_uri]
+                logger.debug(f"Removed workspace state for {workspace_uri}")
+                return True
+            return False
 
     @classmethod
     def remove_session(cls, workspace_uri: str, session_id: str) -> bool:
@@ -2799,7 +2811,8 @@ class WorkspaceRegistry:
 
         Primarily for testing.
         """
-        cls._workspaces.clear()
+        with cls._registry_lock:
+            cls._workspaces.clear()
         logger.debug("Cleared all workspace states")
 
     @classmethod
@@ -2823,20 +2836,21 @@ class WorkspaceRegistry:
         Returns:
             Number of workspaces removed
         """
-        # First, cleanup stale sessions in each workspace
-        for workspace in cls._workspaces.values():
-            workspace.cleanup_stale_sessions(SESSION_STALE_HOURS)
+        with cls._registry_lock:
+            # First, cleanup stale sessions in each workspace
+            for workspace in cls._workspaces.values():
+                workspace.cleanup_stale_sessions(SESSION_STALE_HOURS)
 
-        # Then cleanup stale workspaces (no sessions and no activity)
-        stale_uris = [
-            uri
-            for uri, state in cls._workspaces.items()
-            if state.is_stale(max_age_hours) and state.session_count() == 0
-        ]
+            # Then cleanup stale workspaces (no sessions and no activity)
+            stale_uris = [
+                uri
+                for uri, state in cls._workspaces.items()
+                if state.is_stale(max_age_hours) and state.session_count() == 0
+            ]
 
-        for uri in stale_uris:
-            del cls._workspaces[uri]
-            logger.info(f"Cleaned up stale workspace: {uri}")
+            for uri in stale_uris:
+                del cls._workspaces[uri]
+                logger.info(f"Cleaned up stale workspace: {uri}")
 
         if stale_uris:
             logger.info(f"Cleaned up {len(stale_uris)} stale workspace(s)")

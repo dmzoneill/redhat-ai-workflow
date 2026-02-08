@@ -147,7 +147,8 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 data = json.loads(SESSION_STATE_FILE.read_text())
                 service["session_count"] = data.get("session_count", 0)
                 service["workspace_count"] = data.get("workspace_count", 0)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in get_status (state file read): {e}")
             service["session_count"] = 0
             service["workspace_count"] = 0
 
@@ -942,8 +943,10 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         except Exception:
             try:
                 Path(temp_path).unlink()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug(
+                    f"Suppressed error in _save_state (temp file cleanup): {e}"
+                )
             raise
 
     async def _fast_sync_loop(self):

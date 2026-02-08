@@ -100,8 +100,8 @@ def _detect_default_branch(project_path: Path) -> str:
         if result.returncode == 0:
             # refs/remotes/origin/main -> main
             return result.stdout.strip().split("/")[-1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_default_branch (symbolic-ref): {e}")
 
     # Fallback: check if main or master exists
     try:
@@ -118,8 +118,8 @@ def _detect_default_branch(project_path: Path) -> str:
                 return "main"
             if "origin/master" in branches:
                 return "master"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_default_branch (branch list): {e}")
 
     return "main"  # Default
 
@@ -150,8 +150,8 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
                 if path.endswith(".git"):
                     path = path[:-4]
                 return path
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_gitlab_remote: {e}")
     return None
 
 
@@ -182,8 +182,10 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
                     return "npm run lint"
                 if "eslint" in scripts:
                     return "npm run eslint"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _detect_lint_command (package.json): {e}"
+                )
         return "npm run lint"
 
     if language == "go":
@@ -209,8 +211,10 @@ def _detect_test_command(project_path: Path, language: str) -> str:
                 scripts = pkg.get("scripts", {})
                 if "test" in scripts:
                     return "npm test"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _detect_test_command (package.json): {e}"
+                )
         return "npm test"
 
     if language == "go":

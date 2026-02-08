@@ -1032,6 +1032,7 @@ _browser_instance: Optional[Browser] = None  # Browser instance
 _browser_context: Optional[BrowserContext] = None  # Browser context
 _browser_page: Optional[Page] = None  # Active page
 _browser_pid: Optional[int] = None  # Browser process PID for atexit cleanup
+_browser_lock = asyncio.Lock()  # Protects browser globals during lazy init
 
 # Screenshot output directory
 BROWSER_SNAPSHOT_DIR = Path("/tmp/browser_snapshots")
@@ -1054,49 +1055,50 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
     """
     global _browser_playwright, _browser_instance, _browser_context, _browser_page
 
-    # Return existing page if browser is still connected
-    if _browser_page is not None and _browser_instance is not None:
+    async with _browser_lock:
+        # Return existing page if browser is still connected
+        if _browser_page is not None and _browser_instance is not None:
+            try:
+                # Verify the browser is still alive by checking the page URL
+                _ = _browser_page.url
+                return _browser_page
+            except Exception as e:
+                logger.debug(f"Suppressed error in _get_or_create_browser: {e}")
+                logger.warning("Browser session expired, creating new one")
+                await _close_browser_unlocked()
+
         try:
-            # Verify the browser is still alive by checking the page URL
-            _ = _browser_page.url
-            return _browser_page
+            from playwright.async_api import async_playwright as _async_playwright
+        except ImportError:
+            raise RuntimeError(
+                "Playwright is not installed. "
+                "Install it with: uv add playwright && playwright install chromium"
+            )
+
+        global _browser_pid
+
+        logger.info(f"Launching browser (headless={headless})")
+        _browser_playwright = await _async_playwright().start()
+        _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
+        # Store browser PID for synchronous atexit cleanup
+        try:
+            _browser_pid = (
+                _browser_instance.process.pid if _browser_instance.process else None
+            )
         except Exception as e:
-            logger.debug(f"Suppressed error in _get_or_create_browser: {e}")
-            logger.warning("Browser session expired, creating new one")
-            await _close_browser()
-
-    try:
-        from playwright.async_api import async_playwright as _async_playwright
-    except ImportError:
-        raise RuntimeError(
-            "Playwright is not installed. "
-            "Install it with: uv add playwright && playwright install chromium"
+            logger.debug(f"Suppressed error in _get_or_create_browser PID: {e}")
+            _browser_pid = None
+        _browser_context = await _browser_instance.new_context(
+            viewport={"width": 1280, "height": 720},
         )
+        _browser_page = await _browser_context.new_page()
 
-    global _browser_pid
-
-    logger.info(f"Launching browser (headless={headless})")
-    _browser_playwright = await _async_playwright().start()
-    _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
-    # Store browser PID for synchronous atexit cleanup
-    try:
-        _browser_pid = (
-            _browser_instance.process.pid if _browser_instance.process else None
-        )
-    except Exception as e:
-        logger.debug(f"Suppressed error in _get_or_create_browser PID: {e}")
-        _browser_pid = None
-    _browser_context = await _browser_instance.new_context(
-        viewport={"width": 1280, "height": 720},
-    )
-    _browser_page = await _browser_context.new_page()
-
-    logger.info("Browser session created")
-    return _browser_page
+        logger.info("Browser session created")
+        return _browser_page
 
 
-async def _close_browser() -> None:
-    """Close the persistent browser session and clean up resources."""
+async def _close_browser_unlocked() -> None:
+    """Close the persistent browser session (caller must hold _browser_lock)."""
     global _browser_playwright, _browser_instance, _browser_context, _browser_page, _browser_pid
 
     if _browser_instance is not None:
@@ -1117,6 +1119,12 @@ async def _close_browser() -> None:
     _browser_page = None
     _browser_pid = None
     logger.info("Browser session closed")
+
+
+async def _close_browser() -> None:
+    """Close the persistent browser session and clean up resources."""
+    async with _browser_lock:
+        await _close_browser_unlocked()
 
 
 def _cleanup_browser_sync() -> None:

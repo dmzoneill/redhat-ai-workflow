@@ -23,6 +23,7 @@ import functools
 import inspect
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Global registry of tools and their source locations
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {}
+_registry_lock = threading.Lock()
 
 
 def debuggable(func: Callable) -> Callable:
@@ -115,7 +117,8 @@ def debuggable(func: Callable) -> Callable:
     wrapper.__dict__["_debug_info"] = debug_info
 
     # Register in global registry
-    TOOL_REGISTRY[func.__name__] = debug_info
+    with _registry_lock:
+        TOOL_REGISTRY[func.__name__] = debug_info
 
     return wrapper
 
@@ -364,8 +367,9 @@ def wrap_all_tools(server, tools_module) -> int:
         if func_name.startswith("_"):
             continue
 
-        if func_name in TOOL_REGISTRY:
-            continue
+        with _registry_lock:
+            if func_name in TOOL_REGISTRY:
+                continue
 
         # Calculate line number
         line_num = full_source[: match.start()].count("\n") + 1
@@ -374,12 +378,13 @@ def wrap_all_tools(server, tools_module) -> int:
         func_source = _extract_function(full_source, func_name)
         end_line = line_num + func_source.count("\n")
 
-        TOOL_REGISTRY[func_name] = {
-            "source_file": source_file,
-            "start_line": line_num,
-            "end_line": end_line,
-            "func_name": func_name,
-        }
+        with _registry_lock:
+            TOOL_REGISTRY[func_name] = {
+                "source_file": source_file,
+                "start_line": line_num,
+                "end_line": end_line,
+                "func_name": func_name,
+            }
         count += 1
 
     return count

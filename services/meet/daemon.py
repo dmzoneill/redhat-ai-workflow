@@ -160,7 +160,10 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                             datetime.now(poll_time.tzinfo) - poll_time
                         ).total_seconds()
                         checks["recent_poll"] = poll_age < 300  # Within 5 minutes
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in health_check (poll time parse): {e}"
+                        )
                         checks["recent_poll"] = False
                 else:
                     checks["recent_poll"] = False
@@ -616,8 +619,10 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                             days = total_seconds // 86400
                             hours = (total_seconds % 86400) // 3600
                             meet_state["countdown"] = f"{days}d {hours}h"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(
+                        f"Suppressed error in _get_meet_state (countdown): {e}"
+                    )
 
         return meet_state
 

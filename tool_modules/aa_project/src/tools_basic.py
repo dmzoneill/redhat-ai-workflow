@@ -69,7 +69,9 @@ def _save_config(config: dict) -> bool:
 
 def _detect_language(project_path: Path) -> str:
     """Detect project language from config files."""
-    if (project_path / "pyproject.toml").exists() or (project_path / "setup.py").exists():
+    if (project_path / "pyproject.toml").exists() or (
+        project_path / "setup.py"
+    ).exists():
         return "python"
     if (project_path / "package.json").exists():
         return "javascript"
@@ -95,8 +97,8 @@ def _detect_default_branch(project_path: Path) -> str:
         if result.returncode == 0:
             # refs/remotes/origin/main -> main
             return result.stdout.strip().split("/")[-1]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_default_branch (symbolic-ref): {e}")
 
     # Fallback: check if main or master exists
     try:
@@ -113,8 +115,8 @@ def _detect_default_branch(project_path: Path) -> str:
                 return "main"
             if "origin/master" in branches:
                 return "master"
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_default_branch (branch list): {e}")
 
     return "main"  # Default
 
@@ -145,8 +147,8 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
                 if path.endswith(".git"):
                     path = path[:-4]
                 return path
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed error in _detect_gitlab_remote: {e}")
     return None
 
 
@@ -177,8 +179,10 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
                     return "npm run lint"
                 if "eslint" in scripts:
                     return "npm run eslint"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _detect_lint_command (package.json): {e}"
+                )
         return "npm run lint"
 
     if language == "go":
@@ -190,7 +194,9 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
 def _detect_test_command(project_path: Path, language: str) -> str:
     """Detect test command based on project type."""
     if language == "python":
-        if (project_path / "pytest.ini").exists() or (project_path / "pyproject.toml").exists():
+        if (project_path / "pytest.ini").exists() or (
+            project_path / "pyproject.toml"
+        ).exists():
             return "pytest tests/ -v"
         return "python -m pytest"
 
@@ -202,8 +208,10 @@ def _detect_test_command(project_path: Path, language: str) -> str:
                 scripts = pkg.get("scripts", {})
                 if "test" in scripts:
                     return "npm test"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(
+                    f"Suppressed error in _detect_test_command (package.json): {e}"
+                )
         return "npm test"
 
     if language == "go":
@@ -215,7 +223,16 @@ def _detect_test_command(project_path: Path, language: str) -> str:
 def _detect_scopes(project_path: Path) -> list[str]:
     """Detect commit scopes from directory structure."""
     scopes = []
-    important_dirs = ["api", "core", "models", "services", "utils", "tests", "docs", "config"]
+    important_dirs = [
+        "api",
+        "core",
+        "models",
+        "services",
+        "utils",
+        "tests",
+        "docs",
+        "config",
+    ]
 
     for dir_name in important_dirs:
         if (project_path / dir_name).exists():
@@ -247,7 +264,9 @@ def _generate_test_setup(project_path: Path, language: str) -> str:
         )
 
         # Check for docker-compose
-        if (project_path / "docker-compose.yml").exists() or (project_path / "docker-compose.yaml").exists():
+        if (project_path / "docker-compose.yml").exists() or (
+            project_path / "docker-compose.yaml"
+        ).exists():
             lines.extend(
                 [
                     "# 3. Start services:",
@@ -516,7 +535,9 @@ async def _project_add_impl(
     lines.append("```")
 
     lines.append("\n### Next Steps\n")
-    lines.append(f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge")
+    lines.append(
+        f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge"
+    )
     lines.append(f"2. Verify GitLab access: `gitlab_mr_list(project='{gitlab}')`")
     lines.append(f"3. Verify Jira access: `jira_list_issues(project='{jira_project}')`")
 
@@ -544,7 +565,9 @@ async def _project_remove_impl(name: str, confirm: bool = False) -> list[TextCon
         lines.append("```json")
         lines.append(json.dumps({name: entry}, indent=2))
         lines.append("```")
-        lines.append(f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*")
+        lines.append(
+            f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*"
+        )
         return [TextContent(type="text", text="\n".join(lines))]
 
     # Remove from config

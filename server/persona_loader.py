@@ -19,6 +19,7 @@ Usage:
 import asyncio
 import importlib.util
 import logging
+import threading
 from typing import TYPE_CHECKING, cast
 
 import yaml
@@ -110,14 +111,16 @@ def discover_tool_modules() -> set[str]:
 
 # Dynamically discovered tool modules (cached on first access)
 _discovered_modules: set[str] | None = None
+_discovered_modules_lock = threading.Lock()
 
 
 def get_available_modules() -> set[str]:
     """Get available tool modules, discovering them if needed."""
     global _discovered_modules
-    if _discovered_modules is None:
-        _discovered_modules = discover_tool_modules()
-    return _discovered_modules
+    with _discovered_modules_lock:
+        if _discovered_modules is None:
+            _discovered_modules = discover_tool_modules()
+        return _discovered_modules
 
 
 def is_valid_module(module_name: str) -> bool:

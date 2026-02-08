@@ -26,6 +26,7 @@ Tools register themselves at import time, eliminating hardcoded tool lists.
 """
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -69,7 +70,9 @@ class ToolManifest:
     """Global registry of all discovered tools."""
 
     tools: dict[str, ToolInfo] = field(default_factory=dict)
-    modules: dict[str, list[str]] = field(default_factory=dict)  # module -> [tool_names]
+    modules: dict[str, list[str]] = field(
+        default_factory=dict
+    )  # module -> [tool_names]
     _frozen: bool = False
 
     def register(self, info: ToolInfo) -> None:
@@ -86,7 +89,9 @@ class ToolManifest:
         if info.name not in self.modules[info.module]:
             self.modules[info.module].append(info.name)
 
-        logger.debug(f"Registered tool: {info.name} (module={info.module}, tier={info.tier})")
+        logger.debug(
+            f"Registered tool: {info.name} (module={info.module}, tier={info.tier})"
+        )
 
     def get_module_tools(self, module: str, tier: ToolTier | None = None) -> list[str]:
         """Get tools for a module, optionally filtered by tier."""
@@ -117,6 +122,7 @@ class ToolManifest:
 
 # Global manifest instance
 TOOL_MANIFEST = ToolManifest()
+_manifest_lock = threading.Lock()
 
 
 def register_tool(
@@ -167,7 +173,8 @@ def register_tool(
         )
 
         # Register in global manifest
-        TOOL_MANIFEST.register(info)
+        with _manifest_lock:
+            TOOL_MANIFEST.register(info)
 
         return func
 
@@ -361,7 +368,12 @@ def discover_module_tools(module: str) -> dict[str, list[str]]:
 
     # Special case: workflow module has tools split across multiple files
     # Scan all *_tools.py files in the module directory
-    if not result["core"] and not result["basic"] and not result["extra"] and module_dir.exists():
+    if (
+        not result["core"]
+        and not result["basic"]
+        and not result["extra"]
+        and module_dir.exists()
+    ):
         for py_file in module_dir.glob("*_tools.py"):
             for info in discover_tools_from_file(py_file, base_name):
                 result["basic"].append(info.name)
@@ -418,7 +430,9 @@ def get_module_tool_counts(module: str) -> dict[str, int]:
         "core": len(discovered["core"]),
         "basic": len(discovered["basic"]),
         "extra": len(discovered["extra"]),
-        "total": len(discovered["core"]) + len(discovered["basic"]) + len(discovered["extra"]),
+        "total": len(discovered["core"])
+        + len(discovered["basic"])
+        + len(discovered["extra"]),
     }
 
 

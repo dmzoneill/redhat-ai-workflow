@@ -45,7 +45,10 @@ def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
     # data-qa="channel_sidebar_name_team-clouddot-automation-analytics"
 
     # Find all channel IDs
-    channel_ids = re.findall(r'data-qa-channel-sidebar-channel-id="([^"]+)"', html_content)  # noqa: F841
+    _channel_ids = re.findall(  # noqa: F841
+        r'data-qa-channel-sidebar-channel-id="([^"]+)"',
+        html_content,
+    )
 
     # Find all channel names (they follow a specific pattern)
     name_pattern = r'data-qa="channel_sidebar_name_([^"]+)"'
@@ -54,10 +57,14 @@ def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
     # Build a mapping - names appear after their IDs in the HTML
     # We need to correlate them by position in the HTML
     id_positions = [
-        (m.start(), m.group(1)) for m in re.finditer(r'data-qa-channel-sidebar-channel-id="([^"]+)"', html_content)
+        (m.start(), m.group(1))
+        for m in re.finditer(
+            r'data-qa-channel-sidebar-channel-id="([^"]+)"', html_content
+        )
     ]
     name_positions = [
-        (m.start(), m.group(1)) for m in re.finditer(r'data-qa="channel_sidebar_name_([^"]+)"', html_content)
+        (m.start(), m.group(1))
+        for m in re.finditer(r'data-qa="channel_sidebar_name_([^"]+)"', html_content)
     ]
 
     # For each channel ID, find the next name that appears after it
@@ -67,7 +74,10 @@ def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
         for name_pos, name in name_positions:
             if name_pos > id_pos:
                 # Skip special entries
-                if name.startswith("sidebar_add_more") or name in ("you", "all_thread_link"):
+                if name.startswith("sidebar_add_more") or name in (
+                    "you",
+                    "all_thread_link",
+                ):
                     continue
                 if name.startswith("page_"):
                     continue
@@ -86,7 +96,11 @@ def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
                 channel_type = "unknown"
 
             # Clean up the name (replace dashes with spaces for display)
-            display_name = channel_name.replace("-", " ").title() if channel_type == "dm" else channel_name
+            display_name = (
+                channel_name.replace("-", " ").title()
+                if channel_type == "dm"
+                else channel_name
+            )
 
             channels.append(
                 {
@@ -325,7 +339,9 @@ class SlackStateDB:
             db_path: Path to SQLite database file.
                      Defaults to SLACK_STATE_DB_PATH env var or ./slack_state.db
         """
-        self.db_path = db_path or os.getenv("SLACK_STATE_DB_PATH", os.path.join(os.getcwd(), "slack_state.db"))
+        self.db_path = db_path or os.getenv(
+            "SLACK_STATE_DB_PATH", os.path.join(os.getcwd(), "slack_state.db")
+        )
         self._db: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
 
@@ -442,15 +458,19 @@ class SlackStateDB:
                 (cutoff,),
             )
             await self._db.commit()
-        except Exception:
-            pass  # Table might not exist yet on first run
+        except Exception as e:
+            logger.debug(
+                f"Suppressed error in _ensure_tables (cleanup old notifications): {e}"
+            )  # Table might not exist yet on first run
 
         # Migration: Add avatar_url column to user_cache if it doesn't exist
         try:
             cursor = await self._db.execute("PRAGMA table_info(user_cache)")
             columns = [row[1] for row in await cursor.fetchall()]
             if "avatar_url" not in columns:
-                await self._db.execute("ALTER TABLE user_cache ADD COLUMN avatar_url TEXT")
+                await self._db.execute(
+                    "ALTER TABLE user_cache ADD COLUMN avatar_url TEXT"
+                )
                 await self._db.commit()
                 logger.info("Migrated user_cache: added avatar_url column")
         except Exception as e:
@@ -492,7 +512,9 @@ class SlackStateDB:
         """Get all channel states as dict of channel_id -> last_processed_ts."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute("SELECT channel_id, last_processed_ts FROM channel_state")
+            cursor = await self._db.execute(
+                "SELECT channel_id, last_processed_ts FROM channel_state"
+            )
             rows = await cursor.fetchall()
             return {row[0]: row[1] for row in rows}
 
@@ -589,7 +611,9 @@ class SlackStateDB:
         """Get count of unprocessed messages."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute("SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL"
+            )
             row = await cursor.fetchone()
             return row[0] if row else 0
 
@@ -610,7 +634,9 @@ class SlackStateDB:
         """Get cached user name."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute("SELECT user_name FROM user_cache WHERE user_id = ?", (user_id,))
+            cursor = await self._db.execute(
+                "SELECT user_name FROM user_cache WHERE user_id = ?", (user_id,)
+            )
             row = await cursor.fetchone()
             return row[0] if row else None
 
@@ -691,7 +717,9 @@ class SlackStateDB:
             )
             with_avatar = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute("SELECT COUNT(*) FROM user_cache WHERE email IS NOT NULL AND email != ''")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM user_cache WHERE email IS NOT NULL AND email != ''"
+            )
             with_email = (await cursor.fetchone())[0]
 
             cursor = await self._db.execute(
@@ -699,7 +727,9 @@ class SlackStateDB:
             )
             with_gitlab = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute("SELECT MIN(updated_at), MAX(updated_at) FROM user_cache")
+            cursor = await self._db.execute(
+                "SELECT MIN(updated_at), MAX(updated_at) FROM user_cache"
+            )
             row = await cursor.fetchone()
             oldest = row[0] if row[0] else 0
             newest = row[1] if row[1] else 0
@@ -720,7 +750,9 @@ class SlackStateDB:
         """Get metadata value."""
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute("SELECT value FROM listener_meta WHERE key = ?", (key,))
+            cursor = await self._db.execute(
+                "SELECT value FROM listener_meta WHERE key = ?", (key,)
+            )
             row = await cursor.fetchone()
             return row[0] if row else default
 
@@ -852,7 +884,13 @@ class SlackStateDB:
                     LIMIT ?
                 """
                 search_pattern = "%" + query + "%"
-                params = [search_pattern, search_pattern, search_pattern, search_pattern, limit]
+                params = [
+                    search_pattern,
+                    search_pattern,
+                    search_pattern,
+                    search_pattern,
+                    limit,
+                ]
             elif query:
                 sql = """
                     SELECT channel_id, name, display_name, is_private, is_member,
@@ -863,7 +901,13 @@ class SlackStateDB:
                     LIMIT ?
                 """
                 search_pattern = "%" + query + "%"
-                params = [search_pattern, search_pattern, search_pattern, search_pattern, limit]
+                params = [
+                    search_pattern,
+                    search_pattern,
+                    search_pattern,
+                    search_pattern,
+                    limit,
+                ]
             elif member_only:
                 sql = """
                     SELECT channel_id, name, display_name, is_private, is_member,
@@ -943,10 +987,14 @@ class SlackStateDB:
             cursor = await self._db.execute("SELECT COUNT(*) FROM channel_cache")
             total = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute("SELECT COUNT(*) FROM channel_cache WHERE is_member = 1")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM channel_cache WHERE is_member = 1"
+            )
             member_count = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute("SELECT MIN(updated_at), MAX(updated_at) FROM channel_cache")
+            cursor = await self._db.execute(
+                "SELECT MIN(updated_at), MAX(updated_at) FROM channel_cache"
+            )
             row = await cursor.fetchone()
             oldest = row[0] if row[0] else 0
             newest = row[1] if row[1] else 0
@@ -959,7 +1007,9 @@ class SlackStateDB:
                 "cache_age_seconds": time.time() - newest if newest else None,
             }
 
-    async def import_channels_from_sidebar(self, file_path: str | Path) -> dict[str, Any]:
+    async def import_channels_from_sidebar(
+        self, file_path: str | Path
+    ) -> dict[str, Any]:
         """
         Import channels from a Slack sidebar HTML file.
 
@@ -1208,7 +1258,16 @@ class SlackStateDB:
                 (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, time.time()),
+                (
+                    user_id,
+                    user_name,
+                    display_name,
+                    real_name,
+                    email,
+                    gitlab_username,
+                    avatar_url,
+                    time.time(),
+                ),
             )
             await self._db.commit()
 
@@ -1241,7 +1300,14 @@ class SlackStateDB:
                     ORDER BY user_name ASC
                     LIMIT ?
                     """,
-                    (search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, limit),
+                    (
+                        search_pattern,
+                        search_pattern,
+                        search_pattern,
+                        search_pattern,
+                        search_pattern,
+                        limit,
+                    ),
                 )
             else:
                 cursor = await self._db.execute(
@@ -1269,7 +1335,9 @@ class SlackStateDB:
                 for row in rows
             ]
 
-    async def get_user_by_gitlab_username(self, gitlab_username: str) -> dict[str, Any] | None:
+    async def get_user_by_gitlab_username(
+        self, gitlab_username: str
+    ) -> dict[str, Any] | None:
         """Get a user by their GitLab username."""
         async with self._lock:
             await self._connect_unlocked()
@@ -1380,9 +1448,21 @@ class SlackStateDB:
 
             # Calculate best match score across all name fields
             scores = [
-                SequenceMatcher(None, name_lower, real_name).ratio() if real_name else 0,
-                SequenceMatcher(None, name_lower, display_name).ratio() if display_name else 0,
-                SequenceMatcher(None, name_lower, user_name).ratio() if user_name else 0,
+                (
+                    SequenceMatcher(None, name_lower, real_name).ratio()
+                    if real_name
+                    else 0
+                ),
+                (
+                    SequenceMatcher(None, name_lower, display_name).ratio()
+                    if display_name
+                    else 0
+                ),
+                (
+                    SequenceMatcher(None, name_lower, user_name).ratio()
+                    if user_name
+                    else 0
+                ),
             ]
             best_score = max(scores)
 
@@ -1428,13 +1508,37 @@ class SlackStateDB:
 
         # Already an ID?
         if target.startswith("C") and len(target) > 8:
-            return {"type": "channel", "id": target, "name": target, "found": True, "source": "raw_id"}
+            return {
+                "type": "channel",
+                "id": target,
+                "name": target,
+                "found": True,
+                "source": "raw_id",
+            }
         if target.startswith("D") and len(target) > 8:
-            return {"type": "dm", "id": target, "name": target, "found": True, "source": "raw_id"}
+            return {
+                "type": "dm",
+                "id": target,
+                "name": target,
+                "found": True,
+                "source": "raw_id",
+            }
         if target.startswith("U") and len(target) > 8:
-            return {"type": "user", "id": target, "name": target, "found": True, "source": "raw_id"}
+            return {
+                "type": "user",
+                "id": target,
+                "name": target,
+                "found": True,
+                "source": "raw_id",
+            }
         if target.startswith("S") and len(target) > 8:
-            return {"type": "group", "id": target, "name": target, "found": True, "source": "raw_id"}
+            return {
+                "type": "group",
+                "id": target,
+                "name": target,
+                "found": True,
+                "source": "raw_id",
+            }
 
         # Channel name?
         if target.startswith("#"):
@@ -1448,7 +1552,13 @@ class SlackStateDB:
                     "found": True,
                     "source": "channel_cache",
                 }
-            return {"type": "channel", "id": None, "name": channel_name, "found": False, "source": "not_found"}
+            return {
+                "type": "channel",
+                "id": None,
+                "name": channel_name,
+                "found": False,
+                "source": "not_found",
+            }
 
         # User or group?
         if target.startswith("@"):
@@ -1477,7 +1587,13 @@ class SlackStateDB:
                     "source": "user_cache",
                 }
 
-            return {"type": "unknown", "id": None, "name": name, "found": False, "source": "not_found"}
+            return {
+                "type": "unknown",
+                "id": None,
+                "name": name,
+                "found": False,
+                "source": "not_found",
+            }
 
         # Plain name - try channel first, then user
         channel = await self.get_channel_by_name(target)
@@ -1501,4 +1617,10 @@ class SlackStateDB:
                 "source": "user_cache",
             }
 
-        return {"type": "unknown", "id": None, "name": target, "found": False, "source": "not_found"}
+        return {
+            "type": "unknown",
+            "id": None,
+            "name": target,
+            "found": False,
+            "source": "not_found",
+        }

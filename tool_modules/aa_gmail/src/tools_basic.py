@@ -94,8 +94,8 @@ def get_gmail_service():
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in get_gmail_service (load token): {e}")
 
     # Refresh if expired
     if creds and creds.expired and creds.refresh_token:
@@ -103,14 +103,16 @@ def get_gmail_service():
             creds.refresh(Request())
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Suppressed error in get_gmail_service (refresh token): {e}")
             creds = None
 
     # Need to authenticate via calendar first
     if not creds or not creds.valid:
         return (
             None,
-            f"Not authenticated. Run `google_calendar_status()` first to authenticate.\n" f"Token file: {TOKEN_FILE}",
+            f"Not authenticated. Run `google_calendar_status()` first to authenticate.\n"
+            f"Token file: {TOKEN_FILE}",
         )
 
     try:
@@ -127,8 +129,8 @@ def _decode_body(payload: dict) -> str:
     if "body" in payload and payload["body"].get("data"):
         try:
             body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed error in _decode_body (body decode): {e}")
 
     # Check parts for multipart messages
     if "parts" in payload:
@@ -137,10 +139,14 @@ def _decode_body(payload: dict) -> str:
             if mime_type == "text/plain":
                 if part.get("body", {}).get("data"):
                     try:
-                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode(
+                            "utf-8"
+                        )
                         break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Suppressed error in _decode_body (part decode): {e}"
+                        )
             elif mime_type.startswith("multipart/"):
                 # Recursively check nested parts
                 nested = _decode_body(part)
@@ -230,7 +236,12 @@ async def _gmail_list_emails_impl(
             msg_data = (
                 service.users()
                 .messages()
-                .get(userId="me", id=msg["id"], format="metadata", metadataHeaders=["From", "Subject", "Date"])
+                .get(
+                    userId="me",
+                    id=msg["id"],
+                    format="metadata",
+                    metadataHeaders=["From", "Subject", "Date"],
+                )
                 .execute()
             )
 
@@ -293,7 +304,12 @@ async def _gmail_search_impl(
             msg_data = (
                 service.users()
                 .messages()
-                .get(userId="me", id=msg["id"], format="metadata", metadataHeaders=["From", "Subject", "Date"])
+                .get(
+                    userId="me",
+                    id=msg["id"],
+                    format="metadata",
+                    metadataHeaders=["From", "Subject", "Date"],
+                )
                 .execute()
             )
 
@@ -326,7 +342,12 @@ async def _gmail_read_email_impl(
         return f"❌ {error}"
 
     try:
-        msg_data = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+        msg_data = (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute()
+        )
 
         payload = msg_data.get("payload", {})
         headers = payload.get("headers", [])
@@ -376,7 +397,9 @@ async def _gmail_read_email_impl(
             lines.append("")
             lines.append("## 📎 Attachments")
             for att in attachments:
-                lines.append(f"- **{att['name']}** ({att['mime']}, {att['size']} bytes)")
+                lines.append(
+                    f"- **{att['name']}** ({att['mime']}, {att['size']} bytes)"
+                )
 
         return "\n".join(lines)
 
@@ -397,7 +420,12 @@ async def _gmail_get_thread_impl(
         thread = (
             service.users()
             .threads()
-            .get(userId="me", id=thread_id, format="metadata", metadataHeaders=["From", "Subject", "Date"])
+            .get(
+                userId="me",
+                id=thread_id,
+                format="metadata",
+                metadataHeaders=["From", "Subject", "Date"],
+            )
             .execute()
         )
 
@@ -505,7 +533,9 @@ async def _gmail_unread_count_impl() -> str:
 
         if unread > 0:
             lines.append("")
-            lines.append("Use `gmail_list_emails(unread_only=True)` to see unread messages.")
+            lines.append(
+                "Use `gmail_list_emails(unread_only=True)` to see unread messages."
+            )
 
         return "\n".join(lines)
 
