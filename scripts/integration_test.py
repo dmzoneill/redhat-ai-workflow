@@ -112,7 +112,9 @@ class TestReport:
                 "fixed": self.total_fixed,
                 "skipped": self.total_skipped,
                 "pass_rate": (
-                    f"{(self.total_passed / self.total_tools * 100):.1f}%" if self.total_tools > 0 else "N/A"
+                    f"{(self.total_passed / self.total_tools * 100):.1f}%"
+                    if self.total_tools > 0
+                    else "N/A"
                 ),
             },
             "agents": [
@@ -165,7 +167,9 @@ TOOL_TEST_PARAMS = {
         "project": "automation-analytics/automation-analytics-backend",
         "limit": 1,
     },
-    "gitlab_project_info": {"project": "automation-analytics/automation-analytics-backend"},
+    "gitlab_project_info": {
+        "project": "automation-analytics/automation-analytics-backend"
+    },
     # K8s tools - read only, use stage
     "kubectl_get_pods": {"namespace": "tower-analytics-stage", "environment": "stage"},
     "kubectl_get_deployments": {
@@ -364,7 +368,10 @@ class IntegrationTestRunner:
         result = ToolTestResult(tool_name=tool_name, agent=agent_name, success=False)
 
         # Skip tools from exclusion list
-        if tool_name in self.exclusions.get("excluded_tools", []) or tool_name in SKIP_TOOLS:
+        if (
+            tool_name in self.exclusions.get("excluded_tools", [])
+            or tool_name in SKIP_TOOLS
+        ):
             result.success = True
             result.output = "SKIPPED (excluded/destructive)"
             self.report.total_skipped += 1
@@ -417,7 +424,10 @@ class IntegrationTestRunner:
     def _capture_feature_ideas(self, tool_name: str, agent_name: str):
         """Capture feature improvement ideas based on tool patterns."""
         # Check for missing test coverage
-        if tool_name not in TOOL_TEST_PARAMS and tool_name not in self._get_all_safe_test_tools():
+        if (
+            tool_name not in TOOL_TEST_PARAMS
+            and tool_name not in self._get_all_safe_test_tools()
+        ):
             self.report.add_todo(
                 category="missing",
                 title=f"Add test params for {tool_name}",
@@ -509,7 +519,10 @@ class IntegrationTestRunner:
                 for tool_name, _params in TOOL_TEST_PARAMS.items():
                     # Check if tool belongs to this module (by prefix convention)
                     tool_module = tool_name.split("_")[0]
-                    if tool_module == module_name.replace("-", "_") or tool_module in module_name:
+                    if (
+                        tool_module == module_name.replace("-", "_")
+                        or tool_module in module_name
+                    ):
                         result.tools_tested += 1
 
                         tool_result = await self.test_tool(tool_name, agent_name)
@@ -614,7 +627,9 @@ class IntegrationTestRunner:
             for ar in self.report.agent_results:
                 for tr in ar.tool_results:
                     if not tr.success and not tr.fixed:
-                        print(f"     • {ar.agent_name}/{tr.tool_name}: {tr.error[:50]}...")
+                        print(
+                            f"     • {ar.agent_name}/{tr.tool_name}: {tr.error[:50]}..."
+                        )
 
         # Show feature todos
         if self.report.feature_todos:
@@ -646,7 +661,11 @@ class IntegrationTestRunner:
     def save_report(self, path: str | None = None):
         """Save test report to JSON."""
         if path is None:
-            path = self.project_root / "test-results" / f"integration-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            path = (
+                self.project_root
+                / "test-results"
+                / f"integration-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+            )
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -702,7 +721,9 @@ class IntegrationTestRunner:
             todos.sort(key=lambda t: priority_order.get(t.priority, 1))
 
             for todo in todos:
-                priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(todo.priority, "⚪")
+                priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(
+                    todo.priority, "⚪"
+                )
                 lines.append(f"### {priority_badge} {todo.title}")
                 lines.append("")
                 lines.append(f"- **Source:** `{todo.source}`")
@@ -729,10 +750,14 @@ class IntegrationTestRunner:
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Integration test runner with auto-remediation")
+    parser = argparse.ArgumentParser(
+        description="Integration test runner with auto-remediation"
+    )
     parser.add_argument("--agent", "-a", help="Test specific agent only")
     parser.add_argument("--fix", "-f", action="store_true", help="Auto-fix failures")
-    parser.add_argument("--dry-run", "-n", action="store_true", help="Dry run (report only)")
+    parser.add_argument(
+        "--dry-run", "-n", action="store_true", help="Dry run (report only)"
+    )
     parser.add_argument("--save", "-s", action="store_true", help="Save report to JSON")
     args = parser.parse_args()
 

@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "tool_modules" / "aa_slack" / "src"))
 
-from server.utils import load_config
+from server.utils import load_config  # noqa: E402
 
 STYLE_DIR = PROJECT_ROOT / "memory" / "style"
 
@@ -118,7 +118,9 @@ async def run_export():
                             "is_thread_reply": False,
                             "reply_to": None,
                             "reactions": msg.get("reactions", []),
-                            "has_attachments": bool(msg.get("files") or msg.get("attachments")),
+                            "has_attachments": bool(
+                                msg.get("files") or msg.get("attachments")
+                            ),
                         }
                         f_out.write(json.dumps(record) + "\n")
 

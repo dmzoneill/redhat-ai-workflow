@@ -932,8 +932,9 @@ class TestDetectProjectFromCwd:
     """Tests for _detect_project_from_cwd."""
 
     def test_no_config(self):
+        # Patches chat_context since session_tools delegates to chat_context._detect_project_from_cwd
         with patch(
-            "tool_modules.aa_workflow.src.session_tools.load_config", return_value=None
+            "tool_modules.aa_workflow.src.chat_context.load_config", return_value=None
         ):
             result = session_tools._detect_project_from_cwd()
         assert result is None
@@ -947,7 +948,7 @@ class TestDetectProjectFromCwd:
             }
         }
         with patch(
-            "tool_modules.aa_workflow.src.session_tools.load_config",
+            "tool_modules.aa_workflow.src.chat_context.load_config",
             return_value=config,
         ):
             with patch("pathlib.Path.cwd", return_value=project_path):
@@ -961,7 +962,7 @@ class TestDetectProjectFromCwd:
             }
         }
         with patch(
-            "tool_modules.aa_workflow.src.session_tools.load_config",
+            "tool_modules.aa_workflow.src.chat_context.load_config",
             return_value=config,
         ):
             with patch("pathlib.Path.cwd", return_value=tmp_path):
@@ -971,7 +972,7 @@ class TestDetectProjectFromCwd:
     def test_cwd_exception(self):
         config = {"repositories": {}}
         with patch(
-            "tool_modules.aa_workflow.src.session_tools.load_config",
+            "tool_modules.aa_workflow.src.chat_context.load_config",
             return_value=config,
         ):
             with patch("pathlib.Path.cwd", side_effect=OSError("no cwd")):

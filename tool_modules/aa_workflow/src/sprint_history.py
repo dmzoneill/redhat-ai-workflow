@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,12 @@ try:
     from server.paths import SPRINT_HISTORY_FILE, SPRINT_STATE_FILE_V2
 except ImportError:
     # Fallback for standalone usage
-    SPRINT_STATE_FILE_V2 = Path.home() / ".config" / "aa-workflow" / "sprint_state_v2.json"
-    SPRINT_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "sprint_history.json"
+    SPRINT_STATE_FILE_V2 = (
+        Path.home() / ".config" / "aa-workflow" / "sprint_state_v2.json"
+    )
+    SPRINT_HISTORY_FILE = (
+        Path.home() / ".config" / "aa-workflow" / "sprint_history.json"
+    )
 
 
 @dataclass
@@ -56,7 +60,7 @@ class SprintIssue:
     created: str = ""
 
     # Maximum timeline entries to prevent unbounded memory growth
-    MAX_TIMELINE_ENTRIES: int = 50
+    MAX_TIMELINE_ENTRIES: ClassVar[int] = 50
 
     def add_timeline_event(self, event: TimelineEvent) -> None:
         """Add a timeline event, trimming old entries if needed."""
@@ -133,17 +137,31 @@ def load_sprint_state() -> SprintState:
             issue = SprintIssue(
                 key=issue_data.get("key", ""),
                 summary=issue_data.get("summary", ""),
-                story_points=issue_data.get("storyPoints", issue_data.get("story_points", 0)),
+                story_points=issue_data.get(
+                    "storyPoints", issue_data.get("story_points", 0)
+                ),
                 priority=issue_data.get("priority", "Major"),
-                jira_status=issue_data.get("jiraStatus", issue_data.get("jira_status", "New")),
+                jira_status=issue_data.get(
+                    "jiraStatus", issue_data.get("jira_status", "New")
+                ),
                 assignee=issue_data.get("assignee", ""),
-                approval_status=issue_data.get("approvalStatus", issue_data.get("approval_status", "pending")),
-                waiting_reason=issue_data.get("waitingReason", issue_data.get("waiting_reason")),
-                priority_reasoning=issue_data.get("priorityReasoning", issue_data.get("priority_reasoning", [])),
-                estimated_actions=issue_data.get("estimatedActions", issue_data.get("estimated_actions", [])),
+                approval_status=issue_data.get(
+                    "approvalStatus", issue_data.get("approval_status", "pending")
+                ),
+                waiting_reason=issue_data.get(
+                    "waitingReason", issue_data.get("waiting_reason")
+                ),
+                priority_reasoning=issue_data.get(
+                    "priorityReasoning", issue_data.get("priority_reasoning", [])
+                ),
+                estimated_actions=issue_data.get(
+                    "estimatedActions", issue_data.get("estimated_actions", [])
+                ),
                 chat_id=issue_data.get("chatId", issue_data.get("chat_id")),
                 timeline=timeline,
-                issue_type=issue_data.get("issueType", issue_data.get("issue_type", "Story")),
+                issue_type=issue_data.get(
+                    "issueType", issue_data.get("issue_type", "Story")
+                ),
                 created=issue_data.get("created", ""),
             )
             issues.append(issue)
@@ -282,11 +300,17 @@ def load_sprint_history(limit: int = 10) -> list[CompletedSprint]:
                 issue = SprintIssue(
                     key=issue_data.get("key", ""),
                     summary=issue_data.get("summary", ""),
-                    story_points=issue_data.get("storyPoints", issue_data.get("story_points", 0)),
+                    story_points=issue_data.get(
+                        "storyPoints", issue_data.get("story_points", 0)
+                    ),
                     priority=issue_data.get("priority", "Major"),
-                    jira_status=issue_data.get("jiraStatus", issue_data.get("jira_status", "Done")),
+                    jira_status=issue_data.get(
+                        "jiraStatus", issue_data.get("jira_status", "Done")
+                    ),
                     assignee=issue_data.get("assignee", ""),
-                    approval_status=issue_data.get("approvalStatus", issue_data.get("approval_status", "completed")),
+                    approval_status=issue_data.get(
+                        "approvalStatus", issue_data.get("approval_status", "completed")
+                    ),
                     timeline=timeline,
                 )
                 issues.append(issue)
@@ -305,10 +329,16 @@ def load_sprint_history(limit: int = 10) -> list[CompletedSprint]:
             sprint = CompletedSprint(
                 id=sprint_data.get("id", ""),
                 name=sprint_data.get("name", ""),
-                start_date=sprint_data.get("startDate", sprint_data.get("start_date", "")),
+                start_date=sprint_data.get(
+                    "startDate", sprint_data.get("start_date", "")
+                ),
                 end_date=sprint_data.get("endDate", sprint_data.get("end_date", "")),
-                total_points=sprint_data.get("totalPoints", sprint_data.get("total_points", 0)),
-                completed_points=sprint_data.get("completedPoints", sprint_data.get("completed_points", 0)),
+                total_points=sprint_data.get(
+                    "totalPoints", sprint_data.get("total_points", 0)
+                ),
+                completed_points=sprint_data.get(
+                    "completedPoints", sprint_data.get("completed_points", 0)
+                ),
                 issues=issues,
                 timeline=sprint_timeline,
                 collapsed=sprint_data.get("collapsed", True),
@@ -454,20 +484,6 @@ def update_issue_status(
     return False
 
 
-# Statuses that are actionable (bot can work on these)
-ACTIONABLE_STATUSES = ["new", "refinement", "to do", "open", "backlog"]
-
-
-def is_actionable(issue: SprintIssue) -> bool:
-    """Check if an issue is actionable based on its Jira status.
-
-    Bot should only work on issues in New/Refinement/Backlog.
-    Issues in Review/Done/Release Pending should be ignored.
-    """
-    jira_status = (issue.jira_status or "").lower()
-    return any(s in jira_status for s in ACTIONABLE_STATUSES)
-
-
 def get_next_issue_to_process(state: SprintState | None = None) -> SprintIssue | None:
     """Get the next issue that should be processed by the bot.
 
@@ -480,6 +496,12 @@ def get_next_issue_to_process(state: SprintState | None = None) -> SprintIssue |
     Returns:
         Next SprintIssue to process, or None if none available
     """
+    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_history)
+    try:
+        from .sprint_tools import is_actionable
+    except ImportError:
+        from sprint_tools import is_actionable
+
     if state is None:
         state = load_sprint_state()
 
@@ -487,7 +509,11 @@ def get_next_issue_to_process(state: SprintState | None = None) -> SprintIssue |
     for issue in state.issues:
         if issue.approval_status == "approved" and is_actionable(issue):
             return issue
-        if issue.approval_status == "in_progress" and state.processing_issue == issue.key and is_actionable(issue):
+        if (
+            issue.approval_status == "in_progress"
+            and state.processing_issue == issue.key
+            and is_actionable(issue)
+        ):
             return issue
 
     return None
@@ -506,13 +532,17 @@ def complete_current_sprint() -> CompletedSprint | None:
 
     # Calculate completion stats
     total_points = sum(i.story_points for i in state.issues)
-    completed_points = sum(i.story_points for i in state.issues if i.approval_status == "completed")
+    completed_points = sum(
+        i.story_points for i in state.issues if i.approval_status == "completed"
+    )
 
     # Create completed sprint
     completed = CompletedSprint(
         id=state.current_sprint.get("id", ""),
         name=state.current_sprint.get("name", ""),
-        start_date=state.current_sprint.get("startDate", state.current_sprint.get("start_date", "")),
+        start_date=state.current_sprint.get(
+            "startDate", state.current_sprint.get("start_date", "")
+        ),
         end_date=datetime.now().isoformat(),
         total_points=total_points,
         completed_points=completed_points,

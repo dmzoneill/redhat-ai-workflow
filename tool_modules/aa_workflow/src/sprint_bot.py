@@ -117,7 +117,9 @@ def acquire_lock() -> bool:
         # Check if lock is stale (older than 1 hour)
         lock_age = datetime.now().timestamp() - LOCK_FILE.stat().st_mtime
         if lock_age < 3600:  # 1 hour
-            logger.info("Sprint bot lock exists and is recent - another instance may be running")
+            logger.info(
+                "Sprint bot lock exists and is recent - another instance may be running"
+            )
             return False
         logger.warning("Removing stale sprint bot lock")
 
@@ -151,7 +153,10 @@ async def fetch_sprint_issues(config: SprintBotConfig) -> list[dict[str, Any]]:
     # Import Jira tools - these are MCP tools so we call them via tool_exec
     # For now, we'll use a direct import approach
     try:
-        from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint, jira_get_sprint_issues
+        from tool_modules.aa_jira.src.tools_basic import (
+            jira_get_active_sprint,
+            jira_get_sprint_issues,
+        )
 
         # Get active sprint
         sprint_result = await jira_get_active_sprint(project=config.jira_project)
@@ -232,7 +237,11 @@ def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
             original_count = len(jira_issues)
             # Match against username OR full name (Jira may use either)
             match_values = [v.lower() for v in [jira_username, full_name] if v]
-            jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
+            jira_issues = [
+                issue
+                for issue in jira_issues
+                if issue.get("assignee", "").lower() in match_values
+            ]
             logger.info(
                 f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
             )
@@ -325,7 +334,9 @@ async def launch_issue_chat(issue: SprintIssue) -> str | None:
         bus = dbus.SessionBus()
 
         # Get the chat service
-        chat_service = bus.get_object("com.redhat.AAWorkflow.Chat", "/com/redhat/AAWorkflow/Chat")
+        chat_service = bus.get_object(
+            "com.redhat.AAWorkflow.Chat", "/com/redhat/AAWorkflow/Chat"
+        )
         chat_interface = dbus.Interface(chat_service, "com.redhat.AAWorkflow.Chat")
 
         # Launch the chat
@@ -348,7 +359,9 @@ async def launch_issue_chat(issue: SprintIssue) -> str | None:
         # Fallback: Log the action for manual execution
         logger.info(f"Manual action required: Create chat for {issue.key}")
         logger.info(f"  Summary: {issue.summary}")
-        logger.info(f"  Command: skill_run('sprint_autopilot', '{{\"issue_key\": \"{issue.key}\"}}')")
+        logger.info(
+            f"  Command: skill_run('sprint_autopilot', '{{\"issue_key\": \"{issue.key}\"}}')"
+        )
 
         return None
 
@@ -463,7 +476,11 @@ def run_sprint_bot(config: SprintBotConfig | None = None) -> dict[str, Any]:
             return result
 
         # Refresh from Jira periodically (every 30 minutes)
-        last_updated = datetime.fromisoformat(state.last_updated) if state.last_updated else datetime.min
+        last_updated = (
+            datetime.fromisoformat(state.last_updated)
+            if state.last_updated
+            else datetime.min
+        )
         if (datetime.now() - last_updated).total_seconds() > 1800:
             logger.info("Refreshing sprint state from Jira")
             state = refresh_sprint_state(config)
@@ -522,20 +539,6 @@ def disable_sprint_bot() -> dict[str, Any]:
     }
 
 
-# Statuses that are actionable (bot can work on these)
-ACTIONABLE_STATUSES = ["new", "refinement", "to do", "open", "backlog"]
-
-
-def is_actionable(issue: SprintIssue) -> bool:
-    """Check if an issue is actionable based on its Jira status.
-
-    Bot should only work on issues in New/Refinement/Backlog.
-    Issues in Review/Done/Release Pending should be ignored.
-    """
-    jira_status = (issue.jira_status or "").lower()
-    return any(s in jira_status for s in ACTIONABLE_STATUSES)
-
-
 def approve_issue(issue_key: str) -> dict[str, Any]:
     """Approve an issue for the bot to work on.
 
@@ -561,6 +564,12 @@ def approve_issue(issue_key: str) -> dict[str, Any]:
             "message": f"Issue {issue_key} not found",
         }
 
+    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_bot)
+    try:
+        from .sprint_tools import is_actionable
+    except ImportError:
+        from sprint_tools import is_actionable
+
     if not is_actionable(issue):
         return {
             "success": False,
@@ -582,7 +591,9 @@ def approve_issue(issue_key: str) -> dict[str, Any]:
 
     return {
         "success": success,
-        "message": f"Issue {issue_key} approved" if success else f"Issue {issue_key} not found",
+        "message": (
+            f"Issue {issue_key} approved" if success else f"Issue {issue_key} not found"
+        ),
     }
 
 
@@ -610,7 +621,9 @@ def skip_issue(issue_key: str, reason: str = "Manually skipped") -> dict[str, An
 
     return {
         "success": success,
-        "message": f"Issue {issue_key} skipped" if success else f"Issue {issue_key} not found",
+        "message": (
+            f"Issue {issue_key} skipped" if success else f"Issue {issue_key} not found"
+        ),
     }
 
 

@@ -31,7 +31,9 @@ from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_outp
 # Uses file lock + timestamp file to coordinate across multiple process/module instances
 _VPN_LOCK_FILE = Path("/tmp/aa_workflow_vpn.lock")
 _VPN_STATE_FILE = Path("/tmp/aa_workflow_vpn_state")
-_VPN_DEBOUNCE_SECONDS = 30  # Don't reconnect within 30 seconds of last successful connect
+_VPN_DEBOUNCE_SECONDS = (
+    30  # Don't reconnect within 30 seconds of last successful connect
+)
 
 
 def _get_vpn_last_connect_time() -> float:
@@ -111,7 +113,9 @@ async def _vpn_connect_impl() -> list[TextContent]:
 
         vpn_script = paths.get("vpn_connect_script")
         if not vpn_script:
-            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+            vpn_script = os.path.expanduser(
+                "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+            )
 
         vpn_script = os.path.expanduser(vpn_script)
 
@@ -119,7 +123,7 @@ async def _vpn_connect_impl() -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text="""❌ VPN connect script not found at: {vpn_script}
+                    text=f"""❌ VPN connect script not found at: {vpn_script}
 
 **To fix:**
 1. Clone the redhatter repo or ensure the script exists
@@ -245,7 +249,9 @@ def _set_kube_last_login_time(cluster: str, timestamp: float) -> None:
 async def _check_kube_connected(cluster: str) -> bool:
     """Check if we're already authenticated to a cluster."""
     kubeconfig_suffix = {"s": ".s", "p": ".p", "k": ".k", "e": ".e"}
-    kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix.get(cluster, '')}")
+    kubeconfig = os.path.expanduser(
+        f"~/.kube/config{kubeconfig_suffix.get(cluster, '')}"
+    )
 
     if not os.path.exists(kubeconfig):
         return False
@@ -356,7 +362,9 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
             "k": ".k",
             "e": ".e",
         }
-        kubeconfig = os.path.expanduser(f"~/.kube/config{kubeconfig_suffix[short_cluster]}")
+        kubeconfig = os.path.expanduser(
+            f"~/.kube/config{kubeconfig_suffix[short_cluster]}"
+        )
 
         try:
             if os.path.exists(kubeconfig):
@@ -392,7 +400,9 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 "failed to get token",
                 "login error",
             ]
-            oauth_failed = any(pattern in output.lower() for pattern in oauth_failure_patterns)
+            oauth_failed = any(
+                pattern in output.lower() for pattern in oauth_failure_patterns
+            )
 
             login_success = False
             if success and not oauth_failed:
@@ -403,12 +413,18 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 lines.append("")
                 lines.append("**Common causes:**")
                 lines.append("1. Browser didn't complete SSO flow")
-                lines.append("2. OAuth token was generated but callback to cluster failed")
+                lines.append(
+                    "2. OAuth token was generated but callback to cluster failed"
+                )
                 lines.append("3. Network issue during token exchange")
                 lines.append("")
                 lines.append("**To fix:**")
-                lines.append("1. Try running `kube-clean {short_cluster}` to clear stale tokens")
-                lines.append("2. Run `kube {short_cluster}` manually and complete browser SSO")
+                lines.append(
+                    "1. Try running `kube-clean {short_cluster}` to clear stale tokens"
+                )
+                lines.append(
+                    "2. Run `kube {short_cluster}` manually and complete browser SSO"
+                )
                 lines.append("3. Ensure VPN is connected if required")
             else:
                 lines.append("⚠️ Login may have issues")
@@ -438,8 +454,12 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 )
 
                 if test_success:
-                    ns_count = len(test_out.strip().split("\n")) if test_out.strip() else 0
-                    lines.append(f"✅ Connection verified ({ns_count} namespaces accessible)")
+                    ns_count = (
+                        len(test_out.strip().split("\n")) if test_out.strip() else 0
+                    )
+                    lines.append(
+                        f"✅ Connection verified ({ns_count} namespaces accessible)"
+                    )
                     # Update last login time on successful verification
                     _set_kube_last_login_time(short_cluster, time.time())
                 else:
@@ -452,7 +472,9 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                         lines.append("**Issue:** Token is invalid or expired")
                         lines.append("**Fix:** OAuth callback may have failed. Try:")
                         lines.append(f"  1. `kube-clean {short_cluster}`")
-                        lines.append(f"  2. `kube {short_cluster}` (complete browser SSO)")
+                        lines.append(
+                            f"  2. `kube {short_cluster}` (complete browser SSO)"
+                        )
                     elif "forbidden" in test_error or "403" in test_error:
                         lines.append("**Issue:** Token valid but lacks permissions")
                         lines.append("**Fix:** Check your cluster role bindings")
@@ -461,13 +483,23 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                         lines.append("**Fix:** Ensure VPN is connected")
                     elif "certificate" in test_error:
                         lines.append("**Issue:** TLS certificate error")
-                        lines.append("**Fix:** Kubeconfig may have stale CA data. Try `kube-clean`")
+                        lines.append(
+                            "**Fix:** Kubeconfig may have stale CA data. Try `kube-clean`"
+                        )
                     else:
-                        lines.append(f"**Error:** {test_err[:200] if test_err else 'Unknown'}")
+                        lines.append(
+                            f"**Error:** {test_err[:200] if test_err else 'Unknown'}"
+                        )
 
                     lines.append("")
                     lines.append("```")
-                    lines.append(truncate_output(test_err or test_out or "No output", max_length=500, mode="tail"))
+                    lines.append(
+                        truncate_output(
+                            test_err or test_out or "No output",
+                            max_length=500,
+                            mode="tail",
+                        )
+                    )
                     lines.append("```")
             else:
                 lines.append(f"⚠️ Kubeconfig not found at {kubeconfig}")

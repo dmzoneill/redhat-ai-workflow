@@ -34,8 +34,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-# Memory directory - relative to project root
-MEMORY_DIR = Path.home() / "src/redhat-ai-workflow/memory"
+# Memory directory - relative to project root (memory.py is in scripts/common/)
+MEMORY_DIR = Path(__file__).parent.parent.parent / "memory"
 
 # Keys that are project-specific (stored per-project)
 PROJECT_SPECIFIC_KEYS = {"state/current_work"}
@@ -182,7 +182,9 @@ def write_memory(key: str, data: Dict[str, Any], validate: bool = True) -> bool:
         return False
 
 
-def append_to_list(key: str, list_path: str, item: Dict[str, Any], match_key: Optional[str] = None) -> bool:
+def append_to_list(
+    key: str, list_path: str, item: Dict[str, Any], match_key: Optional[str] = None
+) -> bool:
     """
     Atomically append an item to a list in a memory file with file locking.
 
@@ -227,7 +229,9 @@ def append_to_list(key: str, list_path: str, item: Dict[str, Any], match_key: Op
                             data["last_updated"] = datetime.now().isoformat()
                             f.seek(0)
                             f.truncate()
-                            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+                            yaml.dump(
+                                data, f, default_flow_style=False, sort_keys=False
+                            )
                             return True
 
                 # Append new item
@@ -280,7 +284,11 @@ def remove_from_list(key: str, list_path: str, match_key: str, match_value: Any)
                     return 0
 
                 original_len = len(data[list_path])
-                data[list_path] = [item for item in data[list_path] if str(item.get(match_key, "")) != str(match_value)]
+                data[list_path] = [
+                    item
+                    for item in data[list_path]
+                    if str(item.get(match_key, "")) != str(match_value)
+                ]
 
                 removed = original_len - len(data[list_path])
                 if removed > 0:
@@ -471,7 +479,9 @@ def add_open_mr(
     )
 
 
-def add_follow_up(task: str, priority: str = "normal", issue_key: str = "", mr_id: int = 0) -> bool:
+def add_follow_up(
+    task: str, priority: str = "normal", issue_key: str = "", mr_id: int = 0
+) -> bool:
     """
     Add a follow-up task (legacy - prefer add_discovered_work for new items).
 
@@ -714,12 +724,16 @@ def get_discovered_work_summary() -> Dict[str, Any]:
 
         # By source skill
         source = item.get("source_skill", "unknown")
-        summary["by_source_skill"][source] = summary["by_source_skill"].get(source, 0) + 1
+        summary["by_source_skill"][source] = (
+            summary["by_source_skill"].get(source, 0) + 1
+        )
 
     return summary
 
 
-def find_similar_discovered_work(task: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
+def find_similar_discovered_work(
+    task: str, threshold: float = 0.8
+) -> Optional[Dict[str, Any]]:
     """
     Find existing discovered work that is similar to the given task.
 
@@ -744,7 +758,23 @@ def find_similar_discovered_work(task: str, threshold: float = 0.8) -> Optional[
 
         words = re.findall(r"\b\w+\b", text.lower())
         # Remove common stop words
-        stop_words = {"the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or", "is", "are", "was", "were"}
+        stop_words = {
+            "the",
+            "a",
+            "an",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "and",
+            "or",
+            "is",
+            "are",
+            "was",
+            "were",
+        }
         return {w for w in words if w not in stop_words and len(w) > 2}
 
     task_tokens = tokenize(task)
@@ -774,7 +804,9 @@ def find_similar_discovered_work(task: str, threshold: float = 0.8) -> Optional[
     return best_match
 
 
-def is_duplicate_discovered_work(task: str, work_type: str = "", source_mr: int = 0) -> Dict[str, Any]:
+def is_duplicate_discovered_work(
+    task: str, work_type: str = "", source_mr: int = 0
+) -> Dict[str, Any]:
     """
     Check if a discovered work item is a duplicate of an existing one.
 
@@ -1037,7 +1069,9 @@ def remove_open_mr(mr_id: int) -> bool:
     return remove_from_list("state/current_work", "open_mrs", "id", mr_id) > 0
 
 
-def save_shared_context(skill_name: str, context: Dict[str, Any], ttl_hours: int = 1) -> bool:
+def save_shared_context(
+    skill_name: str, context: Dict[str, Any], ttl_hours: int = 1
+) -> bool:
     """
     Save context for sharing between skills with expiry.
 
@@ -1097,7 +1131,9 @@ def load_shared_context() -> Optional[Dict[str, Any]]:
 
     # Check expiry
     try:
-        expires_at = datetime.fromisoformat(investigation["expires_at"].replace("Z", "+00:00"))
+        expires_at = datetime.fromisoformat(
+            investigation["expires_at"].replace("Z", "+00:00")
+        )
         if datetime.now().replace(tzinfo=None) > expires_at.replace(tzinfo=None):
             # Expired
             return None
@@ -1156,7 +1192,9 @@ def check_known_issues(tool_name: str = "", error_text: str = "") -> Dict[str, A
             ]:
                 for pattern in patterns.get(category, []):
                     pattern_text = pattern.get("pattern", "").lower()
-                    if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
+                    if pattern_text and (
+                        pattern_text in error_lower or pattern_text in tool_lower
+                    ):
                         matches.append(
                             {
                                 "source": category,
@@ -1251,7 +1289,10 @@ def learn_tool_fix(
 
         # Check if this pattern already exists
         for existing in data["tool_fixes"]:
-            if existing.get("tool_name") == tool_name and existing.get("error_pattern") == error_pattern:
+            if (
+                existing.get("tool_name") == tool_name
+                and existing.get("error_pattern") == error_pattern
+            ):
                 # Update existing entry
                 existing["root_cause"] = root_cause
                 existing["fix_applied"] = fix_description

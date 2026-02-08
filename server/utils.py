@@ -847,19 +847,7 @@ def get_auth_hint(environment: str) -> str:
         Hint message for fixing auth
     """
     env_lower = environment.lower()
-    cluster_map = {
-        "stage": "s",
-        "s": "s",
-        "production": "p",
-        "prod": "p",
-        "p": "p",
-        "ephemeral": "e",
-        "eph": "e",
-        "e": "e",
-        "konflux": "k",
-        "k": "k",
-    }
-    cluster = cluster_map.get(env_lower, env_lower)
+    cluster = KUBECONFIG_MAP.get(env_lower, env_lower)
     return f"🔑 Run: `kube_login('{cluster}')` to refresh authentication"
 
 

@@ -71,17 +71,9 @@ SLACK_STATE_DB_FILE = AA_CONFIG_DIR / "slack_state.db"
 # Sprint Bot State
 # =============================================================================
 
-# DEPRECATED: Old sprint state file (replaced by SPRINT_STATE_FILE_V2)
-SPRINT_STATE_FILE = AA_CONFIG_DIR / "sprint_state.json"  # DEPRECATED
 SPRINT_HISTORY_FILE = (
     AA_CONFIG_DIR / "sprint_history.json"
 )  # Still used for historical data
-
-# The unified state file is the single source of truth for sprint data
-# Access via: workspace_states.json -> sprint section
-# NOTE: UNIFIED_WORKSPACE_STATES_FILE is now an alias for WORKSPACE_STATES_FILE
-# to ensure all components read/write to the same location.
-UNIFIED_WORKSPACE_STATES_FILE = WORKSPACE_STATES_FILE
 
 # =============================================================================
 # Scheduler/Cron State

@@ -1,7 +1,7 @@
 """Mock-based skill execution tests.
 
-Tests end-to-end execution of skills using a SkillHarness that replaces
-real tool calls with mock responses from mock_responses.py.
+Tests end-to-end execution of skills using the SkillTestHarness from
+tests/skills/harness.py (via the ``harness`` fixture from conftest).
 """
 
 import sys
@@ -18,125 +18,15 @@ if str(PROJECT_ROOT) not in sys.path:
 SKILLS_DIR = PROJECT_ROOT / "skills"
 
 
-class SkillHarness:
-    """Test harness that wraps SkillExecutor with mocked tool execution.
-
-    Intercepts _exec_tool to return configurable mock responses and
-    tracks which tools were called with what arguments.
-    """
-
-    def __init__(self, skill_name: str, inputs: dict = None, responses: dict = None):
-        from tests.skills.mock_responses import generate_default_response
-        from tool_modules.aa_workflow.src.skill_engine import SkillExecutor
-
-        skill_path = SKILLS_DIR / f"{skill_name}.yaml"
-        if not skill_path.exists():
-            raise FileNotFoundError(f"Skill not found: {skill_path}")
-
-        with open(skill_path) as f:
-            self.skill = yaml.safe_load(f)
-
-        self.inputs = inputs or {}
-        self.custom_responses = responses or {}
-        self.tool_calls: list[dict] = []
-        self._generate_default = generate_default_response
-
-        self.executor = SkillExecutor(
-            skill=self.skill,
-            inputs=self.inputs,
-            debug=True,
-            server=None,
-            emit_events=False,
-            enable_interactive_recovery=False,
-        )
-
-        # Monkey-patch _exec_tool with our mock
-        self.executor._exec_tool = self._mock_exec_tool
-
-    async def _mock_exec_tool(self, tool_name: str, args: dict) -> dict:
-        """Mock tool executor that records calls and returns mock responses."""
-        self.tool_calls.append({"tool": tool_name, "args": args})
-
-        # Check for custom per-tool response overrides
-        if tool_name in self.custom_responses:
-            return dict(self.custom_responses[tool_name])
-
-        # Fall back to the default mock response generator
-        return self._generate_default(tool_name, args)
-
-    async def execute(self) -> str:
-        """Execute the skill and return the output string."""
-        return await self.executor.execute()
-
-    @property
-    def context(self) -> dict:
-        """Access the executor's context (step outputs)."""
-        return self.executor.context
-
-    @property
-    def step_results(self) -> list:
-        """Access recorded step results."""
-        return self.executor.step_results
-
-    def assert_tool_called(self, tool_name: str, times: int = None):
-        """Assert that a specific tool was called.
-
-        Args:
-            tool_name: The tool name to check for.
-            times: If provided, assert exact call count.
-        """
-        calls = [c for c in self.tool_calls if c["tool"] == tool_name]
-        assert len(calls) > 0, (
-            f"Tool '{tool_name}' was never called. "
-            f"Called tools: {[c['tool'] for c in self.tool_calls]}"
-        )
-        if times is not None:
-            assert (
-                len(calls) == times
-            ), f"Tool '{tool_name}' called {len(calls)} times, expected {times}"
-
-    def assert_tool_not_called(self, tool_name: str):
-        """Assert that a specific tool was never called."""
-        calls = [c for c in self.tool_calls if c["tool"] == tool_name]
-        assert (
-            len(calls) == 0
-        ), f"Tool '{tool_name}' was called {len(calls)} time(s), expected 0"
-
-    def get_tool_args(self, tool_name: str) -> list[dict]:
-        """Return all argument dicts for calls to the given tool."""
-        return [c["args"] for c in self.tool_calls if c["tool"] == tool_name]
-
-
-@pytest.fixture
-def harness():
-    """Factory fixture that creates a SkillHarness for a named skill."""
-
-    def _create(skill_name: str, inputs: dict = None, responses: dict = None):
-        return SkillHarness(skill_name, inputs=inputs, responses=responses)
-
-    return _create
-
-
-@pytest.fixture(scope="session")
-def test_exclusions():
-    """Load the test exclusions list."""
-    exclusions_path = PROJECT_ROOT / "tests" / "test_exclusions.yaml"
-    with open(exclusions_path) as f:
-        data = yaml.safe_load(f)
-
-    # Flatten excluded skill names for easy lookup
+def _excluded_skill_names(test_exclusions: dict) -> set:
+    """Extract excluded skill names from the raw test_exclusions dict."""
     excluded = set()
-    for entry in data.get("excluded_skills", []):
+    for entry in test_exclusions.get("excluded_skills", []):
         if isinstance(entry, dict):
             excluded.add(entry["name"])
         else:
             excluded.add(str(entry))
-
-    return {
-        "excluded_skills": excluded,
-        "excluded_tools": set(data.get("excluded_tools", [])),
-        "raw": data,
-    }
+    return excluded
 
 
 # ============================================================================
@@ -193,9 +83,10 @@ class TestSkillExecution:
 
     async def test_excluded_skills_skipped(self, test_exclusions):
         """Verify excluded skills list is loaded and non-empty."""
-        assert len(test_exclusions["excluded_skills"]) > 0
+        excluded = _excluded_skill_names(test_exclusions)
+        assert len(excluded) > 0
         # Verify known high-risk skills are in the exclusion list
-        assert "release_aa_backend_prod" in test_exclusions["excluded_skills"]
+        assert "release_aa_backend_prod" in excluded
 
     async def test_all_safe_skills_execute(
         self, all_skill_files, harness, test_exclusions
@@ -207,12 +98,13 @@ class TestSkillExecution:
         are expected to produce compute errors but should not crash the
         executor itself.
         """
+        excluded = _excluded_skill_names(test_exclusions)
         tested = 0
         for path in all_skill_files[:10]:  # Smoke test first 10
             with open(path) as f:
                 skill = yaml.safe_load(f)
             name = skill.get("name", path.stem)
-            if name in test_exclusions["excluded_skills"]:
+            if name in excluded:
                 continue
 
             h = harness(name)
@@ -271,9 +163,12 @@ class TestSkillExecution:
         await h.execute()
         h.assert_tool_called("memory_session_log")
 
-    async def test_debug_log_populated(self, harness):
+    async def test_debug_log_populated(self, skill_data):
         """Debug mode populates the executor's log."""
-        h = harness("hello_world")
+        from tests.skills.harness import SkillTestHarness
+
+        data = skill_data("hello_world")
+        h = SkillTestHarness(skill=data, debug=True)
         await h.execute()
-        # SkillExecutor is created with debug=True in harness
-        assert len(h.executor.log) > 0
+        # SkillExecutor is created with debug=True
+        assert len(h._executor.log) > 0

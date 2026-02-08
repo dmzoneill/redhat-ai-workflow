@@ -12,7 +12,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from tool_modules.aa_workflow.src.sprint_bot import (
-    ACTIONABLE_STATUSES,
     SprintBotConfig,
     WorkingHours,
     acquire_lock,
@@ -20,7 +19,6 @@ from tool_modules.aa_workflow.src.sprint_bot import (
     disable_sprint_bot,
     enable_sprint_bot,
     get_sprint_status,
-    is_actionable,
     is_within_working_hours,
     process_next_issue,
     refresh_sprint_state,
@@ -33,6 +31,7 @@ from tool_modules.aa_workflow.src.sprint_history import (
     SprintState,
     TimelineEvent,
 )
+from tool_modules.aa_workflow.src.sprint_tools import ACTIONABLE_STATUSES, is_actionable
 
 # Shared module path prefix for patching
 MOD = "tool_modules.aa_workflow.src.sprint_bot"

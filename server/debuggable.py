@@ -230,8 +230,9 @@ def _extract_function(source: str, func_name: str) -> str:
                 or line.strip().startswith("def ")
                 or line.strip().startswith("async def ")
                 or line.strip().startswith("class ")
-                or line.strip().startswith("return ")
-                and current_indent == func_indent
+                or (
+                    line.strip().startswith("return ") and current_indent == func_indent
+                )
             ):
                 # Check if it's a return statement inside the function
                 if not (

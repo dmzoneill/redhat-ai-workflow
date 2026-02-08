@@ -170,7 +170,7 @@ def get_container_auth(registry: str = "quay.io") -> str | None:
     config_paths.extend(
         [
             Path.home() / ".config/containers/auth.json",
-            Path(os.getenv("XDG_RUNTIME_DIR", "/run/user/1000"))
+            Path(os.getenv("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
             / "containers/auth.json",
         ]
     )
@@ -193,7 +193,3 @@ def get_container_auth(registry: str = "quay.io") -> str | None:
             continue
 
     return None
-
-
-# Backward compatibility alias
-get_docker_auth = get_container_auth

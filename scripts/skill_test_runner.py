@@ -174,12 +174,19 @@ class ToolExecutor:
                 # Also track memory operations separately
                 if tool_name in ("memory_read", "memory_query"):
                     record_memory_read(tool_name)
-                elif tool_name in ("memory_write", "memory_update", "memory_append", "memory_session_log"):
+                elif tool_name in (
+                    "memory_write",
+                    "memory_update",
+                    "memory_append",
+                    "memory_session_log",
+                ):
                     record_memory_write(tool_name)
 
         return success, output
 
-    async def _run_cmd(self, cmd: list[str], cwd: str = None, env: dict = None) -> tuple[bool, str]:
+    async def _run_cmd(
+        self, cmd: list[str], cwd: str = None, env: dict = None
+    ) -> tuple[bool, str]:
         """Run a command using the unified run_cmd from server.utils.
 
         This ensures commands have access to:
@@ -200,7 +207,9 @@ class ToolExecutor:
             return await self._run_cmd(["git", "branch", "--list"], cwd=repo)
         elif tool_name == "git_log":
             limit = args.get("limit", 5)
-            return await self._run_cmd(["git", "log", "--oneline", f"-{limit}"], cwd=repo)
+            return await self._run_cmd(
+                ["git", "log", "--oneline", f"-{limit}"], cwd=repo
+            )
         elif tool_name == "git_remote":
             return await self._run_cmd(["git", "remote", "-v"], cwd=repo)
         else:
@@ -211,7 +220,9 @@ class ToolExecutor:
         if tool_name == "jira_search":
             jql = args.get("jql", "project=AAP")
             max_results = args.get("max_results", 10)
-            return await self._run_cmd(["rh-issue", "search", jql, "-m", str(max_results)])
+            return await self._run_cmd(
+                ["rh-issue", "search", jql, "-m", str(max_results)]
+            )
         elif tool_name == "jira_view_issue":
             issue_key = args.get("issue_key")
             if not issue_key:
@@ -380,7 +391,9 @@ class SkillRunner:
             step_args = step.get("args", {})
             condition = step.get("condition", "")
 
-            step_result = StepResult(step_name=step_name, tool_name=tool_name, success=False)
+            step_result = StepResult(
+                step_name=step_name, tool_name=tool_name, success=False
+            )
 
             # Skip compute steps (Python code)
             if "compute" in step:
@@ -471,7 +484,9 @@ class SkillRunner:
             # Skip excluded
             if skill_info["excluded"]:
                 print(f"\n  ⏭️  {name}: EXCLUDED")
-                results.append(SkillResult(skill_name=name, success=True, error="EXCLUDED"))
+                results.append(
+                    SkillResult(skill_name=name, success=True, error="EXCLUDED")
+                )
                 continue
 
             result = await self.run_skill(name)
@@ -525,8 +540,12 @@ async def main():
         print("-" * 80)
         for s in skills:
             excluded = "⏭️ YES" if s["excluded"] else ""
-            print(f"{s['name']:<25} {s['steps']:<6} {excluded:<10} {s['description'][:40]}")
-        print(f"\nTotal: {len(skills)} skills, {len([s for s in skills if s['excluded']])} excluded")
+            print(
+                f"{s['name']:<25} {s['steps']:<6} {excluded:<10} {s['description'][:40]}"
+            )
+        print(
+            f"\nTotal: {len(skills)} skills, {len([s for s in skills if s['excluded']])} excluded"
+        )
         return
 
     await runner.run_all(skill_filter=args.skill)

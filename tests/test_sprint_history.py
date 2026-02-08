@@ -20,13 +20,13 @@ from tool_modules.aa_workflow.src.sprint_history import (
     complete_current_sprint,
     ensure_storage_dir,
     get_next_issue_to_process,
-    is_actionable,
     load_sprint_history,
     load_sprint_state,
     save_sprint_state,
     save_sprint_to_history,
     update_issue_status,
 )
+from tool_modules.aa_workflow.src.sprint_tools import is_actionable
 
 # ---------------------------------------------------------------------------
 # Fixtures

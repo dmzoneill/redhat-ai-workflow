@@ -176,34 +176,6 @@ def _check_for_significant_changes(
     return notifications
 
 
-def _emit_knowledge_notification(message: str, project: str, persona: str) -> None:
-    """Emit a knowledge notification (can be extended to Slack, etc.)."""
-    try:
-        # Log to session
-        session_file = (
-            MEMORY_DIR / "sessions" / f"{datetime.now().strftime('%Y-%m-%d')}.yaml"
-        )
-        if session_file.exists():
-            with open(session_file) as f:
-                session = yaml.safe_load(f) or {}
-        else:
-            session = {"date": datetime.now().strftime("%Y-%m-%d"), "entries": []}
-
-        session.setdefault("entries", []).append(
-            {
-                "time": datetime.now().strftime("%H:%M:%S"),
-                "action": f"Knowledge: {message}",
-                "details": f"project={project}, persona={persona}",
-            }
-        )
-
-        with open(session_file, "w") as f:
-            yaml.dump(session, f, default_flow_style=False)
-
-    except Exception as e:
-        logger.warning(f"Failed to emit knowledge notification: {e}")
-
-
 def _detect_project_from_path(path: str | Path | None = None) -> str | None:
     """Detect project from a path by matching against config.json repositories.
 
@@ -261,17 +233,14 @@ async def _detect_project_from_ctx(ctx: Any) -> str | None:
 def _get_current_persona() -> str | None:
     """Get the currently loaded persona from the persona loader (sync).
 
+    Delegates to the canonical implementation in session_tools.
     For workspace-aware persona detection, use _get_persona_from_ctx() instead.
     """
     try:
-        from server.persona_loader import get_loader
-
-        loader = get_loader()
-        if loader:
-            return loader.current_persona
-    except Exception:
-        pass
-    return None
+        from .session_tools import _get_current_persona as _get_persona
+    except ImportError:
+        from session_tools import _get_current_persona as _get_persona
+    return _get_persona()
 
 
 async def _get_persona_from_ctx(ctx: Any) -> str:

@@ -15,14 +15,11 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import yaml
 
 from tool_modules.common import PROJECT_ROOT
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +53,6 @@ _ALLOWED_COMPUTE_MODULES = frozenset(
         "urllib",
         "urllib.parse",
         "gzip",
-        "subprocess",
     }
 )
 
@@ -79,28 +75,6 @@ def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
             f"(re, os, json, yaml, datetime, Path, etc.) or use MCP tools."
         )
     return __import__(name, globals, locals, fromlist, level)
-
-
-class AttrDict(dict):
-    """Dictionary that allows attribute-style access to keys.
-
-    This allows skill YAML compute blocks to use `inputs.repo` instead of `inputs["repo"]`.
-    """
-
-    def __getattr__(self, key):
-        try:
-            return self[key]
-        except KeyError:
-            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
-
-    def __setattr__(self, key, value):
-        self[key] = value
-
-    def __delattr__(self, key):
-        try:
-            del self[key]
-        except KeyError:
-            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
 
 
 class SkillComputeEngine:
@@ -221,6 +195,10 @@ class SkillComputeEngine:
         """Internal compute execution without error recovery (used by recovery itself)."""
         # This is the actual compute logic extracted from _exec_compute
         # to avoid infinite recursion during auto-fix retries
+        # Import AttrDict from skill_engine (canonical location) - lazy import
+        # to avoid circular dependency (skill_engine imports SkillComputeEngine)
+        from tool_modules.aa_workflow.src.skill_engine import AttrDict
+
         local_vars = dict(self.context)
         # Wrap inputs in AttrDict to allow attribute-style access (inputs.repo vs inputs["repo"])
         local_vars["inputs"] = AttrDict(self.inputs)

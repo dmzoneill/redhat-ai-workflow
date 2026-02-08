@@ -206,20 +206,6 @@ class TestCheckForSignificantChanges:
         assert notifications == []
 
 
-class TestEmitKnowledgeNotification:
-    """Tests for _emit_knowledge_notification."""
-
-    def test_creates_session_log(self, temp_knowledge_dir):
-        # MEMORY_DIR is patched to tmp_path, sessions dir exists
-        kt._emit_knowledge_notification("Test message", "proj", "dev")
-        # Should not raise
-
-    def test_handles_exception(self, temp_knowledge_dir):
-        with patch("builtins.open", side_effect=Exception("disk error")):
-            # Should not raise
-            kt._emit_knowledge_notification("msg", "proj", "dev")
-
-
 class TestDetectProjectFromPath:
     """Tests for _detect_project_from_path."""
 

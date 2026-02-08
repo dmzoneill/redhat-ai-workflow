@@ -19,7 +19,6 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import load_config
 
 # Support both package import and direct loading
 try:
@@ -512,27 +511,15 @@ def _load_learned_patterns(lines: list[str]) -> None:
 
 
 def _detect_project_from_cwd() -> str | None:
-    """Detect project from current working directory."""
-    config = load_config()
-    if not config:
-        return None
+    """Detect project from current working directory.
 
+    Delegates to the canonical implementation in chat_context.
+    """
     try:
-        cwd = Path.cwd().resolve()
-    except Exception as e:
-        logger.debug(f"Suppressed error in _detect_project_from_cwd: {e}")
-        return None
-
-    repositories = config.get("repositories", {})
-    for project_name, project_config in repositories.items():
-        project_path = Path(project_config.get("path", "")).expanduser().resolve()
-        try:
-            cwd.relative_to(project_path)
-            return project_name
-        except ValueError:
-            continue
-
-    return None
+        from .chat_context import _detect_project_from_cwd as _detect
+    except ImportError:
+        from chat_context import _detect_project_from_cwd as _detect
+    return _detect()
 
 
 def _get_current_persona() -> str | None:

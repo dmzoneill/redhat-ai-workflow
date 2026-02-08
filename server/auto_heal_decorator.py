@@ -87,24 +87,19 @@ async def _run_kube_login(cluster: str) -> bool:
     Returns True if successful.
     """
     try:
-        from server.utils import run_cmd_full, run_cmd_shell
+        from server.utils import (
+            KUBECONFIG_MAP,
+            get_kubeconfig,
+            run_cmd_full,
+            run_cmd_shell,
+        )
 
-        # Map cluster names to short codes
-        cluster_map = {
-            "stage": "s",
-            "production": "p",
-            "prod": "p",
-            "ephemeral": "e",
-            "konflux": "k",
-        }
-        short = cluster_map.get(cluster, cluster)
-        if len(short) > 1 and short not in cluster_map.values():
+        # Use the canonical KUBECONFIG_MAP from utils
+        short = KUBECONFIG_MAP.get(cluster, cluster)
+        if len(short) > 1 and short not in KUBECONFIG_MAP.values():
             short = short[0]
 
-        kubeconfig_suffix = {"s": ".s", "p": ".p", "e": ".e", "k": ".k"}
-        kubeconfig = os.path.expanduser(
-            f"~/.kube/config{kubeconfig_suffix.get(short, '.s')}"
-        )
+        kubeconfig = get_kubeconfig(cluster)
 
         # Step 1: Check if existing credentials are stale
         if os.path.exists(kubeconfig):

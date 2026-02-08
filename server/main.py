@@ -34,8 +34,10 @@ MAX_CURSOR_TOOLS = 128
 
 def load_agent_config(agent_name: str) -> list[str] | None:
     """Load tool modules from an agent config file."""
+    logger = logging.getLogger(__name__)
     agent_file = PROJECT_DIR / "personas" / f"{agent_name}.yaml"
     if not agent_file.exists():
+        logger.warning(f"Agent config file not found: {agent_file}")
         return None
 
     try:
@@ -44,7 +46,8 @@ def load_agent_config(agent_name: str) -> list[str] | None:
         with open(agent_file) as f:
             config = yaml.safe_load(f)
         return cast(list[str], config.get("tools", []))
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to load agent config '{agent_name}': {e}")
         return None
 
 

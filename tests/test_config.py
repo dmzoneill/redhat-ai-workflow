@@ -11,7 +11,6 @@ import pytest
 
 from server.config import (
     get_container_auth,
-    get_docker_auth,
     get_os_env,
     get_token_from_kubeconfig,
     load_config,
@@ -273,9 +272,3 @@ class TestGetContainerAuth:
         ):
             result = get_container_auth("quay.io")
         assert result is None
-
-
-class TestGetDockerAuthAlias:
-    def test_alias_exists(self):
-        """get_docker_auth should be an alias for get_container_auth."""
-        assert get_docker_auth is get_container_auth
