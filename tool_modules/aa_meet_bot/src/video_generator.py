@@ -3003,7 +3003,10 @@ if __name__ == "__main__":  # noqa: C901
     _project_root = Path(__file__).parent.parent.parent.parent.parent
     sys.path.insert(0, str(_project_root))
 
-    from scripts.common.video_device import cleanup_device, setup_v4l2_device
+    from scripts.common.video_device import (  # pylint: disable=no-name-in-module
+        cleanup_device,
+        setup_v4l2_device,
+    )
 
     # Global state for cleanup (uses shared module now)
     _active_device_path = None

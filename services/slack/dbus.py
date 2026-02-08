@@ -14,28 +14,59 @@ Provides IPC communication with the Slack daemon via D-Bus:
 
 D-Bus Service: com.aiworkflow.BotSlack
 D-Bus Path: /com/aiworkflow/BotSlack
+
+Business logic is delegated to handler modules:
+- dbus_message_handlers: messaging, approval, search, threads, history
+- dbus_config_handlers: config, admin, sync, persona tests
+- dbus_formatters: pure formatting helpers
+- dbus_history: message records and history tracking
 """
 
 import asyncio
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
+from services.slack.dbus_config_handlers import (
+    handle_get_app_commands,
+    handle_get_channel_sections,
+    handle_get_command_list,
+    handle_get_config,
+    handle_get_sync_config,
+    handle_get_sync_status,
+    handle_health_check,
+    handle_reload_config,
+    handle_run_persona_test,
+    handle_set_debug_mode,
+    handle_set_sync_config,
+    handle_shutdown,
+    handle_start_sync,
+    handle_stop_sync,
+    handle_trigger_sync,
+)
 from services.slack.dbus_formatters import (
-    check_search_rate_limit,
-    format_command_list,
     format_email_lookup_found,
     format_email_lookup_not_found,
-    format_persona_test_error,
-    format_persona_test_result,
     format_photo_path_response,
-    format_search_results,
-    format_slack_config,
     format_user_match_with_photo,
-    record_search,
 )
 from services.slack.dbus_history import MessageHistory, MessageRecord
+from services.slack.dbus_message_handlers import (
+    handle_approve_all,
+    handle_approve_message,
+    handle_get_channel_history,
+    handle_get_history,
+    handle_get_pending,
+    handle_get_status,
+    handle_get_thread_context,
+    handle_get_thread_replies,
+    handle_reject_message,
+    handle_search_messages,
+    handle_send_message,
+    handle_send_message_rich,
+)
 
 # Check for dbus availability
 try:
@@ -78,7 +109,11 @@ __all__ = [
 if DBUS_AVAILABLE:
 
     class SlackPersonaDBusInterface(ServiceInterface):
-        """D-Bus interface for the Slack Persona daemon."""
+        """D-Bus interface for the Slack Persona daemon.
+
+        Thin routing layer: each @method() delegates to handler functions in
+        dbus_message_handlers or dbus_config_handlers.
+        """
 
         def __init__(self, daemon: "SlackDaemonWithDBus"):
             super().__init__(DBUS_INTERFACE_NAME)
@@ -99,30 +134,9 @@ if DBUS_AVAILABLE:
         @dbus_property(access=PropertyAccess.READ)
         def Stats(self) -> "s":
             """JSON stats about the daemon."""
-            # Get listener stats if available (includes polls, errors, etc.)
-            listener_stats = {}
-            if hasattr(self.daemon, "listener") and self.daemon.listener:
-                listener_stats = getattr(self.daemon.listener, "stats", {})
+            return json.dumps(handle_get_status(self.daemon))
 
-            stats = {
-                "running": self.daemon.is_running,
-                "uptime": (
-                    time.time() - self.daemon.start_time
-                    if self.daemon.start_time
-                    else 0
-                ),
-                "messages_processed": self.daemon.messages_processed,
-                "messages_responded": self.daemon.messages_responded,
-                "pending_approvals": len(self.daemon.history.pending_approvals),
-                # Add listener stats for VSCode extension
-                "polls": listener_stats.get("polls", 0),
-                "errors": listener_stats.get("errors", 0),
-                "consecutive_errors": listener_stats.get("consecutive_errors", 0),
-                "messages_seen": listener_stats.get("messages_seen", 0),
-            }
-            return json.dumps(stats)
-
-        # ==================== Methods ====================
+        # ==================== Message / Approval Methods ====================
 
         @method()
         def GetStatus(self) -> "s":
@@ -132,219 +146,184 @@ if DBUS_AVAILABLE:
         @method()
         def GetPending(self) -> "s":
             """Get pending approval messages as JSON array."""
-            pending = self.daemon.history.get_pending()
-            return json.dumps([m.to_dict() for m in pending])
+            return json.dumps(handle_get_pending(self.daemon))
 
         @method()
         def ApproveMessage(self, message_id: "s") -> "s":
             """Approve a pending message and send it."""
-            loop = self.daemon._event_loop
-            future = asyncio.run_coroutine_threadsafe(
-                self.daemon.approve_message(message_id), loop
-            )
-            # WARNING: future.result() blocks the D-Bus thread until the coroutine
-            # completes or the timeout expires. This is acceptable for short-lived
-            # approve operations, but a hung event loop would block D-Bus for up to
-            # 30 seconds, preventing other D-Bus method calls from being served.
-            try:
-                result = future.result(timeout=30)
-            except TimeoutError:
-                logger.error(
-                    f"ApproveMessage timed out after 30s for message_id={message_id}"
-                )
-                return json.dumps(
-                    {"success": False, "error": "Approval timed out after 30 seconds"}
-                )
-            except Exception as e:
-                logger.error(f"ApproveMessage failed for message_id={message_id}: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-            return json.dumps(result)
+            return json.dumps(handle_approve_message(self.daemon, message_id))
 
         @method()
         def RejectMessage(self, message_id: "s") -> "s":
             """Reject a pending message."""
-            record = self.daemon.history.reject(message_id)
-            if record:
-                return json.dumps({"success": True, "message_id": message_id})
-            return json.dumps({"success": False, "error": "Message not found"})
+            return json.dumps(handle_reject_message(self.daemon, message_id))
 
         @method()
         def ApproveAll(self) -> "s":
             """Approve all pending messages."""
-            loop = self.daemon._event_loop
-            future = asyncio.run_coroutine_threadsafe(
-                self.daemon.approve_all_pending(), loop
-            )
-            # WARNING: future.result() blocks the D-Bus thread. See ApproveMessage
-            # for rationale. The longer 60s timeout is needed for batch approvals.
-            try:
-                result = future.result(timeout=60)
-            except TimeoutError:
-                logger.error("ApproveAll timed out after 60s")
-                return json.dumps(
-                    {"success": False, "error": "Approval timed out after 60 seconds"}
-                )
-            except Exception as e:
-                logger.error(f"ApproveAll failed: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-            return json.dumps(result)
+            return json.dumps(handle_approve_all(self.daemon))
 
         @method()
         def GetHistory(
             self, limit: "i", channel_id: "s", user_id: "s", status: "s"
         ) -> "s":
             """Get message history with optional filters."""
-            history = self.daemon.history.get_history(
-                limit=limit,
-                channel_id=channel_id,
-                user_id=user_id,
-                status=status,
+            return json.dumps(
+                handle_get_history(self.daemon, limit, channel_id, user_id, status)
             )
-            return json.dumps([m.to_dict() for m in history])
 
         @method()
         def SendMessage(self, channel_id: "s", text: "s", thread_ts: "s") -> "s":
-            """Send a message to Slack.
-
-            Note: This method schedules the send and returns immediately.
-            The actual send happens asynchronously.
-            """
-            # Schedule the coroutine on the event loop (non-blocking)
-            loop = self.daemon._event_loop
-            if not loop or not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available"})
-
-            # Create a task to run the send (fire-and-forget for now)
-            # We return success immediately since we can't block here
-            async def do_send():
-                try:
-                    result = await self.daemon.session.send_message(
-                        channel_id=channel_id,
-                        text=text,
-                        thread_ts=thread_ts if thread_ts else None,
-                        typing_delay=True,
-                    )
-                    logger.info(
-                        f"D-Bus SendMessage completed: ts={result.get('ts', 'unknown')}"
-                    )
-                    return result
-                except Exception as e:
-                    logger.error(f"D-Bus SendMessage failed: {e}")
-                    return {"success": False, "error": str(e)}
-
-            # Schedule the task and track it so unhandled exceptions are logged
-            future = asyncio.run_coroutine_threadsafe(do_send(), loop)
-
-            def _on_send_done(fut):
-                """Log any unhandled exception from the fire-and-forget send task."""
-                exc = fut.exception()
-                if exc is not None:
-                    logger.error(f"D-Bus SendMessage background task failed: {exc}")
-
-            future.add_done_callback(_on_send_done)
-
-            # Return immediately - the message will be sent asynchronously
+            """Send a message to Slack (fire-and-forget)."""
             return json.dumps(
-                {"success": True, "message": "Message send scheduled", "async": True}
+                handle_send_message(self.daemon, channel_id, text, thread_ts)
             )
 
         @method()
         async def SendMessageRich(
             self, channel_id: "s", text: "s", thread_ts: "s", reply_broadcast: "b"
         ) -> "s":
-            """
-            Send a message using the web client API format with rich text blocks.
+            """Send a message using the web client API format with rich text blocks."""
+            result = await handle_send_message_rich(
+                self.daemon, channel_id, text, thread_ts, reply_broadcast
+            )
+            return json.dumps(result)
 
-            This uses the same multipart/form-data format as the Slack web client,
-            which provides:
-            - Rich text formatting (bold, italic, code, etc.)
-            - Proper thread replies
-            - Reply broadcast option (also send to channel)
-            - Client message ID tracking
+        @method()
+        async def SearchMessages(self, query: "s", max_results: "i") -> "s":
+            """Search Slack messages with rate limiting."""
+            result = await handle_search_messages(self.daemon, query, max_results)
+            return json.dumps(result)
 
-            Args:
-                channel_id: Target channel ID
-                text: Message text (supports Slack markdown, code blocks, mentions)
-                thread_ts: Thread timestamp for threaded reply (empty string for no thread)
-                reply_broadcast: Also send reply to channel (not just thread)
+        @method()
+        async def GetThreadReplies(
+            self, channel_id: "s", thread_ts: "s", limit: "i"
+        ) -> "s":
+            """Get thread replies using the enhanced web client API."""
+            result = await handle_get_thread_replies(
+                self.daemon, channel_id, thread_ts, limit
+            )
+            return json.dumps(result)
 
-            Returns:
-                JSON with success status, channel, timestamp, and message details
-            """
-            if not self.daemon.session:
-                return json.dumps({"success": False, "error": "Session not available"})
+        @method()
+        async def GetThreadContext(self, channel_id: "s", thread_ts: "s") -> "s":
+            """Get thread context in a simplified format for AI processing."""
+            result = await handle_get_thread_context(self.daemon, channel_id, thread_ts)
+            return json.dumps(result)
 
-            try:
-                result = await self.daemon.session.send_message_rich(
-                    channel_id=channel_id,
-                    text=text,
-                    thread_ts=thread_ts if thread_ts else None,
-                    reply_broadcast=reply_broadcast,
-                    typing_delay=True,
-                )
+        @method()
+        async def GetChannelHistory(
+            self,
+            channel_id: "s",
+            limit: "i",
+            oldest: "s",
+            latest: "s",
+            simplify: "b",
+        ) -> "s":
+            """Get message history for a channel."""
+            result = await handle_get_channel_history(
+                self.daemon, channel_id, limit, oldest, latest, simplify
+            )
+            return json.dumps(result)
 
-                if result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "channel": result.get("channel", channel_id),
-                            "ts": result.get("ts", ""),
-                            "message": result.get("message", {}),
-                        }
-                    )
-                else:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                        }
-                    )
-            except Exception as e:
-                logger.error(f"SendMessageRich error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+        # ==================== Config / Admin Methods ====================
 
         @method()
         def ReloadConfig(self) -> "s":
             """Reload configuration from config.json."""
-            self.daemon.reload_config()
-            return json.dumps({"success": True, "message": "Config reloaded"})
+            return json.dumps(handle_reload_config(self.daemon))
 
         @method()
         def Shutdown(self) -> "s":
             """Gracefully shutdown the daemon."""
-            self.daemon._event_loop.call_soon(self.daemon.request_shutdown)
-            return json.dumps({"success": True, "message": "Shutdown initiated"})
+            return json.dumps(handle_shutdown(self.daemon))
 
         @method()
         def HealthCheck(self) -> "s":
             """Perform a comprehensive health check."""
+            return json.dumps(handle_health_check(self.daemon))
+
+        @method()
+        def GetCommandList(self) -> "s":
+            """Get list of available @me commands with descriptions."""
+            return json.dumps(handle_get_command_list())
+
+        @method()
+        def GetConfig(self) -> "s":
+            """Get current Slack daemon configuration."""
+            return json.dumps(handle_get_config())
+
+        @method()
+        def SetDebugMode(self, enabled: "b") -> "s":
+            """Enable or disable debug mode."""
+            return json.dumps(handle_set_debug_mode(self.daemon, enabled))
+
+        @method()
+        def RunPersonaTest(self, query: "s", persona: "s") -> "s":
+            """Run a context gathering test for the Slack persona."""
+            return json.dumps(handle_run_persona_test(query))
+
+        @method()
+        async def GetAppCommands(self, summarize: "b") -> "s":
+            """Get all available slash commands and app actions."""
+            result = await handle_get_app_commands(self.daemon, summarize)
+            return json.dumps(result)
+
+        @method()
+        async def GetChannelSections(self, summarize: "b") -> "s":
+            """Get the user's sidebar channel sections/folders."""
+            result = await handle_get_channel_sections(self.daemon, summarize)
+            return json.dumps(result)
+
+        # ==================== Background Sync Methods ====================
+
+        @method()
+        def GetSyncStatus(self) -> "s":
+            """Get the status of the background sync process."""
+            return json.dumps(handle_get_sync_status())
+
+        @method()
+        async def StartSync(self) -> "s":
+            """Start the background sync process."""
+            result = await handle_start_sync(self.daemon)
+            return json.dumps(result)
+
+        @method()
+        async def StopSync(self) -> "s":
+            """Stop the background sync process."""
+            result = await handle_stop_sync()
+            return json.dumps(result)
+
+        @method()
+        async def TriggerSync(self, sync_type: "s") -> "s":
+            """Manually trigger a sync operation."""
+            result = await handle_trigger_sync(sync_type)
+            return json.dumps(result)
+
+        @method()
+        def GetSyncConfig(self) -> "s":
+            """Get the background sync configuration."""
+            return json.dumps(handle_get_sync_config())
+
+        @method()
+        def SetSyncConfig(self, config_json: "s") -> "s":
+            """Update background sync configuration."""
+            return json.dumps(handle_set_sync_config(config_json))
+
+        @method()
+        def GetPhotoPath(self, user_id: "s") -> "s":
+            """Get the local cached photo path for a user."""
             try:
-                # Use synchronous health check to avoid event loop issues
-                result = self.daemon.health_check_sync()
-                return json.dumps(result)
+                return json.dumps(format_photo_path_response(user_id))
             except Exception as e:
-                return json.dumps(
-                    {
-                        "healthy": False,
-                        "checks": {"health_check_execution": False},
-                        "message": f"Health check failed: {e}",
-                        "timestamp": time.time(),
-                    }
-                )
+                logger.error(f"GetPhotoPath error: {e}")
+                return json.dumps({"success": False, "error": str(e)})
 
         # ==================== Knowledge Cache Methods ====================
 
         @method()
         async def FindChannel(self, query: "s") -> "s":
-            """
-            Find channels by name, purpose, or topic.
-
-            Args:
-                query: Search string to match against channel name/purpose/topic
-
-            Returns:
-                JSON array of matching channels with id, name, purpose, etc.
-            """
+            """Find channels by name, purpose, or topic."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {
@@ -372,28 +351,12 @@ if DBUS_AVAILABLE:
 
         @method()
         async def SearchChannels(self, query: "s", count: "i") -> "s":
-            """
-            Search for channels using Slack's edge API.
-
-            This uses the internal edgeapi endpoint which works even when the
-            regular conversations.list API is blocked by enterprise restrictions.
-
-            Unlike FindChannel (which searches the local cache), this searches
-            Slack directly and can find channels you're not a member of.
-
-            Args:
-                query: Search query string (e.g., "ansible", "analytics")
-                count: Maximum number of results (default 30, max 100)
-
-            Returns:
-                JSON with search results including channel id, name, purpose, etc.
-            """
+            """Search for channels using Slack's edge API."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "channels": []}
                 )
 
-            # Cap count at 100 for safety
             count = min(max(count, 1), 100) if count > 0 else 30
 
             try:
@@ -407,19 +370,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def SearchAndCacheChannels(self, query: "s", count: "i") -> "s":
-            """
-            Search for channels and add results to the local cache.
-
-            This combines SearchChannels with caching - useful for discovering
-            new channels and adding them to the bot's knowledge base.
-
-            Args:
-                query: Search query string
-                count: Maximum number of results
-
-            Returns:
-                JSON with search results and cache update status
-            """
+            """Search for channels and add results to the local cache."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {
@@ -432,7 +383,6 @@ if DBUS_AVAILABLE:
             count = min(max(count, 1), 100) if count > 0 else 30
 
             try:
-                # Search channels
                 result = await self.daemon.session.search_channels_and_cache(
                     query, count
                 )
@@ -440,7 +390,6 @@ if DBUS_AVAILABLE:
                 if not result.get("success"):
                     return json.dumps(result)
 
-                # Import to cache
                 from tool_modules.aa_slack.src.persistence import CachedChannel
 
                 channels_to_cache = []
@@ -471,15 +420,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def FindUser(self, query: "s") -> "s":
-            """
-            Find users by name, email, or GitLab username.
-
-            Args:
-                query: Search string to match against user fields
-
-            Returns:
-                JSON array of matching users with id, name, email, etc.
-            """
+            """Find users by name, email, or GitLab username."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "users": []}
@@ -501,28 +442,12 @@ if DBUS_AVAILABLE:
 
         @method()
         async def SearchUsers(self, query: "s", count: "i") -> "s":
-            """
-            Search for users using Slack's edge API.
-
-            This uses the internal edgeapi endpoint which works even when the
-            regular users.list API is blocked by enterprise restrictions.
-
-            Unlike FindUser (which searches the local cache), this searches
-            Slack directly and can find any user in the enterprise.
-
-            Args:
-                query: Search query string (name, email, title, etc.)
-                count: Maximum number of results (default 30, max 100)
-
-            Returns:
-                JSON with search results including user id, name, email, title, etc.
-            """
+            """Search for users using Slack's edge API."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "users": []}
                 )
 
-            # Cap count at 100 for safety
             count = min(max(count, 1), 100) if count > 0 else 30
 
             try:
@@ -534,19 +459,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def SearchAndCacheUsers(self, query: "s", count: "i") -> "s":
-            """
-            Search for users and add results to the local cache.
-
-            This combines SearchUsers with caching - useful for discovering
-            new users and adding them to the bot's knowledge base.
-
-            Args:
-                query: Search query string
-                count: Maximum number of results
-
-            Returns:
-                JSON with search results and cache update status
-            """
+            """Search for users and add results to the local cache."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {
@@ -559,13 +472,11 @@ if DBUS_AVAILABLE:
             count = min(max(count, 1), 100) if count > 0 else 30
 
             try:
-                # Search users
                 result = await self.daemon.session.search_users_and_cache(query, count)
 
                 if not result.get("success"):
                     return json.dumps(result)
 
-                # Import to cache
                 from tool_modules.aa_slack.src.persistence import CachedUser
 
                 users_to_cache = []
@@ -582,7 +493,7 @@ if DBUS_AVAILABLE:
                                 display_name=u.get("display_name", ""),
                                 real_name=u.get("real_name", ""),
                                 email=u.get("email", ""),
-                                gitlab_username="",  # Not available from Slack
+                                gitlab_username="",
                                 avatar_url=u.get("avatar_url", ""),
                             )
                         )
@@ -599,18 +510,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetUserProfile(self, user_id: "s") -> "s":
-            """
-            Get detailed user profile with sections (contact info, about me, etc.).
-
-            This uses the users.profile.getSections API which returns structured
-            profile data including custom fields, contact information, and more.
-
-            Args:
-                user_id: Slack user ID (e.g., U04RA3VE2RZ)
-
-            Returns:
-                JSON with profile sections and extracted fields (email, title, etc.)
-            """
+            """Get detailed user profile with sections."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "profile": {}}
@@ -625,29 +525,14 @@ if DBUS_AVAILABLE:
 
         @method()
         def GetAvatarUrl(self, user_id: "s", avatar_hash: "s", size: "i") -> "s":
-            """
-            Construct a Slack avatar URL from user ID and avatar hash.
-
-            Avatar URLs follow the pattern:
-            https://ca.slack-edge.com/{enterprise_id}-{user_id}-{avatar_hash}-{size}
-
-            Args:
-                user_id: Slack user ID (e.g., U04RA3VE2RZ)
-                avatar_hash: Avatar hash from profile (e.g., 4d88f1ddb848)
-                size: Image size in pixels (512, 192, 72, 48, 32)
-
-            Returns:
-                JSON with the constructed avatar URL
-            """
+            """Construct a Slack avatar URL from user ID and avatar hash."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "url": ""}
                 )
 
             try:
-                # Default size to 512 if not specified
                 size = size if size > 0 else 512
-
                 url = self.daemon.session.get_avatar_url(user_id, avatar_hash, size)
                 return json.dumps(
                     {
@@ -664,12 +549,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetMyChannels(self) -> "s":
-            """
-            Get channels the bot is a member of.
-
-            Returns:
-                JSON array of channels with id, name, purpose, etc.
-            """
+            """Get channels the bot is a member of."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {
@@ -694,12 +574,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetUserGroups(self) -> "s":
-            """
-            Get all cached user groups (for @team mentions).
-
-            Returns:
-                JSON array of groups with id, handle, name, members.
-            """
+            """Get all cached user groups (for @team mentions)."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "groups": []}
@@ -722,15 +597,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def LookupUserByEmail(self, email: "s") -> "s":
-            """
-            Find a Slack user by their email address.
-
-            Args:
-                email: Email address to search for (case-insensitive)
-
-            Returns:
-                JSON with user info including user_id, name, and photo_path
-            """
+            """Find a Slack user by their email address."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
 
@@ -746,26 +613,13 @@ if DBUS_AVAILABLE:
 
         @method()
         async def LookupUserByName(self, name: "s", threshold: "d") -> "s":
-            """
-            Find Slack users by fuzzy name matching.
-
-            Compares the input name against real_name, display_name, and user_name
-            using fuzzy string matching.
-
-            Args:
-                name: Name to search for (e.g., "John Smith")
-                threshold: Minimum similarity ratio (0-1, default 0.7 if 0 passed)
-
-            Returns:
-                JSON with list of matching users sorted by match score
-            """
+            """Find Slack users by fuzzy name matching."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "users": []}
                 )
 
             try:
-                # Default threshold if not specified
                 if threshold <= 0:
                     threshold = 0.7
 
@@ -790,17 +644,7 @@ if DBUS_AVAILABLE:
 
         @method()
         def GetUserPhotoPath(self, user_id: "s") -> "s":
-            """
-            Get the local file path to a cached Slack user's profile photo.
-
-            Photos are cached to ~/.cache/aa-workflow/photos/{user_id}.jpg
-
-            Args:
-                user_id: Slack user ID (e.g., U04RA3VE2RZ)
-
-            Returns:
-                JSON with photo_path (empty string if not cached)
-            """
+            """Get the local file path to a cached Slack user's profile photo."""
             try:
                 return json.dumps(format_photo_path_response(user_id))
             except Exception as e:
@@ -809,15 +653,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def ResolveTarget(self, target: "s") -> "s":
-            """
-            Resolve a Slack target to its ID.
-
-            Args:
-                target: Can be #channel, @user, @group, or raw ID
-
-            Returns:
-                JSON with type, id, name, and found status.
-            """
+            """Resolve a Slack target (#channel, @user, @group) to its ID."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {
@@ -849,12 +685,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetChannelCacheStats(self) -> "s":
-            """
-            Get statistics about the knowledge cache.
-
-            Returns:
-                JSON with cache stats (total channels, member channels, age, etc.)
-            """
+            """Get statistics about the knowledge cache."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
 
@@ -868,28 +699,20 @@ if DBUS_AVAILABLE:
 
         @method()
         async def RefreshChannelCache(self) -> "s":
-            """
-            Trigger a refresh of the channel cache from Slack API.
-
-            Returns:
-                JSON with refresh status and count of channels cached.
-            """
+            """Trigger a refresh of the channel cache from Slack API."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "Session or State DB not available"}
                 )
 
             try:
-                # Import here to avoid circular imports
                 from tool_modules.aa_slack.src.persistence import CachedChannel
 
-                # Fetch channels from Slack API
                 channels_data = await self.daemon.session.get_conversations_list(
                     types="public_channel,private_channel",
                     limit=1000,
                 )
 
-                # Convert to CachedChannel objects
                 channels = [
                     CachedChannel(
                         channel_id=c.get("id", ""),
@@ -905,7 +728,6 @@ if DBUS_AVAILABLE:
                     if c.get("id")
                 ]
 
-                # Bulk cache
                 await self.daemon.state_db.cache_channels_bulk(channels)
 
                 return json.dumps(
@@ -921,33 +743,12 @@ if DBUS_AVAILABLE:
 
         @method()
         async def ImportSidebarChannels(self, file_path: "s") -> "s":
-            """
-            Import channels from a Slack sidebar HTML file.
-
-            This is a fallback for when the Slack API's conversations.list is
-            blocked by enterprise restrictions. Users can:
-            1. Open Slack in a browser
-            2. Right-click on the sidebar
-            3. Select "Inspect Element"
-            4. Copy the outer HTML of the sidebar div
-            5. Save to a file
-            6. Call this method with the file path
-
-            Args:
-                file_path: Path to the HTML file (e.g., ~/Downloads/sidebar.txt)
-
-            Returns:
-                JSON with import stats (channels_imported, dms_found, etc.)
-            """
+            """Import channels from a Slack sidebar HTML file."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
 
             try:
-                # Expand ~ in path
-                import os
-
                 expanded_path = os.path.expanduser(file_path)
-
                 result = await self.daemon.state_db.import_channels_from_sidebar(
                     expanded_path
                 )
@@ -958,12 +759,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetSidebarDMs(self) -> "s":
-            """
-            Get DMs that were imported from the sidebar.
-
-            Returns:
-                JSON array of DM info (channel_id, name, display_name, type)
-            """
+            """Get DMs that were imported from the sidebar."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "dms": []}
@@ -978,28 +774,18 @@ if DBUS_AVAILABLE:
 
         @method()
         async def RefreshUserCache(self) -> "s":
-            """
-            Trigger a refresh of the user cache from Slack API.
-
-            This is rate-limited to prevent abuse. Only refreshes if cache
-            is older than 1 hour or empty.
-
-            Returns:
-                JSON with refresh status and count of users cached.
-            """
+            """Trigger a refresh of the user cache from Slack API."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "Session or State DB not available"}
                 )
 
             try:
-                # Import here to avoid circular imports
                 from tool_modules.aa_slack.src.persistence import CachedUser
 
-                # Check if cache is recent (rate limiting)
                 stats = await self.daemon.state_db.get_user_cache_stats()
                 cache_age = stats.get("cache_age_seconds")
-                if cache_age is not None and cache_age < 3600:  # 1 hour
+                if cache_age is not None and cache_age < 3600:
                     return json.dumps(
                         {
                             "success": True,
@@ -1010,10 +796,8 @@ if DBUS_AVAILABLE:
                         }
                     )
 
-                # Fetch users from Slack API
                 users_data = await self.daemon.session.get_users_list(limit=1000)
 
-                # Convert to CachedUser objects
                 users = []
                 for u in users_data:
                     if u.get("id") and not u.get("is_bot") and not u.get("deleted"):
@@ -1025,14 +809,13 @@ if DBUS_AVAILABLE:
                                 display_name=profile.get("display_name", ""),
                                 real_name=profile.get("real_name", ""),
                                 email=profile.get("email", ""),
-                                gitlab_username="",  # Not available from Slack
+                                gitlab_username="",
                                 avatar_url=profile.get(
                                     "image_72", profile.get("image_48", "")
                                 ),
                             )
                         )
 
-                # Bulk cache
                 await self.daemon.state_db.cache_users_bulk(users)
 
                 return json.dumps(
@@ -1048,12 +831,7 @@ if DBUS_AVAILABLE:
 
         @method()
         async def GetUserCacheStats(self) -> "s":
-            """
-            Get statistics about the user cache.
-
-            Returns:
-                JSON with cache stats (total users, with avatar, with email, age, etc.)
-            """
+            """Get statistics about the user cache."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
 
@@ -1066,274 +844,13 @@ if DBUS_AVAILABLE:
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
-        async def SearchMessages(self, query: "s", max_results: "i") -> "s":
-            """
-            Search Slack messages with rate limiting.
-
-            This method is rate-limited to prevent abuse:
-            - Max 1 search per 5 seconds
-            - Max 20 searches per day
-            - Max 50 results per search
-
-            Args:
-                query: Search query string
-                max_results: Maximum results to return (capped at 50)
-
-            Returns:
-                JSON with search results or rate limit error.
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {"success": False, "error": "Session not available", "messages": []}
-                )
-
-            # Cap max_results at 50 for safety
-            max_results = min(max_results, 50) if max_results > 0 else 20
-
-            try:
-                # Initialize rate limit tracking if needed
-                if not hasattr(self.daemon, "_search_rate_limit"):
-                    self.daemon._search_rate_limit = {
-                        "last_search": 0,
-                        "daily_count": 0,
-                        "daily_reset": time.time(),
-                    }
-
-                rl = self.daemon._search_rate_limit
-
-                # Check rate limits
-                rate_limit_error = check_search_rate_limit(rl)
-                if rate_limit_error:
-                    return json.dumps(rate_limit_error)
-
-                # Update rate limit tracking
-                record_search(rl)
-
-                # Perform the search
-                results = await self.daemon.session.search_messages(
-                    query=query,
-                    count=max_results,
-                )
-
-                return json.dumps(
-                    format_search_results(query, results, rl["daily_count"])
-                )
-            except Exception as e:
-                logger.error(f"SearchMessages error: {e}")
-                return json.dumps({"success": False, "error": str(e), "messages": []})
-
-        @method()
-        async def GetThreadReplies(
-            self, channel_id: "s", thread_ts: "s", limit: "i"
-        ) -> "s":
-            """
-            Get thread replies using the enhanced web client API.
-
-            Returns full message data including:
-            - Rich text blocks with formatting
-            - Reactions with user lists
-            - Edit history
-            - Proper pagination
-
-            Args:
-                channel_id: Channel containing the thread
-                thread_ts: Thread parent timestamp
-                limit: Maximum replies to fetch (default 50, max 100)
-
-            Returns:
-                JSON with messages array and pagination info
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                        "messages": [],
-                    }
-                )
-
-            try:
-                limit = min(max(limit, 1), 100)  # Clamp to 1-100
-                result = await self.daemon.session.get_thread_replies_full(
-                    channel_id, thread_ts, limit
-                )
-
-                if not result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                            "messages": [],
-                        }
-                    )
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "channel_id": channel_id,
-                        "thread_ts": thread_ts,
-                        "count": len(result.get("messages", [])),
-                        "has_more": result.get("has_more", False),
-                        "messages": result.get("messages", []),
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetThreadReplies error: {e}")
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": str(e),
-                        "messages": [],
-                    }
-                )
-
-        @method()
-        async def GetThreadContext(self, channel_id: "s", thread_ts: "s") -> "s":
-            """
-            Get thread context in a simplified format for AI processing.
-
-            Extracts key information from a thread:
-            - Parent message with author
-            - All replies with authors
-            - Mentioned users
-            - Links (URLs, MRs, Jira issues)
-            - Code blocks
-            - Reactions summary
-
-            This is optimized for use with @me commands that need
-            to understand thread context (e.g., @me jira, @me cursor).
-
-            Args:
-                channel_id: Channel containing the thread
-                thread_ts: Thread parent timestamp
-
-            Returns:
-                JSON with simplified thread context
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
-
-            try:
-                result = await self.daemon.session.get_thread_context(
-                    channel_id, thread_ts
-                )
-
-                if not result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                        }
-                    )
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        **result,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetThreadContext error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def GetAppCommands(self, summarize: "b") -> "s":
-            """
-            Get all available slash commands and app actions in the workspace.
-
-            This returns information about:
-            - Core Slack commands (/remind, /status, /dnd, etc.)
-            - App commands (/jira, /github, /gcal, etc.)
-            - App actions (message actions, global shortcuts)
-
-            Useful for discovering what integrations are available and
-            what commands can be used.
-
-            Args:
-                summarize: If true, return a categorized summary.
-                          If false, return the raw API response.
-
-            Returns:
-                JSON with commands and actions data
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
-
-            try:
-                result = await self.daemon.session.get_app_commands()
-
-                if not result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                        }
-                    )
-
-                if summarize:
-                    summary = self.daemon.session.get_app_commands_summary(result)
-                    return json.dumps(
-                        {
-                            "success": True,
-                            **summary,
-                        }
-                    )
-                else:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "app_actions": result.get("app_actions", []),
-                            "commands": result.get("commands", []),
-                        }
-                    )
-            except Exception as e:
-                logger.error(f"GetAppCommands error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
         async def ListChannelMembers(self, channel_id: "s", count: "i") -> "s":
-            """
-            List members of a specific channel.
-
-            This uses the Edge API to bypass enterprise restrictions on
-            users.list by scoping the request to a specific channel.
-
-            Returns full user profiles including:
-            - Name, display name, email, title
-            - Avatar URL and hash
-            - Status (text and emoji)
-            - Timezone
-            - Admin/bot flags
-
-            Args:
-                channel_id: Channel ID (e.g., C089F16L30T)
-                count: Maximum number of members (default 100, max 500)
-
-            Returns:
-                JSON with list of channel members
-            """
+            """List members of a specific channel."""
             if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
+                return json.dumps({"success": False, "error": "Session not available"})
 
             try:
-                # Clamp count to reasonable limits
                 count = max(1, min(count, 500))
-
                 result = await self.daemon.session.list_channel_members_and_cache(
                     channel_id, count
                 )
@@ -1353,31 +870,11 @@ if DBUS_AVAILABLE:
         async def CheckChannelMembership(
             self, channel_id: "s", user_ids_json: "s"
         ) -> "s":
-            """
-            Check which users from a list are members of a channel.
-
-            This is useful for:
-            - Verifying if specific users are in a channel
-            - Filtering a user list to only channel members
-            - Checking membership before sending targeted messages
-
-            Args:
-                channel_id: Channel ID to check membership for
-                user_ids_json: JSON array of user IDs to check, e.g. '["U123", "U456"]'
-
-            Returns:
-                JSON with channel, members list (only those who are actually members)
-            """
+            """Check which users from a list are members of a channel."""
             if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
+                return json.dumps({"success": False, "error": "Session not available"})
 
             try:
-                # Parse user IDs from JSON
                 user_ids = json.loads(user_ids_json)
                 if not isinstance(user_ids, list):
                     return json.dumps(
@@ -1410,526 +907,11 @@ if DBUS_AVAILABLE:
                 )
             except json.JSONDecodeError as e:
                 return json.dumps(
-                    {
-                        "success": False,
-                        "error": f"Invalid JSON for user_ids: {e}",
-                    }
+                    {"success": False, "error": f"Invalid JSON for user_ids: {e}"}
                 )
             except Exception as e:
                 logger.error(f"CheckChannelMembership error: {e}")
                 return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def GetChannelSections(self, summarize: "b") -> "s":
-            """
-            Get the user's sidebar channel sections/folders.
-
-            This returns the user's organized sidebar structure including:
-            - Custom sections (folders) they've created
-            - Channel IDs in each section
-            - Section types (standard, stars, direct_messages, etc.)
-
-            This is the proper API alternative to scraping the sidebar HTML
-            and provides a complete list of all channels the user has organized.
-
-            Args:
-                summarize: If true, return a simplified summary with all channel IDs.
-                          If false, return the raw API response.
-
-            Returns:
-                JSON with channel sections and channel IDs
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
-
-            try:
-                result = await self.daemon.session.get_channel_sections()
-
-                if not result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                        }
-                    )
-
-                if summarize:
-                    summary = self.daemon.session.get_channel_sections_summary(result)
-                    return json.dumps(
-                        {
-                            "success": True,
-                            **summary,
-                        }
-                    )
-                else:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "channel_sections": result.get("channel_sections", []),
-                            "last_updated": result.get("last_updated", 0),
-                        }
-                    )
-            except Exception as e:
-                logger.error(f"GetChannelSections error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def GetChannelHistory(
-            self,
-            channel_id: "s",
-            limit: "i",
-            oldest: "s",
-            latest: "s",
-            simplify: "b",
-        ) -> "s":
-            """
-            Get message history for a channel.
-
-            Fetches messages with full rich text blocks, attachments,
-            and thread metadata.
-
-            Args:
-                channel_id: Channel ID to fetch history for
-                limit: Maximum number of messages (1-100, default 50)
-                oldest: Start timestamp - fetch messages after this (empty for no limit)
-                latest: End timestamp - fetch messages before this (empty for no limit)
-                simplify: If true, return simplified format for AI processing
-
-            Returns:
-                JSON with messages list and pagination info
-            """
-            if not self.daemon.session:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Session not available",
-                    }
-                )
-
-            try:
-                # Clamp limit
-                limit = max(1, min(limit or 50, 100))
-
-                result = await self.daemon.session.get_channel_history_rich(
-                    channel_id=channel_id,
-                    limit=limit,
-                    oldest=oldest or "",
-                    latest=latest or "",
-                )
-
-                if not result.get("ok"):
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": result.get("error", "Unknown error"),
-                        }
-                    )
-
-                if simplify:
-                    simplified = self.daemon.session.simplify_channel_history(result)
-                    return json.dumps(
-                        {
-                            "success": True,
-                            **simplified,
-                        }
-                    )
-                else:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "messages": result.get("messages", []),
-                            "has_more": result.get("has_more", False),
-                        }
-                    )
-            except Exception as e:
-                logger.error(f"GetChannelHistory error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        def GetCommandList(self) -> "s":
-            """Get list of available @me commands with descriptions."""
-            try:
-                from scripts.common.command_registry import get_registry
-
-                registry = get_registry()
-                commands = registry.list_commands()
-
-                return json.dumps(
-                    {"success": True, "commands": format_command_list(commands)}
-                )
-            except Exception as e:
-                logger.error(f"GetCommandList error: {e}")
-                return json.dumps({"success": False, "error": str(e), "commands": []})
-
-        @method()
-        def GetConfig(self) -> "s":
-            """Get current Slack daemon configuration."""
-            try:
-                from scripts.common.config_loader import load_config
-
-                config = load_config()
-                return json.dumps(
-                    {"success": True, "config": format_slack_config(config)}
-                )
-            except Exception as e:
-                logger.error(f"GetConfig error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        def SetDebugMode(self, enabled: "b") -> "s":
-            """Enable or disable debug mode."""
-            try:
-                if self.daemon:
-                    # Update daemon state
-                    self.daemon._debug_mode = enabled
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "debug_mode": enabled,
-                            "message": f"Debug mode {'enabled' if enabled else 'disabled'}",
-                        }
-                    )
-                return json.dumps({"success": False, "error": "Daemon not available"})
-            except Exception as e:
-                logger.error(f"SetDebugMode error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        # ==================== Background Sync ====================
-
-        @method()
-        def GetSyncStatus(self) -> "s":
-            """
-            Get the status of the background sync process.
-
-            Returns stats on:
-            - Channels discovered/synced
-            - Users discovered/synced
-            - Photos downloaded/cached
-            - Rate limiting info
-            - Current operation
-            """
-            try:
-                from src.background_sync import get_background_sync
-
-                sync = get_background_sync()
-                if not sync:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync not initialized",
-                            "is_running": False,
-                        }
-                    )
-
-                status = sync.get_status()
-                return json.dumps(
-                    {
-                        "success": True,
-                        **status,
-                    }
-                )
-            except ImportError:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "error": "Background sync module not available",
-                        "is_running": False,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetSyncStatus error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def StartSync(self) -> "s":
-            """
-            Start the background sync process.
-
-            The sync slowly populates the cache with:
-            - Channels from user's sidebar
-            - Members from each channel
-            - User profile pictures
-
-            Rate limited to ~1 request/second to avoid detection.
-            """
-            try:
-                from src.background_sync import (
-                    BackgroundSync,
-                    SyncConfig,
-                    get_background_sync,
-                    set_background_sync,
-                )
-
-                existing = get_background_sync()
-                if existing and existing.stats.is_running:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync already running",
-                            "status": existing.get_status(),
-                        }
-                    )
-
-                if not self.daemon.session or not self.daemon.state_db:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Slack session or database not available",
-                        }
-                    )
-
-                # Create and start sync
-                config = SyncConfig(
-                    min_delay_seconds=1.0,
-                    max_delay_seconds=3.0,
-                    delay_start_seconds=5.0,  # Short delay for manual start
-                )
-                sync = BackgroundSync(
-                    slack_client=self.daemon.session,
-                    state_db=self.daemon.state_db,
-                    config=config,
-                )
-                set_background_sync(sync)
-                await sync.start()
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "message": "Background sync started",
-                        "status": sync.get_status(),
-                    }
-                )
-            except Exception as e:
-                logger.error(f"StartSync error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def StopSync(self) -> "s":
-            """Stop the background sync process."""
-            try:
-                from src.background_sync import get_background_sync
-
-                sync = get_background_sync()
-                if not sync:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync not initialized",
-                        }
-                    )
-
-                if not sync.stats.is_running:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync not running",
-                        }
-                    )
-
-                await sync.stop()
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "message": "Background sync stopped",
-                        "final_stats": sync.stats.to_dict(),
-                    }
-                )
-            except Exception as e:
-                logger.error(f"StopSync error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        async def TriggerSync(self, sync_type: "s") -> "s":
-            """
-            Manually trigger a sync operation.
-
-            Args:
-                sync_type: Type of sync - "full", "channels", "users", or "photos"
-
-            Returns:
-                Status of the trigger request
-            """
-            try:
-                from src.background_sync import get_background_sync
-
-                sync = get_background_sync()
-                if not sync:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync not initialized",
-                        }
-                    )
-
-                result = await sync.trigger_sync(sync_type)
-                return json.dumps(result)
-            except Exception as e:
-                logger.error(f"TriggerSync error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        def GetSyncConfig(self) -> "s":
-            """Get the background sync configuration."""
-            try:
-                from src.background_sync import get_background_sync
-
-                sync = get_background_sync()
-                if sync:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "config": sync.config.to_dict(),
-                        }
-                    )
-
-                # Return default config if sync not started
-                from src.background_sync import SyncConfig
-
-                default_config = SyncConfig()
-                return json.dumps(
-                    {
-                        "success": True,
-                        "config": default_config.to_dict(),
-                        "note": "Using default config (sync not started)",
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetSyncConfig error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        def SetSyncConfig(self, config_json: "s") -> "s":
-            """
-            Update background sync configuration.
-
-            Args:
-                config_json: JSON object with config keys to update:
-                    - min_delay_seconds: Minimum delay between requests (default 1.0)
-                    - max_delay_seconds: Maximum delay for stealth (default 3.0)
-                    - download_photos: Whether to download profile photos (default true)
-                    - max_members_per_channel: Max members to fetch per channel (default 200)
-
-            Returns:
-                Updated configuration
-            """
-            try:
-                from src.background_sync import get_background_sync
-
-                sync = get_background_sync()
-                if not sync:
-                    return json.dumps(
-                        {
-                            "success": False,
-                            "error": "Background sync not initialized. Start sync first.",
-                        }
-                    )
-
-                updates = json.loads(config_json)
-
-                # Apply updates to config
-                if "min_delay_seconds" in updates:
-                    sync.config.min_delay_seconds = float(updates["min_delay_seconds"])
-                if "max_delay_seconds" in updates:
-                    sync.config.max_delay_seconds = float(updates["max_delay_seconds"])
-                if "download_photos" in updates:
-                    sync.config.download_photos = bool(updates["download_photos"])
-                if "max_members_per_channel" in updates:
-                    sync.config.max_members_per_channel = int(
-                        updates["max_members_per_channel"]
-                    )
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "config": sync.config.to_dict(),
-                    }
-                )
-            except json.JSONDecodeError as e:
-                return json.dumps({"success": False, "error": f"Invalid JSON: {e}"})
-            except Exception as e:
-                logger.error(f"SetSyncConfig error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        @method()
-        def GetPhotoPath(self, user_id: "s") -> "s":
-            """
-            Get the local cached photo path for a user.
-
-            Args:
-                user_id: Slack user ID
-
-            Returns:
-                Path to cached photo if it exists, or empty string
-            """
-            try:
-                return json.dumps(format_photo_path_response(user_id))
-            except Exception as e:
-                logger.error(f"GetPhotoPath error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
-
-        # ==================== Context Injection ====================
-
-        @method()
-        def RunPersonaTest(self, query: "s", persona: "s") -> "s":
-            """
-            Run a context gathering test for the Slack persona.
-
-            This tests what context would be injected for a given query,
-            gathering from Slack history, code search, InScope, Jira, and memory.
-
-            Args:
-                query: The test question/message
-                persona: Optional persona name (not used currently)
-
-            Returns:
-                JSON with gathered context and source status
-            """
-            try:
-                import sys
-
-                # Add project root to path for imports
-                project_root = Path(__file__).parent.parent.parent
-                if str(project_root) not in sys.path:
-                    sys.path.insert(0, str(project_root))
-
-                from scripts.context_injector import ContextInjector
-
-                injector = ContextInjector(
-                    project="automation-analytics-backend",
-                    slack_limit=5,
-                    code_limit=5,
-                    jira_limit=3,
-                    memory_limit=3,
-                    inscope_limit=1,
-                )
-
-                # Gather context from all sources (sync version)
-                context = injector.gather_context(
-                    query=query,
-                    include_slack=True,
-                    include_code=True,
-                    include_jira=True,
-                    include_memory=True,
-                    include_inscope=True,
-                )
-
-                return json.dumps(format_persona_test_result(query, context))
-            except ImportError as e:
-                logger.error(f"RunPersonaTest import error: {e}")
-                return json.dumps(
-                    format_persona_test_error(
-                        query, f"Context injector not available: {e}"
-                    )
-                )
-            except Exception as e:
-                logger.error(f"RunPersonaTest error: {e}")
-                return json.dumps(format_persona_test_error(query, str(e)))
 
         # ==================== Signals ====================
 
