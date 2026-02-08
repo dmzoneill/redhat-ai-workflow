@@ -193,7 +193,9 @@ class CommandHandler:
     """
     Handles @me commands from Slack.
 
-    Parses commands, extracts context, and routes to appropriate handlers.
+    Thin dispatcher that parses commands and routes to focused handler modules
+    in services.slack.handlers/.
+
     Supports:
     - @me <skill_name> - Run a skill with context from thread
     - @me help - List available commands
@@ -225,6 +227,21 @@ class CommandHandler:
             )
         )
 
+        # Build shared handler context for extracted handler modules
+        self._handler_ctx = self._build_handler_context()
+
+    def _build_handler_context(self):
+        """Build the HandlerContext passed to extracted handler modules."""
+        from services.slack.handlers.base import HandlerContext
+
+        return HandlerContext(
+            call_dbus=self._call_dbus,
+            extract_context=self._extract_context,
+            run_skill=self._run_skill,
+            run_tool=self._run_tool,
+            claude_agent=self.claude_agent,
+        )
+
     def is_command(self, text: str, is_self_dm: bool = False) -> bool:
         """Check if a message is an @me command."""
         parsed = self.parser.parse(text, is_self_dm)
@@ -245,6 +262,15 @@ class CommandHandler:
         Returns:
             Tuple of (response_text, should_send)
         """
+        # Import handler modules
+        from services.slack.handlers import (
+            jira_commands,
+            knowledge_commands,
+            meet_commands,
+            sprint_commands,
+            system_commands,
+        )
+
         # Check if this is in self-DM channel
         self_dm_channel = get_slack_config("listener.self_dm_channel", "")
         is_self_dm = message.channel_id == self_dm_channel
@@ -259,39 +285,51 @@ class CommandHandler:
             f"Processing @me command: {parsed.command} (type: {parsed.trigger_type.value})"
         )
 
+        ctx = self._handler_ctx
+
         # Route the command
         try:
+            # System commands
             if self.parser.is_help_command(parsed):
-                response = await self._handle_help(parsed)
+                response = await system_commands.handle_help(
+                    parsed, self.parser, self.registry
+                )
             elif self.parser.is_status_command(parsed):
-                response = await self._handle_status()
+                response = await system_commands.handle_status(
+                    self.registry, self.contextual_skills, self.claude_agent
+                )
             elif parsed.command == "list":
-                response = await self._handle_list(parsed)
+                response = await system_commands.handle_list(parsed, self.registry)
             elif parsed.command == "watch":
-                response = await self._handle_watch(message)
-            # D-Bus service commands
-            elif parsed.command == "jira":
-                response = await self._handle_jira(parsed, message)
-            elif parsed.command == "search":
-                response = await self._handle_search(parsed)
-            elif parsed.command == "who":
-                response = await self._handle_who(parsed)
-            elif parsed.command == "find":
-                response = await self._handle_find(parsed)
-            elif parsed.command == "cursor":
-                response = await self._handle_cursor(parsed, message)
-            elif parsed.command == "sprint":
-                response = await self._handle_sprint(parsed)
-            elif parsed.command == "meet":
-                response = await self._handle_meet(parsed)
+                response = await system_commands.handle_watch(message, get_slack_config)
             elif parsed.command == "cron":
-                response = await self._handle_cron(parsed)
+                response = await system_commands.handle_cron(parsed, ctx)
+            # Jira / lookup commands
+            elif parsed.command == "jira":
+                response = await jira_commands.handle_jira(parsed, message, ctx)
+            elif parsed.command == "search":
+                response = await jira_commands.handle_search(parsed, ctx)
+            elif parsed.command == "who":
+                response = await jira_commands.handle_who(parsed, ctx)
+            elif parsed.command == "find":
+                response = await jira_commands.handle_find(parsed, ctx)
+            elif parsed.command == "cursor":
+                response = await jira_commands.handle_cursor(parsed, message, ctx)
+            # Sprint commands
+            elif parsed.command == "sprint":
+                response = await sprint_commands.handle_sprint(parsed, ctx)
+            # Meet commands
+            elif parsed.command == "meet":
+                response = await meet_commands.handle_meet(parsed, ctx)
+            # Knowledge commands
             elif parsed.command == "research":
-                response = await self._handle_research(parsed, message)
+                response = await knowledge_commands.handle_research(
+                    parsed, message, ctx
+                )
             elif parsed.command == "learn":
-                response = await self._handle_learn(parsed, message)
+                response = await knowledge_commands.handle_learn(parsed, message, ctx)
             elif parsed.command == "knowledge":
-                response = await self._handle_knowledge(parsed)
+                response = await knowledge_commands.handle_knowledge(parsed)
             else:
                 response = await self._handle_skill_or_tool(parsed, message)
 
@@ -316,89 +354,7 @@ class CommandHandler:
 
         except Exception as e:
             logger.error(f"Error handling command {parsed.command}: {e}", exc_info=True)
-            return f"❌ Error: {str(e)}", True
-
-    async def _handle_help(self, parsed: ParsedCommand) -> str:
-        """Handle help command."""
-        target = self.parser.get_help_target(parsed)
-
-        if target:
-            # Help for specific command
-            help_info = self.registry.get_command_help(target)
-            if help_info:
-                return help_info.format_slack()
-            return f"❌ Unknown command: `{target}`\n\nUse `@me help` to list available commands."
-
-        # General help
-        commands = self.registry.list_commands()
-        return self.registry.format_list(commands, "slack")
-
-    async def _handle_status(self) -> str:
-        """Handle status command."""
-        lines = ["*🤖 Bot Status*\n"]
-
-        # Count available commands
-        skills = self.registry.list_commands(command_type=CommandType.SKILL)
-        tools = self.registry.list_commands(command_type=CommandType.TOOL)
-
-        lines.append(f"• *Skills available:* {len(skills)}")
-        lines.append(f"• *Tools available:* {len(tools)}")
-        lines.append(
-            f"• *Contextual skills:* {', '.join(sorted(self.contextual_skills))}"
-        )
-
-        if self.claude_agent:
-            lines.append("• *Claude:* ✅ Connected")
-        else:
-            lines.append("• *Claude:* ❌ Not connected")
-
-        lines.append("\n_Use `@me help` to see available commands_")
-
-        return "\n".join(lines)
-
-    async def _handle_list(self, parsed: ParsedCommand) -> str:
-        """Handle list command."""
-        filter_type = None
-        if parsed.args:
-            arg = parsed.args[0].lower()
-            if arg in ("skill", "skills"):
-                filter_type = CommandType.SKILL
-            elif arg in ("tool", "tools"):
-                filter_type = CommandType.TOOL
-
-        commands = self.registry.list_commands(command_type=filter_type)
-        return self.registry.format_list(commands, "slack")
-
-    async def _handle_watch(self, message: "PendingMessage") -> str:
-        """Handle watch command - show channel ID for adding to watch list."""
-        channel_id = message.channel_id
-
-        # Determine channel type
-        if channel_id.startswith("D"):
-            channel_type = "DM (direct message)"
-        elif channel_id.startswith("G"):
-            channel_type = "MPDM (group DM / private chat)"
-        elif channel_id.startswith("C"):
-            channel_type = "public channel"
-        else:
-            channel_type = "channel"
-
-        # Check if already being watched
-        watched = get_slack_config("listener.watched_channels", [])
-        is_watched = channel_id in watched
-
-        lines = ["*📡 Channel Info*\n"]
-        lines.append(f"• *Channel ID:* `{channel_id}`")
-        lines.append(f"• *Type:* {channel_type}")
-        lines.append(f"• *Currently watched:* {'✅ Yes' if is_watched else '❌ No'}")
-
-        if not is_watched:
-            lines.append("\n*To watch this channel:*")
-            lines.append(
-                f'Add `"{channel_id}"` to `slack.listener.watched_channels` in `config.json`'
-            )
-
-        return "\n".join(lines)
+            return f"\u274c Error: {str(e)}", True
 
     async def _handle_skill_or_tool(
         self, parsed: ParsedCommand, message: "PendingMessage"
@@ -408,7 +364,7 @@ class CommandHandler:
 
         if not cmd_info:
             return (
-                f"❌ Unknown command: `{parsed.command}`\n\n"
+                f"\u274c Unknown command: `{parsed.command}`\n\n"
                 f"Use `@me help` to list available commands."
             )
 
@@ -469,7 +425,7 @@ class CommandHandler:
     ) -> str:
         """Run a skill via Claude."""
         if not self.claude_agent:
-            return "❌ Claude agent not available"
+            return "\u274c Claude agent not available"
 
         # Build prompt for Claude to run the skill
         import json
@@ -505,14 +461,14 @@ Format the output for Slack (use *bold*, `code`, bullet points).
 
         except Exception as e:
             logger.error(f"Failed to run skill {skill_name}: {e}")
-            return f"❌ Failed to run skill `{skill_name}`: {str(e)}"
+            return f"\u274c Failed to run skill `{skill_name}`: {str(e)}"
 
     async def _run_tool(
         self, tool_name: str, inputs: dict, message: "PendingMessage"
     ) -> str:
         """Run a tool via Claude."""
         if not self.claude_agent:
-            return "❌ Claude agent not available"
+            return "\u274c Claude agent not available"
 
         # Build prompt for Claude to run the tool
         import json
@@ -548,10 +504,10 @@ Format the output for Slack (use *bold*, `code`, bullet points).
 
         except Exception as e:
             logger.error(f"Failed to run tool {tool_name}: {e}")
-            return f"❌ Failed to run tool `{tool_name}`: {str(e)}"
+            return f"\u274c Failed to run tool `{tool_name}`: {str(e)}"
 
     # =========================================================================
-    # D-BUS SERVICE COMMAND HANDLERS
+    # D-BUS SERVICE CALL HELPER
     # =========================================================================
 
     async def _call_dbus(
@@ -593,831 +549,6 @@ Format the output for Slack (use *bold*, `code`, bullet points).
         except Exception as e:
             logger.error(f"D-Bus call failed: {service}.{method}: {e}")
             return {"error": str(e)}
-
-    async def _handle_jira(
-        self, parsed: ParsedCommand, message: "PendingMessage"
-    ) -> str:
-        """Handle @me jira command - create Jira issue from thread context."""
-        # Determine issue type from args
-        issue_type = "Task"  # default
-        parent_key = None
-
-        if parsed.args:
-            arg = parsed.args[0].lower()
-            if arg == "bug":
-                issue_type = "Bug"
-            elif arg == "story":
-                issue_type = "Story"
-            elif arg == "task":
-                issue_type = "Task"
-            elif arg == "subtask" and len(parsed.args) > 1:
-                issue_type = "Sub-task"
-                parent_key = parsed.args[1].upper()
-            elif arg.startswith("aap-") or arg.startswith("AAP-"):
-                # Assume it's a parent key for subtask
-                issue_type = "Sub-task"
-                parent_key = arg.upper()
-
-        # Extract context from thread
-        context = await self._extract_context(message)
-
-        if not context.is_valid():
-            return (
-                "❌ Could not extract context from thread. Please provide more details."
-            )
-
-        # Build inputs for create_jira_issue skill
-        inputs = {
-            "summary": (
-                context.summary[:200] if context.summary else "Issue from Slack thread"
-            ),
-            "description": context.raw_text[:2000] if context.raw_text else "",
-            "issue_type": issue_type,
-            "slack_format": True,
-        }
-
-        if parent_key:
-            inputs["parent_key"] = parent_key
-
-        if context.jira_issues:
-            inputs["link_to"] = context.jira_issues[0]  # Link to first related issue
-
-        # For Stories, use Claude to generate required fields from context
-        if issue_type == "Story" and self.claude_agent:
-            story_fields = await self._generate_story_fields(context)
-            if story_fields:
-                inputs.update(story_fields)
-
-        # Run the skill
-        return await self._run_skill("create_jira_issue", inputs, message)
-
-    async def _generate_story_fields(self, context: ConversationContext) -> dict:
-        """Use Claude to generate story-specific fields from conversation context."""
-        if not self.claude_agent:
-            return {}
-
-        prompt = f"""Based on this Slack conversation, generate Jira Story fields.
-
-Conversation:
-{context.raw_text[:2000]}
-
-Summary so far: {context.summary}
-
-Generate these fields in JSON format:
-{{
-    "user_story": "As a [role], I want [feature], so that [benefit]",
-    "acceptance_criteria": "- Criterion 1\\n- Criterion 2\\n- Criterion 3",
-    "definition_of_done": "- Code reviewed and merged\\n- Tests pass\\n- Documentation updated"
-}}
-
-Be concise. Extract the actual requirements from the conversation.
-Return ONLY the JSON, no other text."""
-
-        try:
-            response = await self.claude_agent.process_message(
-                prompt,
-                context={"purpose": "story_field_generation"},
-            )
-
-            # Parse JSON from response
-            import json
-            import re
-
-            json_match = re.search(r"\{[^{}]*\}", response, re.DOTALL)
-            if json_match:
-                fields = json.loads(json_match.group())
-                return {
-                    "user_story": fields.get("user_story", ""),
-                    "acceptance_criteria": fields.get("acceptance_criteria", ""),
-                    "definition_of_done": fields.get("definition_of_done", ""),
-                }
-        except Exception as e:
-            logger.warning(f"Failed to generate story fields: {e}")
-
-        # Return defaults if generation fails
-        return {
-            "user_story": f"As a user, I want {context.summary}",
-            "acceptance_criteria": "- Requirements met\n- Tests pass",
-            "definition_of_done": "- Code reviewed and merged\n- Tests pass",
-        }
-
-    async def _handle_search(self, parsed: ParsedCommand) -> str:
-        """Handle @me search command - search Slack, code, or Jira."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a search query.\n\nUsage:\n"
-                "• `@me search <query>` - Search Slack\n"
-                "• `@me search code <query>` - Search code\n"
-                "• `@me search jira <query>` - Search Jira"
-            )
-
-        search_type = "slack"
-        query_parts = parsed.args
-
-        # Check for search type prefix
-        if parsed.args[0].lower() in ("code", "jira", "slack", "logs"):
-            search_type = parsed.args[0].lower()
-            query_parts = parsed.args[1:]
-
-        if not query_parts:
-            return f"❌ Please provide a search query for {search_type} search."
-
-        query = " ".join(query_parts)
-
-        if search_type == "slack":
-            # Use D-Bus to search Slack
-            result = await self._call_dbus(
-                "com.aiworkflow.BotSlack",
-                "/com/aiworkflow/BotSlack",
-                "com.aiworkflow.BotSlack",
-                "SearchMessages",
-                [query, 20],
-            )
-
-            if "error" in result:
-                return f"❌ Search failed: {result['error']}"
-
-            if result.get("rate_limited"):
-                return f"⏳ Rate limited. {result.get('error', 'Please wait before searching again.')}"
-
-            messages = result.get("messages", [])
-            if not messages:
-                return f"🔍 No results found for: `{query}`"
-
-            lines = [
-                f"*🔍 Slack Search Results* ({len(messages)} of {result.get('total', len(messages))})\n"
-            ]
-            for msg in messages[:10]:
-                channel = msg.get("channel_name", "unknown")
-                user = msg.get("username", "unknown")
-                text = msg.get("text", "")[:100]
-                lines.append(f"• *#{channel}* (@{user}): {text}...")
-
-            remaining = result.get("searches_remaining_today")
-            if remaining is not None:
-                lines.append(f"\n_({remaining} searches remaining today)_")
-
-            return "\n".join(lines)
-
-        elif search_type == "code":
-            # Use Claude to search code
-            return await self._run_skill("code_search", {"query": query}, None)
-
-        elif search_type == "jira":
-            # Use Claude to search Jira
-            return await self._run_tool(
-                "jira_search", {"jql": f'text ~ "{query}"', "max_results": 10}, None
-            )
-
-        else:
-            return f"❌ Unknown search type: `{search_type}`"
-
-    async def _handle_who(self, parsed: ParsedCommand) -> str:
-        """Handle @me who command - look up a Slack user."""
-        if not parsed.args:
-            return "❌ Please provide a username or email.\n\nUsage: `@me who @username` or `@me who email@example.com`"
-
-        query = parsed.args[0].lstrip("@")
-
-        result = await self._call_dbus(
-            "com.aiworkflow.BotSlack",
-            "/com/aiworkflow/BotSlack",
-            "com.aiworkflow.BotSlack",
-            "FindUser",
-            [query],
-        )
-
-        if "error" in result:
-            return f"❌ Lookup failed: {result['error']}"
-
-        users = result.get("users", [])
-        if not users:
-            return f"🔍 No users found matching: `{query}`"
-
-        lines = [f"*👤 User Lookup: {query}*\n"]
-        for user in users[:5]:
-            lines.append(f"• *{user.get('display_name') or user.get('user_name')}*")
-            lines.append(f"  ID: `{user.get('user_id')}`")
-            if user.get("real_name"):
-                lines.append(f"  Name: {user.get('real_name')}")
-            if user.get("email"):
-                lines.append(f"  Email: {user.get('email')}")
-            if user.get("gitlab_username"):
-                lines.append(f"  GitLab: @{user.get('gitlab_username')}")
-            lines.append("")
-
-        return "\n".join(lines)
-
-    async def _handle_find(self, parsed: ParsedCommand) -> str:
-        """Handle @me find command - find a Slack channel."""
-        if not parsed.args:
-            return "❌ Please provide a channel name.\n\nUsage: `@me find #channel-name` or `@me find alerts`"
-
-        query = parsed.args[0].lstrip("#")
-
-        result = await self._call_dbus(
-            "com.aiworkflow.BotSlack",
-            "/com/aiworkflow/BotSlack",
-            "com.aiworkflow.BotSlack",
-            "FindChannel",
-            [query],
-        )
-
-        if "error" in result:
-            return f"❌ Lookup failed: {result['error']}"
-
-        channels = result.get("channels", [])
-        if not channels:
-            return f"🔍 No channels found matching: `{query}`"
-
-        lines = [f"*📢 Channel Lookup: {query}*\n"]
-        for ch in channels[:10]:
-            member = " ✅" if ch.get("is_member") else ""
-            private = " 🔒" if ch.get("is_private") else ""
-            lines.append(f"• *#{ch.get('name')}*{member}{private}")
-            lines.append(f"  ID: `{ch.get('channel_id')}`")
-            if ch.get("purpose"):
-                lines.append(f"  Purpose: {ch.get('purpose')[:80]}")
-            if ch.get("num_members"):
-                lines.append(f"  Members: {ch.get('num_members')}")
-            lines.append("")
-
-        return "\n".join(lines)
-
-    async def _handle_cursor(
-        self, parsed: ParsedCommand, message: "PendingMessage"
-    ) -> str:
-        """Handle @me cursor command - create a Cursor chat from thread."""
-        # Extract context from thread
-        context = await self._extract_context(message)
-
-        # Check for issue key in args
-        issue_key = None
-        if parsed.args:
-            for arg in parsed.args:
-                if arg.upper().startswith("AAP-"):
-                    issue_key = arg.upper()
-                    break
-
-        # Build prompt from context
-        prompt = ""
-        if context.is_valid():
-            prompt = f"Context from Slack thread:\n\n{context.summary}\n\n{context.raw_text[:1000]}"
-            if context.jira_issues:
-                prompt += f"\n\nRelated issues: {', '.join(context.jira_issues)}"
-        elif issue_key:
-            prompt = f"Work on issue {issue_key}"
-        else:
-            return (
-                "❌ Could not extract context from thread. Please provide an issue key.\n\n"
-                "Usage: `@me cursor` (in a thread) or `@me cursor AAP-12345`"
-            )
-
-        # Call the Chat D-Bus service
-        if issue_key:
-            result = await self._call_dbus(
-                "com.aiworkflow.Chat",
-                "/com/aiworkflow/Chat",
-                "com.aiworkflow.Chat",
-                "LaunchIssueChatWithPrompt",
-                [issue_key, prompt],
-            )
-        else:
-            result = await self._call_dbus(
-                "com.aiworkflow.Chat",
-                "/com/aiworkflow/Chat",
-                "com.aiworkflow.Chat",
-                "LaunchIssueChatWithPrompt",
-                ["", prompt],
-            )
-
-        if "error" in result:
-            return f"❌ Failed to launch Cursor chat: {result['error']}"
-
-        return "✅ Cursor chat launched with thread context"
-
-    async def _handle_sprint(self, parsed: ParsedCommand) -> str:
-        """Handle @me sprint command - control the sprint bot."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a subcommand.\n\nUsage:\n"
-                "• `@me sprint issues` - List sprint issues\n"
-                "• `@me sprint approve AAP-12345` - Approve an issue\n"
-                "• `@me sprint start AAP-12345` - Start work on an issue\n"
-                "• `@me sprint skip AAP-12345` - Skip an issue"
-            )
-
-        subcommand = parsed.args[0].lower()
-        issue_key = parsed.args[1].upper() if len(parsed.args) > 1 else None
-
-        if subcommand in ("issues", "list"):
-            result = await self._call_dbus(
-                "com.aiworkflow.BotSprint",
-                "/com/aiworkflow/BotSprint",
-                "com.aiworkflow.BotSprint",
-                "list_issues",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to list issues: {result['error']}"
-
-            issues = result.get("issues", [])
-            if not issues:
-                return "📋 No sprint issues found"
-
-            lines = ["*📋 Sprint Issues*\n"]
-            for issue in issues[:15]:
-                status = issue.get("approval_status", "pending")
-                icon = (
-                    "✅"
-                    if status == "approved"
-                    else "⏳" if status == "pending" else "⏭️"
-                )
-                lines.append(
-                    f"{icon} *{issue.get('key')}* - {issue.get('summary', '')[:50]}"
-                )
-
-            return "\n".join(lines)
-
-        elif subcommand == "approve" and issue_key:
-            result = await self._call_dbus(
-                "com.aiworkflow.BotSprint",
-                "/com/aiworkflow/BotSprint",
-                "com.aiworkflow.BotSprint",
-                "approve_issue",
-                [issue_key],
-            )
-
-            if "error" in result:
-                return f"❌ Failed to approve: {result['error']}"
-
-            return f"✅ Issue {issue_key} approved for sprint bot"
-
-        elif subcommand == "start" and issue_key:
-            result = await self._call_dbus(
-                "com.aiworkflow.BotSprint",
-                "/com/aiworkflow/BotSprint",
-                "com.aiworkflow.BotSprint",
-                "start_issue",
-                [issue_key],
-            )
-
-            if "error" in result:
-                return f"❌ Failed to start: {result['error']}"
-
-            return f"✅ Started work on {issue_key}"
-
-        elif subcommand == "skip" and issue_key:
-            result = await self._call_dbus(
-                "com.aiworkflow.BotSprint",
-                "/com/aiworkflow/BotSprint",
-                "com.aiworkflow.BotSprint",
-                "skip_issue",
-                [issue_key],
-            )
-
-            if "error" in result:
-                return f"❌ Failed to skip: {result['error']}"
-
-            return f"⏭️ Skipped {issue_key}"
-
-        else:
-            return f"❌ Unknown sprint command: `{subcommand}`\n\nUse `@me help sprint` for usage."
-
-    async def _handle_meet(self, parsed: ParsedCommand) -> str:
-        """Handle @me meet command - control the meet bot."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a subcommand.\n\nUsage:\n"
-                "• `@me meet list` - List upcoming meetings\n"
-                "• `@me meet join` - Join current meeting\n"
-                "• `@me meet leave` - Leave meeting\n"
-                "• `@me meet captions` - Get meeting captions"
-            )
-
-        subcommand = parsed.args[0].lower()
-
-        if subcommand in ("list", "meetings"):
-            result = await self._call_dbus(
-                "com.aiworkflow.BotMeet",
-                "/com/aiworkflow/BotMeet",
-                "com.aiworkflow.BotMeet",
-                "list_meetings",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to list meetings: {result['error']}"
-
-            meetings = result.get("meetings", [])
-            if not meetings:
-                return "📅 No upcoming meetings"
-
-            lines = ["*📅 Upcoming Meetings*\n"]
-            for mtg in meetings[:10]:
-                status = mtg.get("status", "pending")
-                icon = "🟢" if status == "in_progress" else "⏳"
-                lines.append(f"{icon} *{mtg.get('title', 'Untitled')}*")
-                lines.append(f"  Time: {mtg.get('start_time', 'Unknown')}")
-
-            return "\n".join(lines)
-
-        elif subcommand == "join":
-            result = await self._call_dbus(
-                "com.aiworkflow.BotMeet",
-                "/com/aiworkflow/BotMeet",
-                "com.aiworkflow.BotMeet",
-                "join_meeting",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to join meeting: {result['error']}"
-
-            return "✅ Joining meeting..."
-
-        elif subcommand == "leave":
-            result = await self._call_dbus(
-                "com.aiworkflow.BotMeet",
-                "/com/aiworkflow/BotMeet",
-                "com.aiworkflow.BotMeet",
-                "leave_meeting",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to leave meeting: {result['error']}"
-
-            return "✅ Left meeting"
-
-        elif subcommand == "captions":
-            result = await self._call_dbus(
-                "com.aiworkflow.BotMeet",
-                "/com/aiworkflow/BotMeet",
-                "com.aiworkflow.BotMeet",
-                "get_captions",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to get captions: {result['error']}"
-
-            captions = result.get("captions", "")
-            if not captions:
-                return "📝 No captions available"
-
-            return f"*📝 Meeting Captions*\n\n{captions[:2000]}"
-
-        else:
-            return f"❌ Unknown meet command: `{subcommand}`\n\nUse `@me help meet` for usage."
-
-    async def _handle_cron(self, parsed: ParsedCommand) -> str:
-        """Handle @me cron command - control the cron scheduler."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a subcommand.\n\nUsage:\n"
-                "• `@me cron list` - List scheduled jobs\n"
-                "• `@me cron run <job>` - Run a job now\n"
-                "• `@me cron history` - Show recent job history"
-            )
-
-        subcommand = parsed.args[0].lower()
-
-        if subcommand in ("list", "jobs"):
-            result = await self._call_dbus(
-                "com.aiworkflow.BotCron",
-                "/com/aiworkflow/BotCron",
-                "com.aiworkflow.BotCron",
-                "list_jobs",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to list jobs: {result['error']}"
-
-            jobs = result.get("jobs", [])
-            if not jobs:
-                return "📅 No scheduled jobs"
-
-            lines = ["*📅 Scheduled Jobs*\n"]
-            for job in jobs:
-                enabled = "✅" if job.get("enabled") else "⏸️"
-                lines.append(
-                    f"{enabled} *{job.get('name')}* - {job.get('description', '')[:40]}"
-                )
-                lines.append(f"  Schedule: `{job.get('cron', 'unknown')}`")
-
-            return "\n".join(lines)
-
-        elif subcommand == "run" and len(parsed.args) > 1:
-            job_name = parsed.args[1]
-            result = await self._call_dbus(
-                "com.aiworkflow.BotCron",
-                "/com/aiworkflow/BotCron",
-                "com.aiworkflow.BotCron",
-                "run_job",
-                [job_name],
-            )
-
-            if "error" in result:
-                return f"❌ Failed to run job: {result['error']}"
-
-            return f"✅ Started job: `{job_name}`"
-
-        elif subcommand == "history":
-            result = await self._call_dbus(
-                "com.aiworkflow.BotCron",
-                "/com/aiworkflow/BotCron",
-                "com.aiworkflow.BotCron",
-                "get_history",
-            )
-
-            if "error" in result:
-                return f"❌ Failed to get history: {result['error']}"
-
-            history = result.get("history", [])
-            if not history:
-                return "📜 No job history"
-
-            lines = ["*📜 Recent Job History*\n"]
-            for entry in history[:10]:
-                status = "✅" if entry.get("success") else "❌"
-                lines.append(
-                    f"{status} *{entry.get('job_name')}* - {entry.get('timestamp', '')}"
-                )
-
-            return "\n".join(lines)
-
-        else:
-            return f"❌ Unknown cron command: `{subcommand}`\n\nUse `@me help cron` for usage."
-
-    async def _handle_research(
-        self, parsed: ParsedCommand, message: "PendingMessage"
-    ) -> str:
-        """Handle @me research command - research a topic in Slack."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a topic to research.\n\nUsage:\n"
-                "• `@me research billing errors` - Research a topic\n"
-                "• `@me research deep auth issues` - Deep research with more results"
-            )
-
-        # Check for modifiers
-        deep = False
-        channel = None
-        topic_parts = []
-
-        for arg in parsed.args:
-            if arg.lower() == "deep":
-                deep = True
-            elif arg.startswith("#"):
-                channel = arg.lstrip("#")
-            elif arg.lower() == "in" and channel is None:
-                continue  # Skip "in" before channel
-            else:
-                topic_parts.append(arg)
-
-        topic = " ".join(topic_parts)
-        if not topic:
-            return "❌ Please provide a topic to research."
-
-        # Check rate limits via D-Bus
-        result = await self._call_dbus(
-            "com.aiworkflow.BotSlack",
-            "/com/aiworkflow/BotSlack",
-            "com.aiworkflow.BotSlack",
-            "SearchMessages",
-            [topic, 50 if deep else 30],
-        )
-
-        if "error" in result:
-            if result.get("rate_limited"):
-                return f"⏳ Rate limited. {result.get('error', 'Please wait before researching again.')}"
-            return f"❌ Research failed: {result['error']}"
-
-        messages = result.get("messages", [])
-        if not messages:
-            return f"🔍 No Slack messages found for: `{topic}`"
-
-        # Use Claude to analyze the messages
-        if not self.claude_agent:
-            # Fallback: just return the messages
-            lines = [f"*🔬 Research: {topic}*\n", f"Found {len(messages)} messages:\n"]
-            for msg in messages[:10]:
-                lines.append(
-                    f"• *#{msg.get('channel_name')}* - {msg.get('text', '')[:80]}..."
-                )
-            return "\n".join(lines)
-
-        # Build prompt for Claude to analyze
-
-        messages_text = "\n".join(
-            [
-                f"[#{m.get('channel_name')}] @{m.get('username')}: {m.get('text', '')}"
-                for m in messages[:30]
-            ]
-        )
-
-        prompt = f"""Analyze these Slack messages about "{topic}" and create a knowledge summary:
-
-{messages_text}
-
-Create a structured summary with:
-1. Key patterns or recurring themes
-2. Common causes mentioned
-3. Solutions that worked
-4. Related Jira issues mentioned
-5. Key people involved
-
-Format for Slack (use *bold*, bullet points). Be concise."""
-
-        try:
-            analysis = await self.claude_agent.process_message(
-                prompt, {"purpose": "research"}
-            )
-
-            # Save to knowledge base
-            await self._save_research_knowledge(topic, analysis, messages)
-
-            return f"*🔬 Research: {topic}*\n\n{analysis}\n\n_Knowledge saved to `memory/knowledge/slack/`_"
-
-        except Exception as e:
-            logger.error(f"Research analysis failed: {e}")
-            return f"❌ Analysis failed: {str(e)}"
-
-    async def _handle_learn(
-        self, parsed: ParsedCommand, message: "PendingMessage"
-    ) -> str:
-        """Handle @me learn command - learn from current thread."""
-        # Extract context from thread
-        context = await self._extract_context(message)
-
-        if not context.is_valid():
-            return "❌ Could not extract context from thread. Please use this command in a thread with discussion."
-
-        # Determine topic from args or infer from context
-        topic = (
-            " ".join(parsed.args) if parsed.args else context.inferred_type or "general"
-        )
-
-        # Use Claude to extract learnings
-        if not self.claude_agent:
-            return "❌ Claude agent not available for learning"
-
-        prompt = f"""Extract key learnings from this Slack thread about "{topic}":
-
-{context.raw_text[:2000]}
-
-Create a structured knowledge entry with:
-1. Topic/title
-2. Key patterns or insights
-3. Solutions or approaches that worked
-4. Things to avoid
-5. Related issues or links
-
-Format as YAML for storage."""
-
-        try:
-            analysis = await self.claude_agent.process_message(
-                prompt, {"purpose": "learning"}
-            )
-
-            # Save to knowledge base
-            await self._save_thread_learning(topic, analysis, context)
-
-            return f"✅ Learned from thread about `{topic}`\n\n{analysis[:500]}...\n\n_Saved to knowledge base_"
-
-        except Exception as e:
-            logger.error(f"Learning failed: {e}")
-            return f"❌ Learning failed: {str(e)}"
-
-    async def _handle_knowledge(self, parsed: ParsedCommand) -> str:
-        """Handle @me knowledge command - query or list knowledge."""
-        if not parsed.args:
-            return (
-                "❌ Please provide a topic or 'list'.\n\nUsage:\n"
-                "• `@me knowledge billing` - Query knowledge about billing\n"
-                "• `@me knowledge list` - List all knowledge topics"
-            )
-
-        subcommand = parsed.args[0].lower()
-
-        if subcommand == "list":
-            # List knowledge files
-            knowledge_dir = PROJECT_ROOT / "memory" / "knowledge" / "slack"
-            if not knowledge_dir.exists():
-                return "📚 No Slack knowledge saved yet"
-
-            files = list(knowledge_dir.glob("*.yaml"))
-            if not files:
-                return "📚 No Slack knowledge saved yet"
-
-            lines = ["*📚 Slack Knowledge Base*\n"]
-            for f in sorted(files)[:20]:
-                topic = f.stem.replace("-", " ").title()
-                lines.append(f"• `{f.stem}` - {topic}")
-
-            return "\n".join(lines)
-
-        elif subcommand == "delete" and len(parsed.args) > 1:
-            topic = parsed.args[1]
-            knowledge_file = (
-                PROJECT_ROOT / "memory" / "knowledge" / "slack" / f"{topic}.yaml"
-            )
-            if knowledge_file.exists():
-                knowledge_file.unlink()
-                return f"🗑️ Deleted knowledge: `{topic}`"
-            return f"❌ Knowledge not found: `{topic}`"
-
-        else:
-            # Query knowledge
-            topic = " ".join(parsed.args)
-            topic_slug = topic.lower().replace(" ", "-")
-            knowledge_file = (
-                PROJECT_ROOT / "memory" / "knowledge" / "slack" / f"{topic_slug}.yaml"
-            )
-
-            if knowledge_file.exists():
-                import yaml
-
-                with open(knowledge_file) as f:
-                    data = yaml.safe_load(f)
-
-                lines = [f"*📚 Knowledge: {topic}*\n"]
-                if data.get("summary"):
-                    lines.append(data["summary"][:500])
-                if data.get("patterns"):
-                    lines.append("\n*Patterns:*")
-                    for p in data["patterns"][:5]:
-                        lines.append(f"• {p}")
-                if data.get("solutions"):
-                    lines.append("\n*Solutions:*")
-                    for s in data["solutions"][:5]:
-                        lines.append(f"• {s}")
-
-                return "\n".join(lines)
-
-            return f"❌ No knowledge found for: `{topic}`\n\nUse `@me research {topic}` to gather knowledge."
-
-    async def _save_research_knowledge(
-        self, topic: str, analysis: str, messages: list
-    ) -> None:
-        """Save research results to knowledge base."""
-        from datetime import datetime
-
-        import yaml
-
-        knowledge_dir = PROJECT_ROOT / "memory" / "knowledge" / "slack"
-        knowledge_dir.mkdir(parents=True, exist_ok=True)
-
-        topic_slug = topic.lower().replace(" ", "-")[:50]
-        knowledge_file = knowledge_dir / f"{topic_slug}.yaml"
-
-        data = {
-            "metadata": {
-                "topic": topic,
-                "created": datetime.now().isoformat(),
-                "source": "slack_research",
-                "message_count": len(messages),
-            },
-            "summary": analysis[:1000],
-            "patterns": [],
-            "solutions": [],
-            "sources": [
-                m.get("permalink", "") for m in messages[:10] if m.get("permalink")
-            ],
-        }
-
-        with open(knowledge_file, "w") as f:
-            yaml.dump(data, f, default_flow_style=False)
-
-        logger.info(f"Saved research knowledge: {knowledge_file}")
-
-    async def _save_thread_learning(
-        self, topic: str, analysis: str, context: ConversationContext
-    ) -> None:
-        """Save thread learning to knowledge base."""
-        from datetime import datetime
-
-        import yaml
-
-        knowledge_dir = PROJECT_ROOT / "memory" / "knowledge" / "slack"
-        knowledge_dir.mkdir(parents=True, exist_ok=True)
-
-        topic_slug = topic.lower().replace(" ", "-")[:50]
-        knowledge_file = knowledge_dir / f"{topic_slug}.yaml"
-
-        data = {
-            "metadata": {
-                "topic": topic,
-                "created": datetime.now().isoformat(),
-                "source": "thread_learning",
-            },
-            "summary": analysis[:1000],
-            "patterns": [],
-            "solutions": [],
-            "related_issues": context.jira_issues,
-        }
-
-        with open(knowledge_file, "w") as f:
-            yaml.dump(data, f, default_flow_style=False)
-
-        logger.info(f"Saved thread learning: {knowledge_file}")
 
 
 # =============================================================================
