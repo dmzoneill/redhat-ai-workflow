@@ -646,7 +646,7 @@ class SkillWebSocketServer:
         except FileNotFoundError:
             logger.debug("Zenity not available for fallback")
             return None
-        except asyncio.TimeoutExpired:
+        except asyncio.TimeoutError:
             logger.debug("Zenity dialog timed out")
             return None
         except Exception as e:
