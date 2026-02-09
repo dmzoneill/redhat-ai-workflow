@@ -167,7 +167,7 @@ class TranscriptionProcessor:
         # This avoids duplicate processing and the NPU STT is faster/more accurate
 
         # Call external callback if set
-        if self._on_caption_callback:
+        if self._on_caption_callback and callable(self._on_caption_callback):
             self._on_caption_callback(transcript_entry)
 
     def on_npu_transcription(self, text: str, is_final: bool) -> None:
@@ -238,11 +238,15 @@ class TranscriptionProcessor:
             )
             self._state.wake_word_triggers += 1
 
-            if self._interactive_mode and self._on_wake_word_command:
+            if (
+                self._interactive_mode
+                and self._on_wake_word_command
+                and callable(self._on_wake_word_command)
+            ):
                 # Handle immediately - don't wait for pause
                 asyncio.create_task(self._on_wake_word_command(event))
 
-            if self._on_wake_word_callback:
+            if self._on_wake_word_callback and callable(self._on_wake_word_callback):
                 self._on_wake_word_callback(event)
 
         elif self._wake_word_manager.text_detector.listening_for_command:
@@ -276,12 +280,18 @@ class TranscriptionProcessor:
                 )
 
                 # Handle wake word in interactive mode
-                if self._interactive_mode and self._on_wake_word_command:
+                if (
+                    self._interactive_mode
+                    and self._on_wake_word_command
+                    and callable(self._on_wake_word_command)
+                ):
                     logger.info(f"🎤 Sending to LLM: {event.command_text}")
                     # Don't use create_task - await it so we stay in this flow
                     await self._on_wake_word_command(event)
 
-                if self._on_wake_word_callback:
+                if self._on_wake_word_callback and callable(
+                    self._on_wake_word_callback
+                ):
                     self._on_wake_word_callback(event)
 
                 break
