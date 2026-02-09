@@ -147,8 +147,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 data = json.loads(SESSION_STATE_FILE.read_text())
                 service["session_count"] = data.get("session_count", 0)
                 service["workspace_count"] = data.get("workspace_count", 0)
-        except Exception as e:
-            logger.debug(f"Suppressed error in get_status (state file read): {e}")
+        except Exception:
             service["session_count"] = 0
             service["workspace_count"] = 0
 
@@ -943,10 +942,8 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         except Exception:
             try:
                 Path(temp_path).unlink()
-            except OSError as e:
-                logger.debug(
-                    f"Suppressed error in _save_state (temp file cleanup): {e}"
-                )
+            except OSError:
+                pass
             raise
 
     async def _fast_sync_loop(self):
@@ -1106,7 +1103,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("System wake detected - triggering session refresh")
         try:
             # Trigger immediate sync of recent sessions
-            await self._do_recent_sync()
+            await self._sync_recent_sessions()
             logger.info("Post-wake session refresh complete")
         except Exception as e:
             logger.error(f"Error refreshing sessions after wake: {e}")

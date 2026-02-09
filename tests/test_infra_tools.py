@@ -514,8 +514,9 @@ class TestKubeLoginImpl:
                     return_value=(True, "Logged in", ""),
                 ),
             ):
-                await infra_tools._kube_login_impl("s")
-                # Just verify no crash -- detailed error message check is fragile
+                result = await infra_tools._kube_login_impl("s")
+                # Test verifies no exception is raised
+                assert result is not None  # detailed error message check is fragile
 
     @pytest.mark.asyncio
     async def test_kubeconfig_not_found_after_login(self, kube_state_files):

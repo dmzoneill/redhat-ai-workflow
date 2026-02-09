@@ -34,8 +34,6 @@ import asyncio
 import atexit
 import json
 import logging
-import os
-import signal
 import time
 import urllib.parse
 import urllib.request
@@ -343,15 +341,14 @@ async def fill_sso_form(
         try:
             await page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception as e:
-            logger.debug(f"Suppressed error in fill_sso_form/find_element primary: {e}")
+        except Exception:
+            pass
         for alt in alternatives:
             try:
                 await page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception as e:
-                logger.debug(f"Suppressed error in fill_sso_form/find_element alt: {e}")
+            except Exception:
                 continue
         return primary  # Return primary and let it fail with proper error
 
@@ -413,19 +410,14 @@ def fill_sso_form_sync(
         try:
             page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception as e:
-            logger.debug(
-                f"Suppressed error in fill_sso_form_sync/find_element primary: {e}"
-            )
+        except Exception:
+            pass
         for alt in alternatives:
             try:
                 page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in fill_sso_form_sync/find_element alt: {e}"
-                )
+            except Exception:
                 continue
         return primary  # Return primary and let it fail with proper error
 
@@ -688,8 +680,7 @@ class SSOAuthenticator:
                         strategy.popup_trigger_selector,
                         timeout=3000,
                     )
-                except Exception as e:
-                    logger.debug(f"Suppressed error in _flow_popup: {e}")
+                except Exception:
                     logger.info("Sign-in button not found - already authenticated")
                     return SSOResult(
                         success=True,
@@ -727,8 +718,7 @@ class SSOAuthenticator:
                         "close", timeout=strategy.popup_close_timeout
                     )
                     logger.info("Popup closed - authentication successful")
-                except Exception as e:
-                    logger.debug(f"Suppressed error in _flow_popup popup close: {e}")
+                except Exception:
                     logger.warning("Popup did not close within timeout")
 
             # Refresh main page to get authenticated state
@@ -829,8 +819,8 @@ class SSOAuthenticator:
         try:
             await page.wait_for_selector(primary, timeout=5000)
             return primary
-        except Exception as e:
-            logger.debug(f"Suppressed error in _find_element primary: {e}")
+        except Exception:
+            pass
 
         # Try alternatives
         for alt in alternatives:
@@ -838,8 +828,7 @@ class SSOAuthenticator:
                 await page.wait_for_selector(alt, timeout=2000)
                 logger.info(f"Using alternative selector: {alt}")
                 return alt
-            except Exception as e:
-                logger.debug(f"Suppressed error in _find_element alt: {e}")
+            except Exception:
                 continue
 
         # Return primary and let it fail with proper error
@@ -939,8 +928,7 @@ class SSOAuthenticator:
                         token = value
                         logger.info(f"Found token in {storage_type}['{key}']")
                         break
-                except Exception as e:
-                    logger.debug(f"Suppressed error in _extract_jwt: {e}")
+                except Exception:
                     continue
             if token:
                 break
@@ -1031,8 +1019,6 @@ _browser_playwright = None  # Playwright instance
 _browser_instance: Optional[Browser] = None  # Browser instance
 _browser_context: Optional[BrowserContext] = None  # Browser context
 _browser_page: Optional[Page] = None  # Active page
-_browser_pid: Optional[int] = None  # Browser process PID for atexit cleanup
-_browser_lock = asyncio.Lock()  # Protects browser globals during lazy init
 
 # Screenshot output directory
 BROWSER_SNAPSHOT_DIR = Path("/tmp/browser_snapshots")
@@ -1055,51 +1041,39 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
     """
     global _browser_playwright, _browser_instance, _browser_context, _browser_page
 
-    async with _browser_lock:
-        # Return existing page if browser is still connected
-        if _browser_page is not None and _browser_instance is not None:
-            try:
-                # Verify the browser is still alive by checking the page URL
-                _ = _browser_page.url
-                return _browser_page
-            except Exception as e:
-                logger.debug(f"Suppressed error in _get_or_create_browser: {e}")
-                logger.warning("Browser session expired, creating new one")
-                await _close_browser_unlocked()
-
+    # Return existing page if browser is still connected
+    if _browser_page is not None and _browser_instance is not None:
         try:
-            from playwright.async_api import async_playwright as _async_playwright
-        except ImportError:
-            raise RuntimeError(
-                "Playwright is not installed. "
-                "Install it with: uv add playwright && playwright install chromium"
-            )
+            # Verify the browser is still alive by checking the page URL
+            _ = _browser_page.url
+            return _browser_page
+        except Exception:
+            logger.warning("Browser session expired, creating new one")
+            await _close_browser()
 
-        global _browser_pid
-
-        logger.info(f"Launching browser (headless={headless})")
-        _browser_playwright = await _async_playwright().start()
-        _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
-        # Store browser PID for synchronous atexit cleanup
-        try:
-            _browser_pid = (
-                _browser_instance.process.pid if _browser_instance.process else None
-            )
-        except Exception as e:
-            logger.debug(f"Suppressed error in _get_or_create_browser PID: {e}")
-            _browser_pid = None
-        _browser_context = await _browser_instance.new_context(
-            viewport={"width": 1280, "height": 720},
+    try:
+        from playwright.async_api import async_playwright as _async_playwright
+    except ImportError:
+        raise RuntimeError(
+            "Playwright is not installed. "
+            "Install it with: uv add playwright && playwright install chromium"
         )
-        _browser_page = await _browser_context.new_page()
 
-        logger.info("Browser session created")
-        return _browser_page
+    logger.info(f"Launching browser (headless={headless})")
+    _browser_playwright = await _async_playwright().start()
+    _browser_instance = await _browser_playwright.chromium.launch(headless=headless)
+    _browser_context = await _browser_instance.new_context(
+        viewport={"width": 1280, "height": 720},
+    )
+    _browser_page = await _browser_context.new_page()
+
+    logger.info("Browser session created")
+    return _browser_page
 
 
-async def _close_browser_unlocked() -> None:
-    """Close the persistent browser session (caller must hold _browser_lock)."""
-    global _browser_playwright, _browser_instance, _browser_context, _browser_page, _browser_pid
+async def _close_browser() -> None:
+    """Close the persistent browser session and clean up resources."""
+    global _browser_playwright, _browser_instance, _browser_context, _browser_page
 
     if _browser_instance is not None:
         try:
@@ -1117,31 +1091,20 @@ async def _close_browser_unlocked() -> None:
     _browser_instance = None
     _browser_context = None
     _browser_page = None
-    _browser_pid = None
     logger.info("Browser session closed")
 
 
-async def _close_browser() -> None:
-    """Close the persistent browser session and clean up resources."""
-    async with _browser_lock:
-        await _close_browser_unlocked()
-
-
 def _cleanup_browser_sync() -> None:
-    """Synchronous atexit handler to clean up browser on process exit.
-
-    Uses PID-based kill instead of async calls to avoid issues with
-    closed or running event loops at interpreter shutdown.
-    """
-    global _browser_pid
-    if _browser_pid is not None:
+    """Synchronous atexit handler to clean up browser on process exit."""
+    if _browser_instance is not None:
         try:
-            os.kill(_browser_pid, signal.SIGTERM)
-        except OSError:
-            # Process already exited
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(_close_browser())
+            else:
+                loop.run_until_complete(_close_browser())
+        except Exception:
             pass
-        finally:
-            _browser_pid = None
 
 
 atexit.register(_cleanup_browser_sync)

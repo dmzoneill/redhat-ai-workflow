@@ -26,20 +26,29 @@ from typing import cast
 from fastmcp import FastMCP
 
 # Import shared path resolution utilities
-from .tool_paths import PROJECT_DIR, get_tools_file_path
-from .utils import load_config
+from .tool_paths import PROJECT_DIR, TOOL_MODULES_DIR, get_tools_file_path
 
-# Cursor IDE has a hard limit on the number of MCP tools it can handle
-_config = load_config()
-MAX_CURSOR_TOOLS = _config.get("limits", {}).get("max_cursor_tools", 128)
+
+def get_available_modules() -> set[str]:
+    """
+    Dynamically discover available tool modules from the tool_modules directory.
+
+    Uses the same discovery logic as persona_loader to ensure consistency.
+    """
+    from .persona_loader import get_available_modules as _get_available_modules
+
+    return _get_available_modules()
+
+
+def is_valid_module(module_name: str) -> bool:
+    """Check if a module name is valid (exists in tool_modules)."""
+    return module_name in get_available_modules()
 
 
 def load_agent_config(agent_name: str) -> list[str] | None:
     """Load tool modules from an agent config file."""
-    logger = logging.getLogger(__name__)
     agent_file = PROJECT_DIR / "personas" / f"{agent_name}.yaml"
     if not agent_file.exists():
-        logger.warning(f"Agent config file not found: {agent_file}")
         return None
 
     try:
@@ -48,9 +57,32 @@ def load_agent_config(agent_name: str) -> list[str] | None:
         with open(agent_file) as f:
             config = yaml.safe_load(f)
         return cast(list[str], config.get("tools", []))
-    except Exception as e:
-        logger.error(f"Failed to load agent config '{agent_name}': {e}")
+    except Exception:
         return None
+
+
+def get_tool_module(name: str):
+    """Dynamically load a tool module."""
+    module_dir = TOOL_MODULES_DIR / f"aa_{name}"
+    if not module_dir.exists():
+        return None
+
+    # Add to path if needed
+    src_path = str(module_dir)
+    if src_path not in sys.path:
+        sys.path.insert(0, src_path)
+
+    # Import the tools module
+    from importlib import import_module
+
+    try:
+        return import_module("src.tools")
+    except ImportError:
+        return None
+    finally:
+        # Clean up path to avoid conflicts
+        if src_path in sys.path:
+            sys.path.remove(src_path)
 
 
 def setup_logging() -> logging.Logger:
@@ -195,8 +227,6 @@ def create_mcp_server(
     server = FastMCP(name)
 
     # Get available modules dynamically
-    from .persona_loader import get_available_modules
-
     available_modules = get_available_modules()
 
     # Determine which tools to load
@@ -204,10 +234,8 @@ def create_mcp_server(
         tools = list(available_modules)
 
     # Warn if loading many tools
-    if len(tools) > MAX_CURSOR_TOOLS:
-        logger.warning(
-            f"Loading {len(tools)} tools, may exceed Cursor's limit of {MAX_CURSOR_TOOLS}!"
-        )
+    if len(tools) > 128:
+        logger.warning(f"Loading {len(tools)} tools, may exceed Cursor's limit of 128!")
 
     # Load all requested tool modules, tracking which tools come from which module
     loaded_modules = []
@@ -520,8 +548,6 @@ async def run_mcp_server(server: FastMCP, enable_scheduler: bool = True):
 def main():
     """Main entry point with tool selection."""
     # Get available modules for help text
-    from .persona_loader import get_available_modules
-
     available = sorted(get_available_modules())
     # Show base modules (without _basic/_extra suffixes) for cleaner help
     base_modules = sorted(

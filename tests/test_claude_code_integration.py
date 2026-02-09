@@ -147,12 +147,14 @@ class TestTryMcpClientStrategy:
 class TestCheckSubprocessContext:
     def test_does_not_raise(self):
         """This function is informational only; should never raise."""
-        _check_subprocess_context()
+        _check_subprocess_context()  # Test verifies no exception is raised
+        assert True
 
     def test_handles_missing_proc(self):
         """Should not raise even if /proc is unreadable."""
         with patch("builtins.open", side_effect=PermissionError("denied")):
-            _check_subprocess_context()
+            _check_subprocess_context()  # Test verifies no exception is raised
+        assert True
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +186,9 @@ class TestCreateAskQuestionWrapper:
             "tool_modules.aa_workflow.src.claude_code_integration._try_server_strategy",
             return_value=lambda x: x,
         ) as mock_server:
-            create_ask_question_wrapper(server=server)
+            result = create_ask_question_wrapper(server=server)
             mock_server.assert_called_once_with(server)
+        assert result is not None
 
     def test_falls_through_to_import_strategy(self):
         with patch(

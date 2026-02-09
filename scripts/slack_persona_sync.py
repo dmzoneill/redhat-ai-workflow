@@ -84,13 +84,13 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception as e:
-                logger.debug(f"Suppressed error in SyncLock.release: {e}")
+            except Exception:
+                pass
         if LOCK_FILE.exists():
             try:
                 LOCK_FILE.unlink()
-            except Exception as e:
-                logger.debug(f"Suppressed error in SyncLock.release unlink: {e}")
+            except Exception:
+                pass
 
     def __enter__(self):
         return self

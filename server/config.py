@@ -9,15 +9,12 @@ NO secrets are stored in code.
 """
 
 import json
-import logging
 import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from server.timeouts import Timeouts
-
-logger = logging.getLogger(__name__)
 
 
 def load_config() -> dict[str, Any]:
@@ -94,8 +91,8 @@ def get_token_from_kubeconfig(
         )
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
-    except Exception as e:
-        logger.debug(f"Suppressed error in get_token_from_kubeconfig (oc whoami): {e}")
+    except Exception:
+        pass
 
     # Fallback to kubectl config view (extracts stored token)
     try:
@@ -115,10 +112,8 @@ def get_token_from_kubeconfig(
         )
         if result.stdout.strip():
             return result.stdout.strip()
-    except Exception as e:
-        logger.debug(
-            f"Suppressed error in get_token_from_kubeconfig (kubectl config view): {e}"
-        )
+    except Exception:
+        pass
 
     # Last resort: try to extract from raw kubeconfig
     try:
@@ -138,10 +133,7 @@ def get_token_from_kubeconfig(
             timeout=Timeouts.QUICK,
         )
         return result.stdout.strip()
-    except Exception as e:
-        logger.debug(
-            f"Suppressed error in get_token_from_kubeconfig (raw kubeconfig): {e}"
-        )
+    except Exception:
         return ""
 
 
@@ -170,7 +162,7 @@ def get_container_auth(registry: str = "quay.io") -> str | None:
     config_paths.extend(
         [
             Path.home() / ".config/containers/auth.json",
-            Path(os.getenv("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+            Path(os.getenv("XDG_RUNTIME_DIR", "/run/user/1000"))
             / "containers/auth.json",
         ]
     )
@@ -188,8 +180,11 @@ def get_container_auth(registry: str = "quay.io") -> str | None:
                     if "auth" in value:
                         decoded = base64.b64decode(value["auth"]).decode()
                         return decoded.split(":", 1)[1] if ":" in decoded else decoded
-        except Exception as e:
-            logger.debug(f"Suppressed error in get_container_auth reading {path}: {e}")
+        except Exception:
             continue
 
     return None
+
+
+# Backward compatibility alias
+get_docker_auth = get_container_auth

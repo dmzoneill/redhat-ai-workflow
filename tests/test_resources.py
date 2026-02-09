@@ -289,8 +289,9 @@ class TestGetRepositories:
 
     def test_calls_load_config_fn(self):
         load_fn = MagicMock(return_value={"repositories": {}})
-        _get_repositories(load_fn)
+        result = _get_repositories(load_fn)
         load_fn.assert_called_once()
+        assert result is not None
 
 
 # ---------------------------------------------------------------------------

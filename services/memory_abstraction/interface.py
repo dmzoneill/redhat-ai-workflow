@@ -24,7 +24,6 @@ Usage:
 """
 
 import logging
-import threading
 import time
 import uuid
 from typing import Any
@@ -452,7 +451,6 @@ class MemoryInterface:
 
 # Singleton instance for easy access
 _memory_interface: MemoryInterface | None = None
-_memory_interface_lock = threading.Lock()
 
 
 def get_memory_interface() -> MemoryInterface:
@@ -464,9 +462,7 @@ def get_memory_interface() -> MemoryInterface:
     global _memory_interface
 
     if _memory_interface is None:
-        with _memory_interface_lock:
-            if _memory_interface is None:
-                _memory_interface = MemoryInterface()
+        _memory_interface = MemoryInterface()
 
     return _memory_interface
 
@@ -478,5 +474,4 @@ def set_memory_interface(interface: MemoryInterface) -> None:
     Used by server/main.py to set up the interface with WebSocket.
     """
     global _memory_interface
-    with _memory_interface_lock:
-        _memory_interface = interface
+    _memory_interface = interface

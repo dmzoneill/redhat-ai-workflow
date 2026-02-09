@@ -31,7 +31,6 @@ import json
 import logging
 import os
 import shutil
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
@@ -425,7 +424,6 @@ If no issues found, return: {{"findings": [], "done": true}}
 
 # Global router instance
 _router: Optional[AIModelRouter] = None
-_router_lock = threading.Lock()
 
 
 def get_ai_router(preferred_backend: Optional[str] = None) -> AIModelRouter:
@@ -440,7 +438,5 @@ def get_ai_router(preferred_backend: Optional[str] = None) -> AIModelRouter:
     """
     global _router
     if _router is None:
-        with _router_lock:
-            if _router is None:
-                _router = AIModelRouter(preferred_backend=preferred_backend)
+        _router = AIModelRouter(preferred_backend=preferred_backend)
     return _router

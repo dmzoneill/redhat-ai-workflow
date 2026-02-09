@@ -671,10 +671,8 @@ class ExecutionTracer:
             for trans in self.transitions:
                 try:
                     visited_states.add(WorkflowState(trans.to_state))
-                except ValueError as e:
-                    logger.debug(
-                        f"Suppressed error in generate_diagram (state parse): {e}"
-                    )
+                except ValueError:
+                    pass
 
             # Style visited states
             for state in visited_states:

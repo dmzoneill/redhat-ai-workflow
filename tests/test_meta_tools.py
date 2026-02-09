@@ -21,8 +21,9 @@ def temp_memory_dir(tmp_path):
     """Create a temporary memory directory for known issues checking."""
     learned_dir = tmp_path / "learned"
     learned_dir.mkdir()
-    # Patch PROJECT_ROOT in skill_engine where _check_known_issues_sync lives
-    with patch.object(se, "PROJECT_ROOT", tmp_path):
+    # Patch PROJECT_ROOT in meta_tools so _check_known_issues_sync
+    # uses tmp_path/memory/learned/ instead of real memory dir
+    with patch.object(mt, "PROJECT_ROOT", tmp_path):
         yield tmp_path
 
 
@@ -489,8 +490,8 @@ class TestRegisterMetaTools:
         from fastmcp import FastMCP
 
         server = FastMCP("test-meta")
-        mt.register_meta_tools(server)
-        # The registry should contain tool_list, tool_exec, context_filter, etc.
+        count = mt.register_meta_tools(server)
+        assert count > 0
 
 
 # ==================== context_filter logic Tests ====================
@@ -619,7 +620,8 @@ class TestToolGapsList:
                     else type("mod", (), {"tool_gap": mock_gap})()
                 ),
             ):
-                pass
+                pass  # Test verifies import chain does not raise
+        assert True
 
     @pytest.mark.asyncio
     async def test_gaps_error(self):
@@ -761,8 +763,10 @@ class TestApplyToolFilterFull:
         server = FastMCP("test-apply-noctx")
         with patch.object(mt, "TOOL_FILTER_AVAILABLE", True):
             mt.register_meta_tools(server)
+            count = mt.register_meta_tools(server)
             # call_tool passes a real context, so we can't easily test the no-ctx path
             # through server.call_tool. This path is covered by the tool_list_impl test.
+            assert count > 0
 
     @pytest.mark.asyncio
     async def test_apply_filter_with_real_ctx(self):

@@ -161,17 +161,13 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in SingleInstance.release (unlock): {e}"
-                )
+            except Exception:
+                pass
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in SingleInstance.release (pid cleanup): {e}"
-                )
+            except Exception:
+                pass
         self._acquired = False
 
     def get_running_pid(self) -> Optional[int]:
@@ -187,8 +183,8 @@ class SingleInstance:
                 # Check if process exists
                 os.kill(pid, 0)
                 return pid
-            except (ValueError, OSError) as e:
-                logger.debug(f"Suppressed error in SingleInstance.get_running_pid: {e}")
+            except (ValueError, OSError):
+                pass
         return None
 
     @property

@@ -237,11 +237,6 @@ class HealthStatus:
         }
 
 
-# Latency class constants
-LATENCY_FAST = "fast"  # <2s - local operations, vector DBs
-LATENCY_SLOW = "slow"  # >2s - external APIs, AI queries
-
-
 @dataclass
 class AdapterInfo:
     """
@@ -257,7 +252,6 @@ class AdapterInfo:
     capabilities: set[str]  # {"query", "store", "search"}
     intent_keywords: list[str]  # For routing: ["function", "class"]
     priority: int = 50  # Higher = preferred when multiple match
-    latency_class: str = LATENCY_FAST  # "fast" (<2s) or "slow" (>2s)
     source_file: str = ""  # Path to adapter source file
     adapter_class: type | None = None  # The adapter class itself
 
@@ -270,11 +264,5 @@ class AdapterInfo:
             "capabilities": list(self.capabilities),
             "intent_keywords": self.intent_keywords,
             "priority": self.priority,
-            "latency_class": self.latency_class,
             "source_file": self.source_file,
         }
-
-    @property
-    def is_fast(self) -> bool:
-        """Check if this adapter is fast (suitable for bootstrap)."""
-        return self.latency_class == LATENCY_FAST

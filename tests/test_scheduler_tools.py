@@ -45,6 +45,7 @@ def test_update_schedules_config():
         mock_cm.update_section.assert_called_once_with(
             "schedules", {"jobs": []}, merge=False, flush=True
         )
+        assert mock_cm.update_section.call_count == 1
 
 
 # ---------------------------------------------------------------------------

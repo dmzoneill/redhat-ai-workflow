@@ -69,37 +69,31 @@ _bot_manager: Optional[NotesBotManager] = None  # Multi-meeting mode
 _scheduler: Optional[MeetingScheduler] = None
 _notes_db: Optional[MeetingNotesDB] = None
 
-# Lock protecting lazy init of all meet bot globals
-_meet_lock = asyncio.Lock()
-
 
 async def _get_controller() -> GoogleMeetController:
     """Get or create the browser controller."""
     global _controller
-    async with _meet_lock:
-        if _controller is None:
-            _controller = GoogleMeetController()
-            await _controller.initialize()
-        return _controller
+    if _controller is None:
+        _controller = GoogleMeetController()
+        await _controller.initialize()
+    return _controller
 
 
 async def _get_device_manager() -> VirtualDeviceManager:
     """Get or create the device manager."""
     global _device_manager
-    async with _meet_lock:
-        if _device_manager is None:
-            _device_manager = VirtualDeviceManager()
-        return _device_manager
+    if _device_manager is None:
+        _device_manager = VirtualDeviceManager()
+    return _device_manager
 
 
 async def _get_wake_word_manager() -> WakeWordManager:
     """Get or create the wake word manager."""
     global _wake_word_manager
-    async with _meet_lock:
-        if _wake_word_manager is None:
-            _wake_word_manager = WakeWordManager()
-            await _wake_word_manager.initialize()
-        return _wake_word_manager
+    if _wake_word_manager is None:
+        _wake_word_manager = WakeWordManager()
+        await _wake_word_manager.initialize()
+    return _wake_word_manager
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
@@ -737,43 +731,39 @@ async def _meet_bot_full_response_impl(
 async def _get_notes_db() -> MeetingNotesDB:
     """Get or create the notes database."""
     global _notes_db
-    async with _meet_lock:
-        if _notes_db is None:
-            _notes_db = await init_notes_db()
-        return _notes_db
+    if _notes_db is None:
+        _notes_db = await init_notes_db()
+    return _notes_db
 
 
 async def _get_notes_bot() -> NotesBot:
     """Get or create the notes bot (legacy single-bot mode)."""
     global _notes_bot
-    async with _meet_lock:
-        if _notes_bot is None:
-            bot = NotesBot()
-            success = await bot.initialize()
-            if not success:
-                # Return bot with errors so caller can report them
-                _notes_bot = bot
-            else:
-                _notes_bot = bot
-        return _notes_bot
+    if _notes_bot is None:
+        bot = NotesBot()
+        success = await bot.initialize()
+        if not success:
+            # Return bot with errors so caller can report them
+            _notes_bot = bot
+        else:
+            _notes_bot = bot
+    return _notes_bot
 
 
 async def _get_bot_manager() -> NotesBotManager:
     """Get or create the bot manager for multi-meeting support."""
     global _bot_manager
-    async with _meet_lock:
-        if _bot_manager is None:
-            _bot_manager = get_bot_manager()
-        return _bot_manager
+    if _bot_manager is None:
+        _bot_manager = get_bot_manager()
+    return _bot_manager
 
 
 async def _get_scheduler() -> MeetingScheduler:
     """Get or create the scheduler."""
     global _scheduler
-    async with _meet_lock:
-        if _scheduler is None:
-            _scheduler = await init_scheduler()
-        return _scheduler
+    if _scheduler is None:
+        _scheduler = await init_scheduler()
+    return _scheduler
 
 
 async def _meet_notes_start_scheduler_impl() -> str:

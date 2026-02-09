@@ -109,6 +109,7 @@ class TestToolDecorator:
             return "result"
 
         mock_server.tool.assert_called_with(name="custom", description="A custom tool")
+        assert mock_server.tool.call_count >= 1
 
     def test_decorator_preserves_registration_order(self, registry):
         """Tools should be stored in registration order."""

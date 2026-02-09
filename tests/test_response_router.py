@@ -123,8 +123,9 @@ class TestResponseRouter:
 
     @patch("scripts.common.response_router.ResponseRouter._load_config")
     def test_init_loads_config_when_empty(self, mock_load):
-        ResponseRouter()
+        router = ResponseRouter()
         mock_load.assert_called_once()
+        assert router is not None
 
     def test_dm_default_commands(self):
         assert "secrets" in ResponseRouter.DM_DEFAULT_COMMANDS

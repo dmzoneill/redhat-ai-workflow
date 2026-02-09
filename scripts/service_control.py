@@ -23,10 +23,9 @@ import json
 import sys
 from pathlib import Path
 
-# Add project root to path (only when running as script)
+# Add project root to path - must be before local imports
 PROJECT_ROOT = Path(__file__).parent.parent
-if __name__ == "__main__" and str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))
 
 # Local imports after path setup
 from scripts.common.dbus_base import (  # noqa: E402

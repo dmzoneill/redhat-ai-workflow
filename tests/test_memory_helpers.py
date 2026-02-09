@@ -275,7 +275,9 @@ class TestHelperFunctions:
         # Should be parseable as ISO format
         from datetime import datetime
 
-        datetime.fromisoformat(ts)
+        parsed = datetime.fromisoformat(ts)
+        assert parsed is not None
+        assert isinstance(ts, str)
 
     def test_get_open_mrs_returns_empty_list(self, temp_memory_dir):
         """Test get_open_mrs returns empty list when no MRs."""

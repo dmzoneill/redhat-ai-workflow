@@ -553,8 +553,9 @@ class TestRegistryTools:
         # Make unreadable
         broken.chmod(0o000)
         try:
-            registry.list_commands(command_type=CommandType.TOOL)
-            # Should not raise, may or may not find tools
+            cmds = registry.list_commands(command_type=CommandType.TOOL)
+            # Test verifies no exception is raised, may or may not find tools
+            assert isinstance(cmds, list)
         except PermissionError:
             pass  # OK on some systems
         finally:

@@ -66,7 +66,6 @@ _export_state: dict[str, Any] = {
     "start_time": None,
     "task": None,
 }
-_export_state_lock = asyncio.Lock()
 
 
 def register_tools(server: FastMCP) -> int:  # noqa: C901
@@ -112,32 +111,31 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         """
         global _export_state
 
-        async with _export_state_lock:
-            if _export_state["running"]:
-                progress = _export_state["progress"]
-                return (
-                    f"⏳ Export already in progress\n"
-                    f"Started: {_export_state['start_time']}\n"
-                    f"Channels processed: {progress.get('channels_done', 0)}/{progress.get('channels_total', '?')}\n"
-                    f"Messages exported: {progress.get('messages', 0)}\n"
-                    f"Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
-                )
+        if _export_state["running"]:
+            progress = _export_state["progress"]
+            return (
+                f"⏳ Export already in progress\n"
+                f"Started: {_export_state['start_time']}\n"
+                f"Channels processed: {progress.get('channels_done', 0)}/{progress.get('channels_total', '?')}\n"
+                f"Messages exported: {progress.get('messages', 0)}\n"
+                f"Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
+            )
 
-            # Initialize export state
-            _export_state = {
-                "running": True,
-                "cancelled": False,
-                "progress": {
-                    "channels_done": 0,
-                    "channels_total": 0,
-                    "messages": 0,
-                    "my_messages": 0,
-                    "errors": [],
-                    "current_channel": "",
-                },
-                "start_time": datetime.now().isoformat(),
-                "task": None,
-            }
+        # Initialize export state
+        _export_state = {
+            "running": True,
+            "cancelled": False,
+            "progress": {
+                "channels_done": 0,
+                "channels_total": 0,
+                "messages": 0,
+                "my_messages": 0,
+                "errors": [],
+                "current_channel": "",
+            },
+            "start_time": datetime.now().isoformat(),
+            "task": None,
+        }
 
         try:
             # Ensure style directory exists
@@ -564,11 +562,10 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Confirmation message
         """
-        async with _export_state_lock:
-            if not _export_state["running"]:
-                return "No export in progress to cancel."
+        if not _export_state["running"]:
+            return "No export in progress to cancel."
 
-            _export_state["cancelled"] = True
+        _export_state["cancelled"] = True
         return (
             "🛑 Export cancellation requested.\n"
             "The export will stop after the current channel completes.\n"

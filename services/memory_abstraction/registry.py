@@ -29,14 +29,55 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .models import LATENCY_FAST, LATENCY_SLOW, AdapterInfo
-
 logger = logging.getLogger(__name__)
 
 # Project root for module discovery
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 ADAPTER_FILE = "adapter.py"
+
+
+# Latency class constants
+LATENCY_FAST = "fast"  # <2s - local operations, vector DBs
+LATENCY_SLOW = "slow"  # >2s - external APIs, AI queries
+
+
+@dataclass
+class AdapterInfo:
+    """
+    Metadata about a registered adapter.
+
+    Stored in ADAPTER_MANIFEST when an adapter is registered
+    via the @memory_adapter decorator.
+    """
+
+    name: str  # Unique ID: "code", "slack", "yaml"
+    module: str  # Source module: "code_search", "slack_persona"
+    display_name: str  # Human readable: "Code Search"
+    capabilities: set[str]  # {"query", "store", "search"}
+    intent_keywords: list[str]  # For routing: ["function", "class"]
+    priority: int = 50  # Higher = preferred when multiple match
+    latency_class: str = LATENCY_FAST  # "fast" (<2s) or "slow" (>2s)
+    source_file: str = ""  # Path to adapter source file
+    adapter_class: type | None = None  # The adapter class itself
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary (excluding class reference)."""
+        return {
+            "name": self.name,
+            "module": self.module,
+            "display_name": self.display_name,
+            "capabilities": list(self.capabilities),
+            "intent_keywords": self.intent_keywords,
+            "priority": self.priority,
+            "latency_class": self.latency_class,
+            "source_file": self.source_file,
+        }
+
+    @property
+    def is_fast(self) -> bool:
+        """Check if this adapter is fast (suitable for bootstrap)."""
+        return self.latency_class == LATENCY_FAST
 
 
 @dataclass

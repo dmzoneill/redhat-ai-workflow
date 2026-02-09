@@ -383,6 +383,7 @@ class TestRegisterDebugTool:
         mock_server.tool.return_value = lambda fn: fn
         register_debug_tool(mock_server)
         mock_server.tool.assert_called_once()
+        assert mock_server.tool.call_count == 1
 
     @pytest.mark.asyncio
     async def test_debug_tool_not_found(self):

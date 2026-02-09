@@ -94,8 +94,8 @@ def get_gmail_service():
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-        except Exception as e:
-            logger.debug(f"Suppressed error in get_gmail_service (load token): {e}")
+        except Exception:
+            pass
 
     # Refresh if expired
     if creds and creds.expired and creds.refresh_token:
@@ -103,8 +103,7 @@ def get_gmail_service():
             creds.refresh(Request())
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
-        except Exception as e:
-            logger.debug(f"Suppressed error in get_gmail_service (refresh token): {e}")
+        except Exception:
             creds = None
 
     # Need to authenticate via calendar first
@@ -129,8 +128,8 @@ def _decode_body(payload: dict) -> str:
     if "body" in payload and payload["body"].get("data"):
         try:
             body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
-        except Exception as e:
-            logger.debug(f"Suppressed error in _decode_body (body decode): {e}")
+        except Exception:
+            pass
 
     # Check parts for multipart messages
     if "parts" in payload:
@@ -143,10 +142,8 @@ def _decode_body(payload: dict) -> str:
                             "utf-8"
                         )
                         break
-                    except Exception as e:
-                        logger.debug(
-                            f"Suppressed error in _decode_body (part decode): {e}"
-                        )
+                    except Exception:
+                        pass
             elif mime_type.startswith("multipart/"):
                 # Recursively check nested parts
                 nested = _decode_body(part)

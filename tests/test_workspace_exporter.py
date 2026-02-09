@@ -39,6 +39,7 @@ class TestEnsureExportDir:
         ) as mock_dir:
             _ensure_export_dir()
             mock_dir.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+            assert mock_dir.mkdir.call_count == 1
 
 
 # ==================== get_export_file_path ====================
@@ -397,3 +398,4 @@ class TestOnWorkspaceChange:
             mock_export.return_value = {"success": True}
             _on_workspace_change()
             mock_export.assert_called_once()
+            assert mock_export.call_count == 1

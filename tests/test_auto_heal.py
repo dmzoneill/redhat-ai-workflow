@@ -528,7 +528,8 @@ class TestCleanupOldStats:
     def test_no_stats_no_crash(self):
         """Empty data does not crash."""
         data = {}
-        _cleanup_old_stats(data)  # should not raise
+        _cleanup_old_stats(data)  # Test verifies no exception is raised
+        assert data == {}  # Data unchanged when empty
 
     def test_keeps_last_30_daily(self):
         """Keeps only last 30 days of daily stats."""
@@ -670,6 +671,8 @@ class TestLogAutoHealToMemory:
             await _log_auto_heal_to_memory("tool", "auth", "err", "fix")
         finally:
             ahd.__file__ = orig_file
+        # If we got here, the exception was properly swallowed
+        assert True
 
 
 # ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@ Setup:
 3. Run the server once to complete OAuth flow and save token.json
 """
 
-import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,8 +30,6 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
-
-logger = logging.getLogger(__name__)
 
 
 def _get_google_calendar_config_dir() -> Path:
@@ -92,8 +89,8 @@ def _try_load_oauth_token(credentials_cls, scopes):
     if TOKEN_FILE.exists():
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
-        except Exception as e:
-            logger.debug(f"Suppressed error in _try_load_oauth_token: {e}")
+        except Exception:
+            pass
     return None
 
 
@@ -105,8 +102,8 @@ def _try_refresh_credentials(creds, request_cls):
             with open(TOKEN_FILE, "w") as f:
                 f.write(creds.to_json())
             return creds
-        except Exception as e:
-            logger.debug(f"Suppressed error in _try_refresh_credentials: {e}")
+        except Exception:
+            pass
     return None
 
 
@@ -117,8 +114,8 @@ def _try_service_account(service_account, scopes):
             return service_account.Credentials.from_service_account_file(
                 str(SERVICE_ACCOUNT_FILE), scopes=scopes
             )
-        except Exception as e:
-            logger.debug(f"Suppressed error in _try_service_account: {e}")
+        except Exception:
+            pass
     return None
 
 

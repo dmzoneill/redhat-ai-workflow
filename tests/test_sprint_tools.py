@@ -541,8 +541,9 @@ class TestSprintHistory:
     def test_history_respects_limit(self):
         with patch(f"{MOD}.load_sprint_history") as mock_load:
             mock_load.return_value = []
-            sprint_history(limit=3)
+            result = sprint_history(limit=3)
         mock_load.assert_called_once_with(limit=3)
+        assert "No sprint history" in result
 
     def test_history_zero_total_points(self):
         sprints = [
@@ -692,8 +693,9 @@ class TestSprintApproveAll:
             patch(f"{MOD}.load_sprint_state", return_value=state),
             patch(f"{MOD}.save_sprint_state") as mock_save,
         ):
-            sprint_approve_all()
+            result = sprint_approve_all()
         mock_save.assert_called_once_with(state)
+        assert "approved" in result.lower() or "Approved" in result
 
     def test_last_updated_set(self):
         state = _state(

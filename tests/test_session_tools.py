@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
 import yaml
+from fastmcp import Context, FastMCP
+
+from server.persona_loader import PersonaLoader
+from server.workspace_state import ChatSession, WorkspaceState
 
 # Module under test
 from tool_modules.aa_workflow.src import session_tools
@@ -26,7 +30,7 @@ def _make_workspace(
     active_session_id=None,
 ):
     """Build a mock WorkspaceState."""
-    ws = MagicMock()
+    ws = MagicMock(spec=WorkspaceState)
     ws.workspace_uri = "file:///home/user/project"
     ws.project = project
     ws.is_auto_detected = is_auto_detected
@@ -74,7 +78,7 @@ def _make_chat_session(
     is_auto=False,
     tool_call_count=0,
 ):
-    s = MagicMock()
+    s = MagicMock(spec=ChatSession)
     s.session_id = session_id
     s.persona = persona
     s.project = project
@@ -753,7 +757,7 @@ class TestLoadPersonaInfo:
 
     def test_no_agent_with_current_persona(self):
         lines = []
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.current_persona = "developer"
         mock_loader.loaded_modules = ["git", "gitlab"]
 
@@ -768,7 +772,7 @@ class TestLoadPersonaInfo:
 
     def test_no_agent_no_persona_with_dev_modules(self):
         lines = []
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.current_persona = None
         mock_loader.loaded_modules = ["git", "gitlab", "jira"]
 
@@ -782,7 +786,7 @@ class TestLoadPersonaInfo:
 
     def test_no_agent_no_persona_no_modules(self):
         lines = []
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.current_persona = None
         mock_loader.loaded_modules = []
 
@@ -808,7 +812,7 @@ class TestLoadPersonaInfo:
 
     def test_no_agent_persona_with_loaded_modules(self):
         lines = []
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.current_persona = "incident"
         mock_loader.loaded_modules = ["kubectl", "prometheus"]
 
@@ -989,7 +993,7 @@ class TestGetCurrentPersona:
     """Tests for _get_current_persona."""
 
     def test_with_persona(self):
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.current_persona = "developer"
         with patch("server.persona_loader.get_loader", return_value=mock_loader):
             result = session_tools._get_current_persona()
@@ -1351,7 +1355,7 @@ class TestLoadChatContextAsync:
     @pytest.mark.asyncio
     async def test_basic_async_context(self):
         lines = []
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "async-proj"
         mock_state.is_auto_detected = False
         mock_state.persona = "researcher"
@@ -1364,13 +1368,15 @@ class TestLoadChatContextAsync:
             new_callable=AsyncMock,
             return_value=mock_state,
         ):
-            result = await session_tools._load_chat_context_async(MagicMock(), lines)
+            result = await session_tools._load_chat_context_async(
+                MagicMock(spec=Context), lines
+            )
         assert result == "async-proj"
 
     @pytest.mark.asyncio
     async def test_with_all_fields(self):
         lines = []
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "full-proj"
         mock_state.is_auto_detected = True
         mock_state.persona = "devops"
@@ -1383,7 +1389,9 @@ class TestLoadChatContextAsync:
             new_callable=AsyncMock,
             return_value=mock_state,
         ):
-            result = await session_tools._load_chat_context_async(MagicMock(), lines)
+            result = await session_tools._load_chat_context_async(
+                MagicMock(spec=Context), lines
+            )
         assert result == "full-proj"
         joined = "\n".join(lines)
         assert "auto-detected" in joined
@@ -1395,7 +1403,7 @@ class TestLoadChatContextAsync:
     @pytest.mark.asyncio
     async def test_none_project_uses_default(self):
         lines = []
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = None
         mock_state.is_auto_detected = False
         mock_state.persona = None
@@ -1408,7 +1416,9 @@ class TestLoadChatContextAsync:
             new_callable=AsyncMock,
             return_value=mock_state,
         ):
-            result = await session_tools._load_chat_context_async(MagicMock(), lines)
+            result = await session_tools._load_chat_context_async(
+                MagicMock(spec=Context), lines
+            )
         assert result == "redhat-ai-workflow"
         joined = "\n".join(lines)
         assert "default" in joined
@@ -1429,14 +1439,14 @@ class TestDetectProjectFromMcpRoots:
 
     @pytest.mark.asyncio
     async def test_no_roots_returned(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         ctx.session.list_roots = AsyncMock(return_value=None)
         result = await session_tools._detect_project_from_mcp_roots(ctx)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_empty_roots(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         mock_result = MagicMock()
         mock_result.roots = []
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
@@ -1445,7 +1455,7 @@ class TestDetectProjectFromMcpRoots:
 
     @pytest.mark.asyncio
     async def test_matching_root(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         mock_root = MagicMock()
         mock_root.uri = "file:///home/user/myproject"
         mock_root.name = "myproject"
@@ -1465,7 +1475,7 @@ class TestDetectProjectFromMcpRoots:
 
     @pytest.mark.asyncio
     async def test_no_matching_root(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         mock_root = MagicMock()
         mock_root.uri = "file:///home/user/other"
         mock_root.name = "other"
@@ -1484,7 +1494,7 @@ class TestDetectProjectFromMcpRoots:
 
     @pytest.mark.asyncio
     async def test_non_file_uri(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         mock_root = MagicMock()
         mock_root.uri = "/home/user/myproject"
         mock_root.name = "myproject"
@@ -1503,14 +1513,14 @@ class TestDetectProjectFromMcpRoots:
 
     @pytest.mark.asyncio
     async def test_exception_handled(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         ctx.session.list_roots = AsyncMock(side_effect=RuntimeError("fail"))
         result = await session_tools._detect_project_from_mcp_roots(ctx)
         assert result is None
 
     @pytest.mark.asyncio
     async def test_no_config(self):
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         mock_root = MagicMock()
         mock_root.uri = "file:///home/user/proj"
         mock_root.name = "proj"
@@ -1621,7 +1631,7 @@ class TestSessionStartImpl:
     async def test_new_session_with_ctx(self):
         patches = _session_start_patches()
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1637,7 +1647,7 @@ class TestSessionStartImpl:
     async def test_new_session_with_agent(self):
         patches = _session_start_patches()
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="devops",
@@ -1652,7 +1662,7 @@ class TestSessionStartImpl:
     async def test_new_session_with_explicit_project(self):
         patches = _session_start_patches()
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1677,7 +1687,7 @@ class TestSessionStartImpl:
         # The resume-found path has a source bug: `lines` is unbound at line 947.
         # We verify the setup portion works by catching the error.
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             try:
                 result = await session_tools._session_start_impl(
                     ctx=ctx,
@@ -1702,7 +1712,7 @@ class TestSessionStartImpl:
         workspace = _make_workspace(project="test-proj", sessions={})
         patches = _session_start_patches(workspace=workspace)
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1725,7 +1735,7 @@ class TestSessionStartImpl:
         )
         patches = _session_start_patches(workspace=workspace)
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             try:
                 await session_tools._session_start_impl(
                     ctx=ctx,
@@ -1749,7 +1759,7 @@ class TestSessionStartImpl:
         )
         patches = _session_start_patches(workspace=workspace)
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             try:
                 await session_tools._session_start_impl(
                     ctx=ctx,
@@ -1774,7 +1784,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches(workspace=workspace)
         with _start_all_patches(patches):
             with patch("server.workspace_state.WorkspaceRegistry.save_to_disk"):
-                ctx = MagicMock()
+                ctx = MagicMock(spec=Context)
                 try:
                     await session_tools._session_start_impl(
                         ctx=ctx,
@@ -1795,6 +1805,7 @@ class TestSessionStartImpl:
         # But 947 comes first, so the update at 916 never runs.
         # We can only verify the pre-947 behavior.
         session.touch.assert_called_once()
+        assert session.touch.call_count == 1
 
     @pytest.mark.asyncio
     async def test_no_ctx_fallback(self):
@@ -1834,6 +1845,7 @@ class TestSessionStartImpl:
                         resume_session_id="",
                     )
             mock_set.assert_called_once_with("my-proj")
+            assert mock_set.call_count == 1
 
     @pytest.mark.asyncio
     async def test_with_memory_session_log(self):
@@ -1841,7 +1853,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["load_knowledge"].return_value = "detected-proj"
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="devops",
@@ -1851,6 +1863,7 @@ class TestSessionStartImpl:
                 resume_session_id="",
             )
         log_fn.assert_awaited_once()
+        assert log_fn.await_count == 1
 
     @pytest.mark.asyncio
     async def test_bootstrap_context_shown(self):
@@ -1872,7 +1885,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1900,14 +1913,14 @@ class TestSessionStartImpl:
             "related_code": [],
             "sources_queried": [],
         }
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.switch_persona = AsyncMock()
 
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
             with patch("server.persona_loader.get_loader", return_value=mock_loader):
-                ctx = MagicMock()
+                ctx = MagicMock(spec=Context)
                 result = await session_tools._session_start_impl(
                     ctx=ctx,
                     agent="",
@@ -1935,7 +1948,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1963,7 +1976,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -1981,7 +1994,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["export"].side_effect = RuntimeError("export failed")
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -2006,7 +2019,7 @@ class TestSessionStartImpl:
         )
         patches = _session_start_patches(workspace=workspace)
         with _start_all_patches(patches):
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             try:
                 result = await session_tools._session_start_impl(
                     ctx=ctx,
@@ -2058,7 +2071,7 @@ class TestSessionStartImpl:
             "related_code": [],
             "sources_queried": [],
         }
-        mock_loader = MagicMock()
+        mock_loader = MagicMock(spec=PersonaLoader)
         mock_loader.switch_persona = AsyncMock(
             side_effect=RuntimeError("cannot switch")
         )
@@ -2067,7 +2080,7 @@ class TestSessionStartImpl:
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
             with patch("server.persona_loader.get_loader", return_value=mock_loader):
-                ctx = MagicMock()
+                ctx = MagicMock(spec=Context)
                 result = await session_tools._session_start_impl(
                     ctx=ctx,
                     agent="",
@@ -2096,7 +2109,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -2130,7 +2143,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -2162,7 +2175,7 @@ class TestSessionStartImpl:
         patches = _session_start_patches()
         with _start_all_patches(patches) as mocks:
             mocks["bootstrap"].return_value = bootstrap
-            ctx = MagicMock()
+            ctx = MagicMock(spec=Context)
             result = await session_tools._session_start_impl(
                 ctx=ctx,
                 agent="",
@@ -2184,7 +2197,7 @@ class TestRegisterSessionTools:
     """Tests for register_session_tools."""
 
     def test_registers_tools(self):
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.tool.return_value = lambda f: f
 
         count = session_tools.register_session_tools(mock_server)
@@ -2200,7 +2213,7 @@ class TestRegisterPrompts:
     """Tests for register_prompts."""
 
     def test_registers_prompts(self):
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.prompt.return_value = lambda f: f
 
         count = session_tools.register_prompts(mock_server)
@@ -2248,7 +2261,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace(project="current")
         workspace.sessions = {"sess-1": _make_chat_session()}
         workspace.active_session_id = "sess-1"
@@ -2273,7 +2286,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace(project="current")
         workspace.active_session_id = None
         workspace.sessions = {}
@@ -2298,7 +2311,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace(project="current")
         workspace.active_session_id = "ghost-session"
         workspace.sessions = {}
@@ -2323,7 +2336,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(
             session_id="sess-1", project="old-proj", name="My Session"
         )
@@ -2368,7 +2381,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="target-sess", project="old")
         workspace = _make_workspace(project="old")
         workspace.sessions = {"target-sess": session}
@@ -2404,7 +2417,7 @@ class TestSessionSetProject:
         tools = _capture_registered_tools()
         set_project = tools["session_set_project"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         with patch(
             "server.utils.load_config", side_effect=RuntimeError("config error")
         ):
@@ -2426,7 +2439,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace()
         workspace.active_session_id = None
 
@@ -2444,7 +2457,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace()
         workspace.active_session_id = "ghost"
         workspace.sessions = {}
@@ -2463,7 +2476,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(
             session_id="sess-1",
             project="my-proj",
@@ -2513,7 +2526,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"
@@ -2544,7 +2557,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="target")
         workspace = _make_workspace()
         workspace.sessions = {"target": session}
@@ -2570,7 +2583,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         with patch(
             "server.workspace_state.WorkspaceRegistry.get_for_ctx",
             new_callable=AsyncMock,
@@ -2585,7 +2598,7 @@ class TestSessionExportContext:
         tools = _capture_registered_tools()
         export_ctx = tools["session_export_context"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"
@@ -2627,7 +2640,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         result = await attach(ctx, issue_key="invalid")
         text = result[0].text
         assert "Invalid Issue Key" in text
@@ -2637,7 +2650,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace()
         workspace.active_session_id = None
 
@@ -2655,7 +2668,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         workspace = _make_workspace()
         workspace.active_session_id = "ghost"
         workspace.sessions = {}
@@ -2674,7 +2687,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"
@@ -2713,7 +2726,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"
@@ -2754,7 +2767,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         with patch(
             "server.workspace_state.WorkspaceRegistry.get_for_ctx",
             new_callable=AsyncMock,
@@ -2769,7 +2782,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"
@@ -2808,7 +2821,7 @@ class TestJiraAttachSession:
         tools = _capture_registered_tools()
         attach = tools["jira_attach_session"]
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
         session = _make_chat_session(session_id="sess-1")
         workspace = _make_workspace()
         workspace.active_session_id = "sess-1"

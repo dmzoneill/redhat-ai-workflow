@@ -693,7 +693,8 @@ class TestConfigManagerProperties:
 
     def test_validate_or_raise_valid(self, config_manager):
         """validate_or_raise does not raise for valid config."""
-        config_manager.validate_or_raise()  # Should not raise
+        config_manager.validate_or_raise()  # Test verifies no exception is raised
+        assert config_manager.validate() == []
 
     def test_validate_or_raise_invalid(self, tmp_path):
         """validate_or_raise raises ConfigValidationError for invalid config."""

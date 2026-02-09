@@ -17,8 +17,6 @@ import asyncio
 import logging
 import os
 import re
-import threading
-import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -44,21 +42,25 @@ except ImportError:
         Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
     )
 
-from tool_modules.aa_meet_bot.src.meet_audio import MeetAudio
-from tool_modules.aa_meet_bot.src.meet_captions import (  # noqa: E402,F401
-    MAX_CAPTION_BUFFER,
-    CaptionEntry,
-    MeetCaptions,
-)
-from tool_modules.aa_meet_bot.src.meet_devices import MeetDevices
-from tool_modules.aa_meet_bot.src.meet_participants import MeetParticipants
-from tool_modules.aa_meet_bot.src.meet_sign_in import MeetSignIn
-
 logger = logging.getLogger(__name__)
 
 
 class BrowserClosedError(Exception):
     """Raised when the browser has been closed unexpectedly."""
+
+
+@dataclass
+class CaptionEntry:
+    """A single caption entry from the meeting."""
+
+    speaker: str
+    text: str
+    timestamp: datetime = field(default_factory=datetime.now)
+    caption_id: int = 0  # Unique ID for tracking updates
+    is_update: bool = False  # True if this is an update to a previous caption
+
+    def __str__(self) -> str:
+        return f"[{self.timestamp.strftime('%H:%M:%S')}] {self.speaker}: {self.text}"
 
 
 @dataclass
@@ -122,10 +124,7 @@ class GoogleMeetController:
 
     # Class-level counter for unique instance IDs
     _instance_counter = 0
-    _counter_lock = threading.Lock()
-    _instances: weakref.WeakValueDictionary[str, "GoogleMeetController"] = (
-        weakref.WeakValueDictionary()
-    )  # Track all instances; weak refs allow GC of crashed instances
+    _instances: dict[str, "GoogleMeetController"] = {}  # Track all instances
 
     def __init__(self):
         self.config = get_config()
@@ -134,16 +133,21 @@ class GoogleMeetController:
         self.page = None
         # Initialize state early so errors can be captured during initialization
         self.state: MeetingState = MeetingState(meeting_id="", meeting_url="")
+        self._caption_callback: Optional[Callable[[CaptionEntry], None]] = None
+        self._caption_observer_running = False
+        self._caption_poll_task: Optional[asyncio.Task] = (
+            None  # Track caption polling task
+        )
         self._playwright = None
         self._audio_sink_name: Optional[str] = (
             None  # Virtual audio sink for meeting output
         )
 
         # Unique instance tracking
-        with GoogleMeetController._counter_lock:
-            GoogleMeetController._instance_counter += 1
-            counter_val = GoogleMeetController._instance_counter
-        self._instance_id = f"meet-bot-{counter_val}-{id(self)}"
+        GoogleMeetController._instance_counter += 1
+        self._instance_id = (
+            f"meet-bot-{GoogleMeetController._instance_counter}-{id(self)}"
+        )
         self._browser_pid: Optional[int] = None
         self._created_at = datetime.now()
         self._last_activity = datetime.now()
@@ -152,86 +156,723 @@ class GoogleMeetController:
         self._device_manager: Optional[InstanceDeviceManager] = None
         self._devices: Optional[InstanceDevices] = None
 
-        # Composed subsystems (sign-in, captions, participants, audio, devices)
-        self._sign_in = MeetSignIn(self)
-        self._captions = MeetCaptions(self)
-        self._participants = MeetParticipants(self)
-        self._audio = MeetAudio(self)
-        self._meet_devices = MeetDevices(self)
-
         # Register this instance
         GoogleMeetController._instances[self._instance_id] = self
 
-    # Backward-compatible proxies for caption state (used by tests)
-    @property
-    def _caption_observer_running(self):
-        return self._captions._caption_observer_running
-
-    @_caption_observer_running.setter
-    def _caption_observer_running(self, value):
-        self._captions._caption_observer_running = value
-
-    @property
-    def _caption_callback(self):
-        return self._captions._caption_callback
-
-    @_caption_callback.setter
-    def _caption_callback(self, value):
-        self._captions._caption_callback = value
-
-    @property
-    def _caption_poll_task(self):
-        return self._captions._caption_poll_task
-
-    @_caption_poll_task.setter
-    def _caption_poll_task(self, value):
-        self._captions._caption_poll_task = value
-
-    # ==================== Audio Routing (delegated to MeetAudio) ====================
-
     async def _create_virtual_audio_sink(self) -> bool:
-        """Create a virtual PulseAudio sink. Delegates to MeetAudio."""
-        return await self._audio.create_virtual_audio_sink()
+        """Create a virtual PulseAudio sink for meeting audio output.
+
+        This creates a null sink that:
+        - Captures Chrome's audio output (meeting audio)
+        - Doesn't play on speakers
+        - Can be monitored if you want to listen (via the .monitor source)
+
+        Returns:
+            True if sink was created successfully.
+        """
+        import subprocess
+
+        # Create a unique sink name for this instance
+        sink_name = f"meet_bot_{self._instance_id.replace('-', '_')}"
+        sink_description = f"Meet Bot Audio ({self._instance_id})"
+
+        try:
+            # Check if sink already exists
+            result = subprocess.run(
+                ["pactl", "list", "short", "sinks"], capture_output=True, text=True
+            )
+            if sink_name in result.stdout:
+                logger.info(
+                    f"[{self._instance_id}] Virtual audio sink already exists: {sink_name}"
+                )
+                self._audio_sink_name = sink_name
+                return True
+
+            # Create null sink (audio goes nowhere, but can be monitored)
+            result = subprocess.run(
+                [
+                    "pactl",
+                    "load-module",
+                    "module-null-sink",
+                    f"sink_name={sink_name}",
+                    f'sink_properties=device.description="{sink_description}"',
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode == 0:
+                self._audio_sink_name = sink_name
+                logger.info(
+                    f"[{self._instance_id}] Created virtual audio sink: {sink_name}"
+                )
+                logger.info(
+                    f"[{self._instance_id}] To listen: pactl set-default-source {sink_name}.monitor"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"[{self._instance_id}] Failed to create audio sink: {result.stderr}"
+                )
+                return False
+
+        except Exception as e:
+            logger.warning(
+                f"[{self._instance_id}] Could not create virtual audio sink: {e}"
+            )
+            return False
 
     async def _remove_virtual_audio_sink(self) -> None:
-        """Remove the virtual audio sink. Delegates to MeetAudio."""
-        await self._audio.remove_virtual_audio_sink()
+        """Remove the virtual audio sink when done."""
+        import subprocess
+
+        if not self._audio_sink_name:
+            return
+
+        try:
+            # Find the module index for our sink
+            result = subprocess.run(
+                ["pactl", "list", "short", "modules"], capture_output=True, text=True
+            )
+
+            for line in result.stdout.strip().split("\n"):
+                if self._audio_sink_name in line:
+                    module_index = line.split()[0]
+                    subprocess.run(["pactl", "unload-module", module_index])
+                    logger.info(
+                        f"[{self._instance_id}] Removed virtual audio sink: {self._audio_sink_name}"
+                    )
+                    break
+
+            self._audio_sink_name = None
+        except Exception as e:
+            logger.warning(
+                f"[{self._instance_id}] Could not remove virtual audio sink: {e}"
+            )
 
     def get_audio_sink_name(self) -> Optional[str]:
-        """Get the virtual audio sink name. Delegates to MeetAudio."""
-        return self._audio.get_audio_sink_name()
+        """Get the name of the virtual audio sink for this instance.
+
+        To listen to meeting audio:
+            pactl set-default-source <sink_name>.monitor
+            # Or use pavucontrol to route the monitor to your headphones
+        """
+        return self._audio_sink_name
 
     def get_audio_devices(self) -> Optional[InstanceDevices]:
-        """Get per-instance audio devices. Delegates to MeetAudio."""
-        return self._audio.get_audio_devices()
+        """Get the per-instance audio devices for this controller.
+
+        Returns:
+            InstanceDevices with sink_name, source_name, pipe_path, etc.
+            None if devices weren't created (legacy mode).
+        """
+        return self._devices
 
     def get_monitor_source(self) -> Optional[str]:
-        """Get the monitor source name. Delegates to MeetAudio."""
-        return self._audio.get_monitor_source()
+        """Get the monitor source name for capturing meeting audio.
+
+        This is the source that captures all audio going to the sink.
+        Use with parec or other audio capture tools.
+
+        Returns:
+            Monitor source name (e.g., "meet_bot_abc123.monitor")
+        """
+        if self._device_manager:
+            return self._device_manager.get_monitor_source()
+        elif self._audio_sink_name:
+            return f"{self._audio_sink_name}.monitor"
+        return None
 
     def get_pipe_path(self) -> Optional[Path]:
-        """Get the named pipe path for TTS injection. Delegates to MeetAudio."""
-        return self._audio.get_pipe_path()
+        """Get the named pipe path for TTS audio injection.
+
+        Write PCM audio (16kHz, 16-bit, mono) to this pipe to inject
+        audio as the Chrome microphone input.
+
+        Returns:
+            Path to the named pipe, or None if not available.
+        """
+        if self._devices and self._devices.pipe_path:
+            return self._devices.pipe_path
+        return None
 
     async def _route_browser_audio_to_sink(self) -> None:
-        """Route Chrome audio to virtual sink. Delegates to MeetAudio."""
-        await self._audio.route_browser_audio_to_sink()
+        """Route Chrome's audio output to our virtual sink.
+
+        This runs in the background and periodically checks for Chrome audio streams,
+        moving them to our virtual sink so meeting audio doesn't play on speakers.
+        """
+        import subprocess
+
+        if not self._audio_sink_name:
+            return
+
+        logger.info(f"[{self._instance_id}] Starting audio routing monitor...")
+
+        streams_routed = 0
+
+        # Wait for meeting to be joined (up to 60 seconds)
+        for _ in range(60):
+            if self.state and self.state.joined:
+                break
+            await asyncio.sleep(1)
+
+        if not self.state or not self.state.joined:
+            logger.warning(
+                f"[{self._instance_id}] Audio routing: meeting not joined, giving up"
+            )
+            return
+
+        logger.info(f"[{self._instance_id}] Meeting joined, starting audio routing...")
+
+        # Keep checking for new audio streams while in the meeting
+        while self.state and self.state.joined:
+            await asyncio.sleep(3)  # Check every 3 seconds
+
+            try:
+                # Get detailed info about all sink inputs
+                result = subprocess.run(
+                    ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+                )
+
+                # Parse sink inputs and find Chrome/Chromium ones not on our sink
+                # IMPORTANT: Only route OUR browser instance, not user's regular Chrome
+                current_input_id = None
+                current_sink = None
+                is_chrome = False
+                current_pid = None
+
+                for line in result.stdout.split("\n"):
+                    line = line.strip()
+
+                    if line.startswith("Sink Input #"):
+                        # Save previous input if it was CONFIRMED our browser and not on our sink
+                        if (
+                            current_input_id
+                            and is_chrome
+                            and current_sink
+                            and self._audio_sink_name not in current_sink
+                        ):
+                            # Only route if it's our browser PID (or we don't have PID yet)
+                            if not self._browser_pid or current_pid == str(
+                                self._browser_pid
+                            ):
+                                self._move_sink_input(current_input_id)
+                                streams_routed += 1
+                            else:
+                                logger.debug(
+                                    f"[{self._instance_id}] Skipping audio stream {current_input_id} "
+                                    f"(PID {current_pid} != our PID {self._browser_pid})"
+                                )
+
+                        # Start new input
+                        current_input_id = line.split("#")[1]
+                        current_sink = None
+                        is_chrome = False
+                        current_pid = None
+
+                    elif "Sink:" in line and current_input_id:
+                        # Check which sink this stream is on
+                        current_sink = line.split(":")[-1].strip()
+
+                    elif "application.name" in line.lower():
+                        # Only match if application.name explicitly contains chrome/chromium
+                        app_name = line.split("=")[-1].strip().strip('"').lower()
+                        if app_name in ["google chrome", "chromium", "chrome"]:
+                            is_chrome = True
+                            logger.debug(
+                                f"[{self._instance_id}] Found Chrome audio stream: {current_input_id}"
+                            )
+
+                    elif "application.process.id" in line.lower():
+                        current_pid = line.split("=")[-1].strip().strip('"')
+
+                # Don't forget the last one
+                if (
+                    current_input_id
+                    and is_chrome
+                    and current_sink
+                    and self._audio_sink_name not in current_sink
+                ):
+                    if not self._browser_pid or current_pid == str(self._browser_pid):
+                        self._move_sink_input(current_input_id)
+                        streams_routed += 1
+
+            except Exception as e:
+                logger.debug(f"[{self._instance_id}] Audio routing check failed: {e}")
+
+        if streams_routed > 0:
+            logger.info(
+                f"[{self._instance_id}] Audio routing monitor stopped (routed {streams_routed} streams)"
+            )
+        else:
+            logger.info(f"[{self._instance_id}] Audio routing monitor stopped")
+
+    def _move_sink_input(self, sink_input_id: str) -> bool:
+        """Move a sink input to our virtual audio sink."""
+        import subprocess
+
+        if not self._audio_sink_name:
+            return False
+
+        try:
+            result = subprocess.run(
+                ["pactl", "move-sink-input", sink_input_id, self._audio_sink_name],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                logger.info(
+                    f"[{self._instance_id}] Routed audio stream {sink_input_id} to virtual sink"
+                )
+                return True
+            else:
+                logger.debug(
+                    f"Failed to move sink-input {sink_input_id}: {result.stderr}"
+                )
+                return False
+        except Exception as e:
+            logger.debug(f"Failed to move sink-input {sink_input_id}: {e}")
+            return False
+
+    def _get_chrome_sink_inputs(self, only_our_browser: bool = True) -> list[str]:
+        """Get Chrome/Chromium sink input IDs.
+
+        Args:
+            only_our_browser: If True, only return sink inputs from our browser PID.
+                            If False, return all Chrome/Chromium sink inputs.
+        """
+        import subprocess
+
+        sink_inputs = []
+        try:
+            result = subprocess.run(
+                ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+            )
+
+            current_input_id = None
+            is_chrome = False
+            current_pid = None
+
+            for line in result.stdout.split("\n"):
+                line = line.strip()
+
+                if line.startswith("Sink Input #"):
+                    # Check if previous input matches our criteria
+                    if current_input_id and is_chrome:
+                        if not only_our_browser or (
+                            self._browser_pid and current_pid == str(self._browser_pid)
+                        ):
+                            sink_inputs.append(current_input_id)
+                        elif only_our_browser and not self._browser_pid:
+                            # If we don't have browser PID yet, include all Chrome inputs
+                            sink_inputs.append(current_input_id)
+                    current_input_id = line.split("#")[1]
+                    is_chrome = False
+                    current_pid = None
+                elif "application.name" in line.lower():
+                    app_name = line.split("=")[1].strip().strip('"').lower()
+                    if app_name in ["google chrome", "chromium", "chrome"]:
+                        is_chrome = True
+                elif "application.process.id" in line.lower():
+                    current_pid = line.split("=")[1].strip().strip('"')
+
+            # Don't forget the last one
+            if current_input_id and is_chrome:
+                if not only_our_browser or (
+                    self._browser_pid and current_pid == str(self._browser_pid)
+                ):
+                    sink_inputs.append(current_input_id)
+                elif only_our_browser and not self._browser_pid:
+                    sink_inputs.append(current_input_id)
+
+        except Exception as e:
+            logger.debug(f"Failed to get Chrome sink inputs: {e}")
+
+        return sink_inputs
 
     def unmute_audio(self) -> bool:
-        """Move meeting audio to default output. Delegates to MeetAudio."""
-        return self._audio.unmute_audio()
+        """Move meeting audio to default output so user can hear it.
+
+        Returns:
+            True if audio was successfully unmuted.
+        """
+        import subprocess
+
+        try:
+            # Get the default sink
+            result = subprocess.run(
+                ["pactl", "get-default-sink"], capture_output=True, text=True
+            )
+            default_sink = result.stdout.strip()
+
+            if not default_sink:
+                logger.warning("Could not determine default audio sink")
+                return False
+
+            # Get Chrome sink inputs and move them to default
+            sink_inputs = self._get_chrome_sink_inputs()
+            if not sink_inputs:
+                logger.warning("No Chrome audio streams found to unmute")
+                return False
+
+            success = False
+            for sink_input_id in sink_inputs:
+                result = subprocess.run(
+                    ["pactl", "move-sink-input", sink_input_id, default_sink],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    logger.info(
+                        f"[{self._instance_id}] Unmuted: moved stream {sink_input_id} to {default_sink}"
+                    )
+                    success = True
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to unmute audio: {e}")
+            return False
 
     def mute_audio(self) -> bool:
-        """Move meeting audio back to null sink. Delegates to MeetAudio."""
-        return self._audio.mute_audio()
+        """Move meeting audio back to null sink so user can't hear it.
+
+        Returns:
+            True if audio was successfully muted.
+        """
+        import subprocess
+
+        if not self._audio_sink_name:
+            logger.warning("No virtual audio sink available for muting")
+            return False
+
+        try:
+            # Get Chrome sink inputs and move them to our null sink
+            sink_inputs = self._get_chrome_sink_inputs()
+            if not sink_inputs:
+                logger.warning("No Chrome audio streams found to mute")
+                return False
+
+            success = False
+            for sink_input_id in sink_inputs:
+                result = subprocess.run(
+                    ["pactl", "move-sink-input", sink_input_id, self._audio_sink_name],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    logger.info(
+                        f"[{self._instance_id}] Muted: moved stream {sink_input_id} to {self._audio_sink_name}"
+                    )
+                    success = True
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Failed to mute audio: {e}")
+            return False
 
     def is_audio_muted(self) -> bool:
-        """Check if meeting audio is muted. Delegates to MeetAudio."""
-        return self._audio.is_audio_muted()
+        """Check if meeting audio is currently muted (routed to null sink).
+
+        Returns:
+            True if audio is muted (on null sink), False if audible.
+        """
+        import subprocess
+
+        if not self._audio_sink_name:
+            return False
+
+        try:
+            result = subprocess.run(
+                ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+            )
+
+            current_input_id = None
+            is_chrome = False
+            current_sink = None
+
+            for line in result.stdout.split("\n"):
+                line = line.strip()
+
+                if line.startswith("Sink Input #"):
+                    if current_input_id and is_chrome:
+                        # Check if this Chrome stream is on our null sink
+                        if current_sink and self._audio_sink_name in current_sink:
+                            return True  # Found at least one muted stream
+                    current_input_id = line.split("#")[1]
+                    is_chrome = False
+                    current_sink = None
+                elif line.startswith("Sink:"):
+                    current_sink = line.split(":")[1].strip()
+                elif "application.name" in line.lower():
+                    app_name = line.split("=")[1].strip().strip('"').lower()
+                    if app_name in ["google chrome", "chromium", "chrome"]:
+                        is_chrome = True
+
+            # Check the last one
+            if current_input_id and is_chrome and current_sink:
+                if self._audio_sink_name in current_sink:
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.debug(f"Failed to check audio mute state: {e}")
+            return False
 
     async def _restore_user_default_source(self) -> None:
-        """Restore user's default audio source. Delegates to MeetAudio."""
-        await self._audio.restore_user_default_source()
+        """
+        Restore the user's original microphone as the default audio source.
+
+        PipeWire/Chrome may switch the default source to our virtual mic when
+        Chrome connects to it. This method ONLY restores the system default -
+        it does NOT move any browser streams.
+
+        Why no stream moving?
+        1. The bot's Chrome uses PULSE_SOURCE env var - it's already routed correctly
+        2. The user's Chrome should stay on whatever source it was using
+        3. Moving streams is error-prone and can break user's audio
+
+        This works with ANY audio device - built-in mic, USB headset, Bluetooth, etc.
+        """
+        import subprocess
+
+        # Wait for Chrome to fully initialize and potentially mess with defaults
+        await asyncio.sleep(2)
+
+        try:
+            # First, check what the current default is
+            result = subprocess.run(
+                ["pactl", "get-default-source"], capture_output=True, text=True
+            )
+            current_default = result.stdout.strip()
+
+            # If current default is already NOT a meetbot source, we're good
+            if current_default and "meet_bot" not in current_default.lower():
+                logger.info(
+                    f"[{self._instance_id}] Default source is already user's device: {current_default}"
+                )
+                return
+
+            # Current default is meetbot - need to find and restore user's source
+            # Get all available sources
+            result = subprocess.run(
+                ["pactl", "list", "sources", "short"], capture_output=True, text=True
+            )
+
+            # Find a non-meetbot, non-monitor source (user's actual mic/headset)
+            user_source = None
+            for line in result.stdout.strip().split("\n"):
+                if not line:
+                    continue
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    source_name = parts[1]
+                    # Skip monitors and meetbot sources
+                    if (
+                        ".monitor" not in source_name
+                        and "meet_bot" not in source_name.lower()
+                    ):
+                        user_source = source_name
+                        # Don't break - keep looking in case there's a USB/Bluetooth device
+                        # USB/Bluetooth devices typically have "usb" or "bluez" in the name
+                        if (
+                            "usb" in source_name.lower()
+                            or "bluez" in source_name.lower()
+                        ):
+                            break  # Prefer external devices
+
+            if user_source:
+                # Use pw-metadata for persistent default (pactl gets overridden by PipeWire)
+                subprocess.run(
+                    [
+                        "pw-metadata",
+                        "-n",
+                        "default",
+                        "0",
+                        "default.audio.source",
+                        f'{{"name":"{user_source}"}}',
+                    ],
+                    capture_output=True,
+                )
+                logger.info(
+                    f"[{self._instance_id}] Restored default source via pw-metadata: {user_source}"
+                )
+            else:
+                logger.warning(
+                    f"[{self._instance_id}] No user audio source found to restore"
+                )
+
+        except Exception as e:
+            logger.warning(
+                f"[{self._instance_id}] Failed to restore default source: {e}"
+            )
+
+    async def _move_user_browser_to_original_source(self, target_source: str) -> None:
+        """
+        DEPRECATED: This function is no longer used.
+
+        We no longer move browser streams because:
+        1. The bot's Chrome uses PULSE_SOURCE env var - already routed correctly
+        2. The user's Chrome should stay on whatever source it was using
+        3. Moving streams is error-prone and breaks user's audio
+
+        Keeping this function stub for backwards compatibility.
+        """
+        logger.debug(
+            f"[{self._instance_id}] _move_user_browser_to_original_source called but disabled"
+        )
+        return
+
+        # DISABLED CODE BELOW - kept for reference
+        import subprocess
+
+        try:
+            # Get the index for the target source
+            result = subprocess.run(
+                ["pactl", "list", "sources", "short"], capture_output=True, text=True
+            )
+
+            target_index = None
+            for line in result.stdout.strip().split("\n"):
+                if target_source in line:
+                    target_index = line.split("\t")[0]
+                    break
+
+            if not target_index:
+                logger.warning(
+                    f"[{self._instance_id}] Could not find index for source: {target_source}"
+                )
+                return
+
+            # Get all source outputs
+            result = subprocess.run(
+                ["pactl", "list", "source-outputs"], capture_output=True, text=True
+            )
+
+            # Helper to check if a PID belongs to our browser (including child processes)
+            def is_our_browser_pid(audio_pid: str) -> bool:
+                """Check if audio_pid is our browser or a child of our browser."""
+                if not self._browser_pid or not audio_pid:
+                    return False
+
+                try:
+                    audio_pid_int = int(audio_pid)
+
+                    # Direct match
+                    if audio_pid_int == self._browser_pid:
+                        return True
+
+                    # Check if audio process is a child of our browser
+                    # Chrome's audio service runs as a subprocess with our browser as parent
+                    try:
+                        import psutil
+
+                        proc = psutil.Process(audio_pid_int)
+                        # Check parent chain (up to 3 levels)
+                        for _ in range(3):
+                            parent = proc.parent()
+                            if parent is None:
+                                break
+                            if parent.pid == self._browser_pid:
+                                return True
+                            proc = parent
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, ImportError):
+                        pass
+
+                    # Fallback: check via /proc filesystem
+                    try:
+                        with open(f"/proc/{audio_pid}/stat", "r") as f:
+                            stat = f.read().split()
+                            ppid = int(stat[3])  # Parent PID is field 4 (0-indexed: 3)
+                            if ppid == self._browser_pid:
+                                return True
+                    except (FileNotFoundError, IndexError, ValueError):
+                        pass
+
+                except (ValueError, TypeError):
+                    pass
+
+                return False
+
+            current_output_id = None
+            current_source = None
+            current_pid = None
+            is_browser = False
+
+            for line in result.stdout.split("\n"):
+                line = line.strip()
+
+                if line.startswith("Source Output #"):
+                    # Process previous output
+                    if current_output_id and is_browser and current_source:
+                        if "meet_bot" in str(current_source).lower():
+                            # This browser is on meetbot mic - check if it's ours
+                            if not is_our_browser_pid(current_pid):
+                                # This is user's browser - move to their source
+                                subprocess.run(
+                                    [
+                                        "pactl",
+                                        "move-source-output",
+                                        current_output_id,
+                                        target_index,
+                                    ],
+                                    capture_output=True,
+                                )
+                                logger.info(
+                                    f"[{self._instance_id}] Moved user browser stream {current_output_id} "
+                                    f"(PID {current_pid}) to {target_source}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"[{self._instance_id}] Keeping our browser stream {current_output_id} "
+                                    f"(PID {current_pid}, parent {self._browser_pid}) on meetbot mic"
+                                )
+
+                    # Start new output
+                    current_output_id = line.split("#")[1]
+                    current_source = None
+                    current_pid = None
+                    is_browser = False
+
+                elif "Source:" in line:
+                    current_source = (
+                        line.split(":", 1)[1].strip() if ":" in line else ""
+                    )
+
+                elif "application.name" in line.lower():
+                    app = line.lower()
+                    if "chrome" in app or "chromium" in app or "firefox" in app:
+                        is_browser = True
+
+                elif "application.process.id" in line.lower():
+                    try:
+                        current_pid = line.split("=")[1].strip().strip('"')
+                    except (IndexError, ValueError):
+                        pass
+
+            # Don't forget last output
+            if current_output_id and is_browser and current_source:
+                if "meet_bot" in str(current_source).lower():
+                    if not is_our_browser_pid(current_pid):
+                        subprocess.run(
+                            [
+                                "pactl",
+                                "move-source-output",
+                                current_output_id,
+                                target_index,
+                            ],
+                            capture_output=True,
+                        )
+                        logger.info(
+                            f"[{self._instance_id}] Moved user browser stream {current_output_id} "
+                            f"(PID {current_pid}) to {target_source}"
+                        )
+
+        except Exception as e:
+            logger.warning(f"[{self._instance_id}] Failed to move browser streams: {e}")
 
     async def _start_video_stream(
         self, video_device: str, video_enabled: bool = False
@@ -618,10 +1259,8 @@ class GoogleMeetController:
             if self._device_manager:
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
-                except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in launch_browser (device cleanup): {e}"
-                    )
+                except Exception:
+                    pass
                 self._device_manager = None
                 self._devices = None
 
@@ -678,9 +1317,225 @@ class GoogleMeetController:
         """
         )
 
-    async def sign_in_google(self) -> bool:
-        """Sign in to Google using Red Hat SSO. Delegates to MeetSignIn."""
-        return await self._sign_in.sign_in_google()
+    async def sign_in_google(self) -> bool:  # noqa: C901
+        """
+        Sign in to Google using Red Hat SSO.
+
+        Handles the OAuth flow:
+        1. Click "Sign in" on Meet page
+        2. Enter email on Google login
+        3. Redirect to Red Hat SSO
+        4. Enter username/password
+        5. Return to Meet
+
+        Returns:
+            True if sign-in successful, False otherwise.
+        """
+        from tool_modules.aa_meet_bot.src.config import get_google_credentials
+
+        if not self.page:
+            logger.error("Browser not initialized")
+            return False
+
+        try:
+            # Get credentials from redhatter API
+            logger.info("Fetching credentials from redhatter API...")
+            username, password = await get_google_credentials(
+                self.config.bot_account.email
+            )
+
+            # Check if we need to sign in - look for Sign in button on Meet page
+            # Google Meet uses a div[role="button"] with "Sign in" text
+            sign_in_button = None
+
+            # Try to find the Sign in button using Playwright locator (better for text matching)
+            try:
+                # Use locator for better text matching
+                locator = self.page.locator('div[role="button"]:has-text("Sign in")')
+                if await locator.count() > 0:
+                    sign_in_button = locator.first
+                    logger.info("Found Sign in button (div role=button)")
+            except Exception as e:
+                logger.debug(f"Locator search failed: {e}")
+
+            # Fallback: try span with Sign in text
+            if not sign_in_button:
+                try:
+                    locator = self.page.locator('span:has-text("Sign in")').first
+                    if await locator.count() > 0:
+                        sign_in_button = locator
+                        logger.info("Found Sign in span")
+                except Exception:
+                    pass
+
+            if sign_in_button:
+                logger.info("Clicking Sign in button...")
+                await sign_in_button.click()
+                await asyncio.sleep(3)
+
+            # Step 1: Wait for Google login page and enter email
+            try:
+                logger.info("Waiting for Google login page...")
+                email_input = await self.page.wait_for_selector(
+                    "#identifierId", timeout=15000  # Specific Google email input ID
+                )
+                if email_input:
+                    logger.info(f"Entering email: {self.config.bot_account.email}")
+                    await email_input.fill(self.config.bot_account.email)
+                    await asyncio.sleep(1)
+
+                    # Click Next button
+                    next_button = await self.page.wait_for_selector(
+                        "#identifierNext", timeout=5000
+                    )
+                    if next_button:
+                        logger.info("Clicking Next...")
+                        await next_button.click()
+                        await asyncio.sleep(5)  # Wait for redirect to SSO
+            except Exception as e:
+                logger.warning(f"Google email input not found: {e}")
+                return False
+
+            # Step 2: Wait for Red Hat SSO page and enter credentials
+            try:
+                logger.info("Waiting for Red Hat SSO page...")
+                saml_username = await self.page.wait_for_selector(
+                    "#username", timeout=15000  # Red Hat SSO username field
+                )
+                if saml_username:
+                    logger.info("Red Hat SSO page detected - using aa_sso helper")
+
+                    # Use the centralized SSO form filler from aa_sso module
+                    try:
+                        from tool_modules.aa_sso.src.tools_basic import fill_sso_form
+
+                        await fill_sso_form(self.page, username, password)
+                    except ImportError:
+                        # Fallback to inline implementation if aa_sso not available
+                        logger.warning(
+                            "aa_sso module not available, using inline SSO form fill"
+                        )
+                        await saml_username.fill(username)
+                        await asyncio.sleep(0.5)
+                        saml_password = await self.page.wait_for_selector(
+                            "#password", timeout=5000
+                        )
+                        if saml_password:
+                            await saml_password.fill(password)
+                            await asyncio.sleep(0.5)
+                        submit_button = await self.page.wait_for_selector(
+                            "#submit", timeout=5000
+                        )
+                        if submit_button:
+                            await submit_button.click()
+
+                    await asyncio.sleep(10)  # Wait for SSO processing and redirect
+                    logger.info("SSO login submitted, waiting for redirect to Meet...")
+
+                    # Wait for redirect back to Meet (or intermediate verification page)
+                    try:
+                        # Wait up to 30s for either Meet or a verification page
+                        for _ in range(30):
+                            await asyncio.sleep(1)
+                            current_url = self.page.url
+
+                            # Check for Google "Verify it's you" / account confirmation page
+                            if (
+                                "speedbump" in current_url
+                                or "samlconfirmaccount" in current_url
+                            ):
+                                logger.info(
+                                    "Google verification page detected, clicking Continue..."
+                                )
+                                try:
+                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
+                                    # Try multiple selectors to find the actual clickable button
+                                    continue_selectors = [
+                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
+                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
+                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
+                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
+                                    ]
+
+                                    clicked = False
+                                    for selector in continue_selectors:
+                                        try:
+                                            btn = self.page.locator(selector).first
+                                            if await btn.count() > 0:
+                                                logger.info(
+                                                    f"Found Continue button with selector: {selector}"
+                                                )
+                                                await btn.click(
+                                                    force=True, timeout=5000
+                                                )
+                                                logger.info(
+                                                    "Clicked Continue on verification page"
+                                                )
+                                                clicked = True
+                                                await asyncio.sleep(3)
+                                                break
+                                        except Exception as e:
+                                            logger.debug(
+                                                f"Selector {selector} failed: {e}"
+                                            )
+
+                                    if not clicked:
+                                        # Last resort: find by role and text
+                                        logger.info(
+                                            "Trying role-based selector for Continue..."
+                                        )
+                                        await self.page.get_by_role(
+                                            "button", name="Continue"
+                                        ).click(timeout=5000)
+                                        logger.info(
+                                            "Clicked Continue via role selector"
+                                        )
+                                        await asyncio.sleep(3)
+
+                                except Exception as e:
+                                    logger.warning(f"Failed to click Continue: {e}")
+
+                            # Check if we're back on Meet
+                            if "meet.google.com" in self.page.url:
+                                logger.info("Successfully signed in via Red Hat SSO")
+                                return True
+
+                        # Timeout - check final state
+                        if "meet.google.com" in self.page.url:
+                            logger.info("Already on Meet page after SSO")
+                            return True
+                        raise Exception("Timeout waiting for redirect to Meet")
+                    except Exception:
+                        # Check if we're already on meet
+                        if "meet.google.com" in self.page.url:
+                            logger.info("Already on Meet page after SSO")
+                            return True
+                        raise
+
+            except Exception as e:
+                logger.warning(f"Red Hat SSO login failed: {e}")
+                self.state.errors.append(f"SSO login failed: {e}")
+                return False
+
+            # Check if we're now signed in (back on Meet page)
+            current_url = self.page.url
+            if "meet.google.com" in current_url:
+                # Check if sign-in link is gone
+                sign_in_link = await self.page.query_selector(
+                    self.SELECTORS["sign_in_link"]
+                )
+                if not sign_in_link:
+                    logger.info("Sign-in appears successful")
+                    return True
+
+            logger.warning("Sign-in flow completed but status unclear")
+            return True
+
+        except Exception as e:
+            error_msg = f"Sign-in failed: {e}"
+            logger.error(error_msg)
+            self.state.errors.append(error_msg)
+            return False
 
     async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901
         """
@@ -935,10 +1790,8 @@ class GoogleMeetController:
                                     f"[JOIN] Found '{btn_text}' button on retry"
                                 )
                                 break
-                    except Exception as e:
-                        logger.debug(
-                            f"Suppressed error in join_meeting (button retry): {e}"
-                        )
+                    except Exception:
+                        pass
 
             if join_button:
                 logger.info("[JOIN] Clicking join button...")
@@ -981,10 +1834,8 @@ class GoogleMeetController:
                             # Click on the main meeting area to close dialog
                             await self.page.click("body", position={"x": 100, "y": 100})
                             await asyncio.sleep(0.5)
-                        except Exception as e:
-                            logger.debug(
-                                f"Suppressed error in join_meeting (dialog dismiss click): {e}"
-                            )
+                        except Exception:
+                            pass
                 except Exception as e:
                     logger.debug(f"No device dialog or error: {e}")
 
@@ -1074,10 +1925,8 @@ class GoogleMeetController:
                     )
                     self.state.captions_enabled = True
                     return True
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in enable_captions (check existing): {e}"
-                )
+            except Exception:
+                pass
 
             # Find the "Turn on captions" button
             try:
@@ -1166,8 +2015,81 @@ class GoogleMeetController:
             return False
 
     async def _select_camera_in_meeting(self) -> bool:
-        """Select MeetBot camera in meeting. Delegates to MeetDevices."""
-        return await self._meet_devices.select_camera_in_meeting()
+        """Select MeetBot camera via Video settings dropdown in the meeting.
+
+        This is used AFTER joining when camera needs to be re-enabled.
+        The Video settings button opens a dropdown to select the camera.
+        """
+        if not self.page:
+            return False
+
+        # Retry up to 3 times with increasing delays
+        for attempt in range(3):
+            try:
+                if attempt > 0:
+                    logger.info(f"[CAMERA-SELECT] Retry attempt {attempt + 1}/3...")
+                    await asyncio.sleep(2.0)  # Wait before retry
+
+                logger.info("[CAMERA-SELECT] Opening Video settings dropdown...")
+
+                # Wait for the Video settings button to be visible and clickable
+                video_settings = self.page.locator(
+                    'button[aria-label="Video settings"]'
+                )
+
+                try:
+                    # Wait up to 5 seconds for button to be visible
+                    await video_settings.first.wait_for(state="visible", timeout=5000)
+                except Exception:
+                    logger.warning(
+                        f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})"
+                    )
+                    continue
+
+                # Click with a shorter timeout
+                await video_settings.first.click(timeout=5000)
+                await asyncio.sleep(0.8)  # Wait for dropdown to open
+
+                # Look for MeetBot in the dropdown menu
+                meetbot_pattern = "MeetBot"
+
+                # Try to find and click the MeetBot option
+                menu_items = self.page.locator(
+                    '[role="menuitem"], [role="menuitemradio"], li'
+                )
+                count = await menu_items.count()
+                logger.info(f"[CAMERA-SELECT] Found {count} menu items")
+
+                for i in range(count):
+                    try:
+                        item = menu_items.nth(i)
+                        text = await item.text_content(timeout=1000) or ""
+                        if meetbot_pattern.lower() in text.lower():
+                            logger.info(f"[CAMERA-SELECT] Found MeetBot option: {text}")
+                            await item.click(timeout=3000)
+                            await asyncio.sleep(0.5)
+                            logger.info("[CAMERA-SELECT] MeetBot camera selected")
+                            return True
+                    except Exception:
+                        continue
+
+                # Close dropdown if we didn't find MeetBot
+                logger.warning(
+                    "[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape"
+                )
+                await self.page.keyboard.press("Escape")
+                await asyncio.sleep(0.3)
+
+            except Exception as e:
+                logger.warning(f"[CAMERA-SELECT] Attempt {attempt + 1} failed: {e}")
+                # Try to close any open dropdown
+                try:
+                    await self.page.keyboard.press("Escape")
+                except Exception:
+                    pass
+
+        logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
+        return False
 
     async def _toggle_mute(self, mute: bool = True) -> bool:
         """Toggle microphone mute state."""
@@ -1249,23 +2171,546 @@ class GoogleMeetController:
 
         return False
 
-    # ==================== Device Selection (delegated to MeetDevices) ====================
-
     async def _set_devices_via_js(self) -> bool:
-        """Set devices via JavaScript MediaDevices API. Delegates to MeetDevices."""
-        return await self._meet_devices.set_devices_via_js()
+        """
+        Programmatically set audio/video devices using JavaScript MediaDevices API.
+
+        This requests getUserMedia with specific device constraints, which tells
+        Chrome to use our MeetBot devices. This is more reliable than clicking
+        UI elements.
+
+        Returns:
+            True if devices were set successfully.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # JavaScript to find MeetBot devices and request streams with them
+            js_set_devices = """
+            async () => {
+                const results = { camera: false, microphone: false, speaker: false, errors: [] };
+
+                try {
+                    // Get all devices
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+
+                    // Find MeetBot devices
+                    const meetbotCamera = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
+                    const meetbotMic = devices.find(d => d.kind === 'audioinput' && d.label.includes('MeetBot'));
+                    const meetbotSpeaker = devices.find(d => d.kind === 'audiooutput' && d.label.includes('MeetBot'));
+
+                    console.log('[MeetBot] Found devices:', {
+                        camera: meetbotCamera?.label,
+                        mic: meetbotMic?.label,
+                        speaker: meetbotSpeaker?.label
+                    });
+
+                    // Request camera stream with MeetBot device
+                    if (meetbotCamera) {
+                        try {
+                            const videoStream = await navigator.mediaDevices.getUserMedia({
+                                video: { deviceId: { exact: meetbotCamera.deviceId } }
+                            });
+                            // Keep the stream active briefly so Chrome registers it as the selected device
+                            await new Promise(r => setTimeout(r, 500));
+                            videoStream.getTracks().forEach(t => t.stop());
+                            results.camera = true;
+                            console.log('[MeetBot] Camera set to:', meetbotCamera.label);
+                        } catch (e) {
+                            results.errors.push('Camera: ' + e.message);
+                        }
+                    }
+
+                    // Request microphone stream with MeetBot device
+                    if (meetbotMic) {
+                        try {
+                            const audioStream = await navigator.mediaDevices.getUserMedia({
+                                audio: { deviceId: { exact: meetbotMic.deviceId } }
+                            });
+                            await new Promise(r => setTimeout(r, 500));
+                            audioStream.getTracks().forEach(t => t.stop());
+                            results.microphone = true;
+                            console.log('[MeetBot] Microphone set to:', meetbotMic.label);
+                        } catch (e) {
+                            results.errors.push('Microphone: ' + e.message);
+                        }
+                    }
+
+                    // Set speaker output (if supported)
+                    if (meetbotSpeaker && typeof document.createElement('audio').setSinkId === 'function') {
+                        try {
+                            // Create a temporary audio element to set the sink
+                            const audio = document.createElement('audio');
+                            await audio.setSinkId(meetbotSpeaker.deviceId);
+                            results.speaker = true;
+                            console.log('[MeetBot] Speaker set to:', meetbotSpeaker.label);
+                        } catch (e) {
+                            results.errors.push('Speaker: ' + e.message);
+                        }
+                    }
+
+                } catch (e) {
+                    results.errors.push('General: ' + e.message);
+                }
+
+                return results;
+            }
+            """
+
+            result = await self.page.evaluate(js_set_devices)
+            logger.info(f"[DEVICES-JS] Programmatic device selection: {result}")
+
+            if result.get("errors"):
+                for err in result["errors"]:
+                    logger.warning(f"[DEVICES-JS] Error: {err}")
+
+            return result.get("camera") or result.get("microphone")
+
+        except Exception as e:
+            logger.warning(f"[DEVICES-JS] Failed to set devices via JS: {e}")
+            return False
 
     async def _select_meetbot_devices(self) -> dict:
-        """Select all MeetBot virtual devices. Delegates to MeetDevices."""
-        return await self._meet_devices.select_meetbot_devices()
+        """
+        Select all MeetBot virtual devices (camera, microphone, speaker) in Google Meet.
+
+        This opens the device settings and selects our virtual devices to ensure
+        the meeting uses our controlled audio/video pipeline.
+
+        Returns:
+            Dict with results for each device type.
+        """
+        results = {"camera": False, "microphone": False, "speaker": False}
+
+        if not self.page:
+            return results
+
+        try:
+            # Get the device names we're looking for
+            mic_name = None
+            speaker_name = None
+            if self._devices:
+                # The source name is what appears as microphone in Chrome
+                mic_name = self._devices.source_name
+                # The sink name is what appears as speaker in Chrome
+                speaker_name = self._devices.sink_name
+                logger.info(
+                    f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}"
+                )
+
+            # Step 1: Select the camera
+            logger.info("[DEVICES] Selecting MeetBot camera...")
+            results["camera"] = await self._select_meetbot_camera()
+
+            # Step 2: Select the microphone
+            if mic_name:
+                logger.info("[DEVICES] Selecting MeetBot microphone...")
+                results["microphone"] = await self._select_audio_device(
+                    "microphone", mic_name
+                )
+
+            # Step 3: Select the speaker
+            if speaker_name:
+                logger.info("[DEVICES] Selecting MeetBot speaker...")
+                results["speaker"] = await self._select_audio_device(
+                    "speaker", speaker_name
+                )
+
+            logger.info(f"[DEVICES] Selection results: {results}")
+            return results
+
+        except Exception as e:
+            logger.warning(f"[DEVICES] Failed to select devices: {e}")
+            return results
+
+    async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
+        """
+        Select an audio device (microphone or speaker) in Google Meet's UI.
+
+        Args:
+            device_type: "microphone" or "speaker"
+            device_name: The PulseAudio device name to look for (e.g., "MeetBot_meet_bot_1_...")
+
+        Returns:
+            True if device was selected, False otherwise.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # First, find the device in the browser's device list
+            js_find_device = """
+            async () => {{
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const matches = devices.filter(d => d.kind === '{kind}');
+                console.log('Available {device_type}s:', matches.map(d => d.label));
+                // Look for MeetBot device
+                const meetbot = matches.find(d => d.label.includes('MeetBot'));
+                return meetbot ? {{ label: meetbot.label, deviceId: meetbot.deviceId }} : null;
+            }}
+            """
+            device_info = await self.page.evaluate(js_find_device)
+
+            if not device_info:
+                logger.info(f"[AUDIO] MeetBot {device_type} not found in browser")
+                return False
+
+            device_label = device_info.get("label", "")
+            logger.info(f"[AUDIO] Found MeetBot {device_type}: {device_label}")
+
+            # Step 1: Open the appropriate dropdown using aria-label (stable attribute)
+            if device_type == "microphone":
+                dropdown_selector = 'button[aria-label^="Microphone:"]'
+            else:  # speaker
+                dropdown_selector = 'button[aria-label^="Speaker:"]'
+
+            try:
+                dropdown_btn = self.page.locator(dropdown_selector)
+                if await dropdown_btn.count() > 0:
+                    await dropdown_btn.first.click()
+                    logger.info(
+                        f"[AUDIO] Opened {device_type} dropdown via: {dropdown_selector}"
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.info(f"[AUDIO] Could not find {device_type} dropdown button")
+                    return False
+            except Exception as e:
+                logger.info(f"[AUDIO] Could not open {device_type} dropdown: {e}")
+                return False
+
+            # Step 2: Wait for dropdown menu to appear
+            await asyncio.sleep(0.3)
+
+            # Step 3: Find and click the MeetBot option using stable selectors
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
+            is_speaker = device_type == "speaker"
+            js_click_option = """
+            async (args) => {
+                const { searchText, excludeMic } = args;
+                // Find all menu items with role="menuitemradio" and data-device-id
+                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
+
+                for (const item of menuItems) {
+                    // Get the device name from span[jsname="K4r5F"]
+                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
+                    if (!nameSpan) continue;
+
+                    const deviceName = nameSpan.textContent || '';
+
+                    // Check if this is a MeetBot device
+                    if (!deviceName.includes(searchText)) continue;
+
+                    // For speaker, exclude microphone entries (those ending with _Mic)
+                    if (excludeMic && deviceName.includes('_Mic')) continue;
+
+                    // Check if visible
+                    const rect = item.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        item.click();
+                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
+                    }
+                }
+
+                // Debug: list all visible menu items
+                const allNames = Array.from(menuItems).map(item => {
+                    const span = item.querySelector('span[jsname="K4r5Ff"]');
+                    return span ? span.textContent : 'no-name';
+                });
+
+                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
+            }
+            """
+            js_result = await self.page.evaluate(
+                js_click_option, {"searchText": "MeetBot", "excludeMic": is_speaker}
+            )
+            if js_result and js_result.get("success"):
+                logger.info(
+                    f"[AUDIO] Selected {device_type}: {js_result.get('deviceName')}"
+                )
+                await asyncio.sleep(0.5)
+                return True
+
+            logger.info(f"[AUDIO] {device_type} selection failed: {js_result}")
+
+            # Close dropdown if we couldn't select
+            await self.page.keyboard.press("Escape")
+            logger.info(f"[AUDIO] MeetBot {device_type} found but couldn't click in UI")
+            return False
+
+        except Exception as e:
+            logger.warning(f"[AUDIO] Failed to select {device_type}: {e}")
+            return False
 
     async def _select_meetbot_camera(self) -> bool:
-        """Select MeetBot virtual camera. Delegates to MeetDevices."""
-        return await self._meet_devices.select_meetbot_camera()
+        """
+        Select the MeetBot virtual camera in Google Meet's device settings.
+
+        Opens the camera dropdown in Google Meet's pre-join screen and selects
+        the MeetBot virtual camera.
+
+        Returns:
+            True if camera was selected, False otherwise.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # First, get the MeetBot device name from v4l2
+            meetbot_device_name = None
+            if self._devices and self._devices.video_device:
+                import subprocess
+
+                result = subprocess.run(
+                    ["v4l2-ctl", "--device", self._devices.video_device, "--all"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split("\n"):
+                        if "Card type" in line:
+                            meetbot_device_name = line.split(":")[-1].strip()
+                            break
+
+            logger.info(
+                f"[CAMERA] Looking for MeetBot device: {meetbot_device_name or 'any'}"
+            )
+
+            # Use JavaScript to find the MeetBot camera in the browser's device list
+            js_find_camera = """
+            async () => {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === 'videoinput');
+                console.log('Available cameras:', cameras.map(c => c.label));
+                const meetbot = cameras.find(c => c.label.includes('MeetBot'));
+                return meetbot ? { label: meetbot.label, deviceId: meetbot.deviceId } : null;
+            }
+            """
+            meetbot_info = await self.page.evaluate(js_find_camera)
+
+            if not meetbot_info:
+                logger.info("[CAMERA] MeetBot camera not found in browser device list")
+                # Log available cameras for debugging
+                js_list_cameras = """
+                async () => {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    return devices.filter(d => d.kind === 'videoinput').map(c => c.label);
+                }
+                """
+                cameras = await self.page.evaluate(js_list_cameras)
+                logger.info(f"[CAMERA] Available cameras: {cameras}")
+                return False
+
+            camera_label = meetbot_info.get("label", "")
+            logger.info(f"[CAMERA] Found MeetBot in browser: {camera_label}")
+
+            # Step 1: Open camera dropdown using aria-label (stable attribute)
+            dropdown_selector = 'button[aria-label^="Camera:"]'
+            try:
+                dropdown_btn = self.page.locator(dropdown_selector)
+                if await dropdown_btn.count() > 0:
+                    await dropdown_btn.first.click()
+                    logger.info(
+                        f"[CAMERA] Opened camera dropdown via: {dropdown_selector}"
+                    )
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.info("[CAMERA] Could not find camera dropdown button")
+                    return False
+            except Exception as e:
+                logger.info(f"[CAMERA] Could not open camera dropdown: {e}")
+                return False
+
+            # Step 2: Wait for dropdown menu to appear
+            await asyncio.sleep(0.3)
+
+            # Step 3: Find and click the MeetBot option using stable selectors
+            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
+            js_click_option = """
+            async (searchText) => {
+                // Find all menu items with role="menuitemradio" and data-device-id
+                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
+
+                for (const item of menuItems) {
+                    // Get the device name from span[jsname="K4r5F"]
+                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
+                    if (!nameSpan) continue;
+
+                    const deviceName = nameSpan.textContent || '';
+
+                    // Check if this is a MeetBot device
+                    if (!deviceName.includes(searchText)) continue;
+
+                    // Check if visible
+                    const rect = item.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0) {
+                        item.click();
+                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
+                    }
+                }
+
+                // Debug: list all visible menu items
+                const allNames = Array.from(menuItems).map(item => {
+                    const span = item.querySelector('span[jsname="K4r5Ff"]');
+                    return span ? span.textContent : 'no-name';
+                });
+
+                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
+            }
+            """
+            js_result = await self.page.evaluate(js_click_option, "MeetBot")
+            if js_result and js_result.get("success"):
+                logger.info(f"[CAMERA] Selected: {js_result.get('deviceName')}")
+                await asyncio.sleep(0.5)
+                return True
+
+            logger.info(f"[CAMERA] Selection failed: {js_result}")
+
+            # Step 3: Try using JavaScript to programmatically select the camera
+            # This uses the MediaDevices API to request the specific camera
+            logger.info("[CAMERA] Attempting programmatic camera selection via JS...")
+            js_select_camera = """
+            async () => {{
+                try {{
+                    // Get the MeetBot device
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const meetbot = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
+                    if (!meetbot) return {{ success: false, error: 'MeetBot not found' }};
+
+                    // Request a stream with this specific device
+                    // This should trigger Google Meet to switch to this camera
+                    const stream = await navigator.mediaDevices.getUserMedia({{
+                        video: {{ deviceId: {{ exact: meetbot.deviceId }} }}
+                    }});
+
+                    // Stop the stream - we just wanted to trigger the switch
+                    stream.getTracks().forEach(t => t.stop());
+
+                    return {{ success: true, deviceId: meetbot.deviceId, label: meetbot.label }};
+                }} catch (e) {{
+                    return {{ success: false, error: e.message }};
+                }}
+            }}
+            """
+            js_result = await self.page.evaluate(js_select_camera)
+            if js_result and js_result.get("success"):
+                logger.info(
+                    f"[CAMERA] Programmatically selected: {js_result.get('label')}"
+                )
+                await asyncio.sleep(1)
+                return True
+            else:
+                logger.info(f"[CAMERA] Programmatic selection failed: {js_result}")
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"[CAMERA] Failed to select MeetBot camera: {e}")
+            return False
 
     async def _dismiss_chrome_sync_dialog(self) -> bool:
-        """Dismiss Chrome sync dialog. Delegates to MeetSignIn."""
-        return await self._sign_in.dismiss_chrome_sync_dialog()
+        """
+        Dismiss the "Sign in to Chromium?" dialog that appears after Google SSO login.
+
+        This dialog offers to sync Chrome with the Google account. We dismiss it by
+        clicking "Use Chromium without an account" or pressing Escape.
+
+        Returns:
+            True if dialog was dismissed, False if not present.
+        """
+        if not self.page:
+            return False
+
+        try:
+            # Wait a moment for the dialog to appear (it can be delayed)
+            logger.info("Checking for Chrome sync dialog (waiting up to 5s)...")
+            await asyncio.sleep(2)
+
+            # Look for the "Sign in to Chromium?" dialog - check page content
+            page_content = await self.page.content()
+            dialog_found = False
+
+            if (
+                "Sign in to Chromium" in page_content
+                or "Sign in to Chrome" in page_content
+            ):
+                dialog_found = True
+                logger.info("Chrome sync dialog detected via page content")
+
+            if not dialog_found:
+                # Also try locator-based detection
+                dialog_selectors = [
+                    'text="Sign in to Chromium?"',
+                    'text="Sign in to Chrome?"',
+                    'text="Turn on sync?"',
+                    ':text("Sign in to Chromium")',
+                ]
+
+                for selector in dialog_selectors:
+                    try:
+                        if await self.page.locator(selector).count() > 0:
+                            dialog_found = True
+                            logger.info(f"Chrome sync dialog detected: {selector}")
+                            break
+                    except Exception:
+                        pass
+
+            if not dialog_found:
+                logger.info("No Chrome sync dialog found")
+                return False
+
+            # Try to click "Use Chromium without an account" or similar dismiss button
+            dismiss_selectors = [
+                # Exact button text matches
+                'button:has-text("Use Chromium without an account")',
+                'button:has-text("Use Chrome without an account")',
+                # Role-based
+                'role=button[name="Use Chromium without an account"]',
+                # Partial text matches
+                'button:has-text("without an account")',
+                'button:has-text("No thanks")',
+                'button:has-text("Cancel")',
+                'button:has-text("Not now")',
+                # The X close button
+                'button[aria-label="Close"]',
+                'button[aria-label="Dismiss"]',
+            ]
+
+            for selector in dismiss_selectors:
+                try:
+                    btn = self.page.locator(selector)
+                    count = await btn.count()
+                    if count > 0:
+                        logger.info(f"Found dismiss button: {selector} (count={count})")
+                        await btn.first.click(force=True, timeout=5000)
+                        await asyncio.sleep(1)
+                        logger.info("Chrome sync dialog dismissed")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Dismiss button {selector} failed: {e}")
+
+            # Try Playwright's get_by_role
+            try:
+                logger.info("Trying get_by_role for dismiss button...")
+                await self.page.get_by_role(
+                    "button", name="Use Chromium without an account"
+                ).click(timeout=3000)
+                logger.info("Chrome sync dialog dismissed via get_by_role")
+                return True
+            except Exception as e:
+                logger.debug(f"get_by_role failed: {e}")
+
+            # Fallback: press Escape to close
+            logger.info("Trying Escape key to dismiss Chrome sync dialog")
+            await self.page.keyboard.press("Escape")
+            await asyncio.sleep(1)
+            return True
+
+        except Exception as e:
+            logger.warning(f"Error handling Chrome sync dialog: {e}")
+            return False
 
     async def _handle_permissions_dialog(self) -> bool:
         """
@@ -1394,10 +2839,8 @@ class GoogleMeetController:
                         )
                         await asyncio.sleep(0.3)
                         return  # Only dismiss one popup at a time
-                except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in _dismiss_info_popups (dialog click '{text}'): {e}"
-                    )
+                except Exception:
+                    pass
 
             # Fallback: try button text without dialog constraint, but only for very safe texts
             for text in ["Got it", "Not now"]:
@@ -1409,10 +2852,8 @@ class GoogleMeetController:
                         logger.info(f"Dismissed popup by clicking '{text}' button")
                         await asyncio.sleep(0.3)
                         return
-                except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in _dismiss_info_popups (fallback click '{text}'): {e}"
-                    )
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.debug(f"Error dismissing info popups: {e}")
@@ -1420,16 +2861,332 @@ class GoogleMeetController:
     async def start_caption_capture(
         self, callback: Callable[[CaptionEntry], None]
     ) -> None:
-        """Start capturing captions via DOM observation. Delegates to MeetCaptions."""
-        await self._captions.start_caption_capture(callback)
+        """
+        Start capturing captions via DOM observation.
+
+        Args:
+            callback: Function to call with each new caption entry.
+        """
+        if not self.page or self._caption_observer_running:
+            return
+
+        self._caption_callback = callback
+        self._caption_observer_running = True
+
+        # Inject DEBOUNCED caption observer with UPDATE-IN-PLACE support
+        # Google Meet corrects text in-place, so we:
+        # 1. Wait for text to "settle" (800ms no changes)
+        # 2. Use UPDATE mode for refinements of the same utterance (not new entries)
+        # 3. Only create NEW entries when speaker changes or it's clearly a new sentence
+        await self.page.evaluate(
+            """
+            () => {
+                window._meetBotCaptions = [];
+                window._meetBotCurrentSpeaker = 'Unknown';
+                window._meetBotLastText = '';
+                window._meetBotDebounceTimer = null;
+                window._meetBotLastEmittedText = '';
+                window._meetBotLastEmittedId = null;  // Track ID for updates
+                window._meetBotLastSpeakerForText = 'Unknown';
+                window._meetBotCaptionIdCounter = 0;
+
+                function findCaptionContainer() {
+                    // Try multiple selectors for the caption container
+                    return document.querySelector('[aria-label="Captions"]') ||
+                           document.querySelector('.a4cQT') ||
+                           document.querySelector('[jsname="dsyhDe"]');
+                }
+
+                function findCaptionTextDiv(container) {
+                    if (!container) return null;
+                    const divs = container.querySelectorAll('div');
+                    let bestDiv = null;
+                    let bestLen = 0;
+                    for (const div of divs) {
+                        if (div.querySelector('button, img')) continue;
+                        const text = div.textContent || '';
+                        if (text.length > bestLen && !text.includes('Jump to')) {
+                            bestLen = text.length;
+                            bestDiv = div;
+                        }
+                    }
+                    return bestDiv;
+                }
+
+                function getSpeaker(container) {
+                    if (!container) return null;
+
+                    // Method 1: Look for speaker name near avatar image
+                    const img = container.querySelector('img');
+                    if (img) {
+                        // Check parent and siblings for name
+                        let parent = img.parentElement;
+                        for (let i = 0; i < 3 && parent; i++) {
+                            const spans = parent.querySelectorAll('span');
+                            for (const span of spans) {
+                                const t = span.textContent.trim();
+                                // Name should be reasonable length, not contain common UI text
+                                if (t && t.length > 1 && t.length < 50 &&
+                                    !t.includes('Jump') && !t.includes('caption') &&
+                                    !t.includes('English') && !t.includes('Live')) {
+                                    return t;
+                                }
+                            }
+                            parent = parent.parentElement;
+                        }
+                    }
+
+                    // Method 2: Look for speaker class patterns
+                    const speakerEl = container.querySelector('.zs7s8d, .KcIKyf, [data-speaker-name]');
+                    if (speakerEl) {
+                        const t = speakerEl.textContent.trim();
+                        if (t && t.length > 1 && t.length < 50) return t;
+                    }
+
+                    return null;
+                }
+
+                // Normalize text for comparison (lowercase, collapse whitespace)
+                function normalizeText(text) {
+                    return (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                }
+
+                // Check if newText is a refinement of oldText (same utterance, just corrected/extended)
+                function isRefinement(oldText, newText) {
+                    if (!oldText) return false;
+                    const oldNorm = normalizeText(oldText);
+                    const newNorm = normalizeText(newText);
+
+                    // Same text (case correction only)
+                    if (oldNorm === newNorm) return true;
+
+                    // New text starts with old text (extension)
+                    if (newNorm.startsWith(oldNorm)) return true;
+
+                    // Old text starts with new text (correction that shortened)
+                    if (oldNorm.startsWith(newNorm)) return true;
+
+                    // Check if they share a significant common prefix (>60% of shorter)
+                    const minLen = Math.min(oldNorm.length, newNorm.length);
+                    let commonLen = 0;
+                    for (let i = 0; i < minLen; i++) {
+                        if (oldNorm[i] === newNorm[i]) commonLen++;
+                        else break;
+                    }
+                    if (commonLen > minLen * 0.6) return true;
+
+                    return false;
+                }
+
+                function emitCaption() {
+                    const text = window._meetBotLastText;
+                    const speaker = window._meetBotLastSpeakerForText || window._meetBotCurrentSpeaker || 'Unknown';
+
+                    if (!text) return;
+
+                    // Check if this is a refinement of the last emitted caption
+                    const lastEmitted = window._meetBotLastEmittedText;
+                    const lastId = window._meetBotLastEmittedId;
+
+                    if (lastId !== null && isRefinement(lastEmitted, text)) {
+                        // UPDATE existing caption instead of creating new one
+                        window._meetBotCaptions.push({
+                            id: lastId,
+                            speaker: speaker,
+                            text: text,
+                            ts: Date.now(),
+                            isUpdate: true  // Signal to update, not append
+                        });
+                        console.log('[MeetBot] Caption UPDATED:', speaker, text.substring(0, 50));
+                    } else {
+                        // NEW caption entry
+                        const newId = ++window._meetBotCaptionIdCounter;
+                        window._meetBotCaptions.push({
+                            id: newId,
+                            speaker: speaker,
+                            text: text,
+                            ts: Date.now(),
+                            isUpdate: false
+                        });
+                        window._meetBotLastEmittedId = newId;
+                        console.log('[MeetBot] Caption NEW:', speaker, text.substring(0, 50));
+                    }
+                    window._meetBotLastEmittedText = text;
+                }
+
+                const observer = new MutationObserver((mutations) => {
+                    const container = findCaptionContainer();
+                    if (!container) return;
+
+                    // Always try to get the current speaker
+                    const speaker = getSpeaker(container);
+                    if (speaker) {
+                        window._meetBotCurrentSpeaker = speaker;
+                        // Store the speaker associated with the current text being built
+                        window._meetBotLastSpeakerForText = speaker;
+                    }
+
+                    const captionDiv = findCaptionTextDiv(container);
+                    if (!captionDiv) return;
+
+                    const fullText = (captionDiv.textContent || '').trim();
+                    if (!fullText) return;
+
+                    // Detect speaker change - force new caption
+                    const lastSpeaker = window._meetBotLastSpeakerForText;
+                    if (speaker && lastSpeaker && speaker !== lastSpeaker) {
+                        // Speaker changed - emit previous caption and start fresh
+                        if (window._meetBotDebounceTimer) {
+                            clearTimeout(window._meetBotDebounceTimer);
+                            emitCaption();
+                        }
+                        window._meetBotLastEmittedText = '';
+                        window._meetBotLastEmittedId = null;
+                        window._meetBotLastSpeakerForText = speaker;
+                    }
+
+                    // Text changed - reset debounce timer
+                    window._meetBotLastText = fullText;
+
+                    if (window._meetBotDebounceTimer) {
+                        clearTimeout(window._meetBotDebounceTimer);
+                    }
+
+                    // Wait 400ms of no changes before emitting (allows corrections to settle)
+                    // Reduced from 800ms for faster wake word detection
+                    window._meetBotDebounceTimer = setTimeout(emitCaption, 400);
+                });
+
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true
+                });
+
+                window._meetBotObserver = observer;
+                console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
+            }
+        """
+        )
+
+        # Start polling for new captions (track task for cleanup)
+        self._caption_poll_task = asyncio.create_task(self._poll_captions())
+        logger.info("Caption capture started")
+
+    async def _poll_captions(self) -> None:
+        """Poll for settled/corrected captions from the JS observer buffer."""
+        # Track caption IDs to their index in buffer for updates
+        caption_id_to_index: dict[int, int] = {}
+
+        while self._caption_observer_running and self.page:
+            try:
+                # Fetch and clear the caption buffer - these are already debounced/corrected
+                captions = await self.page.evaluate(
+                    """
+                    () => {
+                        const c = window._meetBotCaptions || [];
+                        window._meetBotCaptions = [];
+                        return c;
+                    }
+                """
+                )
+
+                for cap in captions:
+                    speaker = cap.get("speaker", "Unknown")
+                    text = cap.get("text", "")
+                    ts = cap.get("ts", 0)
+                    cap_id = cap.get("id", 0)
+                    is_update = cap.get("isUpdate", False)
+
+                    if not text.strip():
+                        continue
+
+                    # Determine if this is truly an update (JS says update AND we've seen this ID before)
+                    is_true_update = is_update and cap_id in caption_id_to_index
+
+                    entry = CaptionEntry(
+                        speaker=speaker,
+                        text=text.strip(),
+                        timestamp=(
+                            datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
+                        ),
+                        caption_id=cap_id,
+                        is_update=is_true_update,
+                    )
+
+                    if entry.is_update:
+                        # UPDATE existing caption in buffer
+                        idx = caption_id_to_index[cap_id]
+                        if self.state and 0 <= idx < len(self.state.caption_buffer):
+                            self.state.caption_buffer[idx] = entry
+                            logger.debug(f"Caption UPDATE [{speaker}] {text[:50]}...")
+                        # Also notify callback with updated entry (for live display)
+                        if self._caption_callback:
+                            self._caption_callback(entry)
+                    else:
+                        # NEW caption entry
+                        if self.state:
+                            caption_id_to_index[cap_id] = len(self.state.caption_buffer)
+                            self.state.caption_buffer.append(entry)
+                        if self._caption_callback:
+                            self._caption_callback(entry)
+                        logger.debug(f"Caption NEW [{speaker}] {text[:50]}...")
+
+                await asyncio.sleep(0.5)  # Poll every 500ms
+
+            except Exception as e:
+                error_msg = str(e)
+                # Detect browser/page closure
+                if (
+                    "Target closed" in error_msg
+                    or "Target page, context or browser has been closed" in error_msg
+                    or "Browser has been closed" in error_msg
+                ):
+                    logger.warning(
+                        f"[Caption poll] Browser closed detected: {error_msg}"
+                    )
+                    self._browser_closed = True
+                    if self.state:
+                        self.state.joined = False
+                    break
+                logger.debug(f"Caption poll error: {e}")
+                await asyncio.sleep(1)
 
     async def stop_caption_capture(self) -> None:
-        """Stop capturing captions. Delegates to MeetCaptions."""
-        await self._captions.stop_caption_capture()
+        """Stop capturing captions."""
+        self._caption_observer_running = False
+        self._caption_callback = None
+
+        # Cancel the polling task if it exists
+        if self._caption_poll_task and not self._caption_poll_task.done():
+            self._caption_poll_task.cancel()
+            try:
+                await asyncio.wait_for(self._caption_poll_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            self._caption_poll_task = None
+
+        if self.page:
+            try:
+                await self.page.evaluate(
+                    """
+                    () => {
+                        if (window._meetBotObserver) {
+                            window._meetBotObserver.disconnect();
+                        }
+                    }
+                """
+                )
+            except Exception:
+                pass
+
+        logger.info("Caption capture stopped")
 
     async def get_captions(self) -> list[CaptionEntry]:
-        """Get all captured captions. Delegates to MeetCaptions."""
-        return await self._captions.get_captions()
+        """Get all captured captions."""
+        if self.state:
+            return self.state.caption_buffer.copy()
+        return []
 
     async def leave_meeting(self) -> bool:
         """Leave the current meeting."""
@@ -1456,13 +3213,341 @@ class GoogleMeetController:
 
         return False
 
-    async def get_participants(self) -> list[dict]:
-        """Get participant list. Delegates to MeetParticipants."""
-        return await self._participants.get_participants()
+    async def get_participants(self) -> list[dict]:  # noqa: C901
+        """
+        Scrape the participant list from Google Meet UI.
+
+        Uses accessibility attributes (aria-label, role) which are stable across
+        Google's CSS obfuscation. Opens the People panel if needed, extracts
+        participant names, then closes the panel.
+
+        Returns:
+            List of dicts with 'name' and optionally 'email' for each participant.
+            Returns empty list if not in a meeting or scraping fails.
+        """
+        if not self.page or not self.state or not self.state.joined:
+            return []
+
+        participants = []
+        panel_was_opened = False
+
+        # Words that indicate UI elements, not participant names
+        ui_keywords = [
+            "mute",
+            "unmute",
+            "pin",
+            "unpin",
+            "remove",
+            "more options",
+            "more actions",
+            "turn of",
+            "turn on",
+            "present",
+            "presentation",
+            "screen",
+            "camera",
+            "microphone",
+            "admit",
+            "deny",
+            "waiting",
+        ]
+
+        def is_valid_name(name: str) -> bool:
+            """Check if a string looks like a valid participant name."""
+            if not name or len(name) < 2 or len(name) > 100:
+                return False
+            name_lower = name.lower()
+            # Filter out UI element labels
+            if any(kw in name_lower for kw in ui_keywords):
+                return False
+            # Filter out strings that are just "(You)" or similar
+            if name_lower in ["(you)", "you", "me"]:
+                return False
+            return True
+
+        def clean_name(name: str) -> str:
+            """Clean up a participant name."""
+            # Remove "(You)" suffix for self
+            if "(You)" in name:
+                name = name.replace("(You)", "").strip()
+            # Remove "Meeting host" or similar suffixes
+            for suffix in ["Meeting host", "Host", "Co-host", "Presentation"]:
+                if name.endswith(suffix):
+                    name = name[: -len(suffix)].strip()
+            return name.strip()
+
+        try:
+            # First check if People panel is already open by looking for the
+            # participant list container (uses stable aria-label)
+            panel_open = False
+            try:
+                # Look for the "In call" region which contains participants
+                panel = await self.page.wait_for_selector(
+                    '[role="region"][aria-label="In call"], '
+                    '[role="list"][aria-label="Participants"]',
+                    timeout=500,
+                )
+                if panel and await panel.is_visible():
+                    panel_open = True
+            except Exception:
+                pass
+
+            # If panel not open, click the People button to open it
+            if not panel_open:
+                # Use only stable attributes (aria-*, data-*, role) - NOT generated class names
+                people_button_selectors = [
+                    "[data-avatar-count]",  # Badge showing participant avatars
+                    '[aria-label="Show everyone"]',
+                    '[aria-label="People"]',
+                    '[data-tooltip="Show everyone"]',
+                    '[role="button"][aria-label*="People" i]',
+                    '[role="button"][aria-label*="participant" i]',
+                ]
+
+                for selector in people_button_selectors:
+                    try:
+                        btn = await self.page.wait_for_selector(selector, timeout=1000)
+                        if btn and await btn.is_visible():
+                            await btn.click()
+                            panel_was_opened = True
+                            await asyncio.sleep(1.5)  # Wait for panel animation
+                            break
+                    except Exception:
+                        continue
+
+            # Primary method: Use JavaScript to extract from accessibility tree
+            # This is the most reliable as it uses stable ARIA attributes
+            js_participants = await self.page.evaluate(
+                """
+                () => {
+                    const participants = [];
+                    const seen = new Set();
+
+                    // UI keywords to filter out (lowercase)
+                    const uiKeywords = [
+                        'mute', 'unmute', 'pin', 'unpin', 'remove', 'more options',
+                        'more actions', 'turn of', 'turn on', 'present', 'presentation',
+                        'screen', 'camera', 'microphone', 'admit', 'deny', 'waiting',
+                        'contributors', 'in the meeting', 'waiting to join'
+                    ];
+
+                    function isValidName(name) {
+                        if (!name || name.length < 2 || name.length > 100) return false;
+                        const lower = name.toLowerCase();
+                        if (uiKeywords.some(kw => lower.includes(kw))) return false;
+                        if (['(you)', 'you', 'me'].includes(lower)) return false;
+                        // Filter out numbers only (like "2" for participant count)
+                        if (/^\\d+$/.test(name)) return false;
+                        return true;
+                    }
+
+                    function cleanName(name) {
+                        // Remove "(You)" suffix
+                        name = name.replace(/\\s*\\(You\\)\\s*/g, '').trim();
+                        // Remove "Meeting host" suffix
+                        name = name.replace(/\\s*Meeting host\\s*/gi, '').trim();
+                        return name;
+                    }
+
+                    function addParticipant(name, email = null) {
+                        name = cleanName(name);
+                        if (isValidName(name) && !seen.has(name)) {
+                            seen.add(name);
+                            participants.push({ name, email });
+                        }
+                    }
+
+                    // ALL METHODS USE STABLE ATTRIBUTES ONLY (aria-*, data-*, role)
+                    // NEVER use generated class names like .zWGUib, .fdZ55, etc.
+
+                    // Method 1 (BEST): role="listitem" with aria-label contains the name
+                    // Example: <div role="listitem" aria-label="David O Neill" ...>
+                    const listItems = document.querySelectorAll('[role="listitem"][aria-label]');
+                    listItems.forEach(item => {
+                        const name = item.getAttribute('aria-label');
+                        if (name) {
+                            addParticipant(name);
+                        }
+                    });
+
+                    // Method 2: data-participant-id elements have aria-label with name
+                    if (participants.length === 0) {
+                        const participantItems = document.querySelectorAll('[data-participant-id][aria-label]');
+                        participantItems.forEach(item => {
+                            const name = item.getAttribute('aria-label');
+                            if (name) {
+                                addParticipant(name);
+                            }
+                        });
+                    }
+
+                    // Method 3: Find participant list by aria-label="Participants"
+                    if (participants.length === 0) {
+                        const list = document.querySelector('[role="list"][aria-label="Participants"]');
+                        if (list) {
+                            const items = list.querySelectorAll('[role="listitem"][aria-label]');
+                            items.forEach(item => {
+                                const name = item.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
+                                }
+                            });
+                        }
+                    }
+
+                    // Method 4: Find the "In call" region and extract from listitems
+                    if (participants.length === 0) {
+                        const region = document.querySelector('[role="region"][aria-label="In call"]');
+                        if (region) {
+                            const items = region.querySelectorAll('[role="listitem"][aria-label]');
+                            items.forEach(item => {
+                                const name = item.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
+                                }
+                            });
+                        }
+                    }
+
+                    // Method 5: data-participant-id without aria-label - check nested aria-label
+                    if (participants.length === 0) {
+                        const participantItems = document.querySelectorAll('[data-participant-id]');
+                        participantItems.forEach(item => {
+                            // Look for nested element with aria-label
+                            const labeled = item.querySelector('[aria-label]');
+                            if (labeled) {
+                                const name = labeled.getAttribute('aria-label');
+                                if (name) {
+                                    addParticipant(name);
+                                }
+                            }
+                        });
+                    }
+
+                    return participants;
+                }
+            """
+            )
+
+            if js_participants:
+                participants = js_participants
+                logger.debug(
+                    f"JavaScript extraction found {len(participants)} participants"
+                )
+
+            # Fallback: Try Playwright selectors if JS extraction failed
+            if not participants:
+                try:
+                    # Use role-based selectors
+                    elements = await self.page.query_selector_all(
+                        '[role="listitem"][aria-label]'
+                    )
+                    for el in elements:
+                        try:
+                            name = await el.get_attribute("aria-label")
+                            if name:
+                                name = clean_name(name)
+                                if is_valid_name(name):
+                                    if not any(p["name"] == name for p in participants):
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug(f"Playwright fallback failed: {e}")
+
+            # Secondary fallback: data-participant-id elements
+            if not participants:
+                try:
+                    elements = await self.page.query_selector_all(
+                        "[data-participant-id]"
+                    )
+                    for el in elements:
+                        try:
+                            name = await el.get_attribute("aria-label")
+                            if name:
+                                name = clean_name(name)
+                                if is_valid_name(name):
+                                    if not any(p["name"] == name for p in participants):
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
+                        except Exception:
+                            continue
+                except Exception as e:
+                    logger.debug(f"data-participant-id fallback failed: {e}")
+
+            # Update state with participant list
+            if self.state:
+                self.state.participants = [p["name"] for p in participants]
+
+            logger.info(f"[{self._instance_id}] Found {len(participants)} participants")
+
+        except Exception as e:
+            logger.error(f"[{self._instance_id}] Failed to get participants: {e}")
+
+        finally:
+            # Close the panel if we opened it
+            if panel_was_opened:
+                try:
+                    await self.page.keyboard.press("Escape")
+                    await asyncio.sleep(0.3)  # Brief wait for panel to close
+                except Exception:
+                    pass
+
+        return participants
 
     async def get_participant_count(self) -> int:
-        """Get participant count. Delegates to MeetParticipants."""
-        return await self._participants.get_participant_count()
+        """
+        Get the number of participants in the meeting.
+
+        This is a lightweight alternative to get_participants() that just
+        reads the participant count from the UI without opening the panel.
+
+        Returns:
+            Number of participants, or 0 if unavailable.
+        """
+        if not self.page or not self.state or not self.state.joined:
+            return 0
+
+        try:
+            # Try to find participant count in the UI
+            count_selectors = [
+                "[data-participant-count]",
+                ".rua5Nb",  # Participant count badge
+                '[aria-label*="participant" i]',
+            ]
+
+            for selector in count_selectors:
+                try:
+                    el = await self.page.wait_for_selector(selector, timeout=500)
+                    if el:
+                        # Try data attribute first
+                        count_str = await el.get_attribute("data-participant-count")
+                        if count_str:
+                            return int(count_str)
+
+                        # Try text content
+                        text = await el.text_content()
+                        if text:
+                            # Extract number from text like "5 participants" or just "5"
+                            import re
+
+                            match = re.search(r"(\d+)", text)
+                            if match:
+                                return int(match.group(1))
+                except Exception:
+                    continue
+
+            # Fallback: count from state if we've scraped before
+            if self.state and self.state.participants:
+                return len(self.state.participants)
+
+        except Exception as e:
+            logger.debug(f"Failed to get participant count: {e}")
+
+        return 0
 
     async def close(self, restore_browser_audio: bool = False) -> None:
         """Close the browser and cleanup resources.

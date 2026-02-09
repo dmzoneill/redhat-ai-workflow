@@ -63,10 +63,7 @@ from .discovery import (
 from .formatter import ResultFormatter
 from .interface import MemoryInterface, get_memory_interface, set_memory_interface
 from .merger import ResultMerger
-from .models import (  # noqa: F401
-    LATENCY_FAST,
-    LATENCY_SLOW,
-    AdapterInfo,
+from .models import (
     AdapterResult,
     HealthStatus,
     IntentClassification,
@@ -74,7 +71,7 @@ from .models import (  # noqa: F401
     QueryResult,
     SourceFilter,
 )
-from .registry import ADAPTER_MANIFEST, memory_adapter
+from .registry import ADAPTER_MANIFEST, AdapterInfo, memory_adapter
 from .router import QueryRouter
 
 __all__ = [

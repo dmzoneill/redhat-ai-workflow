@@ -572,11 +572,12 @@ class TestPollEngine:
     @pytest.mark.asyncio
     async def test_trigger_job_no_callback(self):
         engine = PollEngine(job_callback=None)
-        # Should not raise
+        # Test verifies no exception is raised
         await engine._trigger_job(
             {"name": "test", "skill": "deploy", "inputs": {}},
             [{"id": "1"}],
         )
+        assert True
 
     @pytest.mark.asyncio
     async def test_trigger_job_with_callback(self):
@@ -603,10 +604,12 @@ class TestPollEngine:
     async def test_trigger_job_callback_error(self):
         callback = AsyncMock(side_effect=RuntimeError("Callback failed"))
         engine = PollEngine(job_callback=callback)
-        # Should not raise
+        # Test verifies no exception is raised
         await engine._trigger_job(
             {"name": "test", "skill": "s", "inputs": {}}, [{"id": "1"}]
         )
+        callback.assert_awaited_once()
+        assert callback.await_count == 1
 
     # ---- poll_now ----
 

@@ -7,9 +7,10 @@ requiring full PulseAudio integration.
 Run with: pytest tests/test_meetbot_smoke.py -v
 """
 
+import asyncio
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

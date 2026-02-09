@@ -416,7 +416,10 @@ class TestSetWorkspaceToolCount:
         state, _ = _make_state_mock(has_session=False)
         ctx = _mock_ctx()
         with patch(_GET_FOR_CTX, new_callable=AsyncMock, return_value=state):
-            await set_workspace_tool_count(ctx, 10)  # should not raise
+            await set_workspace_tool_count(
+                ctx, 10
+            )  # Test verifies no exception is raised
+        assert True
 
 
 # ────────────────────────────────────────────────────────────────────

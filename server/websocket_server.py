@@ -21,7 +21,6 @@ from datetime import datetime
 from typing import Optional
 
 from server.timeouts import Timeouts
-from server.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,14 +63,10 @@ class PendingConfirmation:
     future: asyncio.Future
 
 
-# Load limits from config with hardcoded fallbacks
-_config = load_config()
-_limits = _config.get("limits", {})
-
 # Maximum number of running skills to track (prevents memory leaks from orphaned skills)
-MAX_RUNNING_SKILLS = _limits.get("max_running_skills", 100)
+MAX_RUNNING_SKILLS = 100
 # Maximum age for a running skill before it's considered stale (1 hour)
-MAX_SKILL_AGE_SECONDS = _limits.get("max_skill_age_seconds", 3600)
+MAX_SKILL_AGE_SECONDS = 3600
 
 
 class SkillWebSocketServer:
@@ -646,7 +641,7 @@ class SkillWebSocketServer:
         except FileNotFoundError:
             logger.debug("Zenity not available for fallback")
             return None
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutExpired:
             logger.debug("Zenity dialog timed out")
             return None
         except Exception as e:

@@ -249,7 +249,7 @@ class TestDefaultSourcePreservation:
             found_source = False
             in_our_source = False
             for line in output.split("\n"):
-                if "meet_bot_test_priority_mic" in line:
+                if f"meet_bot_test_priority_mic" in line:
                     in_our_source = True
                     found_source = True
                 elif in_our_source and line.strip().startswith("Name:"):
@@ -491,6 +491,18 @@ class TestVideoGeneratorStartupCheck:
     @pytest.mark.asyncio
     async def test_ensure_default_source_not_meetbot(self):
         """Startup check should restore default if it's a meetbot device."""
+        # Import the function we added
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "video_generator",
+            PROJECT_ROOT
+            / "tool_modules"
+            / "aa_meet_bot"
+            / "src"
+            / "video_generator.py",
+        )
+
         # We can't easily test this without mocking, so verify the function exists
         # and has the right structure
         video_gen_path = (
@@ -537,7 +549,7 @@ class TestMultipleInstanceIsolation:
         try:
             # Create both
             await manager1.create_all()
-            await manager2.create_all()
+            devices2 = await manager2.create_all()
 
             # Verify both exist before cleanup
             sources_before = await list_sources()

@@ -23,7 +23,6 @@ Usage:
 
 import importlib.util
 import logging
-import threading
 from pathlib import Path
 
 from .registry import ADAPTER_MANIFEST, AdapterInfo
@@ -37,7 +36,6 @@ ADAPTER_FILE = "adapter.py"
 
 # Cache for discovered modules
 _discovered_modules: set[str] | None = None
-_discovery_lock = threading.RLock()
 
 
 def discover_adapter_modules() -> set[str]:
@@ -56,29 +54,25 @@ def discover_adapter_modules() -> set[str]:
     if _discovered_modules is not None:
         return _discovered_modules
 
-    with _discovery_lock:
-        if _discovered_modules is not None:
-            return _discovered_modules
+    modules = set()
 
-        modules = set()
-
-        if not TOOL_MODULES_DIR.exists():
-            logger.warning(f"Tool modules directory not found: {TOOL_MODULES_DIR}")
-            return modules
-
-        for module_dir in TOOL_MODULES_DIR.iterdir():
-            if not module_dir.is_dir() or not module_dir.name.startswith("aa_"):
-                continue
-
-            adapter_file = module_dir / "src" / ADAPTER_FILE
-            if adapter_file.exists():
-                base_name = module_dir.name[3:]  # Remove "aa_" prefix
-                modules.add(base_name)
-                logger.debug(f"Found adapter module: {base_name} at {adapter_file}")
-
-        _discovered_modules = modules
-        logger.info(f"Discovered {len(modules)} adapter modules: {sorted(modules)}")
+    if not TOOL_MODULES_DIR.exists():
+        logger.warning(f"Tool modules directory not found: {TOOL_MODULES_DIR}")
         return modules
+
+    for module_dir in TOOL_MODULES_DIR.iterdir():
+        if not module_dir.is_dir() or not module_dir.name.startswith("aa_"):
+            continue
+
+        adapter_file = module_dir / "src" / ADAPTER_FILE
+        if adapter_file.exists():
+            base_name = module_dir.name[3:]  # Remove "aa_" prefix
+            modules.add(base_name)
+            logger.debug(f"Found adapter module: {base_name} at {adapter_file}")
+
+    _discovered_modules = modules
+    logger.info(f"Discovered {len(modules)} adapter modules: {sorted(modules)}")
+    return modules
 
 
 def load_adapter_module(module_name: str) -> AdapterInfo | None:
@@ -143,27 +137,22 @@ def discover_and_load_all_adapters() -> dict[str, AdapterInfo]:
         )
         return dict(ADAPTER_MANIFEST.adapters)
 
-    with _discovery_lock:
-        # Double-check after acquiring lock
-        if ADAPTER_MANIFEST.adapters:
-            return dict(ADAPTER_MANIFEST.adapters)
+    # Discover all modules with adapters
+    adapter_modules = discover_adapter_modules()
 
-        # Discover all modules with adapters
-        adapter_modules = discover_adapter_modules()
+    # Load each adapter module
+    loaded = 0
+    for module_name in sorted(adapter_modules):
+        info = load_adapter_module(module_name)
+        if info:
+            loaded += 1
 
-        # Load each adapter module
-        loaded = 0
-        for module_name in sorted(adapter_modules):
-            info = load_adapter_module(module_name)
-            if info:
-                loaded += 1
+    logger.info(
+        f"Loaded {loaded}/{len(adapter_modules)} memory adapters: "
+        f"{list(ADAPTER_MANIFEST.adapters.keys())}"
+    )
 
-        logger.info(
-            f"Loaded {loaded}/{len(adapter_modules)} memory adapters: "
-            f"{list(ADAPTER_MANIFEST.adapters.keys())}"
-        )
-
-        return dict(ADAPTER_MANIFEST.adapters)
+    return dict(ADAPTER_MANIFEST.adapters)
 
 
 def reload_adapter(module_name: str) -> AdapterInfo | None:

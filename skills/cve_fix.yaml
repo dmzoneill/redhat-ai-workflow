@@ -177,7 +177,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       prune: true
     output: fetch_result
-    on_error: continue
+    on_error: auto_heal
 
   - name: get_main_log
     description: "Get git log from origin/main to check for merged CVE fixes"
@@ -205,7 +205,7 @@ steps:
       repo: "{{ resolved_repo.path }}"
       all_branches: true
     output: all_branches_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: get_open_mrs
     description: "Get all open MRs to check for existing CVE fixes"
@@ -213,23 +213,33 @@ steps:
     args:
       project: "{{ resolved_repo.gitlab_project }}"
     output: open_mrs_raw
-    on_error: continue
+    on_error: auto_heal
 
   - name: filter_unfixed_cves
-    description: "Filter out CVEs that are merged to main, have branches, or have open MRs"
+    description: "Filter CVEs by status: merged, has MR, has branch (resumable), or unfixed"
     compute: |
       import re
 
-      # Only check origin/main for "merged" status - local commits don't count
-      main_log = str(main_log_raw) if main_log_raw else ""
-      all_branches = str(all_branches_raw) if all_branches_raw else ""
-      open_mrs = str(open_mrs_raw) if open_mrs_raw else ""
+      # Defensive access - variables may be None if auto_heal failed upstream
+      try:
+          main_log = str(main_log_raw) if main_log_raw else ""
+      except NameError:
+          main_log = ""
+      try:
+          all_branches = str(all_branches_raw) if all_branches_raw else ""
+      except NameError:
+          all_branches = ""
+      try:
+          open_mrs = str(open_mrs_raw) if open_mrs_raw else ""
+      except NameError:
+          open_mrs = ""
       all_cves = cve_issues.get("issue_keys", [])
 
       unfixed = []
       merged_to_main = []
       has_branch = []
       has_mr = []
+      resumable = []  # CVEs with branches but no MR - can resume
 
       for issue_key in all_cves:
           issue_key_lower = issue_key.lower()
@@ -247,25 +257,28 @@ steps:
               continue
 
           # Check 3: Is there a branch for this issue (but no MR yet)?
+          # These are RESUMABLE - the skill started but didn't finish
           if issue_key_lower in all_branches.lower():
               has_branch.append({"key": issue_key, "reason": "branch exists"})
+              resumable.append(issue_key)
               continue
 
-          # Not found anywhere - this CVE needs work
+          # Not found anywhere - this CVE needs work from scratch
           unfixed.append(issue_key)
 
       # Apply max_cves limit
+      # Prioritize resumable CVEs (closer to completion) over brand new ones
       max_cves = inputs.get("max_cves", 1)
-      to_process = unfixed[:max_cves]
-
-      # Combine all "in progress" items for reporting
-      in_progress = has_branch + has_mr
+      to_process = resumable[:max_cves]
+      remaining_slots = max_cves - len(to_process)
+      if remaining_slots > 0:
+          to_process.extend(unfixed[:remaining_slots])
 
       result = {
           "to_process": to_process,
           "unfixed_count": len(unfixed),
-          "in_progress": in_progress,
-          "in_progress_count": len(in_progress),
+          "resumable": resumable,
+          "resumable_count": len(resumable),
           "merged_to_main": [item["key"] for item in merged_to_main],
           "merged_count": len(merged_to_main),
           "has_branch": [item["key"] for item in has_branch],
@@ -276,31 +289,136 @@ steps:
     output: filtered_cves
 
   - name: check_has_work
-    description: "Check if there are CVEs to process"
+    description: "Check if there are CVEs to process (including resumable ones)"
     compute: |
       to_process = filtered_cves.get("to_process", [])
-      in_progress = filtered_cves.get("in_progress_count", 0)
+      resumable = filtered_cves.get("resumable", [])
 
       if not to_process:
-          msg_parts = ["No unfixed CVEs found."]
+          msg_parts = ["No CVEs to process."]
           if filtered_cves.get("merged_count", 0) > 0:
               msg_parts.append(f"Merged: {filtered_cves['merged_count']}")
           if filtered_cves.get("has_mr_count", 0) > 0:
               msg_parts.append(f"Has MR: {filtered_cves['has_mr_count']}")
-          if filtered_cves.get("has_branch_count", 0) > 0:
-              msg_parts.append(f"Has branch: {filtered_cves['has_branch_count']}")
 
           result = {
               "has_work": False,
+              "is_resume": False,
               "message": " ".join(msg_parts)
           }
       else:
+          issue_key = to_process[0]
+          is_resume = issue_key in resumable
+
           result = {
               "has_work": True,
-              "issue_key": to_process[0],
-              "message": f"Found {len(to_process)} CVE(s) to process, {in_progress} in progress (branch/MR)"
+              "is_resume": is_resume,
+              "issue_key": issue_key,
+              "message": f"{'Resuming' if is_resume else 'Processing'} {issue_key} ({len(to_process)} CVE(s) total, {len(resumable)} resumable)"
           }
     output: work_check
+
+  # ==================== CHECK RESUME STATE (for existing branches) ====================
+
+  - name: check_resume_state
+    description: "For resumed CVEs, find the existing branch, check it out, and detect what work is already done"
+    condition: "work_check.has_work and work_check.is_resume"
+    compute: |
+      import re
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+      default_branch = resolved_repo.get("default_branch", "main")
+      issue_key = work_check["issue_key"]
+      issue_key_lower = issue_key.lower()
+
+      # Defensive access for all_branches_raw
+      try:
+          branches_text = str(all_branches_raw) if all_branches_raw else ""
+      except NameError:
+          branches_text = ""
+
+      # Find the actual branch name by searching for the issue key in branches
+      existing_branch = None
+      for line in branches_text.split("\n"):
+          line_stripped = line.strip().lstrip("* ")
+          # Remove remote prefix like "remotes/origin/"
+          branch_name_candidate = re.sub(r'^remotes/\w+/', '', line_stripped)
+          # Extract just the branch name (before any whitespace or arrow)
+          branch_name_candidate = branch_name_candidate.split()[0] if branch_name_candidate.split() else ""
+          # Remove backticks that git_branch_list might add
+          branch_name_candidate = branch_name_candidate.strip("`")
+          if issue_key_lower in branch_name_candidate.lower():
+              existing_branch = branch_name_candidate
+              break
+
+      if not existing_branch:
+          raise ValueError(
+              f"Could not find branch for {issue_key} in branch list. "
+              "Branch may have been deleted. Will need to create a new one."
+          )
+
+      # Check out the existing branch
+      checkout_result = subprocess.run(
+          ["git", "-C", repo_path, "checkout", existing_branch],
+          capture_output=True, text=True, timeout=30,
+      )
+      if checkout_result.returncode != 0:
+          # Try fetching and checking out from remote
+          subprocess.run(
+              ["git", "-C", repo_path, "checkout", "-b", existing_branch, f"origin/{existing_branch}"],
+              capture_output=True, text=True, timeout=30,
+          )
+
+      # Check if there are commits on this branch beyond origin/main
+      log_result = subprocess.run(
+          ["git", "-C", repo_path, "log", f"origin/{default_branch}..HEAD", "--oneline"],
+          capture_output=True, text=True, timeout=30,
+      )
+      commits_ahead = log_result.stdout.strip().split("\n") if log_result.stdout.strip() else []
+      has_commits = len(commits_ahead) > 0 and commits_ahead[0] != ""
+
+      # Check if Pipfile/Pipfile.lock are modified in those commits
+      already_committed = False
+      if has_commits:
+          diff_result = subprocess.run(
+              ["git", "-C", repo_path, "diff", "--name-only", f"origin/{default_branch}..HEAD"],
+              capture_output=True, text=True, timeout=30,
+          )
+          changed_files = diff_result.stdout.strip().split("\n") if diff_result.stdout.strip() else []
+          already_committed = "Pipfile" in changed_files or "Pipfile.lock" in changed_files
+
+      # Check if the branch exists on the remote (already pushed)
+      remote_check = subprocess.run(
+          ["git", "-C", repo_path, "ls-remote", "--heads", "origin", existing_branch],
+          capture_output=True, text=True, timeout=30,
+      )
+      already_pushed = bool(remote_check.stdout.strip())
+
+      result = {
+          "is_resume": True,
+          "existing_branch_name": existing_branch,
+          "has_commits": has_commits,
+          "commits_ahead": len(commits_ahead) if has_commits else 0,
+          "already_committed": already_committed,
+          "already_pushed": already_pushed,
+      }
+    output: resume_state
+    on_error: continue
+
+  - name: init_resume_state_default
+    description: "Initialize resume_state for non-resume (new CVE) flow"
+    condition: "work_check.has_work and not work_check.is_resume"
+    compute: |
+      result = {
+          "is_resume": False,
+          "existing_branch_name": None,
+          "has_commits": False,
+          "commits_ahead": 0,
+          "already_committed": False,
+          "already_pushed": False,
+      }
+    output: resume_state
 
   # ==================== PROCESS FIRST CVE ====================
 
@@ -481,24 +599,26 @@ steps:
   # ==================== CREATE BRANCH ====================
 
   - name: create_branch_name
-    description: "Generate branch name for CVE fix"
+    description: "Generate or resolve branch name for CVE fix"
     condition: "work_check.has_work"
     compute: |
       from scripts.common.parsers import slugify_text
 
-      issue_key = cve_info["issue_key"]
-      cve_id = cve_info["cve_id"].lower()
-      package = cve_info["affected_package"].lower().replace("_", "-")
+      # When resuming, use the existing branch name found by check_resume_state
+      if work_check.get("is_resume") and isinstance(resume_state, dict) and resume_state.get("existing_branch_name"):
+          result = resume_state["existing_branch_name"]
+      else:
+          issue_key = cve_info["issue_key"]
+          cve_id = cve_info["cve_id"].lower()
+          package = cve_info["affected_package"].lower().replace("_", "-")
 
-      # Branch format: AAP-XXXXX-cve-2025-69223-aiohttp
-      branch_name = f"{issue_key}-{cve_id}-{package}"
-
-      result = branch_name
+          # Branch format: AAP-XXXXX-cve-2025-69223-aiohttp
+          result = f"{issue_key}-{cve_id}-{package}"
     output: branch_name
 
   - name: fetch_latest
     description: "Fetch latest from origin"
-    condition: "work_check.has_work and not inputs.dry_run"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     tool: git_fetch
     args:
       repo: "{{ resolved_repo.path }}"
@@ -508,7 +628,7 @@ steps:
 
   - name: verify_clean_state
     description: "Verify working directory is clean before creating branch"
-    condition: "work_check.has_work and not inputs.dry_run"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     compute: |
       import subprocess
 
@@ -536,8 +656,8 @@ steps:
     output: clean_state_check
 
   - name: checkout_main
-    description: "Checkout main branch"
-    condition: "work_check.has_work and not inputs.dry_run"
+    description: "Checkout main branch (skipped when resuming - already on feature branch)"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     tool: git_checkout
     args:
       repo: "{{ resolved_repo.path }}"
@@ -547,7 +667,7 @@ steps:
 
   - name: reset_to_origin_main
     description: "Reset local main to origin/main to ensure clean base (CRITICAL for branch isolation)"
-    condition: "work_check.has_work and not inputs.dry_run"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     compute: |
       import subprocess
 
@@ -570,8 +690,8 @@ steps:
     output: reset_result
 
   - name: create_branch
-    description: "Create feature branch for CVE fix FROM origin/main"
-    condition: "work_check.has_work and not inputs.dry_run"
+    description: "Create feature branch for CVE fix FROM origin/main (skipped when resuming)"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     tool: git_branch_create
     args:
       repo: "{{ resolved_repo.path }}"
@@ -582,7 +702,7 @@ steps:
 
   - name: verify_branch_base
     description: "Verify the new branch is based on origin/main (not another feature branch)"
-    condition: "work_check.has_work and not inputs.dry_run"
+    condition: "work_check.has_work and not inputs.dry_run and not work_check.is_resume"
     compute: |
       import subprocess
 
@@ -622,7 +742,7 @@ steps:
 
   - name: update_pipfile_and_lock
     description: "Create temp pipenv with project's Python version, install package and companions, copy version/hashes to Pipfile and Pipfile.lock"
-    condition: "work_check.has_work and not inputs.dry_run"
+    condition: "work_check.has_work and not inputs.dry_run and not resume_state.already_committed"
     compute: |
       import json
       import os
@@ -887,7 +1007,7 @@ steps:
 
   - name: cleanup_temp
     description: "Clean up temporary directory"
-    condition: "work_check.has_work and not inputs.dry_run and pipfile_update"
+    condition: "work_check.has_work and not inputs.dry_run and pipfile_update and not resume_state.already_committed"
     compute: |
       import shutil
 
@@ -933,8 +1053,8 @@ steps:
     output: commit_message
 
   - name: stage_changes
-    description: "Stage Pipfile and Pipfile.lock changes"
-    condition: "work_check.has_work and not inputs.dry_run"
+    description: "Stage Pipfile and Pipfile.lock changes (skipped when resuming with existing commits)"
+    condition: "work_check.has_work and not inputs.dry_run and not resume_state.already_committed"
     tool: git_add
     args:
       repo: "{{ resolved_repo.path }}"
@@ -943,8 +1063,8 @@ steps:
     on_error: continue
 
   - name: commit_changes
-    description: "Commit the CVE fix"
-    condition: "work_check.has_work and not inputs.dry_run"
+    description: "Commit the CVE fix (skipped when resuming with existing commits)"
+    condition: "work_check.has_work and not inputs.dry_run and not resume_state.already_committed"
     tool: git_commit
     args:
       repo: "{{ resolved_repo.path }}"
@@ -955,8 +1075,8 @@ steps:
   # ==================== CREATE MR ====================
 
   - name: push_branch
-    description: "Push branch to origin"
-    condition: "work_check.has_work and not inputs.dry_run"
+    description: "Push branch to origin (skipped when already pushed)"
+    condition: "work_check.has_work and not inputs.dry_run and not resume_state.already_pushed"
     tool: git_push
     args:
       repo: "{{ resolved_repo.path }}"
@@ -1252,14 +1372,14 @@ outputs:
       |--------|-------|--------|
       | ✅ Merged to main | {{ filtered_cves.merged_count }} | {{ filtered_cves.merged_to_main | join(', ') if filtered_cves.merged_to_main else '-' }} |
       | 🔀 Has Open MR | {{ filtered_cves.has_mr_count }} | {{ filtered_cves.has_mr | join(', ') if filtered_cves.has_mr else '-' }} |
-      | 🌿 Has Branch (no MR) | {{ filtered_cves.has_branch_count }} | {{ filtered_cves.has_branch | join(', ') if filtered_cves.has_branch else '-' }} |
+      | 🔄 Resumable (branch, no MR) | {{ filtered_cves.resumable_count }} | {{ filtered_cves.resumable | join(', ') if filtered_cves.resumable else '-' }} |
       | 🔧 Needs Work | {{ filtered_cves.unfixed_count }} | {{ filtered_cves.to_process | join(', ') if filtered_cves.to_process else '-' }} |
 
       {% if not work_check.has_work %}
       {{ work_check.message }}
       {% else %}
       ---
-      ### Processing: {{ cve_info.issue_key }}
+      ### {{ 'Resuming' if work_check.is_resume else 'Processing' }}: {{ cve_info.issue_key }}
 
       | Field | Value |
       |-------|-------|
@@ -1268,6 +1388,12 @@ outputs:
       | Package | {{ cve_info.affected_package }} |
       | Severity | {{ cve_info.severity }} |
       | CVSS | {{ cve_info.cvss_score }} |
+      {% if work_check.is_resume and resume_state is mapping %}
+      | Mode | **Resume** (branch: `{{ resume_state.existing_branch_name }}`) |
+      | Commits ahead | {{ resume_state.commits_ahead }} |
+      | Pipfile committed | {{ '✅ Yes' if resume_state.already_committed else '❌ No' }} |
+      | Already pushed | {{ '✅ Yes' if resume_state.already_pushed else '❌ No' }} |
+      {% endif %}
 
       {% if not inputs.dry_run and pipfile_update is mapping %}
       ### Changes Made
@@ -1299,6 +1425,19 @@ outputs:
 
       **MR:** [{{ mr.title | default('MR') }}]({{ mr.web_url | default('#') }})
       {% endif %}
+      {% elif not inputs.dry_run and work_check.is_resume and resume_state is mapping and resume_state.already_committed %}
+      ### Resumed from Existing Branch
+
+      - **Branch:** `{{ branch_name }}`
+      - **Commits ahead of main:** {{ resume_state.commits_ahead }}
+      - **Skipped:** Pipfile update (already committed), staging, commit
+      {% if not resume_state.already_pushed %}- **Pushed:** Branch pushed to origin{% endif %}
+
+      {% if mr is mapping %}
+      ### Merge Request
+
+      **MR:** [{{ mr.title | default('MR') }}]({{ mr.web_url | default('#') }})
+      {% endif %}
       {% elif not inputs.dry_run %}
       ### Changes Made
 
@@ -1314,6 +1453,14 @@ outputs:
       ### Would Do
 
       1. Assign {{ cve_info.issue_key }} to current user
+      {% if work_check.is_resume %}
+      2. Resume from existing branch: `{{ branch_name }}`
+      3. Check existing state (commits, push status)
+      4. Skip already-completed steps
+      5. Push branch if needed
+      6. Create MR with CVE details
+      7. Add MR link to Jira issue
+      {% else %}
       2. Create branch: `{{ branch_name }}`
       3. Create temp pipenv in /tmp with Python {{ pipfile_update.python_version if pipfile_update is mapping else 'from Pipfile' }}
       4. Install latest {{ cve_info.affected_package }} to get version and hashes
@@ -1322,20 +1469,22 @@ outputs:
       7. Create MR with CVE details
       8. Add MR link to Jira issue
       {% endif %}
+      {% endif %}
 
-      {% if filtered_cves.unfixed_count > 1 %}
+      {% if filtered_cves.unfixed_count + filtered_cves.resumable_count > 1 %}
       ---
-      **Note:** {{ filtered_cves.unfixed_count - 1 }} more CVE(s) remaining to process after this one.
+      **Note:** {{ filtered_cves.unfixed_count + filtered_cves.resumable_count - 1 }} more CVE(s) remaining to process after this one.
       {% endif %}
       {% endif %}
 
   - name: context
     value:
       processed: "{{ work_check.has_work }}"
+      resumed: "{{ work_check.is_resume if work_check else false }}"
       issue_key: "{{ cve_info.issue_key if cve_info else none }}"
       cve_id: "{{ cve_info.cve_id if cve_info else none }}"
       package: "{{ cve_info.affected_package if cve_info else none }}"
       mr_url: "{{ mr.web_url if mr else none }}"
       branch: "{{ branch_name if branch_name else none }}"
-      remaining_cves: "{{ filtered_cves.unfixed_count - 1 if filtered_cves else 0 }}"
-      in_progress_count: "{{ filtered_cves.in_progress_count if filtered_cves else 0 }}"
+      remaining_cves: "{{ (filtered_cves.unfixed_count + filtered_cves.resumable_count - 1) if filtered_cves else 0 }}"
+      resumable_count: "{{ filtered_cves.resumable_count if filtered_cves else 0 }}"

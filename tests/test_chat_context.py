@@ -108,6 +108,7 @@ class TestSetChatIssueAsync:
         ) as mock_fn:
             await chat_context.set_chat_issue_async(ctx, "AAP-456")
         mock_fn.assert_awaited_once_with(ctx, "AAP-456")
+        assert mock_fn.await_count == 1
 
 
 class TestGetChatBranchAsync:
@@ -133,6 +134,7 @@ class TestSetChatBranchAsync:
         ) as mock_fn:
             await chat_context.set_chat_branch_async(ctx, "feature/x")
         mock_fn.assert_awaited_once_with(ctx, "feature/x")
+        assert mock_fn.await_count == 1
 
 
 class TestGetChatStateAsync:
@@ -300,8 +302,8 @@ class TestSetChatProject:
         mock_state = MagicMock()
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
             mock_registry.get_or_create.return_value = mock_state
-            chat_context.set_chat_project("backend")
-        mock_state.project = "backend"
+            result = chat_context.set_chat_project("backend")
+        assert result is True
 
 
 class TestSetChatIssue:
@@ -314,7 +316,7 @@ class TestSetChatIssue:
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
             mock_registry.get_or_create.return_value = mock_state
             chat_context.set_chat_issue("AAP-456")
-        mock_state.issue_key = "AAP-456"
+        assert chat_context._chat_state["issue_key"] == "AAP-456"
 
 
 class TestGetChatIssue:

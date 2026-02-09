@@ -218,7 +218,8 @@ class TestLocking:
     def test_release_lock_not_exists(self, tmp_path):
         lock = tmp_path / "bot.lock"
         with patch(f"{MOD}.LOCK_FILE", lock):
-            release_lock()  # Should not raise
+            release_lock()  # Test verifies no exception is raised
+            assert not lock.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -358,10 +359,11 @@ class TestSkipIssue:
             patch(f"{MOD}.update_issue_status", return_value=True) as mock_update,
             patch(f"{MOD}.add_timeline_event"),
         ):
-            skip_issue("AAP-1")
+            result = skip_issue("AAP-1")
         mock_update.assert_called_once_with(
             "AAP-1", "blocked", waiting_reason="Manually skipped"
         )
+        assert result["success"] is True
 
     def test_skip_not_found(self):
         with (
@@ -652,8 +654,9 @@ class TestRunSprintBot:
             patch(f"{MOD}.refresh_sprint_state", return_value=state) as mock_refresh,
             patch(f"{MOD}.process_next_issue", return_value=False),
         ):
-            run_sprint_bot()
+            result = run_sprint_bot()
         mock_refresh.assert_called_once()
+        assert result["success"] is True
 
     def test_error_handling(self):
         _state(bot_enabled=True, last_updated=datetime.now().isoformat())
@@ -682,8 +685,9 @@ class TestRunSprintBot:
             patch(f"{MOD}.load_sprint_state", return_value=state),
             patch(f"{MOD}.process_next_issue", return_value=False),
         ):
-            run_sprint_bot()
+            result = run_sprint_bot()
         mock_release.assert_called_once()
+        assert result["success"] is True
 
 
 # ---------------------------------------------------------------------------

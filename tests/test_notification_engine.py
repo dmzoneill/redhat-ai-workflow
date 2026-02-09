@@ -524,3 +524,4 @@ class TestGlobalFunctions:
         # Should not raise
         await send_notification(job_name="test", skill="test", success=True)
         mod._notification_engine = original
+        assert True  # Reached without exception

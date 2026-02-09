@@ -19,7 +19,6 @@ Usage:
 import asyncio
 import importlib.util
 import logging
-import threading
 from typing import TYPE_CHECKING, cast
 
 import yaml
@@ -111,16 +110,14 @@ def discover_tool_modules() -> set[str]:
 
 # Dynamically discovered tool modules (cached on first access)
 _discovered_modules: set[str] | None = None
-_discovered_modules_lock = threading.Lock()
 
 
 def get_available_modules() -> set[str]:
     """Get available tool modules, discovering them if needed."""
     global _discovered_modules
-    with _discovered_modules_lock:
-        if _discovered_modules is None:
-            _discovered_modules = discover_tool_modules()
-        return _discovered_modules
+    if _discovered_modules is None:
+        _discovered_modules = discover_tool_modules()
+    return _discovered_modules
 
 
 def is_valid_module(module_name: str) -> bool:
@@ -291,8 +288,8 @@ class PersonaLoader:
                 )
 
                 notify_persona_failed(persona_name, "Persona not found")
-            except Exception as e:
-                logger.debug(f"Suppressed error in notify_persona_failed: {e}")
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": f"Persona not found: {persona_name}",
@@ -427,8 +424,7 @@ class PersonaLoader:
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             return workspace_state.persona
-        except Exception as e:
-            logger.debug(f"Suppressed error in get_workspace_persona: {e}")
+        except Exception:
             if self.current_persona:
                 return self.current_persona
             # Fall back to config default
@@ -437,10 +433,7 @@ class PersonaLoader:
 
                 cfg = load_config()
                 return cfg.get("agent", {}).get("default_persona", "researcher")
-            except Exception as e2:
-                logger.debug(
-                    f"Suppressed error in get_workspace_persona config fallback: {e2}"
-                )
+            except Exception:
                 return "researcher"
 
     async def set_workspace_persona(self, ctx: "Context", persona_name: str) -> None:

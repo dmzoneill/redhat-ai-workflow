@@ -61,6 +61,23 @@ def setup_env():
     os.environ.update(original_env)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_notifications(tmp_path):
+    """Redirect notification_emitter to a temp file so tests never pollute
+    the real ~/.config/aa-workflow/notifications.json that the VS Code
+    extension watches."""
+    try:
+        from unittest.mock import patch
+
+        from tool_modules.aa_workflow.src import notification_emitter
+
+        notif_file = tmp_path / "notifications.json"
+        with patch.object(notification_emitter, "NOTIFICATIONS_FILE", notif_file):
+            yield notif_file
+    except ImportError:
+        yield None
+
+
 # ============================================================================
 # MeetBot Device Testing Fixtures
 # ============================================================================

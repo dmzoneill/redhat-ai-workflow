@@ -217,7 +217,8 @@ class TestClientLifecycle:
     async def test_close_no_client_no_error(self):
         """close() does not raise when no client exists."""
         client = APIClient()
-        await client.close()  # should not raise
+        await client.close()  # Test verifies no exception is raised
+        assert client._client is None
 
     async def test_context_manager(self):
         """Async context manager calls close on exit."""

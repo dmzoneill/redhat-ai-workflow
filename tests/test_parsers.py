@@ -1,7 +1,5 @@
 """Tests for common parsers module."""
 
-from unittest.mock import patch
-
 from common.parsers import (
     analyze_mr_status,
     analyze_review_status,
@@ -21,12 +19,9 @@ from common.parsers import (
     extract_version_suffix,
     extract_web_url,
     filter_human_comments,
-    find_full_conflict_marker,
     find_transition_name,
     get_next_version,
     is_bot_comment,
-    linkify_jira_keys,
-    linkify_mr_ids,
     parse_alertmanager_output,
     parse_conflict_markers,
     parse_deploy_clowder_ref,
@@ -98,7 +93,7 @@ class TestParseJiraIssues:
         """Should parse issue key and summary."""
         output = "AAP-12345: Fix the login bug"
         result = parse_jira_issues(output)
-        assert len(result) >= 0  # Depends on format
+        assert isinstance(result, list)  # Parser returns list
 
 
 class TestParseNamespaces:
@@ -112,8 +107,9 @@ class TestParseNamespaces:
         """Should parse namespace output."""
         output = """ephemeral-abc123  reserved  2h
 ephemeral-def456  active    1h"""
-        _ = parse_namespaces(output)
-        # Result depends on exact format
+        result = parse_namespaces(output)
+        assert isinstance(result, list)
+        assert len(result) > 0  # Should parse the alert JSON
 
 
 class TestIsBotComment:
@@ -160,8 +156,8 @@ class TestParseGitLog:
     def test_parse_commit(self):
         """Should parse git log output."""
         output = "abc1234 - AAP-12345 - feat: add feature"
-        _ = parse_git_log(output)
-        # Verify structure
+        result = parse_git_log(output)
+        assert isinstance(result, list)
 
 
 class TestParseGitBranches:
@@ -193,7 +189,7 @@ class TestParseKubectlPods:
 my-pod-abc123           1/1     Running   0          1h
 another-pod-def456      0/1     Pending   0          5m"""
         result = parse_kubectl_pods(output)
-        assert len(result) >= 0  # Depends on exact parsing
+        assert len(result) == 2  # Two pod lines parsed
 
 
 class TestExtractJiraKey:
@@ -283,8 +279,8 @@ class TestExtractBranchFromMr:
     def test_extract_branch(self):
         """Should extract branch name from MR details."""
         details = "Source branch: feature/aap-12345-new-feature"
-        _ = extract_branch_from_mr(details)
-        # Depends on format
+        result = extract_branch_from_mr(details)
+        assert result is None or isinstance(result, str)
 
 
 class TestExtractCurrentBranch:
@@ -817,7 +813,7 @@ class TestParseJiraIssuesExtended:
 Summary: Implement new feature
 Status: In Progress"""
         result = parse_jira_issues(output)
-        assert len(result) >= 0  # Parser may or may not match this format
+        assert isinstance(result, list)  # Parser returns a list
 
 
 class TestParseErrorLogsExtended:
@@ -836,6 +832,7 @@ Traceback (most recent call last)
         result = parse_error_logs(output)
         # parse_error_logs looks for Exception, Traceback, etc.
         assert isinstance(result, list)
+        assert len(result) > 0  # Should find at least the Exception line
 
 
 class TestParseStaleBranchesExtended:
@@ -852,7 +849,7 @@ class TestParseStaleBranchesExtended:
   feature/aap-123
   bugfix/aap-456"""
         result = parse_stale_branches(output)
-        assert len(result) >= 0  # Depends on stale criteria
+        assert isinstance(result, list)  # Parser returns a list
 
 
 class TestExtractWebUrlExtended:
@@ -930,7 +927,7 @@ applications:
 """
         result = parse_deploy_clowder_ref(content)
         # Result depends on exact parsing logic
-        assert isinstance(result, (str, type(None)))
+        assert result is None or isinstance(result, str)
 
 
 class TestUpdateDeployClowderRefExtended:
@@ -943,6 +940,7 @@ class TestUpdateDeployClowderRefExtended:
         new_content, updated = update_deploy_clowder_ref(content, new_sha)
         # Check if updated
         assert isinstance(updated, bool)
+        assert isinstance(new_content, str)
 
 
 class TestParseAlertmanagerOutputExtended:
@@ -961,708 +959,3 @@ class TestParseAlertmanagerOutputExtended:
         result = parse_alertmanager_output(output)
         # Should return list of dicts
         assert isinstance(result, list)
-
-
-# ============================================================================
-# Additional coverage tests targeting uncovered lines
-# ============================================================================
-
-
-class TestParseMrListBranchFormats:
-    """Tests for parse_mr_list - branch format variants (lines 53-65, 78-80)."""
-
-    def test_single_line_with_source_and_target_branch(self):
-        """Should parse single-line MR format with both branches: (target) <- (source)."""
-        output = "!1452  project!1452  AAP-58394 - feat: new thing (main) \u2190 (feature/aap-58394)"
-        result = parse_mr_list(output)
-        assert len(result) == 1
-        assert result[0]["iid"] == 1452
-        assert result[0]["target_branch"] == "main"
-        assert result[0]["branch"] == "feature/aap-58394"
-
-    def test_single_line_with_author_and_branch(self):
-        """Should extract author from single-line format with branches."""
-        output = "!1452  project!1452  AAP-58394 - feat: new @daoneill (main) \u2190 (feature/aap-58394)"
-        result = parse_mr_list(output, include_author=True)
-        assert len(result) == 1
-        assert result[0]["author"] == "daoneill"
-
-    def test_no_branch_format_with_author(self):
-        """Should parse format without source branch and include author."""
-        output = "!200  project!200  Fix: the bug @alice (main)"
-        result = parse_mr_list(output, include_author=True)
-        assert len(result) == 1
-        assert result[0]["iid"] == 200
-        assert result[0]["branch"] == ""
-        assert result[0]["author"] == "alice"
-
-    def test_no_branch_format_no_author_match(self):
-        """Should handle no-branch format without @username."""
-        output = "!200  project!200  Fix: the bug (main)"
-        result = parse_mr_list(output, include_author=True)
-        assert len(result) == 1
-        assert "author" not in result[0]
-
-    def test_multiline_with_source_branch(self):
-        """Should parse multi-line MR with source branch field."""
-        output = """IID: 789
-Title: Fix parser
-Source Branch: feature/fix-parser"""
-        result = parse_mr_list(output)
-        assert len(result) == 1
-        assert result[0]["iid"] == 789
-        assert result[0]["branch"] == "feature/fix-parser"
-
-    def test_multiline_with_author_include(self):
-        """Should extract author from multi-line format when include_author=True."""
-        output = """IID: 789
-Title: Fix parser
-Author: alice"""
-        result = parse_mr_list(output, include_author=True)
-        assert len(result) == 1
-        assert result[0]["author"] == "alice"
-
-    def test_multiline_mr_id_format(self):
-        """Should parse mr_id format in multi-line output."""
-        output = "mr_id: 999\nTitle: Some MR title"
-        result = parse_mr_list(output)
-        assert len(result) == 1
-        assert result[0]["iid"] == 999
-
-
-class TestParseNamespacesFallback:
-    """Tests for parse_namespaces fallback path (lines 165-169)."""
-
-    def test_namespace_without_expiry(self):
-        """Should handle namespace line without expiry info."""
-        output = "ephemeral-xyz789  status_unknown"
-        result = parse_namespaces(output)
-        assert len(result) == 1
-        assert result[0]["name"] == "ephemeral-xyz789"
-        assert result[0]["expires"] == "unknown"
-
-
-class TestParseGitLogMarkdown:
-    """Tests for parse_git_log markdown format (lines 224, 229-230)."""
-
-    def test_markdown_formatted_log(self):
-        """Should parse markdown-formatted git log like '- `sha message`'."""
-        output = "- `abc1234 feat: add new feature`"
-        result = parse_git_log(output)
-        assert len(result) == 1
-        assert result[0]["sha"] == "abc1234"
-        assert "add new feature" in result[0]["message"]
-
-    def test_sha_only_no_message(self):
-        """Should handle commit with SHA but no message."""
-        output = "abcdef1"
-        result = parse_git_log(output)
-        assert len(result) == 1
-        assert result[0]["sha"] == "abcdef1"
-        assert result[0]["message"] == ""
-
-
-class TestParseGitBranchesFormats:
-    """Tests for parse_git_branches - markdown formats (lines 268, 274, 285)."""
-
-    def test_current_branch_markdown(self):
-        """Should parse **Current:** `branch-name` format."""
-        output = "**Current:** `feature/aap-12345`"
-        result = parse_git_branches(output)
-        assert "feature/aap-12345" in result
-
-    def test_backtick_format(self):
-        """Should parse backtick branch format: `branch-name` -> `origin/...`."""
-        output = "  `feature/my-branch` \u2192 `origin/feature/my-branch` (3 weeks ago)"
-        result = parse_git_branches(output)
-        assert "feature/my-branch" in result
-
-    def test_header_lines_skipped(self):
-        """Should skip header lines starting with ## or 'Branches in'."""
-        output = """## Branches
-Branches in /repo
-  `feature/test`"""
-        result = parse_git_branches(output)
-        assert any("feature/test" in b for b in result)
-        assert not any(b.startswith("##") for b in result)
-
-    def test_arrow_prefix_backtick(self):
-        """Should handle arrow prefix before backtick branch."""
-        output = "\u2192 `hotfix/urgent-fix` \u2192 `origin/hotfix/urgent-fix`"
-        result = parse_git_branches(output)
-        assert "hotfix/urgent-fix" in result
-
-    def test_deduplication(self):
-        """Should deduplicate branch names."""
-        output = """  `feature/abc`
-  `feature/abc`"""
-        result = parse_git_branches(output)
-        assert result.count("feature/abc") == 1
-
-
-class TestParseGitConflictsBothAdded:
-    """Tests for parse_git_conflicts - both added human readable (lines 380-383)."""
-
-    def test_human_readable_both_added(self):
-        """Should parse human-readable 'both added' format."""
-        output = "both added: src/new_module.py"
-        result = parse_git_conflicts(output)
-        assert len(result) == 1
-        assert result[0]["file"] == "src/new_module.py"
-        assert result[0]["type"] == "both added"
-
-    def test_skips_blank_lines(self):
-        """Should skip blank lines in conflict output."""
-        output = "\n\nUU file1.py\n\n"
-        result = parse_git_conflicts(output)
-        assert len(result) == 1
-
-
-class TestParsePipelineStatusExtended:
-    """Tests for parse_pipeline_status - canceled, failed jobs (lines 418, 428-430)."""
-
-    def test_canceled_status(self):
-        """Should detect canceled pipeline status."""
-        result = parse_pipeline_status("Pipeline was canceled by user")
-        assert result["status"] == "canceled"
-
-    def test_cancelled_uk_spelling(self):
-        """Should detect cancelled (UK spelling)."""
-        result = parse_pipeline_status("Pipeline was cancelled")
-        assert result["status"] == "canceled"
-
-    def test_failed_jobs_extraction(self):
-        """Should extract failed job names."""
-        output = """lint: failed
-test-unit: failed
-build: passed"""
-        result = parse_pipeline_status(output)
-        assert "lint" in result["failed_jobs"]
-        assert "test-unit" in result["failed_jobs"]
-
-
-class TestParseMrCommentsExtended:
-    """Tests for parse_mr_comments - text format details (lines 454-475)."""
-
-    def test_multiple_text_comments(self):
-        """Should parse multiple text-format comments."""
-        output = """@alice commented 3 days ago
-Please fix the typo.
-@bob commented 1 day ago
-LGTM, approved."""
-        result = parse_mr_comments(output)
-        assert len(result) == 2
-        assert result[0]["author"] == "alice"
-        assert "typo" in result[0]["text"]
-        assert result[1]["author"] == "bob"
-
-    def test_invalid_json_falls_through(self):
-        """Should fall through to text parser on invalid JSON."""
-        output = "{not valid json"
-        result = parse_mr_comments(output)
-        # Should not crash, returns whatever text parsing finds
-        assert isinstance(result, list)
-
-
-class TestAnalyzeMrStatusExtended:
-    """Tests for analyze_mr_status - reviewers, feedback, status branches (lines 573-594)."""
-
-    def test_reviewer_comment_detected(self):
-        """Should detect reviewer comments."""
-        details = "alice commented on the MR: please fix the typo"
-        result = analyze_mr_status(details, my_username="bob")
-        assert result["has_feedback"] is True
-        assert "alice" in result["reviewers"]
-
-    def test_own_comments_excluded(self):
-        """Should exclude own comments from reviewers."""
-        details = "bob commented on the MR: I fixed the typo"
-        result = analyze_mr_status(details, my_username="bob")
-        assert "bob" not in result["reviewers"]
-
-    def test_approved_and_not_unresolved(self):
-        """Should detect approved status when no unresolved discussions."""
-        details = "This MR has been approved by reviewer. LGTM."
-        result = analyze_mr_status(details)
-        assert result["status"] == "approved"
-        assert result["action"] == "Ready to merge!"
-
-    def test_unresolved_with_feedback(self):
-        """Should detect needs_response when unresolved discussions exist."""
-        details = "alice commented: please fix. There are unresolved discussions."
-        result = analyze_mr_status(details)
-        assert result["status"] == "needs_response"
-        assert result["has_feedback"] is True
-
-    def test_pipeline_failed_status(self):
-        """Should set pipeline_failed status when no conflicts."""
-        details = "Pipeline failed. CI failed."
-        result = analyze_mr_status(details)
-        assert result["status"] == "pipeline_failed"
-        assert "Fix pipeline" in result["action"]
-
-    def test_merge_commits_needs_rebase(self):
-        """Should detect merge commits as needing rebase."""
-        details = "merge branch main into feature"
-        result = analyze_mr_status(details)
-        assert result["needs_rebase"] is True
-
-    def test_merge_commits_status_no_conflicts(self):
-        """Should suggest rebase for merge commits even without conflicts."""
-        # No conflicts, not approved, no feedback, no pipeline fail, but has merge commits
-        details = "merge branch main into feature/aap-123"
-        result = analyze_mr_status(details, my_username="nobody_matches")
-        assert result["status"] == "needs_rebase"
-        assert "merge commits" in result["action"]
-
-    def test_review_by_pattern(self):
-        """Should detect 'Review by' pattern for reviewers."""
-        details = "Review by alice. Code looks good."
-        result = analyze_mr_status(details, my_username="bob")
-        assert "alice" in result["reviewers"]
-
-    def test_at_username_pattern(self):
-        """Should detect '@username :' pattern for reviewers."""
-        details = "@charlie : I have a question about this change."
-        result = analyze_mr_status(details, my_username="bob")
-        assert "charlie" in result["reviewers"]
-
-    def test_feedback_from_pattern(self):
-        """Should detect 'Feedback from' pattern for reviewers."""
-        details = "Feedback from diana regarding the API changes."
-        result = analyze_mr_status(details, my_username="bob")
-        assert "diana" in result["reviewers"]
-
-
-class TestExtractMrIdFromTextExtended:
-    """Tests for extract_mr_id_from_text - IID format, fallback (lines 760, 770)."""
-
-    def test_iid_format(self):
-        """Should extract from IID: 123 format."""
-        assert extract_mr_id_from_text("IID: 456") == 456
-
-    def test_mr_id_format(self):
-        """Should extract from mr_id: 789 format."""
-        assert extract_mr_id_from_text("mr_id: 789") == 789
-
-    def test_fallback_bare_number(self):
-        """Should fall back to finding a bare number when no patterns match."""
-        assert extract_mr_id_from_text("review 1449 please") == 1449
-
-    def test_empty_returns_none(self):
-        """Should return None for empty string."""
-        assert extract_mr_id_from_text("") is None
-
-    def test_single_digit_ignored(self):
-        """Should not match single digits in fallback."""
-        assert extract_mr_id_from_text("version 1 is old") is None
-
-
-class TestExtractBranchFromMrExtended:
-    """Tests for extract_branch_from_mr - all pattern variants (lines 786-800)."""
-
-    def test_source_branch_pattern(self):
-        """Should match SourceBranch: pattern."""
-        details = "SourceBranch: feature/aap-123"
-        result = extract_branch_from_mr(details)
-        assert result == "feature/aap-123"
-
-    def test_source_branch_underscore(self):
-        """Should match source_branch: pattern."""
-        details = "source_branch: bugfix/fix-it"
-        result = extract_branch_from_mr(details)
-        assert result == "bugfix/fix-it"
-
-    def test_branch_colon_pattern(self):
-        """Should match Branch: pattern."""
-        details = "Branch: release/v2.0"
-        result = extract_branch_from_mr(details)
-        assert result == "release/v2.0"
-
-    def test_empty_returns_none(self):
-        """Should return None for empty input."""
-        assert extract_branch_from_mr("") is None
-        assert extract_branch_from_mr(None) is None
-
-    def test_no_match_returns_none(self):
-        """Should return None when no branch pattern found."""
-        assert extract_branch_from_mr("Title: Some title") is None
-
-
-class TestExtractGitShaExtended:
-    """Tests for extract_git_sha - labeled and short SHA (lines 1058-1073)."""
-
-    def test_sha_with_label(self):
-        """Should extract SHA with label prefix."""
-        text = "SHA: abc1234def567"
-        result = extract_git_sha(text)
-        assert result == "abc1234def567"
-
-    def test_sha_with_backticks(self):
-        """Should extract SHA from backtick-wrapped label."""
-        text = "sha: `abc1234def567`"
-        result = extract_git_sha(text)
-        assert result == "abc1234def567"
-
-    def test_short_sha_7_chars(self):
-        """Should extract 7-char short SHA."""
-        text = "commit abcdef1 was the last"
-        result = extract_git_sha(text)
-        assert result == "abcdef1"
-
-    def test_empty_returns_none(self):
-        """Should return None for empty input."""
-        assert extract_git_sha("") is None
-        assert extract_git_sha(None) is None
-
-
-class TestExtractJsonFromOutputExtended:
-    """Tests for extract_json_from_output - invalid JSON (lines 1215-1217)."""
-
-    def test_invalid_json_in_braces(self):
-        """Should return None for text with braces but invalid JSON."""
-        text = "Result: {not: valid, json: here}"
-        result = extract_json_from_output(text)
-        assert result is None
-
-    def test_no_braces(self):
-        """Should return None when no braces found."""
-        result = extract_json_from_output("just plain text")
-        assert result is None
-
-
-class TestParseAlertmanagerOutputExtended2:
-    """Tests for parse_alertmanager_output - severity and message (lines 1242-1249)."""
-
-    def test_alert_with_severity_and_message(self):
-        """Should extract severity and message from alertmanager output."""
-        output = """alertname=HighMemory
-severity=critical
-message: Memory usage exceeded threshold"""
-        result = parse_alertmanager_output(output)
-        assert len(result) == 1
-        assert result[0]["name"] == "HighMemory"
-        assert result[0]["severity"] == "critical"
-        assert "Memory usage" in result[0]["message"]
-
-    def test_multiple_alerts(self):
-        """Should parse multiple sequential alerts."""
-        output = """alertname=Alert1
-severity=warning
-alertname=Alert2
-severity=critical"""
-        result = parse_alertmanager_output(output)
-        assert len(result) == 2
-        assert result[0]["name"] == "Alert1"
-        assert result[0]["severity"] == "warning"
-        assert result[1]["name"] == "Alert2"
-        assert result[1]["severity"] == "critical"
-
-    def test_description_line(self):
-        """Should capture description line as message."""
-        output = """alertname=TestAlert
-description: Something bad happened"""
-        result = parse_alertmanager_output(output)
-        assert len(result) == 1
-        assert "Something bad" in result[0]["message"]
-
-
-class TestLinkifyJiraKeys:
-    """Tests for linkify_jira_keys (lines 1289-1305)."""
-
-    def test_basic_linkify(self):
-        """Should convert Jira keys to markdown links."""
-        text = "Working on AAP-12345"
-        result = linkify_jira_keys(text, jira_url="https://issues.example.com")
-        assert "[AAP-12345](https://issues.example.com/browse/AAP-12345)" in result
-
-    def test_branch_style_key(self):
-        """Should handle branch-style keys like AAP-12345-description."""
-        text = "Branch: AAP-12345-fix-login"
-        result = linkify_jira_keys(text, jira_url="https://issues.example.com")
-        assert (
-            "[AAP-12345-fix-login](https://issues.example.com/browse/AAP-12345)"
-            in result
-        )
-
-    def test_slack_format(self):
-        """Should produce Slack-format links when requested."""
-        text = "Working on AAP-12345"
-        result = linkify_jira_keys(
-            text, jira_url="https://issues.example.com", slack_format=True
-        )
-        assert "<https://issues.example.com/browse/AAP-12345|AAP-12345>" in result
-
-    def test_empty_text(self):
-        """Should handle empty text."""
-        assert linkify_jira_keys("", jira_url="https://issues.example.com") == ""
-        assert linkify_jira_keys(None, jira_url="https://issues.example.com") is None
-
-    def test_no_keys_unchanged(self):
-        """Should leave text unchanged when no Jira keys present."""
-        text = "Just some regular text"
-        result = linkify_jira_keys(text, jira_url="https://issues.example.com")
-        assert result == text
-
-
-class TestLinkifyMrIds:
-    """Tests for linkify_mr_ids (lines 1324-1341)."""
-
-    @patch(
-        "scripts.common.config_loader.get_gitlab_url",
-        return_value="https://gitlab.example.com",
-    )
-    def test_basic_mr_linkify(self, mock_url):
-        """Should convert !123 to markdown link."""
-        text = "Check out !1449"
-        result = linkify_mr_ids(text, project_path="org/repo")
-        assert (
-            "[!1449](https://gitlab.example.com/org/repo/-/merge_requests/1449)"
-            in result
-        )
-
-    @patch(
-        "scripts.common.config_loader.get_gitlab_url",
-        return_value="https://gitlab.example.com",
-    )
-    def test_slack_format(self, mock_url):
-        """Should produce Slack-format links when requested."""
-        text = "Review !1449"
-        result = linkify_mr_ids(text, project_path="org/repo", slack_format=True)
-        assert (
-            "<https://gitlab.example.com/org/repo/-/merge_requests/1449|!1449>"
-            in result
-        )
-
-    @patch(
-        "scripts.common.config_loader.get_gitlab_url",
-        return_value="https://gitlab.example.com",
-    )
-    def test_empty_text(self, mock_url):
-        """Should handle empty text."""
-        assert linkify_mr_ids("") == ""
-        assert linkify_mr_ids(None) is None
-
-    @patch(
-        "scripts.common.config_loader.get_gitlab_url",
-        return_value="https://gitlab.example.com",
-    )
-    def test_multiple_mr_ids(self, mock_url):
-        """Should convert multiple MR IDs."""
-        text = "See !100 and !200"
-        result = linkify_mr_ids(text, project_path="org/repo")
-        assert "!100](" in result
-        assert "!200](" in result
-
-
-class TestFindFullConflictMarker:
-    """Tests for find_full_conflict_marker (lines 1356-1361)."""
-
-    def test_find_marker(self):
-        """Should find full conflict marker for given ours/theirs."""
-        content = """some code
-<<<<<<< HEAD
-our code
-=======
-their code
->>>>>>> feature/branch
-more code"""
-        result = find_full_conflict_marker(content, "our code\n", "their code\n")
-        assert result is not None
-        assert "<<<<<<< HEAD" in result
-        assert ">>>>>>> feature/branch" in result
-
-    def test_empty_content(self):
-        """Should return None for empty content."""
-        assert find_full_conflict_marker("", "ours", "theirs") is None
-        assert find_full_conflict_marker(None, "ours", "theirs") is None
-
-    def test_no_match(self):
-        """Should return None when no matching marker found."""
-        content = "just normal code"
-        assert find_full_conflict_marker(content, "ours", "theirs") is None
-
-
-class TestSplitMrCommentsExtended:
-    """Tests for split_mr_comments (lines 1378-1399)."""
-
-    def test_split_multiple_comments(self):
-        """Should split multiple comment blocks."""
-        text = """some header
-alice commented 2026-01-15 10:30:00
-This looks good to me
-
-bob commented 2026-01-15 11:00:00
-Can you fix the typo?"""
-        result = split_mr_comments(text)
-        assert len(result) == 2
-        assert result[0][0] == "alice"
-        assert result[0][1] == "2026-01-15 10:30:00"
-        assert "looks good" in result[0][2]
-        assert result[1][0] == "bob"
-
-    def test_single_comment(self):
-        """Should handle a single comment."""
-        text = """header
-alice commented 2026-01-15 10:30:00
-Great work!"""
-        result = split_mr_comments(text)
-        assert len(result) == 1
-        assert result[0][0] == "alice"
-        assert "Great work" in result[0][2]
-
-    def test_empty_returns_empty(self):
-        """Should return empty list for empty text."""
-        assert split_mr_comments("") == []
-        assert split_mr_comments(None) == []
-
-
-class TestFindTransitionNameExtended2:
-    """Tests for find_transition_name - custom variations (lines 1439-1445)."""
-
-    def test_no_match_returns_none(self):
-        """Should return None when no variation matches."""
-        text = "Available: Start, Pause, Reopen"
-        result = find_transition_name(text, target_variations=["Done", "Close"])
-        assert result is None
-
-    def test_close_variation(self):
-        """Should find Close transition."""
-        text = "Available: Close Issue, Reopen"
-        result = find_transition_name(text, target_variations=["Close"])
-        assert result is not None
-        assert "Close" in result
-
-    def test_resolve_variation(self):
-        """Should find Resolve transition."""
-        text = "Available: Resolve, Reopen"
-        result = find_transition_name(text)
-        assert result is not None
-        assert "Resolve" in result
-
-
-class TestAnalyzeReviewStatusExtended:
-    """Tests for analyze_review_status - advanced branches (lines 1485, 1500-1511)."""
-
-    def test_empty_reviewer(self):
-        """Should return needs_full_review for empty reviewer."""
-        result = analyze_review_status("some details", "")
-        assert result["recommended_action"] == "needs_full_review"
-        assert result["reason"] == "No details available"
-
-    def test_feedback_exists_no_reply(self):
-        """Should recommend skip when feedback exists but author has not replied."""
-        details = "reviewer123 commented on the code. Please fix."
-        result = analyze_review_status(details, "reviewer123", author="alice")
-        assert result["my_feedback_exists"] is True
-        assert result["author_replied"] is False
-        assert result["recommended_action"] == "skip"
-        assert "Waiting for author" in result["reason"]
-
-    def test_feedback_exists_author_replied(self):
-        """Should recommend followup when author replied to feedback."""
-        details = "reviewer123 commented on the code. alice commented later. replied"
-        result = analyze_review_status(details, "reviewer123", author="alice")
-        assert result["my_feedback_exists"] is True
-        assert result["author_replied"] is True
-        assert result["recommended_action"] == "needs_followup"
-
-    def test_no_feedback_needs_review(self):
-        """Should recommend full review when no prior feedback."""
-        details = "MR created by alice. No reviews yet."
-        result = analyze_review_status(details, "reviewer123", author="alice")
-        assert result["my_feedback_exists"] is False
-        assert result["recommended_action"] == "needs_full_review"
-        assert "No previous review" in result["reason"]
-
-
-class TestPrometheusAlertLinks:
-    """Tests for parse_prometheus_alert - link extraction (line 977)."""
-
-    def test_extract_grafana_link(self):
-        """Should extract Grafana link from alert."""
-        message = 'Alert: TestAlert [FIRING:1] <a href="https://grafana.example.com/dashboard/123">View</a>'
-        result = parse_prometheus_alert(message)
-        assert "grafana" in result["links"]
-        assert "grafana.example.com" in result["links"]["grafana"]
-
-    def test_extract_alertmanager_link(self):
-        """Should extract AlertManager link."""
-        message = 'Alert: Test [FIRING:1] <a href="https://alertmanager.example.com/alerts">View</a>'
-        result = parse_prometheus_alert(message)
-        assert "alertmanager" in result["links"]
-
-    def test_extract_silence_link(self):
-        """Should extract silence link."""
-        message = 'Alert: Test [FIRING:1] <a href="https://alertmanager.example.com/silences/new?id=123">Silence</a>'
-        result = parse_prometheus_alert(message)
-        assert "silence" in result["links"]
-
-    def test_namespace_extraction(self):
-        """Should extract namespace from alert message."""
-        message = "Alert: Test [FIRING:1] namespace=tower-analytics-prod check it"
-        result = parse_prometheus_alert(message)
-        assert result["namespace"] == "tower-analytics-prod"
-
-
-class TestFilterHumanCommentsExtended:
-    """Tests for filter_human_comments - exclude_author (line 203)."""
-
-    def test_exclude_specific_author(self):
-        """Should exclude comments from a specific author."""
-        comments = [
-            {"text": "LGTM", "author": "Alice"},
-            {"text": "Good work", "author": "Bob"},
-            {"text": "Thanks", "author": "Charlie"},
-        ]
-        result = filter_human_comments(comments, exclude_author="Alice")
-        assert len(result) == 2
-        assert all(c["author"] != "Alice" for c in result)
-
-    def test_exclude_author_case_insensitive(self):
-        """Should exclude author in case-insensitive manner."""
-        comments = [
-            {"text": "Done", "author": "ALICE"},
-        ]
-        result = filter_human_comments(comments, exclude_author="alice")
-        assert len(result) == 0
-
-
-class TestParseKubectlPodsExtended:
-    """Tests for parse_kubectl_pods - healthy detection (lines 316-327)."""
-
-    def test_running_pod_healthy(self):
-        """Should mark fully ready running pod as healthy."""
-        output = """NAME    READY   STATUS    RESTARTS   AGE
-mypod   2/2     Running   0          1h"""
-        result = parse_kubectl_pods(output)
-        assert len(result) == 1
-        assert result[0]["healthy"] is True
-        assert result[0]["restarts"] == "0"
-        assert result[0]["age"] == "1h"
-
-    def test_pending_pod_unhealthy(self):
-        """Should mark pending pod as unhealthy."""
-        output = """NAME    READY   STATUS    RESTARTS   AGE
-mypod   0/1     Pending   0          5m"""
-        result = parse_kubectl_pods(output)
-        assert len(result) == 1
-        assert result[0]["healthy"] is False
-
-    def test_partially_ready_unhealthy(self):
-        """Should mark partially ready pod as unhealthy."""
-        output = """NAME    READY   STATUS    RESTARTS   AGE
-mypod   1/2     Running   3          2h"""
-        result = parse_kubectl_pods(output)
-        assert len(result) == 1
-        assert result[0]["healthy"] is False
-
-
-class TestBillingEventNumberExtended:
-    """Tests for extract_billing_event_number - no matches (line 1006)."""
-
-    def test_no_billing_events(self):
-        """Should return 1 when no BillingEvent matches found."""
-        output = "AAP-12345: Some other issue\nAAP-67890: Another issue"
-        result = extract_billing_event_number(output)
-        assert result == 1

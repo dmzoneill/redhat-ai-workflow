@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from fastmcp import Context, FastMCP
+
 # Ensure project root is on sys.path so `server` is importable as a package
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -19,6 +21,7 @@ from server.persona_loader import (  # noqa: E402
     get_available_modules,
     is_valid_module,
 )
+from server.workspace_state import ChatSession, WorkspaceState  # noqa: E402
 
 
 class TestPaths:
@@ -91,7 +94,7 @@ class TestPersonaLoaderInit:
 
     def test_init_with_server(self):
         """Should initialize with a server instance."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         assert loader.server == mock_server
@@ -105,7 +108,7 @@ class TestLoadPersonaConfig:
 
     def test_load_existing_persona(self):
         """Should load config for existing persona."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         # Check that developer persona exists and can be loaded
@@ -116,7 +119,7 @@ class TestLoadPersonaConfig:
 
     def test_load_nonexistent_persona(self):
         """Should return None for nonexistent persona."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         config = loader.load_persona_config("nonexistent_persona_xyz")
@@ -128,7 +131,7 @@ class TestPersonaLoaderGetStatus:
 
     def test_get_status_empty(self):
         """Should return empty status for fresh loader."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         status = loader.get_status()
@@ -181,7 +184,7 @@ class TestGlobalLoader:
         """init_loader should create and return loader."""
         from server.persona_loader import get_loader, init_loader  # noqa: F811
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = init_loader(mock_server)
 
         assert isinstance(loader, PersonaLoader)
@@ -281,7 +284,7 @@ class TestLoadToolModule:
 
     async def test_nonexistent_tools_file(self, tmp_path):
         """Returns empty list for nonexistent tools file."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         with patch(
@@ -296,7 +299,7 @@ class TestLoadToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("# empty")
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         with patch(
@@ -315,7 +318,7 @@ class TestLoadToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("x = 1\n")
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -346,7 +349,7 @@ class TestLoadToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("def register_tools(server): pass\n")
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
 
         tool_before = MagicMock()
         tool_before.name = "existing_tool"
@@ -402,7 +405,7 @@ class TestLoadToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("def register_tools(server): pass\n")
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -440,7 +443,7 @@ class TestLoadToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("raise RuntimeError('boom')\n")
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         with patch(
@@ -465,7 +468,7 @@ class TestUnloadModuleTools:
 
     async def test_removes_module_tools(self):
         """Removes tools belonging to a module."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader._tool_to_module = {
             "tool_a": "mod1",
@@ -485,7 +488,7 @@ class TestUnloadModuleTools:
 
     async def test_does_not_remove_core_tools(self):
         """Core tools are never removed."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader._tool_to_module = {
             "persona_load": "mod1",
@@ -499,7 +502,7 @@ class TestUnloadModuleTools:
 
     async def test_handles_remove_failure(self):
         """Handles failure when removing a tool."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.remove_tool.side_effect = Exception("remove failed")
         loader = PersonaLoader(mock_server)
         loader._tool_to_module = {"tool_a": "mod1"}
@@ -520,7 +523,7 @@ class TestClearNonCoreTools:
 
     async def test_clears_all_non_core(self):
         """Removes all tools except core ones."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
 
         tool_core = MagicMock()
         tool_core.name = "persona_load"
@@ -543,7 +546,7 @@ class TestClearNonCoreTools:
 
     async def test_handles_tool_without_name_attr(self):
         """Handles tool objects without .name attribute."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
 
         tool_str = "some_tool_string"
         mock_server.list_tools = AsyncMock(return_value=[tool_str])
@@ -554,7 +557,7 @@ class TestClearNonCoreTools:
 
     async def test_handles_remove_exception(self):
         """Handles exception when removing tools."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
 
         tool = MagicMock()
         tool.name = "bad_tool"
@@ -576,10 +579,10 @@ class TestSwitchPersona:
 
     async def test_persona_not_found(self, tmp_path):
         """Returns error when persona config not found."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch.object(loader, "load_persona_config", return_value=None):
             with patch(
@@ -593,7 +596,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_loads_valid_modules(self):
         """Loads tools for valid modules in persona config."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -603,7 +606,7 @@ class TestSwitchPersona:
             "persona": "",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -624,8 +627,8 @@ class TestSwitchPersona:
                         with patch(
                             "server.workspace_state.WorkspaceRegistry",
                         ) as mock_ws:
-                            mock_ws_state = MagicMock()
-                            mock_session = MagicMock()
+                            mock_ws_state = MagicMock(spec=WorkspaceState)
+                            mock_session = MagicMock(spec=ChatSession)
                             mock_session.session_id = "abc12345"
                             mock_session.persona = "old"
                             mock_ws_state.get_active_session.return_value = mock_session
@@ -646,7 +649,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_skips_invalid_modules(self):
         """Skips modules not in available modules."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -656,7 +659,7 @@ class TestSwitchPersona:
             "persona": "",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -668,9 +671,9 @@ class TestSwitchPersona:
                     with patch(
                         "server.workspace_state.WorkspaceRegistry",
                     ) as mock_ws:
-                        mock_ws_state = MagicMock()
+                        mock_ws_state = MagicMock(spec=WorkspaceState)
                         mock_ws_state.get_active_session.return_value = None
-                        mock_session = MagicMock()
+                        mock_session = MagicMock(spec=ChatSession)
                         mock_session.session_id = "xyz"
                         mock_ws_state.create_session.return_value = mock_session
                         mock_ws_state.workspace_uri = "file:///test"
@@ -688,7 +691,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_md_file_persona(self, tmp_path):
         """Loads persona text from .md file reference."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -703,7 +706,7 @@ class TestSwitchPersona:
             "persona": "personas/test.md",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -723,7 +726,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_inline_persona(self):
         """Uses inline persona text."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -733,7 +736,7 @@ class TestSwitchPersona:
             "persona": "You are inline.",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -751,7 +754,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_with_persona_append(self):
         """Appends persona_append text."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -762,7 +765,7 @@ class TestSwitchPersona:
             "persona_append": "Extra instructions.",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -781,7 +784,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_fallback_md_file(self, tmp_path):
         """Falls back to {persona_name}.md when persona ref is empty."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -796,7 +799,7 @@ class TestSwitchPersona:
             "persona": "",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock()
 
@@ -815,7 +818,7 @@ class TestSwitchPersona:
 
     async def test_switch_persona_notification_failure_ignored(self):
         """Notification failure does not block persona switch."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
@@ -825,7 +828,7 @@ class TestSwitchPersona:
             "persona": "test",
         }
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = MagicMock()
         mock_ctx.session.send_tool_list_changed = AsyncMock(
             side_effect=Exception("notification failed")
@@ -854,11 +857,11 @@ class TestGetWorkspacePersona:
 
     async def test_returns_workspace_persona(self):
         """Returns persona from workspace state."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
-        mock_ws_state = MagicMock()
+        mock_ws_state = MagicMock(spec=WorkspaceState)
         mock_ws_state.persona = "devops"
 
         with patch(
@@ -871,10 +874,10 @@ class TestGetWorkspacePersona:
 
     async def test_fallback_to_current_persona(self):
         """Falls back to current_persona when workspace fails."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = "developer"
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
@@ -886,10 +889,10 @@ class TestGetWorkspacePersona:
 
     async def test_fallback_to_config_default(self):
         """Falls back to config default when everything else fails."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = ""
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
@@ -905,10 +908,10 @@ class TestGetWorkspacePersona:
 
     async def test_fallback_to_researcher(self):
         """Falls back to 'researcher' when all else fails."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = ""
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
@@ -933,11 +936,11 @@ class TestSetWorkspacePersona:
 
     async def test_sets_persona_on_workspace(self):
         """Sets persona and clears filter cache."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
-        mock_ws_state = MagicMock()
+        mock_ws_state = MagicMock(spec=WorkspaceState)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
@@ -950,16 +953,17 @@ class TestSetWorkspacePersona:
 
     async def test_handles_exception(self):
         """Handles exception without raising."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
         ) as mock_ws:
             mock_ws.get_for_ctx = AsyncMock(side_effect=Exception("boom"))
             await loader.set_workspace_persona(mock_ctx, "devops")
-            # Should not raise
+            # Test verifies no exception is raised
+        assert True
 
 
 # ---------------------------------------------------------------------------
@@ -972,14 +976,14 @@ class TestGetWorkspaceStatus:
 
     async def test_returns_workspace_status(self):
         """Returns workspace-specific status."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = "global_persona"
         loader.loaded_modules = {"mod1", "mod2"}
         loader._tool_to_module = {"t1": "mod1", "t2": "mod2"}
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
-        mock_ws_state = MagicMock()
+        mock_ws_state = MagicMock(spec=WorkspaceState)
         mock_ws_state.workspace_uri = "file:///workspace"
         mock_ws_state.persona = "devops"
         mock_ws_state.project = "my-project"
@@ -999,10 +1003,10 @@ class TestGetWorkspaceStatus:
 
     async def test_fallback_to_get_status(self):
         """Falls back to get_status() on exception."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = "fallback"
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
 
         with patch(
             "server.workspace_state.WorkspaceRegistry",
@@ -1024,7 +1028,7 @@ class TestLoadPersonaConfigErrors:
 
     def test_yaml_parse_error(self, tmp_path):
         """Returns None on YAML parse error."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
 
         bad_yaml = tmp_path / "bad.yaml"
@@ -1046,7 +1050,7 @@ class TestGetStatusPopulated:
 
     def test_status_reflects_loaded_state(self):
         """Status reflects loaded modules and tools."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         loader = PersonaLoader(mock_server)
         loader.current_persona = "devops"
         loader.loaded_modules = {"mod1", "mod2"}

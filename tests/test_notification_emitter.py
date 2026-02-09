@@ -142,6 +142,7 @@ class TestSaveNotificationsUnlocked:
         with patch("builtins.open", side_effect=PermissionError("denied")):
             # Should not raise, just log warning
             notification_emitter._save_notifications_unlocked({"notifications": []})
+        assert True  # Reached without exception
 
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,6 @@ Tools register themselves at import time, eliminating hardcoded tool lists.
 """
 
 import logging
-import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -122,7 +121,6 @@ class ToolManifest:
 
 # Global manifest instance
 TOOL_MANIFEST = ToolManifest()
-_manifest_lock = threading.Lock()
 
 
 def register_tool(
@@ -173,8 +171,7 @@ def register_tool(
         )
 
         # Register in global manifest
-        with _manifest_lock:
-            TOOL_MANIFEST.register(info)
+        TOOL_MANIFEST.register(info)
 
         return func
 

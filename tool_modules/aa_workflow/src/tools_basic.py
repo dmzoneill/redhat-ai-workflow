@@ -16,7 +16,6 @@ Provides workflow coordination and local development tools:
 import logging
 import os
 import sys
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -54,7 +53,6 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
 
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}
-_recent_issues_lock = threading.Lock()
 _ISSUE_DEDUP_SECONDS = 3600  # Don't create duplicate issues within 1 hour
 _MAX_RECENT_ISSUES = 100  # Prevent unbounded memory growth
 
@@ -96,25 +94,22 @@ async def create_github_issue(
 
     # Cleanup: remove expired entries and enforce max size
     global _recent_issues
-    with _recent_issues_lock:
-        _recent_issues = {
-            k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
-        }
-        if len(_recent_issues) > _MAX_RECENT_ISSUES:
-            # Keep only the most recent entries
-            sorted_items = sorted(
-                _recent_issues.items(), key=lambda x: x[1], reverse=True
-            )
-            _recent_issues = dict(sorted_items[:_MAX_RECENT_ISSUES])
+    _recent_issues = {
+        k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
+    }
+    if len(_recent_issues) > _MAX_RECENT_ISSUES:
+        # Keep only the most recent entries
+        sorted_items = sorted(_recent_issues.items(), key=lambda x: x[1], reverse=True)
+        _recent_issues = dict(sorted_items[:_MAX_RECENT_ISSUES])
 
-        if fingerprint in _recent_issues:
-            last_created = _recent_issues[fingerprint]
-            if now - last_created < _ISSUE_DEDUP_SECONDS:
-                return {
-                    "success": False,
-                    "issue_url": None,
-                    "message": f"Similar issue recently created (dedup: {fingerprint})",
-                }
+    if fingerprint in _recent_issues:
+        last_created = _recent_issues[fingerprint]
+        if now - last_created < _ISSUE_DEDUP_SECONDS:
+            return {
+                "success": False,
+                "issue_url": None,
+                "message": f"Similar issue recently created (dedup: {fingerprint})",
+            }
 
     # Check for GitHub token
     token = _get_github_token()
@@ -183,8 +178,7 @@ async def create_github_issue(
             if response.status_code == 201:
                 data = response.json()
                 issue_url = data.get("html_url", "")
-                with _recent_issues_lock:
-                    _recent_issues[fingerprint] = now
+                _recent_issues[fingerprint] = now
 
                 logger.info(f"Created GitHub issue: {issue_url}")
                 return {

@@ -205,9 +205,8 @@ class TestParameterFormatClassification:
         )
 
         # Should not be PARAMETER_FORMAT since no image_tag to check
-        if result["is_usage_error"] and result["error_category"] == "PARAMETER_FORMAT":
-            # The param_check function should fail since no image_tag
-            pass  # This is acceptable behavior since "image_tag" in {} is False
+        assert isinstance(result, dict)
+        assert "is_usage_error" in result
 
     def test_invalid_format_generic(self):
         """Generic 'invalid format' errors should be PARAMETER_FORMAT."""

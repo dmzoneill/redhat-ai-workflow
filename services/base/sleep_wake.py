@@ -241,8 +241,8 @@ class SleepWakeAwareDaemon(ABC):
                 # Refresh your data here
                 await self.refresh_calendars()
 
-            @abstractmethod
-    async def on_system_sleep(self):
+    @abstractmethod
+            async def on_system_sleep(self):
                 # Optional: save state before sleep
                 pass
     """

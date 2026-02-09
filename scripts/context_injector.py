@@ -38,13 +38,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-# Add project root to path (only when running as script)
+# Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
-if __name__ == "__main__":
-    if str(PROJECT_ROOT) not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT))
-    if str(PROJECT_ROOT / "tool_modules") not in sys.path:
-        sys.path.insert(0, str(PROJECT_ROOT / "tool_modules"))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "tool_modules") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "tool_modules"))
 
 logger = logging.getLogger(__name__)
 
@@ -824,9 +823,8 @@ class ContextInjector:
             # Get or create memory interface
             try:
                 memory = get_memory_interface()
-            except Exception as e:
+            except Exception:
                 # Fall back to creating a new instance
-                logger.debug(f"Suppressed error in gather_context: {e}")
                 memory = MemoryInterface()
 
             # Build source filters

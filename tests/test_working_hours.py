@@ -279,7 +279,8 @@ class TestWaitForWorkingHours:
             patch("asyncio.sleep", new_callable=AsyncMock),
             patch.object(e, "wait_for_delay", new_callable=AsyncMock, return_value=0),
         ):
-            await e.wait_for_working_hours()
+            result = await e.wait_for_working_hours()
+            assert result is not None
 
 
 # ---------------------------------------------------------------------------

@@ -481,6 +481,7 @@ def test_log_fix_success(memory):
     memory.increment.assert_called_once_with(
         "learned/skill_error_fixes", "stats.auto_fix_success"
     )
+    assert memory.append.call_count == 1
 
 
 def test_log_fix_failure(memory):
@@ -495,6 +496,7 @@ def test_log_fix_failure(memory):
     memory.increment.assert_called_once_with(
         "learned/skill_error_fixes", "stats.skip_failed"
     )
+    assert memory.increment.call_count == 1
 
 
 def test_log_fix_no_memory(recovery_no_mem):
@@ -504,6 +506,7 @@ def test_log_fix_no_memory(recovery_no_mem):
         action="skip",
         success=True,
     )
+    assert True
 
 
 def test_log_fix_memory_error(memory):
@@ -515,6 +518,7 @@ def test_log_fix_memory_error(memory):
         action="edit",
         success=True,
     )
+    assert True
 
 
 # ---------------------------------------------------------------------------

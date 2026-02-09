@@ -9,9 +9,10 @@ This module is workspace-aware: skill execution context includes workspace_uri
 for proper isolation of skill state and events per workspace.
 """
 
+import asyncio
 import json
 import logging
-from dataclasses import dataclass
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -22,9 +23,6 @@ from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
-from tool_modules.aa_workflow.src.skill_auto_healer import SkillAutoHealer
-from tool_modules.aa_workflow.src.skill_compute_engine import SkillComputeEngine
-from tool_modules.aa_workflow.src.skill_template_engine import SkillTemplateEngine
 
 # Setup project path for server imports (auto-setup on import)
 from tool_modules.common import PROJECT_ROOT
@@ -120,9 +118,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     tool_lower = tool_name.lower() if tool_name else ""
 
     try:
-        memory_dir = PROJECT_ROOT / "memory" / "learned"
-
-        patterns_file = memory_dir / "patterns.yaml"
+        patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
         if patterns_file.exists():
             with open(patterns_file) as f:
                 patterns = yaml.safe_load(f) or {}
@@ -150,7 +146,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                         )
 
         # Check tool_fixes.yaml
-        fixes_file = memory_dir / "tool_fixes.yaml"
+        fixes_file = SKILLS_DIR.parent / "memory" / "learned" / "tool_fixes.yaml"
         if fixes_file.exists():
             with open(fixes_file) as f:
                 fixes = yaml.safe_load(f) or {}
@@ -177,8 +173,8 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                             }
                         )
 
-    except Exception as e:
-        logger.debug(f"Suppressed error in _check_known_issues_sync: {e}")
+    except Exception:
+        pass
 
     return matches
 
@@ -202,60 +198,6 @@ def _format_known_issues(matches: list) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-# Allowed modules for compute block `import` statements.
-# Skill YAML compute blocks should use the modules already provided in
-# safe_globals (re, os, json, yaml, datetime, pathlib, etc.) rather than
-# importing arbitrary packages.  This allowlist keeps exec() functional
-# for common patterns like ``from datetime import datetime`` while
-# blocking dangerous imports (e.g., subprocess, socket, shutil).
-_ALLOWED_COMPUTE_MODULES = frozenset(
-    {
-        "re",
-        "os",
-        "os.path",
-        "pathlib",
-        "datetime",
-        "json",
-        "yaml",
-        "math",
-        "collections",
-        "itertools",
-        "functools",
-        "textwrap",
-        "string",
-        "hashlib",
-        "base64",
-        "copy",
-        "time",
-        "zoneinfo",
-        "urllib",
-        "urllib.parse",
-        "gzip",
-        "subprocess",
-    }
-)
-
-
-def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
-    """A restricted __import__ that only allows pre-approved modules.
-
-    This is used in skill compute block exec() to prevent arbitrary code
-    from importing dangerous modules (e.g., ctypes, socket) while still
-    allowing common stdlib patterns like ``from datetime import datetime``
-    or ``import json``.
-    """
-    if level != 0:
-        # Relative imports are not supported in compute blocks
-        raise ImportError(f"Relative imports not allowed in compute blocks: {name}")
-    if name not in _ALLOWED_COMPUTE_MODULES:
-        raise ImportError(
-            f"Import of '{name}' is not allowed in skill compute blocks. "
-            f"Use the modules already provided in the execution context "
-            f"(re, os, json, yaml, datetime, Path, etc.) or use MCP tools."
-        )
-    return __import__(name, globals, locals, fromlist, level)
 
 
 class SprintSafetyGuard:
@@ -530,24 +472,6 @@ class SprintSafetyGuard:
             return {"success": False, "message": str(e)}
 
 
-@dataclass
-class SkillExecutorConfig:
-    """Configuration parameters for SkillExecutor.
-
-    Groups the many optional parameters that control execution behavior,
-    session tracking, and workspace isolation.
-    """
-
-    debug: bool = False
-    enable_interactive_recovery: bool = True
-    emit_events: bool = True
-    workspace_uri: str = "default"
-    session_id: str | None = None
-    session_name: str | None = None
-    source: str = "chat"  # "chat", "cron", "slack", "api"
-    source_details: str | None = None  # e.g., cron job name
-
-
 class SkillExecutor:
     """Full skill execution engine with debug support.
 
@@ -559,42 +483,34 @@ class SkillExecutor:
         self,
         skill: dict,
         inputs: dict,
-        config: SkillExecutorConfig | None = None,
+        debug: bool = False,
         server: FastMCP | None = None,
         create_issue_fn=None,
         ask_question_fn=None,
+        enable_interactive_recovery: bool = True,
+        emit_events: bool = True,
+        workspace_uri: str = "default",
         ctx: Optional["Context"] = None,
-        # Legacy kwargs — accepted for backward compatibility
-        **kwargs,
+        # Session context for multi-execution tracking
+        session_id: str | None = None,
+        session_name: str | None = None,
+        source: str = "chat",  # "chat", "cron", "slack", "api"
+        source_details: str | None = None,  # e.g., cron job name
     ):
-        if config is None:
-            # Build config from legacy keyword arguments for backward compatibility
-            config = SkillExecutorConfig(
-                debug=kwargs.get("debug", False),
-                enable_interactive_recovery=kwargs.get(
-                    "enable_interactive_recovery", True
-                ),
-                emit_events=kwargs.get("emit_events", True),
-                workspace_uri=kwargs.get("workspace_uri", "default"),
-                session_id=kwargs.get("session_id", None),
-                session_name=kwargs.get("session_name", None),
-                source=kwargs.get("source", "chat"),
-                source_details=kwargs.get("source_details", None),
-            )
         self.skill = skill
         self.inputs = inputs
-        self.debug = config.debug
+        self.debug = debug
         self.server = server
         self.create_issue_fn = create_issue_fn
         self.ask_question_fn = ask_question_fn
-        self.enable_interactive_recovery = config.enable_interactive_recovery
-        self.emit_events = config.emit_events
-        self.workspace_uri = config.workspace_uri
+        self.enable_interactive_recovery = enable_interactive_recovery
+        self.emit_events = emit_events
+        self.workspace_uri = workspace_uri
         self.ctx = ctx
-        self.session_id = config.session_id
-        self.session_name = config.session_name
-        self.source = config.source
-        self.source_details = config.source_details
+        self.session_id = session_id
+        self.session_name = session_name
+        self.source = source
+        self.source_details = source_details
         # Load config.json config for compute blocks
         self.config = load_config()
         # Add today's date for templating (YYYY-MM-DD format)
@@ -603,25 +519,9 @@ class SkillExecutor:
         self.context: dict[str, Any] = {
             "inputs": inputs,
             "config": self.config,
-            "workspace_uri": self.workspace_uri,
+            "workspace_uri": workspace_uri,
             "today": date.today().isoformat(),
         }
-
-        # Template engine handles Jinja2 rendering, conditions, and link formatting.
-        # It shares the context dict (by reference) so updates propagate automatically.
-        self.template_engine = SkillTemplateEngine(
-            context=self.context,
-            config=self.config,
-            inputs=self.inputs,
-            debug_fn=self._debug,
-        )
-
-        # Compute engine handles sandboxed Python execution in compute blocks.
-        self.compute_engine = SkillComputeEngine(executor=self)
-
-        # Auto healer handles error detection, pattern matching, and recovery.
-        self.auto_healer = SkillAutoHealer(executor=self)
-
         self.log: list[str] = []
         self.step_results: list[dict] = []
         self.start_time: float | None = None
@@ -629,7 +529,7 @@ class SkillExecutor:
 
         # Event emitter for VS Code extension (workspace-aware, multi-execution)
         self.event_emitter = None
-        if self.emit_events:
+        if emit_events:
             try:
                 # Use absolute import to avoid relative import issues
                 from tool_modules.aa_workflow.src.skill_execution_events import (
@@ -640,19 +540,48 @@ class SkillExecutor:
                 self.event_emitter = SkillExecutionEmitter(
                     skill.get("name", "unknown"),
                     skill.get("steps", []),
-                    workspace_uri=self.workspace_uri,
-                    session_id=self.session_id,
-                    session_name=self.session_name,
-                    source=self.source,
-                    source_details=self.source_details,
+                    workspace_uri=workspace_uri,
+                    session_id=session_id,
+                    session_name=session_name,
+                    source=source,
+                    source_details=source_details,
                 )
-                set_emitter(self.event_emitter, self.workspace_uri)
+                set_emitter(self.event_emitter, workspace_uri)
                 skill_name = skill.get("name", "unknown")
                 logger.info(
-                    f"Event emitter initialized for skill: {skill_name} (workspace: {self.workspace_uri}, source: {self.source})"  # noqa: E501
+                    f"Event emitter initialized for skill: {skill_name} (workspace: {workspace_uri}, source: {source})"
                 )
+                # Debug: write to a file to confirm emitter is created
+                from pathlib import Path
+
+                debug_file = (
+                    Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
+                )
+                debug_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(debug_file, "a") as f:
+                    from datetime import datetime
+
+                    skill_name = skill.get("name", "unknown")
+                    f.write(
+                        f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
+                # Also write to debug file on failure
+                try:
+                    from datetime import datetime
+                    from pathlib import Path
+
+                    debug_file = (
+                        Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
+                    )
+                    debug_file.parent.mkdir(parents=True, exist_ok=True)
+                    with open(debug_file, "a") as f:
+                        f.write(
+                            f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n"
+                        )
+                except Exception:
+                    pass
 
         # Layer 5: Initialize usage pattern learner
         self.usage_learner = None
@@ -685,50 +614,6 @@ class SkillExecutor:
             )
             self.log.append(f"🔍 {elapsed} {msg}")
 
-    def _emit_event(self, event_type: str, **kwargs):
-        """Emit a file-based event to the VS Code extension.
-
-        Delegates to the SkillExecutionEmitter which writes events to a JSON file
-        that the VS Code extension watches. No-ops silently if no emitter is set.
-        """
-        if self.event_emitter:
-            try:
-                method = getattr(self.event_emitter, event_type, None)
-                if method:
-                    method(**kwargs)
-            except Exception as e:
-                logger.debug(f"Suppressed file event emission error: {e}")
-
-    def _emit_ws_event_async(self, event_type: str, **kwargs):
-        """Emit an async WebSocket event via asyncio.create_task.
-
-        This is used for WebSocket events that are coroutines and need to be
-        scheduled as background tasks.
-        """
-        import asyncio
-
-        if self.ws_server and self.ws_server.is_running:
-            try:
-                method = getattr(self.ws_server, event_type, None)
-                if method:
-                    asyncio.create_task(method(**kwargs))
-            except Exception as e:
-                logger.debug(f"Suppressed async WS event emission error: {e}")
-
-    def _notify(self, notification_fn_name: str, *args):
-        """Emit a toast notification, suppressing any errors."""
-        try:
-            import importlib
-
-            mod = importlib.import_module(
-                "tool_modules.aa_workflow.src.notification_emitter"
-            )
-            fn = getattr(mod, notification_fn_name, None)
-            if fn:
-                fn(*args)
-        except Exception as e:
-            logger.debug(f"Suppressed notification error: {e}")
-
     async def _learn_from_error(self, tool_name: str, params: dict, error_msg: str):
         """Send error to Layer 5 learning system (async).
 
@@ -756,34 +641,218 @@ class SkillExecutor:
             # Don't let learning failure break the skill
             logger.warning(f"Layer 5 learning failed: {e}")
 
-    # -- Auto-healer delegation -----------------------------------------------
-    # These methods delegate to the SkillAutoHealer instance.
-    # They preserve the original underscore-prefixed signatures for backward
-    # compatibility with tests and internal callers.
-
     def _find_matched_pattern(self, error_lower: str) -> tuple[dict | None, str | None]:
-        """Find a matching pattern from memory based on error text."""
-        return self.auto_healer.find_matched_pattern(error_lower)
+        """Find a matching pattern from memory based on error text.
+
+        Returns:
+            (matched_pattern, pattern_category) tuple or (None, None)
+        """
+        try:
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if not patterns_file.exists():
+                return None, None
+
+            with open(patterns_file) as f:
+                patterns_data = yaml.safe_load(f) or {}
+
+            # Check each category for matches
+            for cat in [
+                "auth_patterns",
+                "error_patterns",
+                "bonfire_patterns",
+                "pipeline_patterns",
+            ]:
+                for pattern in patterns_data.get(cat, []):
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if pattern_text and pattern_text in error_lower:
+                        # Track that pattern was matched
+                        self._update_pattern_usage_stats(
+                            cat, pattern_text, matched=True
+                        )
+                        return pattern, cat
+        except Exception as e:
+            self._debug(f"Pattern lookup failed: {e}")
+
+        return None, None
 
     def _determine_fix_type(
         self, error_lower: str, matched_pattern: dict | None, matches: list
     ) -> str | None:
-        """Determine which fix type to apply based on patterns."""
-        return self.auto_healer.determine_fix_type(
-            error_lower, matched_pattern, matches
-        )
+        """Determine which fix type to apply based on patterns.
+
+        Returns:
+            "network", "auth", or None
+        """
+        # Priority 1: Use matched pattern from learned memory
+        if matched_pattern:
+            commands = matched_pattern.get("commands", [])
+            for cmd in commands:
+                if "vpn" in cmd.lower() or "connect" in cmd.lower():
+                    return "network"
+                if (
+                    "login" in cmd.lower()
+                    or "auth" in cmd.lower()
+                    or "kube" in cmd.lower()
+                ):
+                    return "auth"
+
+        # Priority 2: Hardcoded patterns
+        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
+        network_patterns = ["no route to host", "connection refused", "timeout"]
+
+        if any(p in error_lower for p in auth_patterns):
+            return "auth"
+        elif any(p in error_lower for p in network_patterns):
+            return "network"
+
+        # Priority 3: Check matches from known issues
+        for match in matches:
+            fix = match.get("fix", "").lower()
+            if "vpn" in fix or "connect" in fix:
+                return "network"
+            if "login" in fix or "auth" in fix or "kube" in fix:
+                return "auth"
+
+        return None
 
     async def _apply_network_fix(self) -> bool:
-        """Apply VPN connect fix."""
-        return await self.auto_healer._apply_network_fix()
+        """Apply VPN connect fix using the configured VPN script or nmcli fallback."""
+        import asyncio
+        import os
+
+        try:
+            # Try to use the configured VPN script first (same as vpn_connect tool)
+            from server.utils import load_config
+
+            config = load_config()
+            paths = config.get("paths", {})
+            vpn_script = paths.get("vpn_connect_script")
+
+            if not vpn_script:
+                vpn_script = os.path.expanduser(
+                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+                )
+            else:
+                vpn_script = os.path.expanduser(vpn_script)
+
+            if os.path.exists(vpn_script):
+                self._debug(f"  → Using VPN script: {vpn_script}")
+                proc = await asyncio.create_subprocess_exec(
+                    vpn_script,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=120)
+                self._debug(f"  → VPN connect result: {proc.returncode}")
+                await asyncio.sleep(2)  # Wait for VPN to establish
+                return proc.returncode == 0
+            else:
+                # Fallback to nmcli with common VPN connection names
+                self._debug("  → VPN script not found, trying nmcli fallback")
+                vpn_names = [
+                    "Red Hat Global VPN",
+                    "Red Hat VPN",
+                    "redhat-vpn",
+                    "RH-VPN",
+                ]
+                for vpn_name in vpn_names:
+                    proc = await asyncio.create_subprocess_shell(
+                        f"nmcli connection up '{vpn_name}' 2>/dev/null",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=30)
+                        if proc.returncode == 0:
+                            self._debug(
+                                f"  → VPN connect result: success with {vpn_name}"
+                            )
+                            await asyncio.sleep(2)
+                            return True
+                    except asyncio.TimeoutError:
+                        continue
+
+                self._debug("  → All VPN connection attempts failed")
+                return False
+
+        except Exception as e:
+            self._debug(f"  → Auto-fix failed: {e}")
+            return False
 
     async def _apply_auth_fix(self, error_lower: str) -> bool:
         """Apply kube login fix."""
-        return await self.auto_healer._apply_auth_fix(error_lower)
+        import asyncio
+
+        try:
+            # Guess cluster from error
+            cluster = "stage"  # default
+            if "ephemeral" in error_lower or "bonfire" in error_lower:
+                cluster = "ephemeral"
+            elif "konflux" in error_lower or "tekton" in error_lower:
+                cluster = "konflux"
+            elif "prod" in error_lower:
+                cluster = "prod"
+
+            # Call oc login using asyncio subprocess
+            kubeconfig = f"~/.kube/config.{cluster[0]}"
+            cluster_urls = {
+                "stage": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                "ephemeral": "api.c-rh-c-eph.8p0c.p1.openshiftapps.com:6443",
+                "prod": "api.crcp01ue1.o9m8.p1.openshiftapps.com:6443",
+                "konflux": "api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443",
+            }
+            url = cluster_urls.get(cluster, cluster_urls["stage"])
+
+            proc = await asyncio.create_subprocess_exec(
+                "oc",
+                "login",
+                f"--kubeconfig={kubeconfig}",
+                f"https://{url}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=30)
+            self._debug(f"  → Kube login result: {proc.returncode}")
+            await asyncio.sleep(1)
+            return proc.returncode == 0
+        except Exception as e:
+            self._debug(f"  → Auto-fix failed: {e}")
+            return False
 
     async def _try_auto_fix(self, error_msg: str, matches: list) -> bool:
-        """Try to auto-fix based on known patterns."""
-        return await self.auto_healer.try_auto_fix(error_msg, matches)
+        """Try to auto-fix based on known patterns.
+
+        Returns True if a fix was applied, False otherwise.
+        """
+        error_lower = error_msg.lower()
+
+        # Find matching pattern from memory
+        matched_pattern, pattern_category = self._find_matched_pattern(error_lower)
+
+        # Determine which fix to apply
+        fix_type = self._determine_fix_type(error_lower, matched_pattern, matches)
+
+        if not fix_type:
+            return False
+
+        self._debug(f"  → Detected {fix_type} issue, applying auto-fix")
+
+        # Apply the appropriate fix
+        if fix_type == "network":
+            fix_success = await self._apply_network_fix()
+        elif fix_type == "auth":
+            fix_success = await self._apply_auth_fix(error_lower)
+        else:
+            fix_success = False
+
+        # Track fix success for matched pattern
+        if fix_success and matched_pattern and pattern_category:
+            pattern_text = matched_pattern.get("pattern", "")
+            self._update_pattern_usage_stats(
+                pattern_category, pattern_text, matched=False, fixed=True
+            )
+
+        return fix_success
 
     def _update_pattern_usage_stats(
         self,
@@ -792,31 +861,169 @@ class SkillExecutor:
         matched: bool = True,
         fixed: bool = False,
     ) -> None:
-        """Update usage statistics for a pattern."""
-        return self.auto_healer.update_pattern_usage_stats(
-            category, pattern_text, matched, fixed
-        )
+        """Update usage statistics for a pattern.
 
-    # -- Template engine delegation ------------------------------------------
-    # These methods delegate to the SkillTemplateEngine instance.
-    # They preserve the original underscore-prefixed signatures for backward
-    # compatibility with tests and the SkillTestHarness.
+        Args:
+            category: Pattern category (e.g., "auth_patterns", "error_patterns")
+            pattern_text: The pattern text to find
+            matched: Whether the pattern was matched (default: True)
+            fixed: Whether the fix succeeded (default: False)
+        """
+        try:
+            import fcntl
+
+            patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
+            if not patterns_file.exists():
+                return
+
+            # Atomic read-modify-write with file locking
+            with open(patterns_file, "r+") as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+                try:
+                    f.seek(0)
+                    patterns_data = yaml.safe_load(f.read()) or {}
+
+                    if category not in patterns_data:
+                        return
+
+                    # Find and update the pattern
+                    for pattern in patterns_data[category]:
+                        if pattern.get("pattern", "").lower() == pattern_text.lower():
+                            # Initialize usage_stats if not present
+                            if "usage_stats" not in pattern:
+                                pattern["usage_stats"] = {
+                                    "times_matched": 0,
+                                    "times_fixed": 0,
+                                    "success_rate": 0.0,
+                                }
+
+                            stats = pattern["usage_stats"]
+
+                            # Update counters
+                            if matched:
+                                stats["times_matched"] = (
+                                    stats.get("times_matched", 0) + 1
+                                )
+                                stats["last_matched"] = datetime.now().isoformat()
+
+                            if fixed:
+                                stats["times_fixed"] = stats.get("times_fixed", 0) + 1
+
+                            # Recalculate success rate
+                            if stats["times_matched"] > 0:
+                                stats["success_rate"] = round(
+                                    stats["times_fixed"] / stats["times_matched"], 2
+                                )
+
+                            # Write back
+                            f.seek(0)
+                            f.truncate()
+                            yaml.dump(
+                                patterns_data,
+                                f,
+                                default_flow_style=False,
+                                sort_keys=False,
+                            )
+                            break
+
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+        except Exception as e:
+            self._debug(f"Failed to update pattern stats: {e}")
 
     def _linkify_jira_keys(self, text):
         """Convert Jira keys to clickable links (Slack or Markdown format)."""
-        return self.template_engine._linkify_jira_keys(text)
+        import re
 
-    def _linkify_mr_ids(self, text, project=None):
+        if not text:
+            return text
+
+        is_slack = self.inputs.get("slack_format", False)
+        jira_url = self.config.get("jira", {}).get("url", "https://issues.redhat.com")
+
+        pattern = re.compile(r"\b([A-Z]+-\d+)(-[\w-]+)?\b")
+
+        def replace(match):
+            key = match.group(1)
+            suffix = match.group(2) or ""
+            if is_slack:
+                return f"<{jira_url}/browse/{key}|{key}{suffix}>"
+            return f"[{key}{suffix}]({jira_url}/browse/{key})"
+
+        return pattern.sub(replace, str(text))
+
+    def _linkify_mr_ids(self, text):
         """Convert MR IDs to clickable links (Slack or Markdown format)."""
-        return self.template_engine._linkify_mr_ids(text, project)
+        import re
+
+        if not text:
+            return text
+
+        is_slack = self.inputs.get("slack_format", False)
+        gitlab_url = self.config.get("gitlab", {}).get(
+            "url", "https://gitlab.cee.redhat.com"
+        )
+        project = "automation-analytics/automation-analytics-backend"
+
+        pattern = re.compile(r"!(\d+)")
+
+        def replace(match):
+            mr_id = match.group(1)
+            url = f"{gitlab_url}/{project}/-/merge_requests/{mr_id}"
+            if is_slack:
+                return f"<{url}|!{mr_id}>"
+            return f"[!{mr_id}]({url})"
+
+        return pattern.sub(replace, str(text))
 
     def _create_jinja_filters(self):
         """Create Jinja2 custom filters for template rendering."""
-        return self.template_engine._create_jinja_filters()
+        return {
+            "jira_link": self._linkify_jira_keys,
+            "mr_link": self._linkify_mr_ids,
+            "length": len,
+        }
 
     def _template_with_regex_fallback(self, text: str) -> str:
         """Template replacement using regex (fallback when Jinja2 unavailable)."""
-        return self.template_engine._template_with_regex_fallback(text)
+        import re
+
+        def replace_var(match):
+            var_path = match.group(1).strip()
+            try:
+                value = self.context
+                parts = var_path.split(".")
+
+                for part in parts:
+                    array_match = re.match(r"^(\w+)\[(\d+)\]$", part)
+                    if array_match:
+                        var_name, index = array_match.groups()
+                        index = int(index)
+                        if isinstance(value, dict):
+                            value = value.get(var_name)
+                        elif hasattr(value, var_name):
+                            value = getattr(value, var_name)
+                        else:
+                            return match.group(0)
+                        if isinstance(value, (list, tuple)) and index < len(value):
+                            value = value[index]
+                        else:
+                            return match.group(0)
+                    elif isinstance(value, dict):
+                        value = value.get(part, match.group(0))
+                        if value == match.group(0):
+                            return value
+                    elif hasattr(value, part):
+                        value = getattr(value, part)
+                    else:
+                        return match.group(0)
+                return str(value) if value is not None else ""
+            except Exception:
+                return match.group(0)
+
+        return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
 
     def _check_error_patterns(self, error: str) -> str | None:
         """Check if error matches known patterns and return fix suggestion."""
@@ -860,16 +1067,113 @@ class SkillExecutor:
             return None
 
     def _template(self, text: str) -> str:
-        """Resolve {{ variable }} templates in text using Jinja2 if available."""
-        return self.template_engine.template(text)
+        """Resolve {{ variable }} templates in text using Jinja2 if available.
+
+        Uses ChainableUndefined to allow attribute access on undefined variables
+        (returns empty string) while still catching completely missing variables
+        in debug mode.
+        """
+        if not isinstance(text, str) or "{{" not in text:
+            return text
+
+        try:
+            from jinja2 import ChainableUndefined, Environment
+
+            # autoescape=False to preserve Slack link format <url|text>
+            # Skills don't generate HTML, they generate plain text and Slack markdown
+            # ChainableUndefined allows {{ foo.bar.baz }} to return "" if foo is undefined
+            # but still allows chained attribute access without errors
+            env = Environment(autoescape=False, undefined=ChainableUndefined)
+            env.filters.update(self._create_jinja_filters())
+
+            template = env.from_string(text)
+            rendered = template.render(**self.context)
+
+            # Warn if template rendered to empty when it had variables
+            # This helps catch cases where context variables are missing
+            if rendered == "" and "{{" in text:
+                self._debug(f"WARNING: Template rendered to empty string: {text[:100]}")
+
+            return rendered
+        except ImportError:
+            return self._template_with_regex_fallback(text)
+        except Exception as e:
+            self._debug(f"Template error: {e}")
+            return text
 
     def _template_dict(self, d: dict) -> dict:
         """Recursively template a dictionary."""
-        return self.template_engine.template_dict(d)
+        result: dict = {}
+        for k, v in d.items():
+            if isinstance(v, str):
+                result[k] = self._template(v)
+            elif isinstance(v, dict):
+                result[k] = self._template_dict(v)
+            elif isinstance(v, list):
+                result[k] = [self._template(i) if isinstance(i, str) else i for i in v]
+            else:
+                result[k] = v
+        return result
 
     def _eval_condition(self, condition: str) -> bool:
         """Safely evaluate a condition expression using Jinja2 if available."""
-        return self.template_engine.eval_condition(condition)
+        self._debug(f"Evaluating condition: {condition}")
+
+        try:
+            from jinja2 import Environment
+
+            # autoescape=False - conditions don't need HTML escaping
+            env = Environment(autoescape=False)
+            # Wrap condition in {{ }} if not already there for Jinja evaluation
+            if "{{" not in condition:
+                expr = "{{ " + condition + " }}"
+            else:
+                expr = condition
+
+            result_str = env.from_string(expr).render(**self.context).strip()
+            self._debug(f"  → Rendered condition: '{condition}' = '{result_str}'")
+            # If it's a boolean-like string, convert it
+            if result_str.lower() in ("true", "1", "yes"):
+                return True
+            if result_str.lower() in ("false", "0", "no", "", "none"):
+                return False
+            # Otherwise check if it's non-empty
+            return bool(result_str)
+        except ImportError:
+            # Fallback to eval
+            templated = self._template(condition)
+            self._debug(f"  → Templated (fallback): {templated}")
+
+            safe_context = {
+                "len": len,
+                "any": any,
+                "all": all,
+                "isinstance": isinstance,
+                "type": type,
+                "hasattr": hasattr,
+                "dir": dir,
+                "str": str,
+                "int": int,
+                "float": float,
+                "list": list,
+                "dict": dict,
+                "bool": bool,
+                "True": True,
+                "False": False,
+                "None": None,
+                **self.context,
+            }
+
+            try:
+                result = eval(templated, {"__builtins__": {}}, safe_context)
+                self._debug(f"  → Result: {result}")
+                return bool(result)
+            except Exception as e:
+                self._debug(f"  → Error: {e}, defaulting to False")
+                return False
+        except Exception as e:
+            self._debug(f"  → Jinja eval error: {e}, defaulting to False")
+            return False
 
     def _handle_auto_fix_action(self, error_info: dict, step_name: str):
         """Handle auto_fix action for interactive recovery."""
@@ -1041,22 +1345,239 @@ class SkillExecutor:
 
         return None
 
-    # -- Compute engine delegation ---------------------------------------------
-    # These methods delegate to the SkillComputeEngine instance.
-    # They preserve the original underscore-prefixed signatures for backward
-    # compatibility with tests, harness, and error recovery.
-
     def _create_nested_skill_runner(self):
-        """Create a helper function for running nested skills from compute blocks."""
-        return self.compute_engine.create_nested_skill_runner()
+        """Create a helper function that compute blocks can use to run nested skills.
+
+        Returns a function that can be called like:
+            run_skill("jira_hygiene", {"issue_key": "AAP-12345"})
+        """
+        import asyncio
+
+        def run_skill_sync(skill_name: str, inputs: Optional[dict] = None) -> dict:
+            """Run a nested skill synchronously from within a compute block.
+
+            Args:
+                skill_name: Name of the skill to run (e.g., "jira_hygiene")
+                inputs: Input parameters for the skill
+
+            Returns:
+                dict with 'success', 'result', and optionally 'error' keys
+            """
+            inputs = inputs or {}
+
+            try:
+                # Load the skill definition
+                skill_file = SKILLS_DIR / f"{skill_name}.yaml"
+                if not skill_file.exists():
+                    return {"success": False, "error": f"Skill not found: {skill_name}"}
+
+                with open(skill_file) as f:
+                    nested_skill = yaml.safe_load(f)
+
+                # Create a new executor for the nested skill
+                nested_executor = SkillExecutor(
+                    skill=nested_skill,
+                    inputs=inputs,
+                    debug=self.debug,
+                    server=self.server,
+                    create_issue_fn=self.create_issue_fn,
+                    ask_question_fn=self.ask_question_fn,
+                    enable_interactive_recovery=False,  # Don't prompt in nested skills
+                    emit_events=False,  # Don't emit events for nested skills
+                    workspace_uri=self.workspace_uri,
+                    ctx=self.ctx,
+                )
+
+                # Run the nested skill - handle async properly
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                outputs: Any = None
+                if loop and loop.is_running():
+                    # We're already in an async context, schedule on the existing loop
+                    # Use run_coroutine_threadsafe to safely run from sync context
+                    future = asyncio.run_coroutine_threadsafe(
+                        nested_executor.execute(), loop
+                    )
+                    outputs, _ = future.result(timeout=300)  # type: ignore[misc]
+                else:
+                    # No running loop, can use asyncio.run directly
+                    outputs, _ = asyncio.run(nested_executor.execute())  # type: ignore[misc]
+
+                return {"success": True, "result": outputs}
+
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        return run_skill_sync
 
     def _exec_compute_internal(self, code: str, output_name: str):
-        """Internal compute execution without error recovery."""
-        return self.compute_engine.exec_compute_internal(code, output_name)
+        """Internal compute execution without error recovery (used by recovery itself)."""
+        # This is the actual compute logic extracted from _exec_compute
+        # to avoid infinite recursion during auto-fix retries
+        local_vars = dict(self.context)
+        # Wrap inputs in AttrDict to allow attribute-style access (inputs.repo vs inputs["repo"])
+        local_vars["inputs"] = AttrDict(self.inputs)
+        local_vars["config"] = self.config
+
+        import os
+        import re
+        from datetime import datetime, timedelta
+        from pathlib import Path
+
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            ZoneInfo = None  # type: ignore[misc,assignment]
+
+        # Use module-level PROJECT_ROOT
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
+
+        try:
+            from scripts.common import config_loader, jira_utils, lint_utils
+            from scripts.common import memory as memory_helpers
+            from scripts.common import parsers, repo_utils, slack_utils
+            from scripts.common.config_loader import get_timezone
+            from scripts.common.config_loader import load_config as load_skill_config
+            from scripts.skill_hooks import emit_event_sync
+        except ImportError:
+            parsers = None  # type: ignore[assignment]
+            jira_utils = None  # type: ignore[assignment]
+            load_skill_config = None  # type: ignore[assignment]
+            get_timezone = None  # type: ignore[assignment]
+            emit_event_sync = None  # type: ignore[assignment]
+            memory_helpers = None  # type: ignore[assignment]
+            config_loader = None  # type: ignore[assignment]
+            lint_utils = None  # type: ignore[assignment]
+            repo_utils = None  # type: ignore[assignment]
+            slack_utils = None  # type: ignore[assignment]
+
+        try:
+            from google.oauth2.credentials import Credentials as GoogleCredentials
+            from googleapiclient.discovery import build as google_build
+        except ImportError:
+            GoogleCredentials = None  # type: ignore[misc,assignment]
+            google_build = None
+
+        # Create the nested skill runner for compute blocks
+        run_skill = self._create_nested_skill_runner()
+
+        safe_globals = {
+            "__builtins__": {
+                "len": len,
+                "str": str,
+                "int": int,
+                "float": float,
+                "list": list,
+                "dict": dict,
+                "bool": bool,
+                "tuple": tuple,
+                "set": set,
+                "range": range,
+                "enumerate": enumerate,
+                "zip": zip,
+                "map": map,
+                "filter": filter,
+                "sorted": sorted,
+                "min": min,
+                "max": max,
+                "sum": sum,
+                "any": any,
+                "all": all,
+                "isinstance": isinstance,
+                "type": type,
+                "hasattr": hasattr,
+                "getattr": getattr,
+                "repr": repr,
+                "print": print,
+                "dir": dir,
+                "vars": vars,
+                "Exception": Exception,
+                "ValueError": ValueError,
+                "TypeError": TypeError,
+                "KeyError": KeyError,
+                "AttributeError": AttributeError,
+                "IndexError": IndexError,
+                "ImportError": ImportError,
+                "True": True,
+                "False": False,
+                "None": None,
+                "open": open,
+                "__import__": __import__,
+            },
+            "re": re,
+            "os": os,
+            "Path": Path,
+            "datetime": datetime,
+            "timedelta": timedelta,
+            "ZoneInfo": ZoneInfo,
+            "parsers": parsers,
+            "jira_utils": jira_utils,
+            "memory": memory_helpers,
+            "emit_event": emit_event_sync,
+            "load_config": load_skill_config,
+            "get_timezone": get_timezone,
+            "GoogleCredentials": GoogleCredentials,
+            "google_build": google_build,
+            # New shared utilities
+            "config_loader": config_loader,
+            "lint_utils": lint_utils,
+            "repo_utils": repo_utils,
+            "slack_utils": slack_utils,
+            # Nested skill runner - allows compute blocks to run other skills
+            "run_skill": run_skill,
+        }
+
+        templated_code = self._template(code)
+        namespace = {**safe_globals, **local_vars}
+        exec(templated_code, namespace)
+
+        if output_name in namespace:
+            result = namespace[output_name]
+        elif "result" in namespace:
+            result = namespace["result"]
+        elif "return" in templated_code:
+            for line in reversed(templated_code.split("\n")):
+                if line.strip().startswith("return "):
+                    expr = line.strip()[7:]
+                    result = eval(expr, namespace)
+                    break
+            else:
+                result = None
+        else:
+            result = None
+
+        # Update context with any new variables defined in the code
+        for key in namespace:
+            if key not in safe_globals and not key.startswith("_"):
+                local_vars[key] = namespace[key]
+
+        return result
 
     def _exec_compute(self, code: str, output_name: str):
         """Execute a compute block (limited Python) with error recovery."""
-        return self.compute_engine.exec_compute(code, output_name)
+        self._debug(f"Executing compute block for '{output_name}'")
+
+        try:
+            result = self._exec_compute_internal(code, output_name)
+            self._debug(f"  → Result: {str(result)[:100]}")
+            return result
+
+        except Exception as e:
+            self._debug(f"  → Compute error: {e}")
+
+            # Try interactive recovery if enabled
+            if self.enable_interactive_recovery and self.ask_question_fn:
+                recovery_result = self._try_interactive_recovery(
+                    code, str(e), output_name
+                )
+                if recovery_result is not None:
+                    return recovery_result
+
+            return f"<compute error: {e}>"
 
     def _get_module_for_tool(self, tool_name: str) -> str | None:
         """Map tool name to module name using the discovery system."""
@@ -1125,8 +1646,8 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception as e2:
-                logger.debug(f"Suppressed error in recording failed tool stats: {e2}")
+            except Exception:
+                pass
             return {"success": False, "error": str(e)}
 
     async def _load_and_execute_module_tool(
@@ -1183,10 +1704,8 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception as e2:
-                logger.debug(
-                    f"Suppressed error in recording failed module tool stats: {e2}"
-                )
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": str(e),
@@ -1239,26 +1758,21 @@ class SkillExecutor:
                     if fix_applied:
                         self._debug("  → Auto-fix applied, retrying tool")
                         # Emit auto-heal event
-                        fix_type = self._determine_fix_type(
-                            error_msg.lower(), None, matches
-                        )
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
-                        self._emit_event(
-                            "auto_heal",
-                            step_index=step_idx,
-                            details=f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
-                        )
+                        if self.event_emitter:
+                            fix_type = self._determine_fix_type(
+                                error_msg.lower(), None, matches
+                            )
+                            self.event_emitter.auto_heal(
+                                self.event_emitter.current_step_index,
+                                f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
+                            )
                         try:
                             # Emit retry event
-                            self._emit_event(
-                                "retry",
-                                step_index=step_idx,
-                                retry_count=1,
-                            )
+                            if self.event_emitter:
+                                self.event_emitter.retry(
+                                    self.event_emitter.current_step_index,
+                                    1,  # First retry
+                                )
                             retry_result = await temp_server.call_tool(tool_name, args)
                             duration = time.time() - start
                             duration_ms = int(duration * 1000)
@@ -1270,10 +1784,8 @@ class SkillExecutor:
                                 agent_stats.record_tool_call(
                                     tool_name, True, duration_ms
                                 )
-                            except Exception as e:
-                                logger.debug(
-                                    f"Suppressed error in recording retry tool stats: {e}"
-                                )
+                            except Exception:
+                                pass
 
                             return self._format_tool_result(retry_result, duration)
                         except Exception as retry_e:
@@ -1289,8 +1801,55 @@ class SkillExecutor:
         return result
 
     def _detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
-        """Detect if error is auto-healable and what type."""
-        return self.auto_healer.detect_auto_heal_type(error_msg)
+        """Detect if error is auto-healable and what type.
+
+        Returns:
+            (heal_type, cluster_hint) where heal_type is 'auth', 'network', or None
+        """
+        error_lower = error_msg.lower()
+
+        # Auth patterns that can be fixed with kube_login
+        auth_patterns = [
+            "unauthorized",
+            "401",
+            "forbidden",
+            "403",
+            "token expired",
+            "authentication required",
+            "not authorized",
+            "permission denied",
+            "the server has asked for the client to provide credentials",
+        ]
+
+        # Network patterns that can be fixed with vpn_connect
+        network_patterns = [
+            "no route to host",
+            "no such host",  # DNS resolution failure
+            "connection refused",
+            "network unreachable",
+            "timeout",
+            "dial tcp",
+            "connection reset",
+            "eof",
+            "cannot connect",
+            "name or service not known",  # Another DNS failure pattern
+        ]
+
+        # Determine cluster from error context
+        cluster = "stage"  # default
+        if "ephemeral" in error_lower or "bonfire" in error_lower:
+            cluster = "ephemeral"
+        elif "konflux" in error_lower:
+            cluster = "konflux"
+        elif "prod" in error_lower:
+            cluster = "prod"
+
+        if any(p in error_lower for p in auth_patterns):
+            return "auth", cluster
+        if any(p in error_lower for p in network_patterns):
+            return "network", cluster
+
+        return None, cluster
 
     async def _attempt_auto_heal(
         self,
@@ -1300,10 +1859,86 @@ class SkillExecutor:
         step: dict,
         output_lines: list[str],
     ) -> dict | None:
-        """Attempt to auto-heal and retry the tool."""
-        return await self.auto_healer.attempt_auto_heal(
-            heal_type, cluster, tool, step, output_lines
-        )
+        """Attempt to auto-heal and retry the tool.
+
+        Returns:
+            Retry result dict if successful, None if heal failed
+        """
+        try:
+            if heal_type == "auth":
+                output_lines.append(
+                    f"   🔧 Auto-healing: running kube_login({cluster})..."
+                )
+                self._debug(f"Auto-heal: kube_login({cluster})")
+
+                # Emit remediation step event
+                if self.event_emitter:
+                    self.event_emitter.remediation_step(
+                        self.event_emitter.current_step_index,
+                        "kube_login",
+                        f"Auth error on {tool}",
+                    )
+
+                # Call kube_login tool
+                heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
+                if not heal_result.get("success"):
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
+                    error_msg = heal_result.get("error") or heal_result.get(
+                        "result", "unknown"
+                    )
+                    # Truncate long error messages
+                    if len(error_msg) > 200:
+                        error_msg = error_msg[:200] + "..."
+                    output_lines.append(f"   ⚠️ kube_login failed: {error_msg}")
+                    return None
+                output_lines.append("   ✅ kube_login successful")
+
+            elif heal_type == "network":
+                output_lines.append("   🔧 Auto-healing: running vpn_connect()...")
+                self._debug("Auto-heal: vpn_connect()")
+
+                # Emit remediation step event
+                if self.event_emitter:
+                    self.event_emitter.remediation_step(
+                        self.event_emitter.current_step_index,
+                        "vpn_connect",
+                        f"Network error on {tool}",
+                    )
+
+                # Call vpn_connect tool
+                heal_result = await self._exec_tool("vpn_connect", {})
+                if not heal_result.get("success"):
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
+                    error_msg = heal_result.get("error") or heal_result.get(
+                        "result", "unknown"
+                    )
+                    # Truncate long error messages
+                    if len(error_msg) > 200:
+                        error_msg = error_msg[:200] + "..."
+                    output_lines.append(f"   ⚠️ vpn_connect failed: {error_msg}")
+                    return None
+                output_lines.append("   ✅ vpn_connect successful")
+
+                # Wait for VPN connection to stabilize before retrying
+                # Network routes need time to propagate after VPN connects
+                output_lines.append("   ⏳ Waiting 3s for VPN to stabilize...")
+                await asyncio.sleep(3)
+
+            else:
+                return None
+
+            # Retry the original tool
+            output_lines.append(f"   🔄 Retrying {tool}...")
+            raw_args = step.get("args", {})
+            args = self._template_dict(raw_args)
+            retry_result = await self._exec_tool(tool, args)
+
+            return retry_result
+
+        except Exception as e:
+            self._debug(f"Auto-heal failed: {e}")
+            output_lines.append(f"   ⚠️ Auto-heal exception: {e}")
+            return None
 
     async def _log_auto_heal_to_memory(
         self,
@@ -1313,9 +1948,73 @@ class SkillExecutor:
         success: bool,
     ) -> None:
         """Log auto-heal attempt to memory for learning."""
-        return await self.auto_healer.log_auto_heal_to_memory(
-            tool, heal_type, error_snippet, success
-        )
+        try:
+            from datetime import datetime
+
+            import yaml
+
+            # Find memory directory
+            memory_dir = SKILLS_DIR.parent / "memory" / "learned"
+            memory_dir.mkdir(parents=True, exist_ok=True)
+
+            failures_file = memory_dir / "tool_failures.yaml"
+
+            # Load or create
+            if failures_file.exists():
+                with open(failures_file) as f:
+                    data = yaml.safe_load(f) or {}
+            else:
+                data = {
+                    "failures": [],
+                    "stats": {
+                        "total_failures": 0,
+                        "auto_fixed": 0,
+                        "manual_required": 0,
+                    },
+                }
+
+            if "failures" not in data:
+                data["failures"] = []
+            if "stats" not in data:
+                data["stats"] = {
+                    "total_failures": 0,
+                    "auto_fixed": 0,
+                    "manual_required": 0,
+                }
+
+            # Add entry
+            entry = {
+                "tool": tool,
+                "error_type": heal_type,
+                "error_snippet": error_snippet[:100],
+                "fix_applied": "kube_login" if heal_type == "auth" else "vpn_connect",
+                "success": success,
+                "source": "skill_engine",
+                "timestamp": datetime.now().isoformat(),
+            }
+            data["failures"].append(entry)
+
+            # Update stats
+            data["stats"]["total_failures"] = data["stats"].get("total_failures", 0) + 1
+            if success:
+                data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
+            else:
+                data["stats"]["manual_required"] = (
+                    data["stats"].get("manual_required", 0) + 1
+                )
+
+            # Keep only last 100 entries
+            if len(data["failures"]) > 100:
+                data["failures"] = data["failures"][-100:]
+
+            # Write back
+            with open(failures_file, "w") as f:
+                yaml.dump(data, f, default_flow_style=False)
+
+            self._debug(f"Logged auto-heal for {tool} to memory (success={success})")
+
+        except Exception as e:
+            self._debug(f"Failed to log auto-heal to memory: {e}")
 
     async def _handle_tool_error(
         self,
@@ -1349,25 +2048,43 @@ class SkillExecutor:
                 )
 
                 # Emit auto-heal triggered event (WebSocket)
-                step_idx = (
-                    self.event_emitter.current_step_index if self.event_emitter else 0
-                )
-                fix_action = (
-                    f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
-                )
-                self._emit_ws_event_async(
-                    "auto_heal_triggered",
-                    skill_id=self.skill_id,
-                    step_index=step_idx,
-                    error_type=heal_type,
-                    fix_action=fix_action,
-                    error_snippet=error_msg[:200],
-                )
+                if self.ws_server and self.ws_server.is_running:
+                    import asyncio
+
+                    # Get current step index from event_emitter or calculate it
+                    step_idx = (
+                        self.event_emitter.current_step_index
+                        if self.event_emitter
+                        else 0
+                    )
+                    asyncio.create_task(
+                        self.ws_server.auto_heal_triggered(
+                            skill_id=self.skill_id,
+                            step_index=step_idx,
+                            error_type=heal_type,
+                            fix_action=(
+                                f"kube_login({cluster})"
+                                if heal_type == "auth"
+                                else "vpn_connect()"
+                            ),
+                            error_snippet=error_msg[:200],
+                        )
+                    )
 
                 # Emit toast notification for auto-heal triggered
-                self._notify(
-                    "notify_auto_heal_triggered", step_name, heal_type, fix_action
-                )
+                try:
+                    from tool_modules.aa_workflow.src.notification_emitter import (
+                        notify_auto_heal_triggered,
+                    )
+
+                    fix_action = (
+                        f"kube_login({cluster})"
+                        if heal_type == "auth"
+                        else "vpn_connect()"
+                    )
+                    notify_auto_heal_triggered(step_name, heal_type, fix_action)
+                except Exception:
+                    pass
 
                 retry_result = await self._attempt_auto_heal(
                     heal_type, cluster, tool, step, output_lines
@@ -1388,21 +2105,32 @@ class SkillExecutor:
                     )
 
                     # Emit auto-heal completed event (WebSocket)
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
-                    self._emit_ws_event_async(
-                        "auto_heal_completed",
-                        skill_id=self.skill_id,
-                        step_index=step_idx,
-                        fix_action=heal_type,
-                        success=True,
-                    )
+                    if self.ws_server and self.ws_server.is_running:
+                        import asyncio
+
+                        step_idx = (
+                            self.event_emitter.current_step_index
+                            if self.event_emitter
+                            else 0
+                        )
+                        asyncio.create_task(
+                            self.ws_server.auto_heal_completed(
+                                skill_id=self.skill_id,
+                                step_index=step_idx,
+                                fix_action=heal_type,
+                                success=True,
+                            )
+                        )
 
                     # Emit toast notification for auto-heal success
-                    self._notify("notify_auto_heal_succeeded", step_name, heal_type)
+                    try:
+                        from tool_modules.aa_workflow.src.notification_emitter import (
+                            notify_auto_heal_succeeded,
+                        )
+
+                        notify_auto_heal_succeeded(step_name, heal_type)
+                    except Exception:
+                        pass
 
                     self.step_results.append(
                         {
@@ -1422,26 +2150,43 @@ class SkillExecutor:
                     )
 
                     # Emit auto-heal completed (failed) event (WebSocket)
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
-                    self._emit_ws_event_async(
-                        "auto_heal_completed",
-                        skill_id=self.skill_id,
-                        step_index=step_idx,
-                        fix_action=heal_type,
-                        success=False,
-                    )
+                    if self.ws_server and self.ws_server.is_running:
+                        import asyncio
+
+                        step_idx = (
+                            self.event_emitter.current_step_index
+                            if self.event_emitter
+                            else 0
+                        )
+                        asyncio.create_task(
+                            self.ws_server.auto_heal_completed(
+                                skill_id=self.skill_id,
+                                step_index=step_idx,
+                                fix_action=heal_type,
+                                success=False,
+                            )
+                        )
 
                     # Emit toast notification for auto-heal failure
-                    self._notify("notify_auto_heal_failed", step_name, error_msg[:100])
+                    try:
+                        from tool_modules.aa_workflow.src.notification_emitter import (
+                            notify_auto_heal_failed,
+                        )
+
+                        notify_auto_heal_failed(step_name, error_msg[:100])
+                    except Exception:
+                        pass
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
             # Fall through to continue behavior
             output_lines.append("   *Continuing despite error (on_error: auto_heal)*\n")
+
+            # Set output variable to None so downstream compute steps don't crash
+            # with NameError when referencing this step's output
+            output_name = step.get("output", step_name)
+            if output_name not in self.context:
+                self.context[output_name] = None
 
             # Layer 5: Learn from this error
             tool_params = {}
@@ -1494,6 +2239,12 @@ class SkillExecutor:
         if on_error == "continue":
             output_lines.append("   *Continuing despite error (on_error: continue)*\n")
 
+            # Set output variable to None so downstream compute steps don't crash
+            # with NameError when referencing this step's output
+            output_name = step.get("output", step_name)
+            if output_name not in self.context:
+                self.context[output_name] = None
+
             # Log to Python logger for journalctl visibility
             skill_name = self.skill.get("name", "unknown")
             logger.warning(
@@ -1515,7 +2266,14 @@ class SkillExecutor:
             )
 
             # Emit toast notification for continue-mode failures (helps visibility)
-            self._notify("notify_step_failed", skill_name, step_name, error_msg[:150])
+            try:
+                from tool_modules.aa_workflow.src.notification_emitter import (
+                    notify_step_failed,
+                )
+
+                notify_step_failed(skill_name, step_name, error_msg[:150])
+            except Exception:
+                pass
 
             self.step_results.append(
                 {
@@ -1540,8 +2298,8 @@ class SkillExecutor:
                         parsed[key.strip().lower().replace(" ", "_")] = val.strip()
                 if parsed:
                     self.context[f"{output_name}_parsed"] = parsed
-        except Exception as e:
-            logger.debug(f"Suppressed error in result text parsing: {e}")
+        except Exception:
+            pass
 
     def _detect_soft_failure(self, result_text: str) -> tuple[bool, str | None]:
         """Detect if a successful tool result actually contains an error (soft failure).
@@ -1795,17 +2553,22 @@ class SkillExecutor:
         self._debug(f"Inputs: {json.dumps(self.inputs)}")
 
         # Emit skill start event (file-based)
-        self._emit_event("skill_start")
+        if self.event_emitter:
+            self.event_emitter.skill_start()
 
         # Emit skill start event (WebSocket)
-        self._emit_ws_event_async(
-            "skill_started",
-            skill_id=self.skill_id,
-            skill_name=skill_name,
-            total_steps=total_steps,
-            inputs=self.inputs,
-            source=self.source,
-        )
+        if self.ws_server and self.ws_server.is_running:
+            import asyncio
+
+            asyncio.create_task(
+                self.ws_server.skill_started(
+                    skill_id=self.skill_id,
+                    skill_name=skill_name,
+                    total_steps=total_steps,
+                    inputs=self.inputs,
+                    source=self.source,
+                )
+            )
 
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
@@ -1846,36 +2609,35 @@ class SkillExecutor:
                         f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n"
                     )
                     # Emit step skipped event
-                    self._emit_event(
-                        "step_skipped",
-                        step_index=step_index,
-                        reason="condition false",
-                    )
+                    if self.event_emitter:
+                        self.event_emitter.step_skipped(step_index, "condition false")
                     continue
 
             # Emit step start event (file-based)
-            self._emit_event("step_start", step_index=step_index)
+            if self.event_emitter:
+                self.event_emitter.step_start(step_index)
 
             # Emit step start event (WebSocket)
-            description = step.get("description", "")
-            self._emit_ws_event_async(
-                "step_started",
-                skill_id=self.skill_id,
-                step_index=step_index,
-                step_name=step_name,
-                description=description[:200] if description else "",
-            )
+            if self.ws_server and self.ws_server.is_running:
+                import asyncio
+
+                description = step.get("description", "")
+                asyncio.create_task(
+                    self.ws_server.step_started(
+                        skill_id=self.skill_id,
+                        step_index=step_index,
+                        step_name=step_name,
+                        description=description[:200] if description else "",
+                    )
+                )
 
             if "then" in step:
                 early_return = self._process_then_block(step, output_lines)
                 if early_return is not None:
                     # Emit skill complete (early return)
-                    total_time = time.time() - (self.start_time or 0.0)
-                    self._emit_event(
-                        "skill_complete",
-                        success=True,
-                        total_duration_ms=int(total_time * 1000),
-                    )
+                    if self.event_emitter:
+                        total_time = time.time() - (self.start_time or 0.0)
+                        self.event_emitter.skill_complete(True, int(total_time * 1000))
                     return early_return
                 continue
 
@@ -1903,13 +2665,11 @@ class SkillExecutor:
 
                 if not should_continue:
                     # Emit step failed event
-                    duration_ms = int((time.time() - step_start_time) * 1000)
-                    self._emit_event(
-                        "step_failed",
-                        step_index=step_index,
-                        duration_ms=duration_ms,
-                        error=step_error or "Step failed",
-                    )
+                    if self.event_emitter:
+                        duration_ms = int((time.time() - step_start_time) * 1000)
+                        self.event_emitter.step_failed(
+                            step_index, duration_ms, step_error or "Step failed"
+                        )
                     break
 
             elif "compute" in step:
@@ -1953,33 +2713,39 @@ class SkillExecutor:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
 
-            # Emit step complete/failed events (file-based + WebSocket)
-            duration_ms = int((time.time() - step_start_time) * 1000)
-            if step_success:
-                self._emit_event(
-                    "step_complete", step_index=step_index, duration_ms=duration_ms
-                )
-                self._emit_ws_event_async(
-                    "step_completed",
-                    skill_id=self.skill_id,
-                    step_index=step_index,
-                    step_name=step_name,
-                    duration_ms=duration_ms,
-                )
-            else:
-                self._emit_event(
-                    "step_failed",
-                    step_index=step_index,
-                    duration_ms=duration_ms,
-                    error=step_error or "Unknown error",
-                )
-                self._emit_ws_event_async(
-                    "step_failed",
-                    skill_id=self.skill_id,
-                    step_index=step_index,
-                    step_name=step_name,
-                    error=step_error or "Unknown error",
-                )
+            # Emit step complete/failed event (file-based)
+            if self.event_emitter:
+                duration_ms = int((time.time() - step_start_time) * 1000)
+                if step_success:
+                    self.event_emitter.step_complete(step_index, duration_ms)
+                else:
+                    self.event_emitter.step_failed(
+                        step_index, duration_ms, step_error or "Unknown error"
+                    )
+
+            # Emit step complete/failed event (WebSocket)
+            if self.ws_server and self.ws_server.is_running:
+                import asyncio
+
+                duration_ms = int((time.time() - step_start_time) * 1000)
+                if step_success:
+                    asyncio.create_task(
+                        self.ws_server.step_completed(
+                            skill_id=self.skill_id,
+                            step_index=step_index,
+                            step_name=step_name,
+                            duration_ms=duration_ms,
+                        )
+                    )
+                else:
+                    asyncio.create_task(
+                        self.ws_server.step_failed(
+                            skill_id=self.skill_id,
+                            step_index=step_index,
+                            step_name=step_name,
+                            error=step_error or "Unknown error",
+                        )
+                    )
 
         self._format_skill_outputs(output_lines)
 
@@ -1993,41 +2759,43 @@ class SkillExecutor:
         )
 
         # Emit skill complete event (file-based)
-        overall_success = fail_count == 0
-        self._emit_event(
-            "skill_complete",
-            success=overall_success,
-            total_duration_ms=int(total_time * 1000),
-        )
-        # Clear the global emitter
         if self.event_emitter:
+            overall_success = fail_count == 0
+            self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
+            # Clear the global emitter
             try:
                 from .skill_execution_events import set_emitter
 
                 set_emitter(None)
-            except Exception as e:
-                logger.debug(f"Suppressed error in clearing event emitter: {e}")
+            except Exception:
+                pass
 
         # Emit skill complete event (WebSocket)
-        if overall_success:
-            self._emit_ws_event_async(
-                "skill_completed",
-                skill_id=self.skill_id,
-                total_duration_ms=int(total_time * 1000),
-            )
-        else:
-            # Get last error from step_results
-            last_error = "Skill failed"
-            for r in reversed(self.step_results):
-                if not r.get("success") and r.get("error"):
-                    last_error = r["error"]
-                    break
-            self._emit_ws_event_async(
-                "skill_failed",
-                skill_id=self.skill_id,
-                error=last_error,
-                total_duration_ms=int(total_time * 1000),
-            )
+        if self.ws_server and self.ws_server.is_running:
+            import asyncio
+
+            overall_success = fail_count == 0
+            if overall_success:
+                asyncio.create_task(
+                    self.ws_server.skill_completed(
+                        skill_id=self.skill_id,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
+            else:
+                # Get last error from step_results
+                last_error = "Skill failed"
+                for r in reversed(self.step_results):
+                    if not r.get("success") and r.get("error"):
+                        last_error = r["error"]
+                        break
+                asyncio.create_task(
+                    self.ws_server.skill_failed(
+                        skill_id=self.skill_id,
+                        error=last_error,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
 
         # Track skill execution in agent stats
         try:
@@ -2376,24 +3144,21 @@ async def _skill_run_impl(
                 logger.debug(f"Could not get session context: {e}")
 
         # Execute mode: run the skill
-        exec_config = SkillExecutorConfig(
+        executor = SkillExecutor(
+            skill,
+            input_data,
             debug=debug,
+            server=server,
+            create_issue_fn=create_issue_fn,
+            ask_question_fn=ask_question_fn,
             enable_interactive_recovery=True,
             emit_events=True,  # Enable VS Code extension events
             workspace_uri=workspace_uri,
+            ctx=ctx,
             session_id=session_id,
             session_name=session_name,
             source=source,
             source_details=source_details,
-        )
-        executor = SkillExecutor(
-            skill,
-            input_data,
-            config=exec_config,
-            server=server,
-            create_issue_fn=create_issue_fn,
-            ask_question_fn=ask_question_fn,
-            ctx=ctx,
         )
         result = await executor.execute()
 

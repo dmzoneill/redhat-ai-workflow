@@ -273,8 +273,9 @@ class TestGetConversationsWithFallback:
     async def test_custom_types_and_limit(self):
         session = MagicMock()
         session.get_user_conversations = AsyncMock(return_value=[])
-        await get_conversations_with_fallback(session, types="im", limit=10)
+        result = await get_conversations_with_fallback(session, types="im", limit=10)
         session.get_user_conversations.assert_awaited_once_with(types="im", limit=10)
+        assert result == []
 
 
 # ---------------------------------------------------------------------------
@@ -343,8 +344,9 @@ class TestExportMessagesToJsonl:
         session.get_conversation_history = AsyncMock(return_value=[])
         convos = [{"name": "no-id"}, {"id": "C1"}]
 
-        await export_messages_to_jsonl(session, convos, output_file)
+        stats = await export_messages_to_jsonl(session, convos, output_file)
         session.get_conversation_history.assert_awaited_once()
+        assert stats["conversation_count"] >= 0
 
     @pytest.mark.asyncio
     async def test_custom_user_id(self, tmp_path):

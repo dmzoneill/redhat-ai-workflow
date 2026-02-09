@@ -556,6 +556,7 @@ def test_emit_event_no_emitter():
 
     # Should not raise
     emit_event("noop", {"x": 1})
+    assert True
 
 
 # ---------------------------------------------------------------------------

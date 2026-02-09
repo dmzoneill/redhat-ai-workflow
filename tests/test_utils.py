@@ -1002,10 +1002,11 @@ class TestRunKubectl:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "ok\n")):
-                await run_kubectl(
+                success, output = await run_kubectl(
                     ["get", "pods"], kubeconfig="/home/user/.kube/config.p"
                 )
                 mock_auth.assert_called_once_with("production", auto_refresh=True)
+                assert success is True
 
     @pytest.mark.asyncio
     async def test_detect_env_from_kubeconfig_ephemeral(self):
@@ -1015,10 +1016,11 @@ class TestRunKubectl:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "ok\n")):
-                await run_kubectl(
+                success, output = await run_kubectl(
                     ["get", "pods"], kubeconfig="/home/user/.kube/config.e"
                 )
                 mock_auth.assert_called_once_with("ephemeral", auto_refresh=True)
+                assert success is True
 
     @pytest.mark.asyncio
     async def test_detect_env_from_kubeconfig_konflux(self):
@@ -1028,10 +1030,11 @@ class TestRunKubectl:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "ok\n")):
-                await run_kubectl(
+                success, output = await run_kubectl(
                     ["get", "pods"], kubeconfig="/home/user/.kube/config.k"
                 )
                 mock_auth.assert_called_once_with("konflux", auto_refresh=True)
+                assert success is True
 
 
 class TestRunOc:
@@ -1112,8 +1115,9 @@ class TestGetBearerToken:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "mytoken")):
-                await get_bearer_token("/kube/config.p")
+                token = await get_bearer_token("/kube/config.p")
                 mock_auth.assert_called_once_with("production", auto_refresh=True)
+                assert token is not None
 
     @pytest.mark.asyncio
     async def test_detect_env_ephemeral(self):
@@ -1123,8 +1127,9 @@ class TestGetBearerToken:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "mytoken")):
-                await get_bearer_token("/kube/config.e")
+                token = await get_bearer_token("/kube/config.e")
                 mock_auth.assert_called_once_with("ephemeral", auto_refresh=True)
+                assert token is not None
 
     @pytest.mark.asyncio
     async def test_detect_env_konflux(self):
@@ -1134,8 +1139,9 @@ class TestGetBearerToken:
             "server.utils.ensure_cluster_auth", return_value=(True, "")
         ) as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "mytoken")):
-                await get_bearer_token("/kube/config.k")
+                token = await get_bearer_token("/kube/config.k")
                 mock_auth.assert_called_once_with("konflux", auto_refresh=True)
+                assert token is not None
 
     @pytest.mark.asyncio
     async def test_no_auto_auth(self):
@@ -1143,8 +1149,9 @@ class TestGetBearerToken:
 
         with patch("server.utils.ensure_cluster_auth") as mock_auth:
             with patch("server.utils.run_cmd", return_value=(True, "token")):
-                await get_bearer_token("/kube/config.s", auto_auth=False)
+                token = await get_bearer_token("/kube/config.s", auto_auth=False)
                 mock_auth.assert_not_called()
+                assert token is not None
 
     @pytest.mark.asyncio
     async def test_exception_in_kubectl_falls_through(self):

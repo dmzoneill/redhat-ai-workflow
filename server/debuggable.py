@@ -23,25 +23,16 @@ import functools
 import inspect
 import logging
 import re
-import threading
 from pathlib import Path
 from typing import Any, Callable
 
 from mcp.types import TextContent
-
-from server.error_patterns import (
-    GITLAB_AUTH_PATTERNS,
-    K8S_AUTH_PATTERNS,
-    SLACK_AUTH_PATTERNS,
-    VPN_PATTERNS,
-)
 
 logger = logging.getLogger(__name__)
 
 
 # Global registry of tools and their source locations
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {}
-_registry_lock = threading.Lock()
 
 
 def debuggable(func: Callable) -> Callable:
@@ -117,8 +108,7 @@ def debuggable(func: Callable) -> Callable:
     wrapper.__dict__["_debug_info"] = debug_info
 
     # Register in global registry
-    with _registry_lock:
-        TOOL_REGISTRY[func.__name__] = debug_info
+    TOOL_REGISTRY[func.__name__] = debug_info
 
     return wrapper
 
@@ -190,10 +180,7 @@ def _search_for_tool(tool_name: str) -> dict | None:
                         "end_line": end_line,
                         "func_name": tool_name,
                     }
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in _search_for_tool scanning {tools_file}: {e}"
-                )
+            except Exception:
                 continue
 
     return None
@@ -233,9 +220,8 @@ def _extract_function(source: str, func_name: str) -> str:
                 or line.strip().startswith("def ")
                 or line.strip().startswith("async def ")
                 or line.strip().startswith("class ")
-                or (
-                    line.strip().startswith("return ") and current_indent == func_indent
-                )
+                or line.strip().startswith("return ")
+                and current_indent == func_indent
             ):
                 # Check if it's a return statement inside the function
                 if not (
@@ -356,8 +342,7 @@ def wrap_all_tools(server, tools_module) -> int:
     try:
         with open(source_file) as f:
             full_source = f.read()
-    except Exception as e:
-        logger.debug(f"Suppressed error in wrap_all_tools reading source: {e}")
+    except Exception:
         return 0
 
     # Find all async def functions that look like tools
@@ -367,9 +352,8 @@ def wrap_all_tools(server, tools_module) -> int:
         if func_name.startswith("_"):
             continue
 
-        with _registry_lock:
-            if func_name in TOOL_REGISTRY:
-                continue
+        if func_name in TOOL_REGISTRY:
+            continue
 
         # Calculate line number
         line_num = full_source[: match.start()].count("\n") + 1
@@ -378,13 +362,12 @@ def wrap_all_tools(server, tools_module) -> int:
         func_source = _extract_function(full_source, func_name)
         end_line = line_num + func_source.count("\n")
 
-        with _registry_lock:
-            TOOL_REGISTRY[func_name] = {
-                "source_file": source_file,
-                "start_line": line_num,
-                "end_line": end_line,
-                "func_name": func_name,
-            }
+        TOOL_REGISTRY[func_name] = {
+            "source_file": source_file,
+            "start_line": line_num,
+            "end_line": end_line,
+            "func_name": func_name,
+        }
         count += 1
 
     return count
@@ -461,11 +444,33 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
     error_lower = error_text.lower()
 
     # VPN connectivity issues
-    if any(pattern in error_lower for pattern in VPN_PATTERNS):
+    vpn_patterns = [
+        "no route to host",
+        "network is unreachable",
+        "connection timed out",
+        "could not resolve host",
+        "name or service not known",
+        "connection refused",
+        "failed to connect",
+        "enetunreach",
+    ]
+
+    if any(pattern in error_lower for pattern in vpn_patterns):
         hints.append("🌐 VPN may be disconnected. Try: `vpn_connect()`")
 
     # Kubernetes auth issues
-    if any(pattern in error_lower for pattern in K8S_AUTH_PATTERNS):
+    k8s_auth_patterns = [
+        "unauthorized",
+        "token expired",
+        "token is expired",
+        "the server has asked for the client to provide credentials",
+        "you must be logged in to the server",
+        "forbidden",
+        "error: you must be logged in",
+        "no valid credentials found",
+    ]
+
+    if any(pattern in error_lower for pattern in k8s_auth_patterns):
         # Try to detect which cluster from the error or tool name
         cluster_hint = ""
         if "stage" in error_lower or "stage" in tool_name:
@@ -482,14 +487,28 @@ def _get_remediation_hints(error_text: str, tool_name: str) -> list[str]:
         hints.append(f"🔑 Kubernetes auth may be stale.{cluster_hint}")
 
     # GitLab auth issues
-    if any(pattern in error_lower for pattern in GITLAB_AUTH_PATTERNS):
+    gitlab_auth_patterns = [
+        "401 unauthorized",
+        "403 forbidden",
+        "authentication required",
+        "invalid token",
+    ]
+
+    if any(pattern in error_lower for pattern in gitlab_auth_patterns):
         hints.append(
             "🦊 GitLab token may be expired. "
             "Check GITLAB_TOKEN env var or ~/.config/glab-cli/config.yml"
         )
 
     # Slack auth issues
-    if any(pattern in error_lower for pattern in SLACK_AUTH_PATTERNS):
+    slack_auth_patterns = [
+        "invalid_auth",
+        "token_expired",
+        "not_authed",
+        "xoxc",
+    ]
+
+    if any(pattern in error_lower for pattern in slack_auth_patterns):
         hints.append("💬 Slack auth may be stale. Re-obtain XOXC token from browser.")
 
     return hints
@@ -576,10 +595,8 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                 from tool_modules.aa_workflow.src.agent_stats import record_tool_call
 
                 record_tool_call(_name, success, duration_ms)
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in stats tracking for {_name}: {e}"
-                )  # Don't let stats tracking break tools
+            except Exception:
+                pass  # Don't let stats tracking break tools
 
             # Track activity in session (for UI display)
             try:
@@ -602,9 +619,7 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                         # Save periodically (every 10 calls) to avoid too many writes
                         if session.tool_call_count % 10 == 0:
                             WorkspaceRegistry.save_to_disk()
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in session tracking for {_name}: {e}"
-                )  # Don't let session tracking break tools
+            except Exception:
+                pass  # Don't let session tracking break tools
 
     return wrapper
