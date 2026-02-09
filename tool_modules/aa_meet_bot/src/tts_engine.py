@@ -283,12 +283,12 @@ class PiperTTS:
                 import wave
 
                 with wave.open(str(audio_path), "wb") as wav:  # pylint: disable=no-member
-                    wav.setnchannels(1)
-                    wav.setsampwidth(2)  # 16-bit
-                    wav.setframerate(sample_rate)
+                    wav.setnchannels(1)  # pylint: disable=no-member
+                    wav.setsampwidth(2)  # pylint: disable=no-member
+                    wav.setframerate(sample_rate)  # pylint: disable=no-member
                     # Convert back to int16 for file
                     audio_int16 = (audio_data * 32767).astype(np.int16)
-                    wav.writeframes(audio_int16.tobytes())
+                    wav.writeframes(audio_int16.tobytes())  # pylint: disable=no-member
 
             return TTSResult(
                 audio_path=audio_path,
