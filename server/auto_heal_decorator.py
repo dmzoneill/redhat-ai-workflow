@@ -281,7 +281,7 @@ async def _log_auto_heal_to_memory(
 
         # Load or create
         if failures_file.exists():
-            with open(failures_file) as f:
+            with open(failures_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {
@@ -314,7 +314,7 @@ async def _log_auto_heal_to_memory(
         _cleanup_old_stats(data)
 
         # Write back
-        with open(failures_file, "w") as f:
+        with open(failures_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
         logger.debug(f"Logged auto-heal for {tool_name} to memory")

@@ -168,8 +168,8 @@ class SkillWebSocketServer:
             async for message in websocket:
                 await self._handle_message(websocket, message)
 
-        except websockets.exceptions.ConnectionClosed:
-            pass
+        except websockets.exceptions.ConnectionClosed as exc:
+            logger.debug("WebSocket connection closed: %s", exc)
         finally:
             async with self._clients_lock:
                 self.clients.discard(websocket)
@@ -560,8 +560,8 @@ class SkillWebSocketServer:
             )
             if result.returncode == 0:
                 return
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         try:
             # Fallback to xdotool
@@ -571,8 +571,8 @@ class SkillWebSocketServer:
                 capture_output=True,
                 timeout=Timeouts.INSTANT,
             )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     async def _bring_cursor_to_front(self) -> None:
         """Raise Cursor window to front (non-blocking)."""

@@ -17,6 +17,7 @@ import asyncio
 import logging
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -724,155 +725,6 @@ class GoogleMeetController:
         logger.debug(
             f"[{self._instance_id}] _move_user_browser_to_original_source called but disabled"
         )
-        return
-
-        # DISABLED CODE BELOW - kept for reference
-        import subprocess
-
-        try:
-            # Get the index for the target source
-            result = subprocess.run(
-                ["pactl", "list", "sources", "short"], capture_output=True, text=True
-            )
-
-            target_index = None
-            for line in result.stdout.strip().split("\n"):
-                if target_source in line:
-                    target_index = line.split("\t")[0]
-                    break
-
-            if not target_index:
-                logger.warning(
-                    f"[{self._instance_id}] Could not find index for source: {target_source}"
-                )
-                return
-
-            # Get all source outputs
-            result = subprocess.run(
-                ["pactl", "list", "source-outputs"], capture_output=True, text=True
-            )
-
-            # Helper to check if a PID belongs to our browser (including child processes)
-            def is_our_browser_pid(audio_pid: str) -> bool:
-                """Check if audio_pid is our browser or a child of our browser."""
-                if not self._browser_pid or not audio_pid:
-                    return False
-
-                try:
-                    audio_pid_int = int(audio_pid)
-
-                    # Direct match
-                    if audio_pid_int == self._browser_pid:
-                        return True
-
-                    # Check if audio process is a child of our browser
-                    # Chrome's audio service runs as a subprocess with our browser as parent
-                    try:
-                        import psutil
-
-                        proc = psutil.Process(audio_pid_int)
-                        # Check parent chain (up to 3 levels)
-                        for _ in range(3):
-                            parent = proc.parent()
-                            if parent is None:
-                                break
-                            if parent.pid == self._browser_pid:
-                                return True
-                            proc = parent
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, ImportError):
-                        pass
-
-                    # Fallback: check via /proc filesystem
-                    try:
-                        with open(f"/proc/{audio_pid}/stat", "r") as f:
-                            stat = f.read().split()
-                            ppid = int(stat[3])  # Parent PID is field 4 (0-indexed: 3)
-                            if ppid == self._browser_pid:
-                                return True
-                    except (FileNotFoundError, IndexError, ValueError):
-                        pass
-
-                except (ValueError, TypeError):
-                    pass
-
-                return False
-
-            current_output_id = None
-            current_source = None
-            current_pid = None
-            is_browser = False
-
-            for line in result.stdout.split("\n"):
-                line = line.strip()
-
-                if line.startswith("Source Output #"):
-                    # Process previous output
-                    if current_output_id and is_browser and current_source:
-                        if "meet_bot" in str(current_source).lower():
-                            # This browser is on meetbot mic - check if it's ours
-                            if not is_our_browser_pid(current_pid):
-                                # This is user's browser - move to their source
-                                subprocess.run(
-                                    [
-                                        "pactl",
-                                        "move-source-output",
-                                        current_output_id,
-                                        target_index,
-                                    ],
-                                    capture_output=True,
-                                )
-                                logger.info(
-                                    f"[{self._instance_id}] Moved user browser stream {current_output_id} "
-                                    f"(PID {current_pid}) to {target_source}"
-                                )
-                            else:
-                                logger.debug(
-                                    f"[{self._instance_id}] Keeping our browser stream {current_output_id} "
-                                    f"(PID {current_pid}, parent {self._browser_pid}) on meetbot mic"
-                                )
-
-                    # Start new output
-                    current_output_id = line.split("#")[1]
-                    current_source = None
-                    current_pid = None
-                    is_browser = False
-
-                elif "Source:" in line:
-                    current_source = (
-                        line.split(":", 1)[1].strip() if ":" in line else ""
-                    )
-
-                elif "application.name" in line.lower():
-                    app = line.lower()
-                    if "chrome" in app or "chromium" in app or "firefox" in app:
-                        is_browser = True
-
-                elif "application.process.id" in line.lower():
-                    try:
-                        current_pid = line.split("=")[1].strip().strip('"')
-                    except (IndexError, ValueError):
-                        pass
-
-            # Don't forget last output
-            if current_output_id and is_browser and current_source:
-                if "meet_bot" in str(current_source).lower():
-                    if not is_our_browser_pid(current_pid):
-                        subprocess.run(
-                            [
-                                "pactl",
-                                "move-source-output",
-                                current_output_id,
-                                target_index,
-                            ],
-                            capture_output=True,
-                        )
-                        logger.info(
-                            f"[{self._instance_id}] Moved user browser stream {current_output_id} "
-                            f"(PID {current_pid}) to {target_source}"
-                        )
-
-        except Exception as e:
-            logger.warning(f"[{self._instance_id}] Failed to move browser streams: {e}")
 
     async def _start_video_stream(
         self, video_device: str, video_enabled: bool = False
@@ -1757,7 +1609,9 @@ class GoogleMeetController:
 
                 # Take a screenshot for debugging
                 try:
-                    screenshot_path = f"/tmp/meet_debug_{meeting_id}.png"
+                    screenshot_path = str(
+                        Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png"
+                    )
                     await self.page.screenshot(path=screenshot_path)
                     logger.info(f"[JOIN] Debug screenshot saved to: {screenshot_path}")
                 except Exception as e:
@@ -2339,8 +2193,11 @@ class GoogleMeetController:
             return False
 
         try:
+            # Map device_type to WebRTC device kind
+            kind = "audioinput" if device_type == "microphone" else "audiooutput"
+
             # First, find the device in the browser's device list
-            js_find_device = """
+            js_find_device = f"""
             async () => {{
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const matches = devices.filter(d => d.kind === '{kind}');
@@ -3808,7 +3665,7 @@ class GoogleMeetController:
             ):
                 logger.error(f"[{self._instance_id}] Browser was closed unexpectedly!")
                 self._browser_closed = True
-                raise BrowserClosedError("Browser was closed")
+                raise BrowserClosedError("Browser was closed") from e
             logger.warning(f"[{self._instance_id}] Failed to take screenshot: {e}")
             return None
 

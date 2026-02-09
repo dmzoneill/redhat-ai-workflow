@@ -77,7 +77,7 @@ def load_exclusions() -> dict:
     if not exclusions_file.exists():
         return {"excluded_skills": [], "excluded_tools": []}
 
-    with open(exclusions_file) as f:
+    with open(exclusions_file, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     excluded_skills = []
@@ -311,7 +311,7 @@ class SkillRunner:
         skills = []
         for path in sorted(SKILLS_DIR.glob("*.yaml")):
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     skill = yaml.safe_load(f)
 
                 name = skill.get("name", path.stem)
@@ -326,7 +326,7 @@ class SkillRunner:
                         "steps": len(skill.get("steps", [])),
                     }
                 )
-            except Exception as e:
+            except (yaml.YAMLError, OSError) as e:
                 skills.append(
                     {
                         "name": path.stem,
@@ -347,7 +347,7 @@ class SkillRunner:
             # Try finding by name in files
             for path in SKILLS_DIR.glob("*.yaml"):
                 try:
-                    with open(path) as f:
+                    with open(path, encoding="utf-8") as f:
                         skill = yaml.safe_load(f)
                     if skill and skill.get("name") == skill_name:
                         return skill
@@ -356,7 +356,7 @@ class SkillRunner:
             return None
 
         try:
-            with open(skill_file) as f:
+            with open(skill_file, encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except yaml.YAMLError as e:
             print(f"    ⚠️  YAML parse error in {skill_name}: {e}")

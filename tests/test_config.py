@@ -7,8 +7,6 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from server.config import (
     get_container_auth,
     get_os_env,
@@ -167,7 +165,7 @@ class TestGetTokenFromKubeconfig:
         kubeconfig = tmp_path / "config.s"
         kubeconfig.write_text("dummy")
 
-        with patch("subprocess.run", side_effect=Exception("fail")):
+        with patch("subprocess.run", side_effect=subprocess.SubprocessError("fail")):
             token = get_token_from_kubeconfig(kubeconfig=str(kubeconfig))
 
         assert token == ""

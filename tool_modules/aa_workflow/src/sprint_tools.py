@@ -236,8 +236,8 @@ def sprint_approve(issue_key: str) -> str:
     if not is_actionable(issue):
         return (
             f"❌ Issue {issue_key} is not actionable (status: {issue.jira_status}).\n"
-            f"Bot only works on issues in New/Refinement/Backlog.\n"
-            f"Issues in Review/Done are managed by the user."
+            "Bot only works on issues in New/Refinement/Backlog.\n"
+            "Issues in Review/Done are managed by the user."
         )
 
     result = approve_issue(issue_key)

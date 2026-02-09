@@ -1,0 +1,330 @@
+# Skill: Reward Zone - Send Award (HTTP)
+# Automates the full "Send a Reward" flow on rewardzone.redhat.com
+#
+# Uses pure HTTP session (no browser) for auth and API calls:
+#   1. Create HTTP session -> SAML auth
+#   2. Search for recipient via API
+#   3. Submit nomination via API
+
+name: reward_zone_send
+description: |
+  Send a recognition award on Red Hat Reward Zone.
+
+  Automates the full end-to-end flow using HTTP session (no browser):
+  SAML authentication, recipient search via API, and award submission.
+
+  **Prerequisites:**
+  - redhatter service running on localhost:8009
+  - Auth token at ~/.cache/redhatter/auth_token
+
+  **Examples:**
+  - "Send a Focus on Team award to Aparna Karve with 25 points"
+  - "Give 50 points to John Smith for helping with the release"
+
+version: "2.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to: []
+  provides_context_for: []
+
+inputs:
+  - name: recipient
+    type: string
+    required: true
+    description: "Recipient's name to search for (first name, last name, or email)"
+
+  - name: award
+    type: string
+    required: false
+    default: "Focus on Team"
+    description: |
+      Award to select. Available awards vary by category but include:
+      "Focus on Team", "Encourage Others", "Collaborate", etc.
+
+  - name: points
+    type: integer
+    required: false
+    default: 25
+    description: "Number of points to award (5-100, within your budget)"
+
+  - name: message
+    type: string
+    required: true
+    description: "Recognition message explaining why the person deserves the award"
+
+  - name: description
+    type: string
+    required: false
+    default: ""
+    description: "Optional description (defaults to same as message)"
+
+  - name: dry_run
+    type: boolean
+    required: false
+    default: false
+    description: "Stop before submitting (show nomination payload without sending)"
+
+defaults:
+  reward_zone_base: "https://rewardzone.redhat.com"
+
+error_patterns:
+  - pattern: "redhatter service"
+    fix: "Start redhatter service: systemctl --user start redhatter"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "Auth token not found"
+    fix: "Ensure redhatter service is running"
+    auto_fix: false
+    category: credentials
+
+  - pattern: "SAML"
+    fix: "SAML authentication failed, retry"
+    auto_fix: true
+    auto_fix_action: "Retry SAML authentication"
+    category: authentication
+
+steps:
+  # ==================== VALIDATE INPUTS ====================
+
+  - name: validate_inputs
+    description: "Validate required inputs"
+    compute: |
+      recipient = inputs.get("recipient", "").strip()
+      message = inputs.get("message", "").strip()
+      description = inputs.get("description", "").strip() or message
+      award = inputs.get("award", "Focus on Team")
+      points = inputs.get("points", 25)
+
+      errors = []
+      if not recipient:
+          errors.append("Recipient name is required")
+      if not message:
+          errors.append("Recognition message is required")
+      if not isinstance(points, int) or points < 1:
+          errors.append(f"Points must be a positive integer (got {points})")
+
+      result = {
+          "valid": len(errors) == 0,
+          "errors": errors,
+          "recipient": recipient,
+          "message": message,
+          "description": description,
+          "award": award,
+          "points": points,
+      }
+    output: validation
+
+  - name: abort_if_invalid
+    description: "Abort if validation failed"
+    condition: "not validation.valid"
+    then:
+      - return: |
+          ## Validation Failed
+
+          {% for error in validation.errors %}
+          - {{ error }}
+          {% endfor %}
+
+          ### Usage
+
+          ```
+          skill_run('reward_zone_send', '{"recipient": "Aparna Karve", "message": "Thanks for the help!", "points": 25}')
+          ```
+
+  # ==================== CREATE HTTP SESSION ====================
+
+  - name: create_session
+    description: "Create HTTP session for Reward Zone API"
+    tool: http_session_create
+    args:
+      name: "reward_zone"
+      base_url: "{{ defaults.reward_zone_base }}"
+    output: session_result
+
+  # ==================== SAML AUTHENTICATION ====================
+  # Pure HTTP SAML flow - no browser needed.
+  # Handles the full redirect chain: init -> SAML -> SSO -> ACS -> login
+
+  - name: authenticate
+    description: "Authenticate via SAML (pure HTTP, no browser)"
+    tool: http_saml_auth
+    args:
+      session: "reward_zone"
+    output: auth_result
+
+  - name: check_auth
+    description: "Verify authentication succeeded"
+    compute: |
+      auth_text = str(auth_result) if auth_result else ""
+      result = {"authenticated": "successful" in auth_text.lower()}
+    output: auth_check
+
+  - name: abort_if_auth_failed
+    description: "Abort if authentication failed"
+    condition: "not auth_check.authenticated"
+    then:
+      - return: |
+          ## Authentication Failed
+
+          SAML authentication to Reward Zone failed.
+
+          {{ auth_result }}
+
+          Make sure:
+          - redhatter service is running: `curl http://localhost:8009/health`
+          - VPN is connected
+          - Your credentials are valid
+
+  # ==================== SEARCH RECIPIENT ====================
+
+  - name: search_recipient
+    description: "Search for recipient by name"
+    tool: http_request
+    args:
+      session: "reward_zone"
+      method: "GET"
+      path: "/api/v1/Members/advancedMemberSearch"
+      params: '{"searchText": "{{ validation.recipient }}"}'
+    output: search_results
+
+  - name: parse_search_results
+    description: "Parse search results and find the best match"
+    compute: |
+      import json
+
+      search_text = str(search_results) if search_results else ""
+
+      # Extract JSON from the response (between ``` markers)
+      result = {"found": False, "error": "No results"}
+
+      try:
+          # Find JSON content between ``` markers
+          if "```" in search_text:
+              json_str = search_text.split("```")[1].strip()
+              data = json.loads(json_str)
+          else:
+              data = json.loads(search_text)
+
+          if isinstance(data, list) and len(data) > 0:
+              member = data[0]
+              first = member.get("firstName") or member.get("fName") or ""
+              last = member.get("lastName") or member.get("lName") or ""
+              result = {
+                  "found": True,
+                  "pin": member.get("pin", ""),
+                  "name": f"{first} {last}".strip(),
+                  "email": member.get("email", ""),
+                  "member_data": member,
+              }
+          elif isinstance(data, dict) and data.get("data"):
+              members = data["data"]
+              if isinstance(members, list) and len(members) > 0:
+                  member = members[0]
+                  first = member.get("firstName") or member.get("fName") or ""
+                  last = member.get("lastName") or member.get("lName") or ""
+                  result = {
+                      "found": True,
+                      "pin": member.get("pin", ""),
+                      "name": f"{first} {last}".strip(),
+                      "email": member.get("email", ""),
+                      "member_data": member,
+                  }
+              else:
+                  result = {"found": False, "error": "No matching members found"}
+          else:
+              result = {"found": False, "error": "No matching members found"}
+      except Exception as e:
+          result = {"found": False, "error": f"Failed to parse search results: {e}"}
+    output: recipient_match
+
+  - name: abort_if_no_recipient
+    description: "Abort if recipient not found"
+    condition: "not recipient_match.found"
+    then:
+      - return: |
+          ## Recipient Not Found
+
+          Could not find a member matching "{{ validation.recipient }}".
+
+          {{ recipient_match.error }}
+
+          Try searching with a different name or email.
+
+  # ==================== DRY RUN CHECK ====================
+
+  - name: dry_run_exit
+    description: "Stop before submitting if dry_run is true"
+    condition: "inputs.dry_run"
+    then:
+      - return: |
+          ## Dry Run Complete
+
+          The award is ready to submit but was **not sent** (dry_run=true).
+
+          | Field | Value |
+          |-------|-------|
+          | **Recipient** | {{ recipient_match.name }} (pin: {{ recipient_match.pin }}) |
+          | **Award** | {{ validation.award }} |
+          | **Points** | {{ validation.points }} |
+          | **Message** | {{ validation.message }} |
+
+          Run again without `dry_run` to submit.
+
+  # ==================== SUBMIT NOMINATION ====================
+
+  - name: submit_nomination
+    description: "Submit the award nomination via API"
+    tool: http_request
+    args:
+      session: "reward_zone"
+      method: "POST"
+      path: "/api/v1/Awards/submitNomination"
+      json_body: '{"nomineePin": "{{ recipient_match.pin }}", "awardName": "{{ validation.award }}", "points": {{ validation.points }}, "description": "{{ validation.description }}", "message": "{{ validation.message }}"}'
+    output: submit_result
+
+  # ==================== LOG ====================
+
+  - name: log_action
+    description: "Log the action to session"
+    tool: memory_session_log
+    args:
+      action: "Reward Zone Send"
+      details: "Sent {{ validation.points }} points to {{ recipient_match.name }} ({{ validation.award }})"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      ## Award Sent
+
+      | Field | Value |
+      |-------|-------|
+      | **Recipient** | {{ recipient_match.name }} |
+      | **Award** | {{ validation.award }} |
+      | **Points** | {{ validation.points }} |
+      | **Message** | {{ validation.message }} |
+
+      ---
+
+      ### Quick Commands
+
+      **Send another award:**
+      ```
+      skill_run('reward_zone_send', '{"recipient": "Name", "message": "Reason", "points": 25}')
+      ```
+
+      **Dry run (preview without sending):**
+      ```
+      skill_run('reward_zone_send', '{"recipient": "Name", "message": "Reason", "dry_run": true}')
+      ```
+
+  - name: context
+    value:
+      recipient: "{{ recipient_match.name }}"
+      award: "{{ validation.award }}"
+      points: "{{ validation.points }}"
+      message: "{{ validation.message }}"

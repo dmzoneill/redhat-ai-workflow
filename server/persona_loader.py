@@ -158,9 +158,9 @@ class PersonaLoader:
             return None
 
         try:
-            with open(persona_file) as f:
+            with open(persona_file, encoding="utf-8") as f:
                 return cast(dict, yaml.safe_load(f))
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to load persona config {persona_name}: {e}")
             return None
 
@@ -288,8 +288,8 @@ class PersonaLoader:
                 )
 
                 notify_persona_failed(persona_name, "Persona not found")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
             return {
                 "success": False,
                 "error": f"Persona not found: {persona_name}",

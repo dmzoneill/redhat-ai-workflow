@@ -28,7 +28,7 @@ class CompetencyMapper:
         """Load competencies configuration."""
         if self.config_path.exists():
             try:
-                with open(self.config_path) as f:
+                with open(self.config_path, encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 logger.error(f"Failed to load competencies config: {e}")

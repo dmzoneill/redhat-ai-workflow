@@ -260,7 +260,7 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
         fd = os.open(device_path, os.O_RDWR | os.O_NONBLOCK)
         os.close(fd)
     except OSError as e:
-        raise RuntimeError(f"Cannot open {device_path}: {e}")
+        raise RuntimeError(f"Cannot open {device_path}: {e}") from e
 
     # Verify the format
     actual_w, actual_h = get_device_format(device_path)

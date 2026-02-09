@@ -14,7 +14,6 @@ from mcp.types import TextContent, Tool
 
 from server.workspace_state import ChatSession, WorkspaceRegistry, WorkspaceState
 from tool_modules.aa_workflow.src import meta_tools as mt
-from tool_modules.aa_workflow.src import skill_engine as se
 
 # ==================== Fixtures ====================
 

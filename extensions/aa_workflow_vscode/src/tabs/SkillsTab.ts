@@ -91,6 +91,8 @@ export class SkillsTab extends BaseTab {
   private workflowViewMode: "horizontal" | "vertical" = "horizontal";
   private wsClient: SkillWebSocketClient | null = null;
   private wsDisposables: vscode.Disposable[] = [];
+  private _lastRunningSkillsStructuralFP: string = "";  // Structural changes (add/remove/status)
+  private _lastRunningSkillsProgressFP: string = "";   // Progress changes (step updates)
 
   // Mind map data
   private mindMapData: SkillsGraphData | null = null;
@@ -105,27 +107,65 @@ export class SkillsTab extends BaseTab {
   private forceNextRender: boolean = false;
 
   /**
-   * Check if the mind map view is currently active AND we should skip rendering.
-   * Returns false if forceNextRender is set (user-initiated action).
+   * Check if the mind map view is currently active.
+   * Does NOT consume forceNextRender (that's handled in notifyNeedsRenderIfNotMindMap).
    */
   public isMindMapActive(): boolean {
-    if (this.forceNextRender) {
-      this.forceNextRender = false; // Reset the flag
-      return false; // Allow the render
-    }
     return this.skillView === "mindmap";
   }
 
   /**
-   * Conditionally trigger re-render, skipping if mind map is active.
-   * This prevents the D3 force simulation from restarting on every update.
+   * Conditionally trigger re-render, skipping if mind map or running workflow is active.
+   * - Mind map: D3 force simulation would restart
+   * - Running workflow: step changes use incremental CSS updates instead
+   *
+   * Set forceNextRender = true BEFORE calling this to force a render for structural changes
+   * (skill started/completed) even during an active workflow or mind map.
    */
   private notifyNeedsRenderIfNotMindMap(): void {
-    if (this.isMindMapActive()) {
+    // Consume the force flag once - if set, always allow the render
+    const forced = this.forceNextRender;
+    if (forced) {
+      this.forceNextRender = false;
+    }
+
+    if (!forced && this.isMindMapActive()) {
       logger.log("Skipping re-render - mind map is active");
       return;
     }
+
+    // Skip full re-render if viewing a running workflow (uses incremental CSS updates)
+    const inWorkflowMode = this.skillView === "workflow" &&
+                           this.detailedExecution?.status === "running";
+    if (!forced && inWorkflowMode) {
+      logger.log("Skipping full re-render - workflow in incremental CSS update mode");
+      return;
+    }
+
     this.notifyNeedsRender();
+  }
+
+  /**
+   * Build a STRUCTURAL fingerprint of running skills.
+   * Only changes when skills are added, removed, or change status.
+   * Does NOT change on step progress updates - those use incremental CSS updates.
+   */
+  private _buildRunningSkillsStructuralFingerprint(): string {
+    return this.runningSkills
+      .map(s => `${s.executionId}:${s.status}`)
+      .sort()
+      .join("|");
+  }
+
+  /**
+   * Build a PROGRESS fingerprint of running skills.
+   * Changes when step progress updates (used for incremental CSS updates).
+   */
+  private _buildRunningSkillsProgressFingerprint(): string {
+    return this.runningSkills
+      .map(s => `${s.executionId}:${s.status}:${s.progress}:${s.currentStep}`)
+      .sort()
+      .join("|");
   }
 
   constructor() {
@@ -144,11 +184,16 @@ export class SkillsTab extends BaseTab {
       this.wsClient = getSkillWebSocketClient();
 
       // Subscribe to skill events
-      // Use notifyNeedsRenderIfNotMindMap to avoid restarting D3 simulation
+      // Use notifyNeedsRenderIfNotMindMap to avoid restarting D3 simulation.
+      //
+      // Note: onSkillUpdate and onStepUpdate fire for the SAME step transition.
+      // To avoid double-renders, we only trigger render from onStepUpdate
+      // (which has more detail). onSkillUpdate just updates internal state.
       this.wsDisposables.push(
         this.wsClient.onSkillStarted((skill) => {
           logger.log(`WebSocket: Skill started - ${skill.skillName}`);
           this.addOrUpdateRunningSkill(skill);
+          this.forceNextRender = true; // Structural change - force full re-render
           this.notifyNeedsRenderIfNotMindMap();
         })
       );
@@ -157,7 +202,7 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onSkillUpdate((skill) => {
           logger.log(`WebSocket: Skill update - ${skill.skillName} step ${skill.currentStep}/${skill.totalSteps}`);
           this.addOrUpdateRunningSkill(skill);
-          this.notifyNeedsRenderIfNotMindMap();
+          // Don't render here - onStepUpdate fires for the same event with more detail
         })
       );
 
@@ -165,6 +210,7 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onSkillCompleted(({ skillId, success }) => {
           logger.log(`WebSocket: Skill completed - ${skillId} success=${success}`);
           this.markSkillCompleted(skillId, success);
+          this.forceNextRender = true; // Structural change - force full re-render
           this.notifyNeedsRenderIfNotMindMap();
         })
       );
@@ -173,7 +219,12 @@ export class SkillsTab extends BaseTab {
         this.wsClient.onStepUpdate(({ skillId, step }) => {
           logger.log(`WebSocket: Step update - ${skillId} step ${step.index}: ${step.status}`);
           this.updateSkillStep(skillId, step);
-          this.notifyNeedsRenderIfNotMindMap();
+          // Try incremental CSS update first (no flicker), fall back to full re-render
+          if (this.selectedSkill && this.skillView === "workflow" && this.sendIncrementalStepUpdate()) {
+            logger.log("WebSocket: Step update sent as incremental CSS update");
+          } else {
+            this.notifyNeedsRenderIfNotMindMap();
+          }
         })
       );
 
@@ -347,6 +398,7 @@ export class SkillsTab extends BaseTab {
       // Remove after a delay
       setTimeout(() => {
         this.runningSkills = this.runningSkills.filter(s => s.executionId !== skillId);
+        this.forceNextRender = true; // Structural change
         this.notifyNeedsRenderIfNotMindMap();
       }, 5000);
     }
@@ -952,6 +1004,78 @@ export class SkillsTab extends BaseTab {
       case "skipped": return "⊘";
       default: return String(stepNumber);
     }
+  }
+
+  /**
+   * Send incremental step status updates to the webview without a full re-render.
+   * This updates CSS classes and icons on individual step nodes in-place,
+   * avoiding the expensive innerHTML replacement that causes flickering.
+   *
+   * Returns true if the incremental update was sent, false if a full re-render
+   * is needed (e.g., webview context not available).
+   */
+  private sendIncrementalStepUpdate(): boolean {
+    if (!this.detailedExecution || !this.selectedSkillData?.steps) {
+      return false;
+    }
+
+    const steps = this.selectedSkillData.steps;
+    const stepUpdates: Array<{
+      index: number;
+      status: string;
+      icon: string;
+      tooltip?: string;
+      lifecycleHtml?: string;
+    }> = [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const execStep = this.getExecutionStepStatus(i);
+      const status = execStep?.status || "pending";
+      const isSkillCall = (step.tool || "") === "skill_run";
+      const icon = this.getStepIcon(status, i + 1, isSkillCall);
+
+      // Build tooltip
+      const tooltipParts = [step.description || step.name || `Step ${i + 1}`];
+      if (isSkillCall && step.args?.skill_name) {
+        tooltipParts.push(`Calls skill: ${step.args.skill_name}`);
+      } else if (step.tool) {
+        tooltipParts.push(`Tool: ${step.tool}`);
+      }
+      if (execStep?.duration) {
+        tooltipParts.push(`Duration: ${this.formatDuration(execStep.duration)}`);
+      }
+      if (execStep?.error) {
+        tooltipParts.push(`Error: ${execStep.error}`);
+      }
+
+      // Build lifecycle indicators
+      const lifecycleIndicators = this.getLifecycleIndicators(step, execStep);
+
+      stepUpdates.push({
+        index: i,
+        status,
+        icon,
+        tooltip: tooltipParts.join("\n"),
+        lifecycleHtml: lifecycleIndicators.length > 0 ? lifecycleIndicators.join("") : "",
+      });
+    }
+
+    // Build meta status
+    const isExecuting = this.detailedExecution.skillName === this.selectedSkill;
+    const execStatus = isExecuting ? this.detailedExecution.status : "ready";
+    const execStep = isExecuting
+      ? `${this.detailedExecution.currentStepIndex + 1}/${this.detailedExecution.totalSteps}`
+      : "";
+    const statusText = isExecuting ? `Step ${execStep} • ${this.capitalizeFirst(execStatus)}` : "Ready";
+    const statusClass = isExecuting && execStatus === "running" ? "status-running" : "";
+
+    return this.postMessageToWebview({
+      type: "stepStatusUpdate",
+      steps: stepUpdates,
+      metaHtml: `Steps: ${steps.length} • Status: ${statusText}`,
+      metaClass: statusClass,
+    });
   }
 
   private getVerticalStepHtml(step: any, index: number, isLast: boolean): string {
@@ -3012,8 +3136,31 @@ export class SkillsTab extends BaseTab {
           // Final deduplication pass
           this.deduplicateRunningSkills();
 
-          logger.log(`Updated running skills: ${this.runningSkills.length} skills`);
-          this.notifyNeedsRenderIfNotMindMap();
+          // Two-level change detection:
+          // 1. Structural changes (skill added/removed/status changed) -> full re-render
+          // 2. Progress changes (step updates) -> incremental CSS update only
+          const newStructuralFP = this._buildRunningSkillsStructuralFingerprint();
+          const newProgressFP = this._buildRunningSkillsProgressFingerprint();
+
+          if (newStructuralFP !== this._lastRunningSkillsStructuralFP) {
+            // Structure changed (new skill, skill completed, etc.) - full re-render needed
+            this._lastRunningSkillsStructuralFP = newStructuralFP;
+            this._lastRunningSkillsProgressFP = newProgressFP;
+            logger.log(`Updated running skills: ${this.runningSkills.length} skills (structural change, full re-render)`);
+            this.forceNextRender = true; // Structural change bypasses workflow incremental mode
+            this.notifyNeedsRenderIfNotMindMap();
+          } else if (newProgressFP !== this._lastRunningSkillsProgressFP) {
+            // Only progress changed - use incremental update if viewing workflow
+            this._lastRunningSkillsProgressFP = newProgressFP;
+            if (this.skillView === "workflow" && this.sendIncrementalStepUpdate()) {
+              logger.log(`Updated running skills: ${this.runningSkills.length} skills (progress change, incremental update)`);
+            } else {
+              logger.log(`Updated running skills: ${this.runningSkills.length} skills (progress change, full re-render)`);
+              this.notifyNeedsRenderIfNotMindMap();
+            }
+          } else {
+            logger.log(`Updated running skills: ${this.runningSkills.length} skills (no change, skipping render)`);
+          }
         }
         return true;
 
@@ -3034,9 +3181,10 @@ export class SkillsTab extends BaseTab {
           };
           logger.log(`Execution update: ${exec.skillName} step ${exec.currentStepIndex}/${exec.totalSteps}, ${exec.steps?.length || 0} steps with status`);
 
-          // If viewing this skill's workflow, re-render to show step progress
+          // Send incremental CSS update instead of full re-render to avoid flickering
           if (this.selectedSkill === exec.skillName && this.skillView === "workflow") {
-            this.notifyNeedsRender();
+            this.sendIncrementalStepUpdate();
+            // No fallback to full re-render - if incremental fails, webview is gone anyway
           }
         }
         return true;
@@ -3206,10 +3354,35 @@ export class SkillsTab extends BaseTab {
       this.runningSkills.some(s => s.executionId === this.watchingExecutionId && s.skillName === skillName);
 
     if (!isWatchingThisSkill) {
-      // User clicked a skill from sidebar, not from Running Skills
-      // Clear execution state to show static template
-      this.watchingExecutionId = null;
-      this.detailedExecution = null;
+      // Check if this skill happens to be running - auto-attach to it
+      // This handles the case where a user clicks a running skill from the sidebar
+      // (not from the Running Skills panel)
+      const runningInstance = this.runningSkills.find(
+        s => s.skillName === skillName && s.status === "running"
+      );
+      if (runningInstance) {
+        logger.log(`loadSkill: Auto-attaching to running execution ${runningInstance.executionId} for ${skillName}`);
+        this.watchingExecutionId = runningInstance.executionId;
+        // Initialize with progress-based step status (will be refined by next update)
+        const totalSteps = runningInstance.totalSteps || 0;
+        const currentStepIndex = totalSteps > 0
+          ? Math.floor((runningInstance.progress / 100) * totalSteps)
+          : 0;
+        this.detailedExecution = {
+          executionId: runningInstance.executionId,
+          skillName: runningInstance.skillName,
+          status: "running",
+          currentStepIndex: currentStepIndex,
+          totalSteps: totalSteps,
+          steps: [],
+          startTime: runningInstance.startedAt,
+        };
+      } else {
+        // User clicked a skill from sidebar that's not running
+        // Clear execution state to show static template
+        this.watchingExecutionId = null;
+        this.detailedExecution = null;
+      }
     }
 
     try {
@@ -3219,6 +3392,27 @@ export class SkillsTab extends BaseTab {
       }
     } catch (error) {
       logger.error("Error loading skill", error);
+    }
+
+    // If we auto-attached to a running execution above, populate the steps
+    // array from the skill definition so the initial render shows correct statuses
+    if (this.detailedExecution && this.selectedSkillData?.steps && this.detailedExecution.steps.length === 0) {
+      const currentStepIndex = this.detailedExecution.currentStepIndex;
+      this.detailedExecution.steps = this.selectedSkillData.steps.map((step: any, index: number) => {
+        let status: "pending" | "running" | "success" | "failed" | "skipped" = "pending";
+        if (index < currentStepIndex) {
+          status = "success";
+        } else if (index === currentStepIndex) {
+          status = "running";
+        }
+        return {
+          name: step.name || `Step ${index + 1}`,
+          description: step.description,
+          tool: step.tool,
+          status: status,
+        };
+      });
+      logger.log(`loadSkill: Pre-populated ${this.detailedExecution.steps.length} step statuses (current: ${currentStepIndex})`);
     }
   }
 

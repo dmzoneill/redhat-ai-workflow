@@ -283,7 +283,7 @@ class IntegrationTestRunner:
             }
 
         try:
-            with open(exclusions_file) as f:
+            with open(exclusions_file, encoding="utf-8") as f:
                 config = yaml.safe_load(f)
 
             # Extract skill names from the detailed format
@@ -315,7 +315,7 @@ class IntegrationTestRunner:
         if not config_path.exists():
             raise FileNotFoundError(f"Agent config not found: {config_path}")
 
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def get_available_agents(self) -> list[str]:
@@ -669,7 +669,7 @@ class IntegrationTestRunner:
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self.report.to_dict(), f, indent=2)
 
         print(f"\n📄 Report saved: {path}")
@@ -743,7 +743,7 @@ class IntegrationTestRunner:
                 lines.append(f"| {cat.title()} | {len(by_category[cat])} |")
         lines.append(f"| **Total** | **{len(self.report.feature_todos)}** |")
 
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
         print(f"📝 Feature TODOs saved: {path}")

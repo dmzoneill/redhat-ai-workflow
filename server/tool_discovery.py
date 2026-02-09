@@ -155,7 +155,7 @@ def register_tool(
         # Get source info
         try:
             source_file = inspect.getfile(func)
-            source_lines, start_line = inspect.getsourcelines(func)
+            _, start_line = inspect.getsourcelines(func)
         except (TypeError, OSError):
             source_file = ""
             start_line = 0
@@ -271,7 +271,7 @@ def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
         return []
 
     try:
-        with open(filepath) as f:
+        with open(filepath, encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source)
     except (SyntaxError, OSError) as e:

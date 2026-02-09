@@ -104,7 +104,7 @@ def workspace_tool(required_modules: list[str] | None = None):
                         suggested = _suggest_persona(missing[0])
                         return (
                             f"❌ Required module(s) not loaded: {', '.join(missing)}\n\n"
-                            f"This tool requires the following modules to be active:\n"
+                            "This tool requires the following modules to be active:\n"
                             f"- {', '.join(required_modules)}\n\n"
                             f"**To enable:** Run `persona_load('{suggested}')` to load the {suggested} persona.\n\n"
                             f"Current workspace persona: `{state.persona}`\n"

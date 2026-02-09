@@ -6,7 +6,6 @@ Provides 5 tools for Alertmanager silences and status.
 import logging
 import os
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from fastmcp import FastMCP
 
@@ -225,23 +224,17 @@ async def _prometheus_grafana_link_impl(
     # Get Prometheus URL from config.json or env
     prom_url = ""
     try:
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            import json
+        from server.config_manager import config as config_manager
 
-            with open(config_path) as f:
-                config = json.load(f)
-            env_key = (
-                "production" if environment.lower() == "prod" else environment.lower()
-            )
-            prom_url = (
-                config.get("prometheus", {})
-                .get("environments", {})
-                .get(env_key, {})
-                .get("url", "")
-            )
-    except Exception:
-        pass
+        env_key = "production" if environment.lower() == "prod" else environment.lower()
+        prom_url = (
+            (config_manager.get("prometheus") or {})
+            .get("environments", {})
+            .get(env_key, {})
+            .get("url", "")
+        )
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
     if not prom_url:
         prom_url = os.getenv(f"PROMETHEUS_{environment.upper()}_URL", "")
     if not prom_url:

@@ -52,10 +52,10 @@ class JobRunner:
         try:
             log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
             log_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now().isoformat()} - {message}\n")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     def _cleanup_skill_execution_state(self, skill_name: str, error: str):
         """Clean up stale skill execution state after timeout or crash.
@@ -76,13 +76,13 @@ class JobRunner:
                 return
 
             # Read current state to check if it's the same skill
-            with open(execution_file) as f:
+            with open(execution_file, encoding="utf-8") as f:
                 current_state = json.load(f)
 
             # Only clean up if it's the same skill and still "running"
             if current_state.get("skillName") != skill_name:
                 self._log_to_file(
-                    f"Skill execution state is for different skill "
+                    "Skill execution state is for different skill "
                     f"({current_state.get('skillName')}), not cleaning up"
                 )
                 return
@@ -114,7 +114,7 @@ class JobRunner:
 
             # Write atomically
             tmp_file = execution_file.with_suffix(".tmp")
-            with open(tmp_file, "w") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(current_state, f, indent=2)
             tmp_file.rename(execution_file)
 
@@ -176,8 +176,8 @@ class JobRunner:
             )
 
             notify_cron_job_started(job_name, skill)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # Use default retry config if not provided
         if retry_config is None:
@@ -301,8 +301,8 @@ class JobRunner:
                 )
 
                 notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # Log execution with retry info
         self.execution_log.log_execution(
@@ -624,7 +624,7 @@ Begin execution now."""
             error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
 
             # Write to log file
-            with open(log_file, "w") as f:
+            with open(log_file, "w", encoding="utf-8") as f:
                 f.write(f"=== Cron Job: {job_name} ===\n")
                 f.write(f"Skill: {skill}\n")
                 f.write(f"Session: {session_name}\n")
@@ -675,7 +675,7 @@ Begin execution now."""
         if not skill_file.exists():
             raise FileNotFoundError(f"Skill not found: {skill_name}")
 
-        with open(skill_file) as f:
+        with open(skill_file, encoding="utf-8") as f:
             skill = yaml.safe_load(f)
 
         sched_config = SkillExecutorConfig(

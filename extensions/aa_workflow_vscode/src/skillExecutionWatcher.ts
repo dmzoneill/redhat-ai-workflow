@@ -209,6 +209,7 @@ export class SkillExecutionWatcher {
   private _executions: Map<string, SkillExecutionState> = new Map();
   private _seenExecutionIds: Set<string> = new Set();  // Track which executions we've notified about
   private _selectedExecutionId: string | undefined;  // Currently selected execution for viewing
+  private _lastStateFingerprint: string = "";  // Change detection to avoid redundant UI updates
 
   constructor() {
     this._executionFilePath = path.join(
@@ -261,12 +262,14 @@ export class SkillExecutionWatcher {
   }
 
   /**
-   * Fallback polling for systems where fs.watch doesn't work well
+   * Fallback polling for systems where fs.watch doesn't work well.
+   * Polls at 1s intervals - this is a backup for the WebSocket which
+   * provides real-time updates. The file watcher is secondary.
    */
   private _startPolling(): void {
     const pollInterval = setInterval(() => {
       this._onFileChange();
-    }, 500);
+    }, 1000);
 
     this._disposables.push({
       dispose: () => clearInterval(pollInterval),
@@ -313,6 +316,19 @@ export class SkillExecutionWatcher {
   }
 
   /**
+   * Build a fingerprint of the execution state for change detection.
+   * Only includes fields that matter for the UI display.
+   */
+  private _buildStateFingerprint(data: MultiExecutionFile): string {
+    const parts: string[] = [];
+    for (const [execId, state] of Object.entries(data.executions)) {
+      // Include status, step index, and event count - these are what drive UI changes
+      parts.push(`${execId}:${state.status}:${state.currentStepIndex}:${state.events?.length || 0}`);
+    }
+    return parts.sort().join("|");
+  }
+
+  /**
    * Process multi-execution state and update UI
    */
   private _processMultiExecutionState(data: MultiExecutionFile): void {
@@ -345,11 +361,19 @@ export class SkillExecutionWatcher {
 
     this._executions = newExecutions;
 
-    // Update status bar
+    // Update status bar (lightweight - always OK)
     this._updateStatusBar(runningCount.count);
 
-    // Update Command Center if open
-    this._updateCommandCenter();
+    // Only update Command Center if the state actually changed.
+    // This prevents redundant re-renders when the file is polled
+    // but nothing meaningful has changed since the last update.
+    const fingerprint = this._buildStateFingerprint(data);
+    if (fingerprint !== this._lastStateFingerprint) {
+      this._lastStateFingerprint = fingerprint;
+      this._updateCommandCenter();
+    } else {
+      logger.log("Skipping Command Center update - state unchanged");
+    }
   }
 
   /**

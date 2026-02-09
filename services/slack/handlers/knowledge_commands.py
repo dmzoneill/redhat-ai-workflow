@@ -221,7 +221,7 @@ async def handle_knowledge(parsed: "ParsedCommand") -> str:
         if knowledge_file.exists():
             import yaml
 
-            with open(knowledge_file) as f:
+            with open(knowledge_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             lines = [f"*\U0001f4da Knowledge: {topic}*\n"]
@@ -268,7 +268,7 @@ async def _save_research_knowledge(topic: str, analysis: str, messages: list) ->
         ],
     }
 
-    with open(knowledge_file, "w") as f:
+    with open(knowledge_file, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False)
 
     logger.info(f"Saved research knowledge: {knowledge_file}")
@@ -300,7 +300,7 @@ async def _save_thread_learning(
         "related_issues": context.jira_issues,
     }
 
-    with open(knowledge_file, "w") as f:
+    with open(knowledge_file, "w", encoding="utf-8") as f:
         yaml.dump(data, f, default_flow_style=False)
 
     logger.info(f"Saved thread learning: {knowledge_file}")

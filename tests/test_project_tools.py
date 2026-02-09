@@ -1,6 +1,7 @@
 """Tests for tool_modules/aa_workflow/src/project_tools.py - Project management tools."""
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -87,7 +88,7 @@ class TestDetectDefaultBranch:
 
     def test_all_fail_default_main(self):
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = Exception("git not found")
+            mock_run.side_effect = subprocess.SubprocessError("git not found")
             assert _detect_default_branch(Path("/repo")) == "main"
 
 
@@ -134,7 +135,7 @@ class TestDetectGitlabRemote:
 
     def test_exception(self):
         with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = Exception("timeout")
+            mock_run.side_effect = subprocess.SubprocessError("timeout")
             assert _detect_gitlab_remote(Path("/repo")) is None
 
 

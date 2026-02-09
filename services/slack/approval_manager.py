@@ -151,8 +151,8 @@ class ApprovalManager:
                 notify_slack_pending_approval(
                     msg.channel_name, msg.user_name, msg.text[:50]
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         except ImportError:
             logger.debug("D-Bus not available for pending message recording")
@@ -170,10 +170,10 @@ class ApprovalManager:
             return
 
         notification = (
-            f"⚠️ *Concerned User Message*\n\n"
+            "⚠️ *Concerned User Message*\n\n"
             f"From: {msg.user_name} in #{msg.channel_name}\n"
             f"Message: {msg.text[:200]}{'...' if len(msg.text) > 200 else ''}\n\n"
-            f"Proposed response queued for review."
+            "Proposed response queued for review."
         )
 
         try:

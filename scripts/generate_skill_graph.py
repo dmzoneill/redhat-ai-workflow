@@ -25,7 +25,7 @@ def load_personas(personas_dir: Path) -> dict:
 
     for path in personas_dir.glob("*.yaml"):
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 persona = yaml.safe_load(f)
 
             if not persona or not isinstance(persona, dict):
@@ -41,7 +41,7 @@ def load_personas(personas_dir: Path) -> dict:
                 "skills": skills,
                 "tools": tools,
             }
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             print(f"Error parsing persona {path}: {e}")
 
     return personas
@@ -187,7 +187,7 @@ def categorize_skill(name: str, description: str) -> str:
 def parse_skill_file(path: Path) -> dict | None:
     """Parse a single skill YAML file."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             skill = yaml.safe_load(f)
 
         if not skill or not isinstance(skill, dict):
@@ -210,7 +210,7 @@ def parse_skill_file(path: Path) -> dict | None:
             "input_count": len(skill.get("inputs", [])),
             "step_count": len(skill.get("steps", [])),
         }
-    except Exception as e:
+    except (yaml.YAMLError, OSError) as e:
         print(f"Error parsing {path}: {e}")
         return None
 
@@ -432,7 +432,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     output_file = output_dir / "skill_graph_data.json"
-    with open(output_file, "w") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         json.dump(graph_data, f, indent=2)
 
     print(f"\nGenerated: {output_file}")

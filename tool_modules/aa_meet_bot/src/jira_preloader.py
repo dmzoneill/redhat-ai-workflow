@@ -222,7 +222,7 @@ class JiraPreloader:
                 # Try to read from config file
                 config_path = Path.home() / ".config" / "jira" / "config.json"
                 if config_path.exists():
-                    with open(config_path) as f:
+                    with open(config_path, encoding="utf-8") as f:
                         config = json.load(f)
                         jira_token = config.get("token", "")
                         jira_url = config.get("url", jira_url)

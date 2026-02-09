@@ -285,7 +285,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         daily_file = engine.daily_dir / f"{today.isoformat()}.json"
 
         if daily_file.exists():
-            with open(daily_file) as f:
+            with open(daily_file, encoding="utf-8") as f:
                 data = json.load(f)
         else:
             data = {
@@ -303,7 +303,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         )
         data["daily_total"] = sum(data["daily_points"].values())
 
-        with open(daily_file, "w") as f:
+        with open(daily_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
         # Tag to questions
@@ -352,7 +352,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
 
         for daily_file in daily_files:
             try:
-                with open(daily_file) as f:
+                with open(daily_file, encoding="utf-8") as f:
                     data = json.load(f)
 
                 dt = data.get("date", daily_file.stem)
@@ -460,7 +460,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
                 if file_date < since:
                     continue
 
-                with open(daily_file) as f:
+                with open(daily_file, encoding="utf-8") as f:
                     data = json.load(f)
 
                 for event in data.get("events", []):
@@ -481,8 +481,8 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
                             }
                         )
 
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         # Sort by points
         highlights.sort(key=lambda x: x["points"], reverse=True)
@@ -776,7 +776,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
 
         # Save to file
         report_file = perf_dir / f"report_q{quarter}_{year}.md"
-        with open(report_file, "w") as f:
+        with open(report_file, "w", encoding="utf-8") as f:
             f.write(report_text)
 
         return [

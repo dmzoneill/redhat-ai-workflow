@@ -32,31 +32,25 @@ class TestEstimateTokens:
 
 class TestSessionBuilderInit:
     def test_init_no_config(self):
-        with patch("server.session_builder.CONFIG_FILE") as mock_config_file:
-            mock_config_file.exists.return_value = False
+        with patch("server.config_manager.ConfigManager.get_all", return_value={}):
             sb = SessionBuilder()
             assert sb.context_sections == {}
             assert sb.token_counts == {}
             assert sb.config == {}
 
     def test_init_with_valid_config(self):
-        with patch("server.session_builder.CONFIG_FILE") as mock_config_file:
-            mock_config_file.exists.return_value = True
-            mock_config_file.read_text.return_value = '{"key": "val"}'
+        with patch(
+            "server.config_manager.ConfigManager.get_all",
+            return_value={"key": "val"},
+        ):
             sb = SessionBuilder()
             assert sb.config == {"key": "val"}
 
-    def test_init_with_bad_json(self):
-        with patch("server.session_builder.CONFIG_FILE") as mock_config_file:
-            mock_config_file.exists.return_value = True
-            mock_config_file.read_text.return_value = "not-json"
-            sb = SessionBuilder()
-            assert sb.config == {}
-
-    def test_init_with_io_error(self):
-        with patch("server.session_builder.CONFIG_FILE") as mock_config_file:
-            mock_config_file.exists.return_value = True
-            mock_config_file.read_text.side_effect = IOError("boom")
+    def test_init_with_config_error(self):
+        with patch(
+            "server.config_manager.ConfigManager.get_all",
+            side_effect=Exception("boom"),
+        ):
             sb = SessionBuilder()
             assert sb.config == {}
 

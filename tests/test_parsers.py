@@ -1,5 +1,6 @@
 """Tests for common parsers module."""
 
+import pytest
 from common.parsers import (
     analyze_mr_status,
     analyze_review_status,
@@ -230,18 +231,30 @@ class TestExtractAllJiraKeys:
 class TestValidateJiraKey:
     """Tests for validate_jira_key function."""
 
-    def test_valid_keys(self):
-        """Should validate correct Jira keys."""
-        assert validate_jira_key("AAP-12345") is True
-        assert validate_jira_key("JIRA-1") is True
-        assert validate_jira_key("AB-999") is True
-
-    def test_invalid_keys(self):
-        """Should reject invalid Jira keys."""
-        assert validate_jira_key("") is False
-        assert validate_jira_key("not-a-key") is False
-        assert validate_jira_key("123-ABC") is False
-        assert validate_jira_key("AAP12345") is False
+    @pytest.mark.parametrize(
+        "key,expected",
+        [
+            ("AAP-12345", True),
+            ("JIRA-1", True),
+            ("AB-999", True),
+            ("", False),
+            ("not-a-key", False),
+            ("123-ABC", False),
+            ("AAP12345", False),
+        ],
+        ids=[
+            "AAP-12345",
+            "JIRA-1",
+            "AB-999",
+            "empty",
+            "not_a_key",
+            "reversed",
+            "no_dash",
+        ],
+    )
+    def test_key_validation(self, key, expected):
+        """Should correctly validate/reject Jira keys."""
+        assert validate_jira_key(key) is expected
 
 
 class TestExtractMrIdFromUrl:
@@ -386,25 +399,20 @@ AA file2.py"""
 class TestParsePipelineStatus:
     """Tests for parse_pipeline_status function."""
 
-    def test_empty_output(self):
-        """Empty output should return default status."""
-        result = parse_pipeline_status("")
-        assert result["status"] == "unknown"
-
-    def test_passed_status(self):
-        """Should detect passed status."""
-        result = parse_pipeline_status("Pipeline passed successfully")
-        assert result["status"] == "passed"
-
-    def test_failed_status(self):
-        """Should detect failed status."""
-        result = parse_pipeline_status("Pipeline failed at job xyz")
-        assert result["status"] == "failed"
-
-    def test_running_status(self):
-        """Should detect running status."""
-        result = parse_pipeline_status("Pipeline is running...")
-        assert result["status"] == "running"
+    @pytest.mark.parametrize(
+        "output,expected_status",
+        [
+            ("", "unknown"),
+            ("Pipeline passed successfully", "passed"),
+            ("Pipeline failed at job xyz", "failed"),
+            ("Pipeline is running...", "running"),
+        ],
+        ids=["empty", "passed", "failed", "running"],
+    )
+    def test_status_detection(self, output, expected_status):
+        """Should detect pipeline status correctly."""
+        result = parse_pipeline_status(output)
+        assert result["status"] == expected_status
 
     def test_extract_url(self):
         """Should extract pipeline URL."""

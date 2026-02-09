@@ -132,7 +132,7 @@ class TestIsWithinWorkingHours:
 
         real_tz = ZoneInfo(config.timezone)
 
-        with patch(f"zoneinfo.ZoneInfo", return_value=real_tz):
+        with patch("zoneinfo.ZoneInfo", return_value=real_tz):
             with patch(f"{MOD}.datetime") as mock_dt:
                 # Make datetime.now(tz) return our fake
                 mock_dt.now.return_value = fake_now
@@ -455,7 +455,7 @@ class TestRefreshSprintState:
             patch(f"{MOD}.prioritize_issues", return_value=jira_issues),
             patch(f"{MOD}.to_sprint_issue_format", return_value=jira_issues),
             patch(f"{MOD}.save_sprint_state"),
-            patch("server.config.load_config", side_effect=ImportError),
+            patch("server.utils.load_config", side_effect=ImportError),
         ):
             result = refresh_sprint_state(config)
 
@@ -478,7 +478,7 @@ class TestRefreshSprintState:
             patch(f"{MOD}.prioritize_issues", return_value=jira_issues),
             patch(f"{MOD}.to_sprint_issue_format", return_value=jira_issues),
             patch(f"{MOD}.save_sprint_state"),
-            patch("server.config.load_config", side_effect=ImportError),
+            patch("server.utils.load_config", side_effect=ImportError),
         ):
             result = refresh_sprint_state(config)
 
@@ -501,7 +501,7 @@ class TestRefreshSprintState:
             patch(f"{MOD}.prioritize_issues", return_value=[jira_issues[0]]),
             patch(f"{MOD}.to_sprint_issue_format", return_value=[jira_issues[0]]),
             patch(f"{MOD}.save_sprint_state"),
-            patch("server.config.load_config", return_value=mock_config),
+            patch("server.utils.load_config", return_value=mock_config),
         ):
             result = refresh_sprint_state(config)
 
@@ -520,7 +520,7 @@ class TestRefreshSprintState:
             patch(f"{MOD}.load_sprint_state", return_value=state),
             patch(f"{MOD}.load_sprint_issues_from_jira_sync", return_value=jira_issues),
             patch(f"{MOD}.save_sprint_state") as mock_save,
-            patch("server.config.load_config", return_value=mock_config),
+            patch("server.utils.load_config", return_value=mock_config),
         ):
             result = refresh_sprint_state(config)
 

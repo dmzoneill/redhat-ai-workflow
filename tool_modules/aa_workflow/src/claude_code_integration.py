@@ -37,8 +37,8 @@ def is_claude_code_context() -> bool:
             return True
         if os.getenv("CLAUDE_CLI_VERSION"):
             return True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     return False
 
@@ -151,15 +151,15 @@ def _check_subprocess_context():
         # Check parent process
         parent_pid = os.getppid()
         try:
-            with open(f"/proc/{parent_pid}/cmdline", "r") as f:
+            with open(f"/proc/{parent_pid}/cmdline", "r", encoding="utf-8") as f:
                 parent_cmd = f.read()
                 if "claude" in parent_cmd.lower() or "code" in parent_cmd:
                     logger.info("Running as subprocess of Claude Code")
                     # We know we're in Claude Code but still need tool access
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
 
 def create_ask_question_wrapper(server=None):

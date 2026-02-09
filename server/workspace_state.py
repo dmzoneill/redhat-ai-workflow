@@ -97,6 +97,14 @@ def get_all_persona_tool_counts() -> dict[str, int]:
     return _persona_tool_counts.copy()
 
 
+def _cursor_workspace_storage() -> Path:
+    """Get Cursor workspace storage path at runtime.
+
+    Computed dynamically so that tests can patch Path.home().
+    """
+    return Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+
+
 def _generate_session_id() -> str:
     """Generate a unique session ID (fallback only)."""
     return str(uuid.uuid4())
@@ -117,9 +125,7 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
     import subprocess
 
     try:
-        workspace_storage_dir = (
-            Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        )
+        workspace_storage_dir = _cursor_workspace_storage()
 
         if not workspace_storage_dir.exists():
             logger.debug("Cursor workspace storage not found")
@@ -229,9 +235,7 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
     import subprocess
 
     try:
-        workspace_storage_dir = (
-            Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        )
+        workspace_storage_dir = _cursor_workspace_storage()
 
         if not workspace_storage_dir.exists():
             return [], None
@@ -393,17 +397,20 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                         try:
                             # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
                             parts = key.split(":")
-                            if len(parts) >= 2:
-                                chat_id = parts[1]
-                                data = json.loads(value)
-                                text = data.get("text", "")
-                                if text:
-                                    matches = issue_pattern.findall(text)
-                                    if matches:
-                                        if chat_id not in chat_issue_sets:
-                                            chat_issue_sets[chat_id] = set()
-                                        for m in matches:
-                                            chat_issue_sets[chat_id].add(m.upper())
+                            if len(parts) < 2:
+                                continue
+                            chat_id = parts[1]
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if not text:
+                                continue
+                            matches = issue_pattern.findall(text)
+                            if not matches:
+                                continue
+                            if chat_id not in chat_issue_sets:
+                                chat_issue_sets[chat_id] = set()
+                            for m in matches:
+                                chat_issue_sets[chat_id].add(m.upper())
                         except (json.JSONDecodeError, ValueError):
                             continue
                 except sqlite3.Error as e:
@@ -817,30 +824,24 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
                     for key, value in cursor.fetchall():
                         try:
                             parts = key.split(":")
-                            if len(parts) >= 3:
-                                chat_id = parts[1]
-                                try:
-                                    bubble_id = (
-                                        int(parts[2]) if parts[2].isdigit() else 0
-                                    )
-                                except (ValueError, IndexError):
-                                    bubble_id = 0
+                            if len(parts) < 3:
+                                continue
+                            chat_id = parts[1]
+                            bubble_id = int(parts[2]) if parts[2].isdigit() else 0
 
-                                data = json.loads(value)
-                                text = data.get("text", "")
-                                if not text:
-                                    continue
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if not text:
+                                continue
 
-                                for pattern in patterns:
-                                    matches = pattern.findall(text)
-                                    for match in matches:
-                                        persona = match.lower()
-                                        if persona in VALID_PERSONAS:
-                                            if chat_id not in chat_personas:
-                                                chat_personas[chat_id] = []
-                                            chat_personas[chat_id].append(
-                                                (bubble_id, persona)
-                                            )
+                            for pattern in patterns:
+                                for match in pattern.findall(text):
+                                    persona = match.lower()
+                                    if persona not in VALID_PERSONAS:
+                                        continue
+                                    if chat_id not in chat_personas:
+                                        chat_personas[chat_id] = []
+                                    chat_personas[chat_id].append((bubble_id, persona))
 
                         except (json.JSONDecodeError, ValueError):
                             continue
@@ -981,35 +982,31 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
                     for key, value in cursor.fetchall():
                         try:
                             parts = key.split(":")
-                            if len(parts) >= 3:
-                                chat_id = parts[1]
-                                try:
-                                    bubble_id = (
-                                        int(parts[2]) if parts[2].isdigit() else 0
+                            if len(parts) < 3:
+                                continue
+                            chat_id = parts[1]
+                            bubble_id = int(parts[2]) if parts[2].isdigit() else 0
+
+                            data = json.loads(value)
+                            text = data.get("text", "")
+                            if not text:
+                                continue
+
+                            for pattern, priority in project_patterns:
+                                for match in pattern.findall(text):
+                                    project_name = match.lower()
+                                    for valid_proj in VALID_PROJECTS:
+                                        if valid_proj.lower() == project_name:
+                                            project_name = valid_proj
+                                            break
+
+                                    if project_name not in VALID_PROJECTS:
+                                        continue
+                                    if chat_id not in chat_projects:
+                                        chat_projects[chat_id] = []
+                                    chat_projects[chat_id].append(
+                                        (bubble_id, priority, project_name)
                                     )
-                                except (ValueError, IndexError):
-                                    bubble_id = 0
-
-                                data = json.loads(value)
-                                text = data.get("text", "")
-                                if not text:
-                                    continue
-
-                                for pattern, priority in project_patterns:
-                                    matches = pattern.findall(text)
-                                    for match in matches:
-                                        project_name = match.lower()
-                                        for valid_proj in VALID_PROJECTS:
-                                            if valid_proj.lower() == project_name:
-                                                project_name = valid_proj
-                                                break
-
-                                        if project_name in VALID_PROJECTS:
-                                            if chat_id not in chat_projects:
-                                                chat_projects[chat_id] = []
-                                            chat_projects[chat_id].append(
-                                                (bubble_id, priority, project_name)
-                                            )
 
                         except (json.JSONDecodeError, ValueError):
                             continue
@@ -1224,9 +1221,7 @@ def inject_context_to_cursor_chat(
     import time
 
     try:
-        workspace_storage_dir = (
-            Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        )
+        workspace_storage_dir = _cursor_workspace_storage()
 
         if not workspace_storage_dir.exists():
             logger.warning("Cursor workspace storage not found")
@@ -2439,7 +2434,7 @@ class WorkspaceRegistry:
             return False
 
         try:
-            with open(PERSIST_FILE) as f:
+            with open(PERSIST_FILE, encoding="utf-8") as f:
                 data = json.load(f)
 
             version = data.get("version", 1)
@@ -2471,16 +2466,16 @@ class WorkspaceRegistry:
             if ws_data.get("created_at"):
                 try:
                     workspace.created_at = datetime.fromisoformat(ws_data["created_at"])
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
             if ws_data.get("last_activity"):
                 try:
                     workspace.last_activity = datetime.fromisoformat(
                         ws_data["last_activity"]
                     )
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
             # Restore sessions
             sessions_data = ws_data.get("sessions", {})
@@ -2511,16 +2506,16 @@ class WorkspaceRegistry:
                         session.started_at = datetime.fromisoformat(
                             sess_data["started_at"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 if sess_data.get("last_activity"):
                     try:
                         session.last_activity = datetime.fromisoformat(
                             sess_data["last_activity"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 # Restore dual tool counts (new format) or derive from old format
                 if sess_data.get("static_tool_count"):
@@ -2538,8 +2533,8 @@ class WorkspaceRegistry:
                         session.last_filter_time = datetime.fromisoformat(
                             sess_data["last_filter_time"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 # Restore activity tracking
                 session.last_tool = sess_data.get("last_tool")
@@ -2548,8 +2543,8 @@ class WorkspaceRegistry:
                         session.last_tool_time = datetime.fromisoformat(
                             sess_data["last_tool_time"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
                 session.tool_call_count = sess_data.get("tool_call_count", 0)
                 session.meeting_references = sess_data.get("meeting_references", [])
 
@@ -2685,7 +2680,7 @@ class WorkspaceRegistry:
         total_changes = sum(totals.values())
         if total_changes > 0:
             logger.info(
-                f"Synced all workspaces with Cursor DB: "
+                "Synced all workspaces with Cursor DB: "
                 f"+{totals['added']} -{totals['removed']} ~{totals['renamed']} ↻{totals['updated']}"
             )
             # Persist changes to disk
@@ -2874,7 +2869,7 @@ class WorkspaceRegistry:
                 "sessions": all_sessions,
             }
 
-            with open(PERSIST_FILE, "w") as f:
+            with open(PERSIST_FILE, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, default=str)
 
             logger.info(f"save_to_disk: successfully saved to {PERSIST_FILE}")
@@ -2899,7 +2894,7 @@ class WorkspaceRegistry:
         logger.debug(f"load_from_disk: Loading from {PERSIST_FILE}")
 
         try:
-            with open(PERSIST_FILE) as f:
+            with open(PERSIST_FILE, encoding="utf-8") as f:
                 data = json.load(f)
 
             logger.info(
@@ -2945,16 +2940,16 @@ class WorkspaceRegistry:
                         workspace.created_at = datetime.fromisoformat(
                             ws_data["created_at"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 if ws_data.get("last_activity"):
                     try:
                         workspace.last_activity = datetime.fromisoformat(
                             ws_data["last_activity"]
                         )
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 # Restore sessions (inside the for loop, per workspace)
                 sessions_data = ws_data.get("sessions", {})
@@ -2987,17 +2982,17 @@ class WorkspaceRegistry:
                             session.started_at = datetime.fromisoformat(
                                 sess_data["started_at"]
                             )
-                        except (ValueError, TypeError):
+                        except (ValueError, TypeError) as exc:
                             # Keep the default (datetime.now()) if parsing fails
-                            pass
+                            logger.debug("Suppressed error: %s", exc)
 
                     if sess_data.get("last_activity"):
                         try:
                             session.last_activity = datetime.fromisoformat(
                                 sess_data["last_activity"]
                             )
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as exc:
+                            logger.debug("Suppressed error: %s", exc)
 
                     # Restore dual tool counts (new format) or derive from old format
                     if sess_data.get("static_tool_count"):
@@ -3014,8 +3009,8 @@ class WorkspaceRegistry:
                             session.last_filter_time = datetime.fromisoformat(
                                 sess_data["last_filter_time"]
                             )
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as exc:
+                            logger.debug("Suppressed error: %s", exc)
 
                     # Restore activity tracking
                     session.last_tool = sess_data.get("last_tool")
@@ -3024,8 +3019,8 @@ class WorkspaceRegistry:
                             session.last_tool_time = datetime.fromisoformat(
                                 sess_data["last_tool_time"]
                             )
-                        except (ValueError, TypeError):
-                            pass
+                        except (ValueError, TypeError) as exc:
+                            logger.debug("Suppressed error: %s", exc)
                     session.tool_call_count = sess_data.get("tool_call_count", 0)
                     session.meeting_references = sess_data.get("meeting_references", [])
 

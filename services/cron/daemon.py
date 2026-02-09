@@ -245,7 +245,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         return {"success": True, "history": history}
 
     async def _handle_toggle_scheduler(self, enabled: bool) -> dict:
-        """Handle D-Bus request to toggle scheduler enabled state."""
+        """Handle D-Bus request to toggle scheduler enabled state.
+
+        Creates a runtime override in state.json. Config.json remains the
+        source of truth for the default; state.json overrides at runtime.
+        """
         try:
             from server.state_manager import state as state_manager
 
@@ -264,7 +268,11 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return {"success": False, "error": str(e)}
 
     async def _handle_toggle_job(self, job_name: str, enabled: bool) -> dict:
-        """Handle D-Bus request to toggle a specific job's enabled state."""
+        """Handle D-Bus request to toggle a specific job's enabled state.
+
+        Creates a runtime override in state.json. Config.json per-job 'enabled'
+        field is the source of truth; state.json overrides at runtime.
+        """
         try:
             from server.state_manager import state as state_manager
 
@@ -615,8 +623,8 @@ class CronDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             except Exception:
                 try:
                     Path(temp_path).unlink()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("OS operation failed: %s", exc)
                 raise
 
         except Exception as e:
@@ -687,7 +695,8 @@ def list_jobs():
         return
 
     for job in cron_jobs:
-        enabled = "[enabled]" if job.get("enabled", True) else "[disabled]"
+        # Resolved enabled state (config.json first, state.json override)
+        enabled = "[enabled]" if config._is_job_enabled(job) else "[disabled]"
         print(f"{enabled} {job.get('name')}")
         print(f"   Schedule: {job.get('cron')}")
         print(f"   Skill: {job.get('skill')}")

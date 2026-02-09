@@ -53,6 +53,7 @@ Console/Display tools:
 
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -1133,13 +1134,13 @@ async def _virsh_screenshot_impl(
 
     Args:
         domain: VM name or UUID
-        file: Output file path (default: /tmp/{domain}-screenshot.ppm)
+        file: Output file path (default: {tempdir}/{domain}-screenshot.ppm)
 
     Returns:
         Screenshot result.
     """
     if not file:
-        file = f"/tmp/{domain}-screenshot.ppm"
+        file = str(Path(tempfile.gettempdir()) / f"{domain}-screenshot.ppm")
 
     cmd = ["virsh", "screenshot", domain, "--file", file]
 

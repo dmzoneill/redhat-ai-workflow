@@ -19,7 +19,7 @@ def extract_tools_from_skill(skill_path: Path) -> Set[str]:
     tools_used = set()
 
     try:
-        with open(skill_path, "r") as f:
+        with open(skill_path, "r", encoding="utf-8") as f:
             skill = yaml.safe_load(f)
     except FileNotFoundError:
         print(f"Error: File not found: {skill_path}")
@@ -97,7 +97,7 @@ def get_all_tools_from_modules() -> Dict[str, List[str]]:
 
         for tools_file in src_dir.glob("tools*.py"):
             try:
-                with open(tools_file, "r") as f:
+                with open(tools_file, "r", encoding="utf-8") as f:
                     content = f.read()
             except OSError as e:
                 print(f"Warning: Could not read {tools_file}: {e}")
@@ -205,7 +205,7 @@ def main():
     output_file = PROJECT_ROOT / ".claude" / "skill-tool-usage-report.md"
     try:
         output_file.parent.mkdir(exist_ok=True)
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             f.write(report)
         print(f"\n✅ Report saved to: {output_file}")
     except OSError as e:

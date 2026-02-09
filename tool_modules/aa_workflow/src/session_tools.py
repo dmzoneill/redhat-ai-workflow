@@ -36,6 +36,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_session(
+    ctx, session_id: str = ""
+) -> tuple[object, object | None, list[TextContent] | None]:
+    """Resolve a session from session_id or active session.
+
+    Returns:
+        (workspace, session, error_response) - error_response is None on success.
+    """
+    from server.workspace_state import WorkspaceRegistry
+
+    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+    target_id = session_id if session_id else workspace.active_session_id
+
+    if not target_id:
+        return (
+            workspace,
+            None,
+            [
+                TextContent(
+                    type="text",
+                    text="# No Active Session\n\n"
+                    "No active session found. Call `session_start()` first or provide a session_id.",
+                )
+            ],
+        )
+
+    session = workspace.sessions.get(target_id)
+    if not session:
+        return (
+            workspace,
+            None,
+            [
+                TextContent(
+                    type="text",
+                    text="# Session Not Found\n\n"
+                    f"Session `{target_id}` not found.\n"
+                    "Use `session_list()` to see available sessions.",
+                )
+            ],
+        )
+
+    return workspace, session, None
+
+
 # ==================== BOOTSTRAP CONTEXT ====================
 
 
@@ -304,7 +348,7 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
         return
 
     try:
-        with open(current_work_file) as f:
+        with open(current_work_file, encoding="utf-8") as f:
             work = yaml.safe_load(f) or {}
 
         active = work.get("active_issues", [])
@@ -363,7 +407,7 @@ def _load_environment_status(lines: list[str]) -> None:
         return
 
     try:
-        with open(env_file) as f:
+        with open(env_file, encoding="utf-8") as f:
             env_data = yaml.safe_load(f) or {}
 
         envs = env_data.get("environments", {})
@@ -403,7 +447,7 @@ def _load_session_history(lines: list[str]) -> None:
         return
 
     try:
-        with open(session_file) as f:
+        with open(session_file, encoding="utf-8") as f:
             session = yaml.safe_load(f) or {}
         entries = session.get("entries", [])
         if entries:
@@ -470,7 +514,7 @@ def _load_learned_patterns(lines: list[str]) -> None:
         return
 
     try:
-        with open(patterns_file) as f:
+        with open(patterns_file, encoding="utf-8") as f:
             patterns = yaml.safe_load(f) or {}
 
         jira_patterns = patterns.get("jira_cli_patterns", [])
@@ -559,7 +603,7 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
 
     if knowledge_path.exists():
         try:
-            with open(knowledge_path) as f:
+            with open(knowledge_path, encoding="utf-8") as f:
                 knowledge = yaml.safe_load(f) or {}
 
             metadata = knowledge.get("metadata", {})
@@ -1469,32 +1513,12 @@ def register_session_tools(  # noqa: C901
                     )
                 ]
 
-            # Get workspace state
-            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+            # Get workspace state and resolve session
+            workspace, session, err = await _resolve_session(ctx, session_id)
+            if err:
+                return err
 
-            # Find the target session
-            target_session_id = (
-                session_id if session_id else workspace.active_session_id
-            )
-
-            if not target_session_id:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# No Active Session\n\n"
-                        "No active session found. Call `session_start()` first or provide a session_id.",
-                    )
-                ]
-
-            session = workspace.sessions.get(target_session_id)
-            if not session:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# Session Not Found\n\n"
-                        f"Session `{target_session_id}` not found in workspace.",
-                    )
-                ]
+            target_session_id = session.session_id
 
             # Update the session's project
             old_project = session.project
@@ -1593,7 +1617,6 @@ def register_session_tools(  # noqa: C901
             jira_attach_session(issue_key="AAP-12345", session_id="abc123")
         """
         from server.workspace_state import (
-            WorkspaceRegistry,
             format_session_context_for_jira,
             get_cursor_chat_content,
         )
@@ -1617,30 +1640,10 @@ def register_session_tools(  # noqa: C901
             issue_key = issue_key.upper()
 
             # Get workspace and session
-            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-            target_session_id = (
-                session_id if session_id else workspace.active_session_id
-            )
-
-            if not target_session_id:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# No Active Session\n\n"
-                        "No active session found. Call `session_start()` first or provide a session_id.",
-                    )
-                ]
-
-            session = workspace.sessions.get(target_session_id)
-            if not session:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# Session Not Found\n\n"
-                        f"Session `{target_session_id}` not found.\n"
-                        "Use `session_list()` to see available sessions.",
-                    )
-                ]
+            workspace, session, err = await _resolve_session(ctx, session_id)
+            if err:
+                return err
+            target_session_id = session.session_id
 
             # Extract chat content from Cursor DB
             lines.append("# Attaching Session Context to Jira\n")
@@ -1743,33 +1746,14 @@ def register_session_tools(  # noqa: C901
             session_export_context(format="json")
             session_export_context(session_id="abc123")
         """
-        from server.workspace_state import WorkspaceRegistry, get_cursor_chat_content
+        from server.workspace_state import get_cursor_chat_content
 
         try:
             # Get workspace and session
-            workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-            target_session_id = (
-                session_id if session_id else workspace.active_session_id
-            )
-
-            if not target_session_id:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# No Active Session\n\n"
-                        "No active session found. Call `session_start()` first or provide a session_id.",
-                    )
-                ]
-
-            session = workspace.sessions.get(target_session_id)
-            if not session:
-                return [
-                    TextContent(
-                        type="text",
-                        text="# Session Not Found\n\n"
-                        f"Session `{target_session_id}` not found.",
-                    )
-                ]
+            workspace, session, err = await _resolve_session(ctx, session_id)
+            if err:
+                return err
+            target_session_id = session.session_id
 
             # Extract chat content
             chat_content = get_cursor_chat_content(target_session_id, max_messages=200)

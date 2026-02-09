@@ -248,25 +248,27 @@ class TestParseValue:
     def parser(self):
         return CommandParser()
 
-    def test_true_values(self, parser):
-        for val in ("true", "True", "yes", "YES", "1"):
-            assert parser._parse_value(val) is True
+    @pytest.mark.parametrize("val", ["true", "True", "yes", "YES", "1"])
+    def test_true_values(self, parser, val):
+        assert parser._parse_value(val) is True
 
-    def test_false_values(self, parser):
-        for val in ("false", "False", "no", "NO", "0"):
-            assert parser._parse_value(val) is False
+    @pytest.mark.parametrize("val", ["false", "False", "no", "NO", "0"])
+    def test_false_values(self, parser, val):
+        assert parser._parse_value(val) is False
 
-    def test_integer(self, parser):
-        assert parser._parse_value("42") == 42
-        assert isinstance(parser._parse_value("42"), int)
-
-    def test_float(self, parser):
-        assert parser._parse_value("3.14") == 3.14
-        assert isinstance(parser._parse_value("3.14"), float)
-
-    def test_string_fallback(self, parser):
-        assert parser._parse_value("hello") == "hello"
-        assert isinstance(parser._parse_value("hello"), str)
+    @pytest.mark.parametrize(
+        "val,expected,expected_type",
+        [
+            ("42", 42, int),
+            ("3.14", 3.14, float),
+            ("hello", "hello", str),
+        ],
+        ids=["integer", "float", "string_fallback"],
+    )
+    def test_type_coercion(self, parser, val, expected, expected_type):
+        result = parser._parse_value(val)
+        assert result == expected
+        assert isinstance(result, expected_type)
 
 
 # ---------------------------------------------------------------------------
@@ -313,19 +315,19 @@ class TestHelperMethods:
     def parser(self):
         return CommandParser()
 
-    def test_is_help_command(self, parser):
-        for cmd in ("help", "list", "commands", "?"):
-            pc = ParsedCommand(command=cmd)
-            assert parser.is_help_command(pc) is True
+    @pytest.mark.parametrize("cmd", ["help", "list", "commands", "?"])
+    def test_is_help_command(self, parser, cmd):
+        pc = ParsedCommand(command=cmd)
+        assert parser.is_help_command(pc) is True
 
     def test_is_not_help_command(self, parser):
         pc = ParsedCommand(command="deploy")
         assert parser.is_help_command(pc) is False
 
-    def test_is_status_command(self, parser):
-        for cmd in ("status", "info", "whoami"):
-            pc = ParsedCommand(command=cmd)
-            assert parser.is_status_command(pc) is True
+    @pytest.mark.parametrize("cmd", ["status", "info", "whoami"])
+    def test_is_status_command(self, parser, cmd):
+        pc = ParsedCommand(command=cmd)
+        assert parser.is_status_command(pc) is True
 
     def test_is_not_status_command(self, parser):
         pc = ParsedCommand(command="deploy")

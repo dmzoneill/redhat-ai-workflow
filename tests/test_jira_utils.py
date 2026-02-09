@@ -56,13 +56,13 @@ class TestMarkdownToJira:
         assert markdown_to_jira("") == ""
 
     def test_none_handling(self):
-        """None should be handled gracefully."""
-        # Depending on implementation, may raise or return empty
+        """None should be handled gracefully - either returns empty/None or raises TypeError."""
         try:
             result = markdown_to_jira(None)
             assert result == "" or result is None
         except (TypeError, AttributeError):
-            pass  # Expected behavior
+            # Raising on None input is acceptable behavior
+            pass
 
 
 class TestNormalizeFieldName:
@@ -87,45 +87,35 @@ class TestNormalizeFieldName:
 class TestNormalizeIssueType:
     """Tests for normalize_issue_type function."""
 
-    def test_lowercase_story(self):
-        """'story' should normalize."""
-        result = normalize_issue_type("story")
-        assert result.lower() == "story"
-
-    def test_uppercase_bug(self):
-        """'BUG' should normalize to lowercase."""
-        result = normalize_issue_type("BUG")
-        assert result.lower() == "bug"
-
-    def test_mixed_case_task(self):
-        """'TaSk' should normalize."""
-        result = normalize_issue_type("TaSk")
-        assert result.lower() == "task"
-
-    def test_epic(self):
-        """'Epic' should normalize."""
-        result = normalize_issue_type("Epic")
-        assert result.lower() == "epic"
+    @pytest.mark.parametrize(
+        "input_type,expected",
+        [
+            ("story", "story"),
+            ("BUG", "bug"),
+            ("TaSk", "task"),
+            ("Epic", "epic"),
+            ("subtask", "subtask"),
+            ("sub-task", "subtask"),
+            ("feature", "story"),
+        ],
+        ids=[
+            "story",
+            "BUG",
+            "TaSk",
+            "Epic",
+            "subtask",
+            "sub-task_alias",
+            "feature_alias",
+        ],
+    )
+    def test_normalizes_valid_types(self, input_type, expected):
+        """Valid issue types should normalize correctly."""
+        assert normalize_issue_type(input_type) == expected
 
     def test_invalid_type_raises(self):
         """Invalid issue type should raise ValueError."""
         with pytest.raises(ValueError):
             normalize_issue_type("invalid")
-
-    def test_subtask(self):
-        """'subtask' should normalize."""
-        result = normalize_issue_type("subtask")
-        assert result == "subtask"
-
-    def test_sub_task_alias(self):
-        """'sub-task' should normalize to subtask."""
-        result = normalize_issue_type("sub-task")
-        assert result == "subtask"
-
-    def test_feature_alias(self):
-        """'feature' should normalize to story."""
-        result = normalize_issue_type("feature")
-        assert result == "story"
 
 
 class TestMarkdownToJiraExtended:
@@ -292,9 +282,15 @@ class TestNormalizeFieldNameExtended:
         result = normalize_field_name("custom_field")
         assert result == "Custom Field"
 
-    def test_various_mappings(self):
-        """Various field mappings should work."""
-        assert normalize_field_name("dod") == "Definition of Done"
-        assert normalize_field_name("epic") == "Epic Link"
-        assert normalize_field_name("points") == "Story Points"
-        assert normalize_field_name("supporting_docs") == "Supporting Documentation"
+    @pytest.mark.parametrize(
+        "input_name,expected",
+        [
+            ("dod", "Definition of Done"),
+            ("epic", "Epic Link"),
+            ("points", "Story Points"),
+            ("supporting_docs", "Supporting Documentation"),
+        ],
+    )
+    def test_known_aliases(self, input_name, expected):
+        """Known field name aliases should map correctly."""
+        assert normalize_field_name(input_name) == expected

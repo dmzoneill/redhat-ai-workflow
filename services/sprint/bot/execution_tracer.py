@@ -671,8 +671,8 @@ class ExecutionTracer:
             for trans in self.transitions:
                 try:
                     visited_states.add(WorkflowState(trans.to_state))
-                except ValueError:
-                    pass
+                except ValueError as exc:
+                    logger.debug("Invalid value encountered: %s", exc)
 
             # Style visited states
             for state in visited_states:

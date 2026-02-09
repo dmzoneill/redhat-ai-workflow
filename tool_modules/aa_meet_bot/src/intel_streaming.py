@@ -184,19 +184,19 @@ class IntelStreamingPipeline:
             pipeline_parts = [
                 f"v4l2src device={self.config.v4l2_device} ! "
                 f"video/x-raw,format=YUY2,width={w},height={h},framerate={fps}/1 ! "
-                f"videoconvert"
+                "videoconvert"
             ]
         elif self.config.input_format == "yuyv":
             # Input: appsrc with YUYV frames (efficient - matches video_generator output)
             # VA-API handles YUY2→NV12 conversion in hardware
             pipeline_parts = [
-                f"appsrc name=src format=time is-live=true do-timestamp=true "
+                "appsrc name=src format=time is-live=true do-timestamp=true "
                 f'caps="video/x-raw,format=YUY2,width={w},height={h},framerate={fps}/1"',
             ]
         else:
             # Input: appsrc with raw BGRA frames from OpenCL
             pipeline_parts = [
-                f"appsrc name=src format=time is-live=true do-timestamp=true "
+                "appsrc name=src format=time is-live=true do-timestamp=true "
                 f'caps="video/x-raw,format=BGRA,width={w},height={h},framerate={fps}/1"',
             ]
 
@@ -223,7 +223,7 @@ class IntelStreamingPipeline:
         else:
             # QSV encoder settings
             pipeline_parts.append(
-                f"{encoder} bitrate={bitrate} rate-control=cbr " f"low-latency=true"
+                f"{encoder} bitrate={bitrate} rate-control=cbr " "low-latency=true"
             )
 
         # Add profile constraint for WebRTC compatibility
@@ -240,12 +240,12 @@ class IntelStreamingPipeline:
             if needs_tee:
                 pipeline_parts.append(
                     f"t. ! queue ! {payloader} config-interval=1 pt=96 ! "
-                    f"webrtcbin name=webrtc bundle-policy=max-bundle"
+                    "webrtcbin name=webrtc bundle-policy=max-bundle"
                 )
             else:
                 pipeline_parts.append(
                     f"{payloader} config-interval=1 pt=96 ! "
-                    f"webrtcbin name=webrtc bundle-policy=max-bundle"
+                    "webrtcbin name=webrtc bundle-policy=max-bundle"
                 )
 
         # RTP output (for testing/debugging)
@@ -296,7 +296,7 @@ class IntelStreamingPipeline:
             self.pipeline = Gst.parse_launch(pipeline_str)
         except GLib.Error as e:
             logger.error(f"Failed to create pipeline: {e}")
-            raise RuntimeError(f"Pipeline creation failed: {e}")
+            raise RuntimeError(f"Pipeline creation failed: {e}") from e
 
         # Get appsrc element (only present when not using v4l2src)
         self.appsrc = self.pipeline.get_by_name("src")

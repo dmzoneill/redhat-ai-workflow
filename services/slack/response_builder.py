@@ -31,8 +31,8 @@ try:
     # Only init once (may already be initialized by daemon.py)
     if not Notify.is_initted():
         Notify.init("AI Workflow Slack Persona")
-except (ImportError, ValueError):
-    pass
+except (ImportError, ValueError) as exc:
+    logger.debug("Suppressed error: %s", exc)
 
 
 def _load_configs():
@@ -455,7 +455,7 @@ class ResponseGenerator:
                 logger.info(f"Claude agent initialized with model: {model}")
         except Exception as e:
             logger.error(f"Failed to initialize Claude agent: {e}")
-            raise RuntimeError(f"Claude agent initialization failed: {e}")
+            raise RuntimeError(f"Claude agent initialization failed: {e}") from e
 
     def _modulate_response(
         self,

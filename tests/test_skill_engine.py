@@ -13,7 +13,6 @@ Focuses on methods NOT covered by the skill harness tests:
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import sys
 from pathlib import Path
@@ -645,6 +644,7 @@ class TestExecCompute:
     def test_interactive_recovery_not_triggered_when_disabled(self):
         ex = _make_executor(enable_interactive_recovery=False)
         result = ex._exec_compute("raise RuntimeError('boom')", "r")
+        assert isinstance(result, str)
         assert "compute error" in result.lower()
 
     def test_exec_compute_internal_directly(self):
@@ -814,12 +814,14 @@ class TestDetectSoftFailure:
             "Error: dial tcp: lookup api.example.com: no such host"
         )
         assert is_fail is True
+        assert msg is not None
         assert "DNS" in msg
 
     def test_unauthorized(self):
         ex = _make_executor()
         is_fail, msg = ex._detect_soft_failure("HTTP 401 Unauthorized: please login")
         assert is_fail is True
+        assert msg is not None
         assert "auth" in msg.lower() or "401" in msg
 
     def test_forbidden(self):
@@ -833,6 +835,7 @@ class TestDetectSoftFailure:
             "Connection refused to api.example.com:8080"
         )
         assert is_fail is True
+        assert msg is not None
         assert "refused" in msg.lower()
 
     def test_traceback(self):
@@ -841,6 +844,7 @@ class TestDetectSoftFailure:
             "Traceback (most recent call last):\n  File ...\nValueError: bad"
         )
         assert is_fail is True
+        assert msg is not None
         assert "Python exception" in msg
 
     def test_emoji_error_marker(self):
@@ -1251,7 +1255,7 @@ class TestExecuteMainLoop:
                 ],
             }
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("val") == "ran"
 
     async def test_tool_step_success(self):
@@ -1332,7 +1336,7 @@ class TestExecuteMainLoop:
                 "some_tool": {"success": False, "error": "minor error"},
             }
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("out") == "ran"
 
     async def test_multiple_steps_in_sequence(self):
@@ -1345,7 +1349,7 @@ class TestExecuteMainLoop:
                 ],
             }
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("a") == 10
         assert ex.context.get("b") == 15
 
@@ -1366,7 +1370,7 @@ class TestExecuteMainLoop:
             },
             inputs={},
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("g") == "hello"
 
     async def test_inputs_default_not_overridden(self):
@@ -1386,7 +1390,7 @@ class TestExecuteMainLoop:
             },
             inputs={"greeting": "hi"},
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("g") == "hi"
 
     async def test_debug_log_included_when_debug(self):
@@ -1462,7 +1466,7 @@ class TestExecuteMainLoop:
                 "steps": [],
             }
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("defaults") == {"region": "us-east"}
 
     async def test_success_and_fail_counts(self):
@@ -2867,6 +2871,7 @@ class TestExecComputeInteractiveRecovery:
         )
         ex._try_interactive_recovery = MagicMock(return_value=None)
         result = ex._exec_compute("raise ValueError('test')", "out")
+        assert isinstance(result, str)
         assert "compute error" in result.lower()
 
 
@@ -3916,8 +3921,6 @@ class TestCreateNestedSkillRunner:
 
     def test_skill_found_exception(self, tmp_path):
         """Exception during nested skill execution returns error."""
-        import yaml
-
         skill_file = tmp_path / "broken.yaml"
         skill_file.write_text("{{invalid yaml")
         ex = _make_executor()
@@ -4841,7 +4844,7 @@ class TestExecuteThenBlockWithEmitter:
                 ],
             }
         )
-        result = await ex.execute()
+        await ex.execute()
         assert ex.context.get("v") == "ran"
 
 
@@ -4930,6 +4933,7 @@ class TestDetectSoftFailureAdditional:
         ex = _make_executor()
         is_fail, msg = ex._detect_soft_failure("no route to host 10.0.0.1")
         assert is_fail is True
+        assert msg is not None
         assert "VPN" in msg
 
     def test_network_unreachable(self):
@@ -4937,6 +4941,7 @@ class TestDetectSoftFailureAdditional:
         ex = _make_executor()
         is_fail, msg = ex._detect_soft_failure("Error: network unreachable")
         assert is_fail is True
+        assert msg is not None
         assert "VPN" in msg
 
     def test_401_http_code(self):
@@ -4952,6 +4957,7 @@ class TestDetectSoftFailureAdditional:
             "the server has asked for the client to provide credentials"
         )
         assert is_fail is True
+        assert msg is not None
         assert "Kubernetes" in msg
 
     def test_emoji_failed_pattern(self):

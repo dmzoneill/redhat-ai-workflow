@@ -67,7 +67,7 @@ class SkillAutoHealer:
             if not patterns_file.exists():
                 return None, None
 
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns_data = yaml.safe_load(f) or {}
 
             # Check each category for matches
@@ -297,7 +297,7 @@ class SkillAutoHealer:
 
             # Load or create
             if failures_file.exists():
-                with open(failures_file) as f:
+                with open(failures_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
             else:
                 data = {
@@ -344,7 +344,7 @@ class SkillAutoHealer:
                 data["failures"] = data["failures"][-100:]
 
             # Write back
-            with open(failures_file, "w") as f:
+            with open(failures_file, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False)
 
             self._debug(f"Logged auto-heal for {tool} to memory (success={success})")
@@ -377,7 +377,7 @@ class SkillAutoHealer:
                 return
 
             # Atomic read-modify-write with file locking
-            with open(patterns_file, "r+") as f:
+            with open(patterns_file, "r+", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
                 try:

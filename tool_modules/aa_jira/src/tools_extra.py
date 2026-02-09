@@ -60,16 +60,16 @@ async def run_rh_issue(args: list[str], timeout: int = 30) -> tuple[bool, str]:
         # Check for common auth issues
         if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
             return False, (
-                f"❌ Jira authentication failed.\n\n"
-                f"Ensure these are in your ~/.bashrc:\n"
-                f"  export JIRA_JPAT='your-token'\n"
+                "❌ Jira authentication failed.\n\n"
+                "Ensure these are in your ~/.bashrc:\n"
+                "  export JIRA_JPAT='your-token'\n"
                 f"  export JIRA_URL='{_get_jira_url()}'\n\n"
                 f"Original error: {output}"
             )
         if "No module named" in output:
             return False, (
-                f"❌ rh-issue dependency missing.\n\n"
-                f"Run: cd ~/src/jira-creator && pipenv install\n\n"
+                "❌ rh-issue dependency missing.\n\n"
+                "Run: cd ~/src/jira-creator && pipenv install\n\n"
                 f"Original error: {output}"
             )
         return False, output
@@ -416,7 +416,7 @@ async def _jira_get_transitions_impl(issue_key: str) -> str:
         return (
             "❌ Jira authentication not configured.\n\n"
             "Ensure JIRA_JPAT is set in your ~/.bashrc:\n"
-            f"  export JIRA_JPAT='your-token'\n"
+            "  export JIRA_JPAT='your-token'\n"
             f"  export JIRA_URL='{base_url}'"
         )
 
@@ -474,7 +474,7 @@ async def _jira_update_issue_impl(
         return (
             "❌ Jira authentication not configured.\n\n"
             "Ensure JIRA_JPAT is set in your ~/.bashrc:\n"
-            f"  export JIRA_JPAT='your-token'\n"
+            "  export JIRA_JPAT='your-token'\n"
             f"  export JIRA_URL='{base_url}'"
         )
 

@@ -29,7 +29,9 @@ from tool_modules.aa_meet_bot.src.config import get_config
 logger = logging.getLogger(__name__)
 
 # GPT-SoVITS paths (for voice cloning backend)
-GPT_SOVITS_ROOT = Path("/home/daoneill/src/GPT-SoVITS")
+GPT_SOVITS_ROOT = Path(
+    os.environ.get("GPT_SOVITS_ROOT", Path.home() / "src" / "GPT-SoVITS")
+)
 GPT_SOVITS_VENV = GPT_SOVITS_ROOT / "venv" / "bin" / "python"
 VOICE_SAMPLES_DIR = Path(__file__).parent.parent / "voice_samples"
 
@@ -282,7 +284,9 @@ class PiperTTS:
                 # Save to file
                 import wave
 
-                with wave.open(str(audio_path), "wb") as wav:  # pylint: disable=no-member
+                with wave.open(
+                    str(audio_path), "wb"
+                ) as wav:  # pylint: disable=no-member
                     wav.setnchannels(1)  # pylint: disable=no-member
                     wav.setsampwidth(2)  # pylint: disable=no-member
                     wav.setframerate(sample_rate)  # pylint: disable=no-member
@@ -343,6 +347,7 @@ class GPTSoVITSEngine:
         """Create a standalone TTS script that runs in GPT-SoVITS venv."""
         script_path = self.output_dir / "run_tts.py"
 
+        gpt_sovits_path = str(GPT_SOVITS_ROOT)
         script_content = '''#!/usr/bin/env python3
 """Standalone TTS script for GPT-SoVITS."""
 import sys
@@ -350,7 +355,7 @@ import json
 import argparse
 
 # Add GPT-SoVITS to path
-sys.path.insert(0, "/home/daoneill/src/GPT-SoVITS")
+sys.path.insert(0, GPT_SOVITS_PATH_PLACEHOLDER)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -411,7 +416,9 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
+'''.replace(
+            "GPT_SOVITS_PATH_PLACEHOLDER", repr(gpt_sovits_path)
+        )
 
         script_path.write_text(script_content)
         script_path.chmod(0o755)

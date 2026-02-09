@@ -96,10 +96,10 @@ def export_workspace_state(
     existing_data = {}
     if EXPORT_FILE.exists():
         try:
-            with open(EXPORT_FILE) as f:
+            with open(EXPORT_FILE, encoding="utf-8") as f:
                 existing_data = json.load(f)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     # Delegate to unified export, preserving existing data
     return export_workspace_state_with_data(
@@ -163,7 +163,7 @@ def export_workspace_state_with_data(
     sync_result = WorkspaceRegistry.sync_all_with_cursor()
     if sum(sync_result.values()) > 0:
         logger.info(
-            f"Synced with Cursor DB before export: "
+            "Synced with Cursor DB before export: "
             f"+{sync_result['added']} -{sync_result['removed']} ~{sync_result['renamed']}"
         )
 
@@ -182,10 +182,10 @@ def export_workspace_state_with_data(
     existing_data = {}
     if EXPORT_FILE.exists():
         try:
-            with open(EXPORT_FILE) as f:
+            with open(EXPORT_FILE, encoding="utf-8") as f:
                 existing_data = json.load(f)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     # SAFETY: If registry is empty but file has workspaces, preserve them
     # This prevents data loss when called from standalone scripts where
@@ -257,8 +257,8 @@ def export_workspace_state_with_data(
             # Clean up temp file on error
             try:
                 os.unlink(temp_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("OS operation failed: %s", exc)
             raise
 
         logger.debug(
@@ -332,7 +332,7 @@ def read_exported_state() -> dict | None:
         return None
 
     try:
-        with open(EXPORT_FILE) as f:
+        with open(EXPORT_FILE, encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"Failed to read exported state: {e}")

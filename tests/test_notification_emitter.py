@@ -271,26 +271,24 @@ class TestEmitNotification:
 
 
 class TestConvenienceFunctions:
-    def test_notify_info(self, notifications_dir):
-        notification_emitter.notify_info(
-            "session", "test", "Info Title", "Info Message"
+    @pytest.mark.parametrize(
+        "func_name,expected_level",
+        [
+            ("notify_info", "info"),
+            ("notify_warning", "warning"),
+            ("notify_error", "error"),
+        ],
+    )
+    def test_notify_level_functions(self, notifications_dir, func_name, expected_level):
+        func = getattr(notification_emitter, func_name)
+        func(
+            "session",
+            "test",
+            f"{expected_level.title()} Title",
+            f"{expected_level.title()} Message",
         )
         data = json.loads(notifications_dir.read_text())
-        assert data["notifications"][0]["level"] == "info"
-
-    def test_notify_warning(self, notifications_dir):
-        notification_emitter.notify_warning(
-            "session", "test", "Warn Title", "Warn Message"
-        )
-        data = json.loads(notifications_dir.read_text())
-        assert data["notifications"][0]["level"] == "warning"
-
-    def test_notify_error(self, notifications_dir):
-        notification_emitter.notify_error(
-            "session", "test", "Error Title", "Error Message"
-        )
-        data = json.loads(notifications_dir.read_text())
-        assert data["notifications"][0]["level"] == "error"
+        assert data["notifications"][0]["level"] == expected_level
 
 
 # ---------------------------------------------------------------------------

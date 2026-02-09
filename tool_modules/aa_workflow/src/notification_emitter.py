@@ -92,10 +92,10 @@ def _file_lock(file_path: Path) -> Generator[bool, None, None]:
                             logger.debug(
                                 f"Removed stale notification lock (age: {lock_age:.1f}s)"
                             )
-                        except OSError:
-                            pass
-                except OSError:
-                    pass
+                        except OSError as exc:
+                            logger.debug("OS operation failed: %s", exc)
+                except OSError as exc:
+                    logger.debug("OS operation failed: %s", exc)
 
             # Try to create lock file exclusively
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -127,7 +127,7 @@ def _load_notifications_unlocked() -> dict:
     """Load notifications from file without lock."""
     try:
         if NOTIFICATIONS_FILE.exists():
-            with open(NOTIFICATIONS_FILE) as f:
+            with open(NOTIFICATIONS_FILE, encoding="utf-8") as f:
                 return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         logger.debug(f"Could not load notifications file: {e}")
@@ -144,7 +144,7 @@ def _save_notifications_unlocked(data: dict) -> None:
     try:
         data["lastUpdated"] = datetime.now().isoformat()
         tmp_file = NOTIFICATIONS_FILE.with_suffix(".tmp")
-        with open(tmp_file, "w") as f:
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         tmp_file.rename(NOTIFICATIONS_FILE)
     except Exception as e:
@@ -166,8 +166,8 @@ def _cleanup_old_notifications(data: dict) -> dict:
                 age_seconds = (now - timestamp).total_seconds()
                 if age_seconds <= CLEANUP_TIMEOUT_SECONDS:
                     filtered.append(notif)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as exc:
+                logger.debug("Suppressed error: %s", exc)
 
     # Keep only the most recent MAX_NOTIFICATIONS
     if len(filtered) > MAX_NOTIFICATIONS:

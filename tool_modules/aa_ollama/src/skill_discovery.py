@@ -59,7 +59,7 @@ class SkillToolDiscovery:
             return set()
 
         try:
-            with open(skill_path) as f:
+            with open(skill_path, encoding="utf-8") as f:
                 skill = yaml.safe_load(f)
         except yaml.YAMLError as e:
             logger.error(f"Failed to parse skill {skill_name}: {e}")
@@ -155,7 +155,7 @@ class SkillToolDiscovery:
             return {}
 
         try:
-            with open(skill_path) as f:
+            with open(skill_path, encoding="utf-8") as f:
                 skill = yaml.safe_load(f)
         except yaml.YAMLError:
             return {}

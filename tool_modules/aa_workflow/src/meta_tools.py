@@ -53,7 +53,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
 
         patterns_file = memory_dir / "patterns.yaml"
         if patterns_file.exists():
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns = yaml.safe_load(f) or {}
 
             # Check all pattern categories
@@ -81,7 +81,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
         # Check tool_fixes.yaml
         fixes_file = memory_dir / "tool_fixes.yaml"
         if fixes_file.exists():
-            with open(fixes_file) as f:
+            with open(fixes_file, encoding="utf-8") as f:
                 fixes = yaml.safe_load(f) or {}
 
             for fix in fixes.get("tool_fixes", []):
@@ -106,8 +106,8 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                             }
                         )
 
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     return matches
 
@@ -836,8 +836,8 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             )
 
             await export_workspace_state_async(ctx)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         return [TextContent(type="text", text="\n".join(lines))]
 
@@ -943,8 +943,8 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             )
 
             await export_workspace_state_async(ctx)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         return [TextContent(type="text", text="\n".join(lines))]
 
@@ -999,8 +999,8 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             )
 
             await export_workspace_state_async(ctx)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         return [
             TextContent(

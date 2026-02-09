@@ -457,7 +457,7 @@ class SkillErrorRecovery:
             import yaml
 
             # Read skill file
-            with open(skill_path, "r") as f:
+            with open(skill_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
             # Parse YAML while preserving formatting
@@ -481,7 +481,7 @@ class SkillErrorRecovery:
 
             # Write back (WARNING: loses YAML comments/formatting)
             # TODO: Use ruamel.yaml to preserve formatting
-            with open(skill_path, "w") as f:
+            with open(skill_path, "w", encoding="utf-8") as f:
                 yaml.dump(
                     skill_data,
                     f,

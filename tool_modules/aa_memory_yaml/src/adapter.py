@@ -169,7 +169,7 @@ class YamlMemoryAdapter:
             if isinstance(value, dict):
                 existing = {}
                 if path.exists():
-                    with open(path) as f:
+                    with open(path, encoding="utf-8") as f:
                         existing = yaml.safe_load(f) or {}
 
                 # Merge (value overwrites existing)
@@ -177,7 +177,7 @@ class YamlMemoryAdapter:
                 value = existing
 
             # Write YAML
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 yaml.safe_dump(value, f, default_flow_style=False)
 
             return AdapterResult(
@@ -236,7 +236,7 @@ class YamlMemoryAdapter:
             if not path.exists():
                 return None
 
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             if not data:

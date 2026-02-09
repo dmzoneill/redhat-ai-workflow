@@ -141,8 +141,8 @@ async def _bonfire_deploy_aa_impl(
         err_msg = (
             f"❌ **Invalid template_ref: `{template_ref}` "
             f"({len(template_ref)} chars)**\n\n"
-            f"template_ref must be a FULL 40-character git commit SHA.\n\n"
-            f"**Fix:** Get the full SHA:\n"
+            "template_ref must be a FULL 40-character git commit SHA.\n\n"
+            "**Fix:** Get the full SHA:\n"
             f"```bash\ngit rev-parse {template_ref}\n```"
         )
         return [TextContent(type="text", text=err_msg)]

@@ -1414,12 +1414,15 @@ if __name__ == "__main__":
     print(f"  Frame shape: {frame.shape}")
 
     # Save test image
+    import tempfile
+
     import cv2
 
     # Convert RGBA to BGR for saving
     bgr = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
-    cv2.imwrite("/tmp/gpu_text_test.png", bgr)
-    print("\nSaved test image to /tmp/gpu_text_test.png")
+    test_image_path = str(Path(tempfile.gettempdir()) / "gpu_text_test.png")
+    cv2.imwrite(test_image_path, bgr)
+    print(f"\nSaved test image to {test_image_path}")
 
     renderer.cleanup()
     print("Done!")

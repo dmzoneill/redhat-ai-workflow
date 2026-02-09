@@ -58,6 +58,8 @@ export abstract class BaseTab {
   protected isLoading = false;
   protected lastError: string | null = null;
   private _onNeedsRender: RenderCallback | null = null;
+  private _renderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private _renderDebounceMs = 150; // Debounce renders to max ~7/sec
 
   /**
    * Service container for domain services.
@@ -90,15 +92,51 @@ export abstract class BaseTab {
   /**
    * Notify that the tab needs to be re-rendered.
    * Call this when internal state changes that affect the UI.
+   *
+   * Debounced to prevent flickering - multiple rapid calls within
+   * _renderDebounceMs are coalesced into a single render.
    */
   protected notifyNeedsRender(): void {
     const logger = createLogger(`${this.id}Tab`);
-    if (this._onNeedsRender) {
-      logger.log("notifyNeedsRender: callback exists, calling it");
-      this._onNeedsRender();
-    } else {
+    if (!this._onNeedsRender) {
       logger.warn("notifyNeedsRender: NO callback set!");
+      return;
     }
+
+    // If a render is already scheduled, skip - it will pick up latest state
+    if (this._renderDebounceTimer) {
+      logger.log("notifyNeedsRender: debounced (render already scheduled)");
+      return;
+    }
+
+    this._renderDebounceTimer = setTimeout(() => {
+      this._renderDebounceTimer = null;
+      if (this._onNeedsRender) {
+        logger.log("notifyNeedsRender: executing debounced render");
+        this._onNeedsRender();
+      }
+    }, this._renderDebounceMs);
+  }
+
+  /**
+   * Force an immediate render, bypassing the debounce.
+   * Use sparingly - only for user-initiated actions that need instant feedback.
+   */
+  protected notifyNeedsRenderImmediate(): void {
+    const logger = createLogger(`${this.id}Tab`);
+    if (!this._onNeedsRender) {
+      logger.warn("notifyNeedsRenderImmediate: NO callback set!");
+      return;
+    }
+
+    // Cancel any pending debounced render
+    if (this._renderDebounceTimer) {
+      clearTimeout(this._renderDebounceTimer);
+      this._renderDebounceTimer = null;
+    }
+
+    logger.log("notifyNeedsRenderImmediate: rendering now");
+    this._onNeedsRender();
   }
 
   /**
@@ -127,6 +165,20 @@ export abstract class BaseTab {
    */
   setContext(context: TabContext): void {
     this.context = context;
+  }
+
+  /**
+   * Post an incremental message directly to the webview without triggering
+   * a full re-render. Use this for targeted DOM updates (e.g., updating
+   * CSS classes on individual elements) that don't require regenerating
+   * the entire tab HTML.
+   */
+  protected postMessageToWebview(message: any): boolean {
+    if (this.context?.postMessage) {
+      this.context.postMessage(message);
+      return true;
+    }
+    return false;
   }
 
   /**

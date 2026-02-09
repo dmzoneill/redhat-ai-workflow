@@ -30,7 +30,7 @@ description: |
 
   **cve_fix** - Security fix notification
   ```json
-  {"template": "cve_fix", "template_data": {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://..."}}
+  {"template": "cve_fix", "template_data": {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://...", "issue_key": "AAP-12345"}}
   ```
 
   **generic** - Plain message with emoji (default)
@@ -103,7 +103,7 @@ inputs:
         - deployment: Deployment status (requires: environment, namespace, status)
         - alert: Alert notification (requires: alert_name, severity, environment)
         - release: Release announcement (requires: version, environments)
-        - cve_fix: CVE fix notification (requires: cve_id, package, version, mr_url)
+        - cve_fix: CVE fix notification (requires: cve_id, package, version, mr_url, issue_key)
         - generic: Plain message with emoji (default)
 
   - name: template_data
@@ -115,7 +115,7 @@ inputs:
         deployment: {"environment": "stage", "namespace": "ephemeral-xxx", "status": "success", "duration": "5m"}
         alert: {"alert_name": "HighCPU", "severity": "warning", "environment": "prod", "runbook": "https://..."}
         release: {"version": "1.2.3", "environments": ["stage", "prod"], "changelog": "..."}
-        cve_fix: {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://..."}
+        cve_fix: {"cve_id": "CVE-2025-66471", "package": "urllib3", "version": "2.6.3", "mr_url": "https://...", "issue_key": "AAP-12345"}
 
 steps:
   # ==================== LOAD SLACK PERSONA ====================
@@ -458,6 +458,7 @@ steps:
           mr_url = data.get("mr_url", "")
           mr_id = data.get("mr_id", "")
           severity = data.get("severity", "")
+          issue_key = data.get("issue_key", "")
 
           lines = ["🔒 *Security Fix*"]
           lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -475,9 +476,13 @@ steps:
           elif package:
               lines.append(f"*Package:* `{package}`")
 
+          if issue_key:
+              jira_url = f"https://issues.redhat.com/browse/{issue_key}"
+              lines.append(f"*Issue:* <{jira_url}|{issue_key}>")
+
           if mr_url:
-              mr_text = f"!{mr_id}" if mr_id else "View MR"
-              lines.append(f"*MR:* <{mr_url}|{mr_text}>")
+              mr_label = f"!{mr_id}" if mr_id else "View MR"
+              lines.append(f"*MR:* <{mr_url}|{mr_label}> ({mr_url})")
 
           if message:
               lines.append(f"\n{message}")

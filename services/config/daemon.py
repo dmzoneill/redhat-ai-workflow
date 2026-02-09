@@ -539,7 +539,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                             "file": str(file),
                         }
                     )
-            except Exception as e:
+            except (yaml.YAMLError, OSError) as e:
                 logger.warning(f"Failed to parse skill {file}: {e}")
 
         self._skills_list_cache = skills
@@ -574,6 +574,36 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
 
         return None
 
+    @staticmethod
+    def _count_persona_tools(
+        module_names: list[str],
+        counts_by_module: dict[str, dict],
+        default_tier: dict,
+    ) -> int:
+        """Count total tools for a persona from its module list.
+
+        Handles tier suffixes (_core, _basic, _extra, _style) on module names.
+        """
+        total = 0
+        for mod in module_names:
+            base = mod.replace("_core", "").replace("_basic", "")
+            base_name = base.replace("_extra", "").replace("_style", "")
+            tier = counts_by_module.get(base_name, default_tier)
+
+            if mod.endswith("_core"):
+                total += tier.get("core", 0)
+            elif mod.endswith("_basic"):
+                total += tier.get("core", 0) + tier.get("basic", 0)
+            elif mod.endswith("_extra"):
+                total += tier.get("extra", 0)
+            elif mod.endswith("_style"):
+                total += tier.get("style", 0)
+            elif tier.get("core", 0) > 0:
+                total += tier.get("core", 0)
+            else:
+                total += tier.get("basic", 0)
+        return total
+
     def _load_personas_list(self) -> list[dict]:
         """Load list of all personas with metadata."""
         if self._personas_list_cache is not None:
@@ -598,48 +628,25 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 content = file.read_text()
                 data = yaml.safe_load(content)
-                if data and data.get("name"):
-                    tool_module_names = data.get("tools", [])
-                    # Calculate actual tool count by summing tools from each module
-                    # Handle tier suffixes: _core, _basic, _extra
-                    tool_count = 0
-                    for mod in tool_module_names:
-                        base = mod.replace("_core", "").replace("_basic", "")
-                        base_name = base.replace("_extra", "").replace("_style", "")
-                        tier_counts = tool_counts_by_module.get(base_name, default_tier)
+                if not data or not data.get("name"):
+                    continue
 
-                        if mod.endswith("_core"):
-                            # Only core tools
-                            tool_count += tier_counts.get("core", 0)
-                        elif mod.endswith("_basic"):
-                            # Core + basic tools (basic includes core when loaded)
-                            tool_count += tier_counts.get("core", 0) + tier_counts.get(
-                                "basic", 0
-                            )
-                        elif mod.endswith("_extra"):
-                            # Only extra tools
-                            tool_count += tier_counts.get("extra", 0)
-                        elif mod.endswith("_style"):
-                            # Style tools (separate count)
-                            tool_count += tier_counts.get("style", 0)
-                        else:
-                            # No suffix: load core if exists, else basic
-                            if tier_counts.get("core", 0) > 0:
-                                tool_count += tier_counts.get("core", 0)
-                            else:
-                                tool_count += tier_counts.get("basic", 0)
+                tool_module_names = data.get("tools", [])
+                tool_count = self._count_persona_tools(
+                    tool_module_names, tool_counts_by_module, default_tier
+                )
 
-                    personas.append(
-                        {
-                            "name": data.get("name"),
-                            "description": data.get("description", ""),
-                            "tools": tool_module_names,
-                            "tool_count": tool_count,
-                            "skills": data.get("skills", []),
-                            "skills_count": len(data.get("skills", [])),
-                            "file": str(file),
-                        }
-                    )
+                personas.append(
+                    {
+                        "name": data.get("name"),
+                        "description": data.get("description", ""),
+                        "tools": tool_module_names,
+                        "tool_count": tool_count,
+                        "skills": data.get("skills", []),
+                        "skills_count": len(data.get("skills", [])),
+                        "file": str(file),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to parse persona {file}: {e}")
 
@@ -784,8 +791,8 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                         if line.strip() and not line.startswith("#"):
                             description = line.strip()
                             break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
             modules.append(
                 {
@@ -989,7 +996,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             self._config_loaded_at = datetime.now()
             logger.info("Loaded config.json")
             return self._config_cache
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to load config: {e}")
             return {}
 

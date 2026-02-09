@@ -73,11 +73,11 @@ def file_lock(file_path: Path) -> Generator[bool, None, None]:
                             logger.debug(
                                 f"Removed stale lock file (age: {lock_age:.1f}s)"
                             )
-                        except OSError:
+                        except OSError as exc:
                             # Another process may have removed it
-                            pass
-                except OSError:
-                    pass
+                            logger.debug("OS operation failed: %s", exc)
+                except OSError as exc:
+                    logger.debug("OS operation failed: %s", exc)
 
             # Try to create lock file exclusively
             # O_CREAT | O_EXCL ensures atomic create-if-not-exists
@@ -125,7 +125,7 @@ def _load_all_executions_unlocked() -> dict:
     """
     try:
         if EXECUTION_FILE.exists():
-            with open(EXECUTION_FILE) as f:
+            with open(EXECUTION_FILE, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Handle old single-execution format (backward compatibility)
@@ -170,7 +170,7 @@ def _save_all_executions_unlocked(data: dict) -> None:
     try:
         data["lastUpdated"] = datetime.now().isoformat()
         tmp_file = EXECUTION_FILE.with_suffix(".tmp")
-        with open(tmp_file, "w") as f:
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         tmp_file.rename(EXECUTION_FILE)
     except Exception as e:
@@ -204,8 +204,8 @@ def _cleanup_old_executions(data: dict) -> dict:
                 age_seconds = (now - end_time).total_seconds()
                 if age_seconds > CLEANUP_TIMEOUT_SECONDS:
                     to_remove.append(exec_id)
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as exc:
+                logger.debug("Suppressed error: %s", exc)
 
     for exec_id in to_remove:
         del data["executions"][exec_id]
@@ -243,6 +243,21 @@ class SkillExecutionEmitter:
         self.start_time = datetime.now().isoformat()
         self.end_time: str | None = None
 
+        # Write coalescing: buffer events and flush on important events
+        # or after a short delay, to reduce file I/O and UI flickering.
+        self._write_pending = False
+        self._last_write_time = 0.0
+        self._write_coalesce_ms = 300  # Min interval between file writes
+        # Events that flush immediately (important for UI state transitions)
+        self._flush_events = {
+            "skill_start",
+            "step_start",
+            "step_complete",
+            "step_failed",
+            "step_skipped",
+            "skill_complete",
+        }
+
         # Generate unique execution ID
         self.execution_id = _generate_execution_id(workspace_uri, skill_name)
 
@@ -250,7 +265,14 @@ class SkillExecutionEmitter:
         EXECUTION_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     def _emit(self, event_type: str, data: dict | None = None) -> None:
-        """Emit an event and write to file."""
+        """Emit an event and write to file.
+
+        Uses write coalescing to reduce file I/O:
+        - Important events (step_start, step_complete, skill_start, etc.)
+          flush immediately but respect a minimum interval.
+        - Supplementary events (memory_read, semantic_search, etc.)
+          are buffered and written with the next important event.
+        """
         event = {
             "type": event_type,
             "timestamp": datetime.now().isoformat(),
@@ -268,7 +290,41 @@ class SkillExecutionEmitter:
             "data": data,
         }
         self.events.append(event)
-        self._write_state()
+
+        # Decide whether to flush now or defer
+        is_important = event_type in self._flush_events
+        now = time.time() * 1000  # ms
+        elapsed = now - self._last_write_time
+
+        if is_important:
+            if elapsed >= self._write_coalesce_ms:
+                # Enough time has passed, write now
+                self._write_state()
+                self._last_write_time = now
+                self._write_pending = False
+            else:
+                # Too soon after last write - mark pending, it'll flush
+                # on the next important event or at skill_complete
+                self._write_pending = True
+                # Always flush skill_complete and skill_start regardless
+                if event_type in ("skill_complete", "skill_start"):
+                    self._write_state()
+                    self._last_write_time = now
+                    self._write_pending = False
+        else:
+            # Supplementary event - just mark pending
+            self._write_pending = True
+
+    def flush_pending(self) -> None:
+        """Flush any pending buffered events to file.
+
+        Called automatically before step_start/step_complete to ensure
+        supplementary events from the previous step are persisted.
+        """
+        if self._write_pending:
+            self._write_state()
+            self._last_write_time = time.time() * 1000
+            self._write_pending = False
 
     def _write_state(self) -> None:
         """Write current state to multi-execution file.
@@ -339,6 +395,8 @@ class SkillExecutionEmitter:
 
     def step_start(self, step_index: int) -> None:
         """Emit step start event."""
+        # Flush any pending supplementary events from the previous step
+        self.flush_pending()
         self.current_step_index = step_index
         self._emit("step_start")
 
@@ -403,6 +461,8 @@ class SkillExecutionEmitter:
 
     def skill_complete(self, success: bool, total_duration_ms: int) -> None:
         """Emit skill complete event."""
+        # Flush any pending supplementary events first
+        self.flush_pending()
         self.status = "success" if success else "failed"
         self.end_time = datetime.now().isoformat()
         self._emit(

@@ -263,98 +263,70 @@ class TestAutoHealWithDifferentReturnTypes:
 class TestDetectFailureType:
     """Tests for _detect_failure_type function."""
 
-    def test_empty_output_returns_none(self):
-        """Empty string returns (None, '')."""
-        ft, snippet = _detect_failure_type("")
-        assert ft is None
-        assert snippet == ""
-
-    def test_none_output_returns_none(self):
-        """None-ish empty input returns (None, '')."""
-        ft, snippet = _detect_failure_type("")
-        assert ft is None
-
-    def test_no_error_indicator_returns_none(self):
-        """Output without error indicators returns None."""
-        ft, snippet = _detect_failure_type("Everything is fine, all good")
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "",
+            "Everything is fine, all good",
+        ],
+        ids=["empty_string", "no_error_indicator"],
+    )
+    def test_returns_none_for_non_errors(self, output):
+        """Non-error output returns (None, '')."""
+        ft, snippet = _detect_failure_type(output)
         assert ft is None
 
-    def test_auth_401(self):
-        """Detects 401 auth error."""
-        ft, snippet = _detect_failure_type("Error: 401 unauthorized access")
-        assert ft == "auth"
-        assert len(snippet) > 0
-
-    def test_auth_403(self):
-        """Detects 403 forbidden."""
-        ft, _ = _detect_failure_type("Error: 403 forbidden")
-        assert ft == "auth"
-
-    def test_auth_token_expired(self):
-        """Detects token expired."""
-        ft, _ = _detect_failure_type("Error: token expired please re-authenticate")
-        assert ft == "auth"
-
-    def test_auth_permission_denied(self):
-        """Detects permission denied."""
-        ft, _ = _detect_failure_type("Error: permission denied for resource")
-        assert ft == "auth"
-
-    def test_auth_authentication_required(self):
-        """Detects authentication required."""
-        ft, _ = _detect_failure_type("Error: authentication required")
-        assert ft == "auth"
-
-    def test_auth_not_authorized(self):
-        """Detects not authorized."""
-        ft, _ = _detect_failure_type("Error: not authorized to perform action")
-        assert ft == "auth"
-
-    def test_auth_credentials_prompt(self):
-        """Detects server credentials prompt."""
-        ft, _ = _detect_failure_type(
-            "Error: the server has asked for the client to provide credentials"
-        )
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param("Error: 401 unauthorized access", id="401"),
+            pytest.param("Error: 403 forbidden", id="403"),
+            pytest.param(
+                "Error: token expired please re-authenticate", id="token_expired"
+            ),
+            pytest.param(
+                "Error: permission denied for resource", id="permission_denied"
+            ),
+            pytest.param(
+                "Error: authentication required", id="authentication_required"
+            ),
+            pytest.param(
+                "Error: not authorized to perform action", id="not_authorized"
+            ),
+            pytest.param(
+                "Error: the server has asked for the client to provide credentials",
+                id="credentials_prompt",
+            ),
+            pytest.param("❌ Something went wrong with 401", id="emoji_indicator"),
+            pytest.param(
+                "Operation failed with unauthorized access", id="failed_indicator"
+            ),
+        ],
+    )
+    def test_detects_auth_errors(self, output):
+        """Various auth error patterns are detected as 'auth'."""
+        ft, _ = _detect_failure_type(output)
         assert ft == "auth"
 
-    def test_network_no_route(self):
-        """Detects no route to host."""
-        ft, _ = _detect_failure_type("Error: no route to host")
-        assert ft == "network"
-
-    def test_network_connection_refused(self):
-        """Detects connection refused."""
-        ft, _ = _detect_failure_type("Error: connection refused on port 443")
-        assert ft == "network"
-
-    def test_network_unreachable(self):
-        """Detects network unreachable."""
-        ft, _ = _detect_failure_type("Error: network unreachable")
-        assert ft == "network"
-
-    def test_network_timeout(self):
-        """Detects timeout."""
-        ft, _ = _detect_failure_type("Error: timeout waiting for response")
-        assert ft == "network"
-
-    def test_network_dial_tcp(self):
-        """Detects dial tcp error."""
-        ft, _ = _detect_failure_type("Error: dial tcp 10.0.0.1:6443 i/o timeout")
-        assert ft == "network"
-
-    def test_network_connection_reset(self):
-        """Detects connection reset."""
-        ft, _ = _detect_failure_type("Error: connection reset by peer")
-        assert ft == "network"
-
-    def test_network_eof(self):
-        """Detects EOF error."""
-        ft, _ = _detect_failure_type("Error: eof received unexpectedly")
-        assert ft == "network"
-
-    def test_network_cannot_connect(self):
-        """Detects cannot connect."""
-        ft, _ = _detect_failure_type("Error: cannot connect to the cluster")
+    @pytest.mark.parametrize(
+        "output",
+        [
+            pytest.param("Error: no route to host", id="no_route"),
+            pytest.param(
+                "Error: connection refused on port 443", id="connection_refused"
+            ),
+            pytest.param("Error: network unreachable", id="unreachable"),
+            pytest.param("Error: timeout waiting for response", id="timeout"),
+            pytest.param("Error: dial tcp 10.0.0.1:6443 i/o timeout", id="dial_tcp"),
+            pytest.param("Error: connection reset by peer", id="connection_reset"),
+            pytest.param("Error: eof received unexpectedly", id="eof"),
+            pytest.param("Error: cannot connect to the cluster", id="cannot_connect"),
+            pytest.param("exception: connection refused", id="exception_indicator"),
+        ],
+    )
+    def test_detects_network_errors(self, output):
+        """Various network error patterns are detected as 'network'."""
+        ft, _ = _detect_failure_type(output)
         assert ft == "network"
 
     def test_unknown_error(self):
@@ -362,21 +334,6 @@ class TestDetectFailureType:
         ft, snippet = _detect_failure_type("Error: some unknown problem occurred")
         assert ft == "unknown"
         assert "unknown problem" in snippet
-
-    def test_error_emoji_indicator(self):
-        """Detects error via cross-mark emoji."""
-        ft, _ = _detect_failure_type("❌ Something went wrong with 401")
-        assert ft == "auth"
-
-    def test_failed_in_first_200_chars(self):
-        """Detects 'failed' within first 200 chars as error indicator."""
-        ft, _ = _detect_failure_type("Operation failed with unauthorized access")
-        assert ft == "auth"
-
-    def test_exception_in_first_200_chars(self):
-        """Detects 'exception' within first 200 chars as error indicator."""
-        ft, _ = _detect_failure_type("exception: connection refused")
-        assert ft == "network"
 
     def test_output_starts_with_error(self):
         """Detects output starting with 'error'."""
@@ -399,25 +356,26 @@ class TestDetectFailureType:
 class TestGuessCluster:
     """Tests for _guess_cluster function."""
 
-    def test_bonfire_tool_name(self):
-        """Tool name containing 'bonfire' returns ephemeral."""
-        assert _guess_cluster("bonfire_namespace_reserve", "") == "ephemeral"
-
-    def test_ephemeral_in_output(self):
-        """Output containing 'ephemeral' returns ephemeral."""
-        assert _guess_cluster("some_tool", "error on ephemeral cluster") == "ephemeral"
-
-    def test_konflux_tool_name(self):
-        """Tool name containing 'konflux' returns konflux."""
-        assert _guess_cluster("konflux_build_check", "") == "konflux"
-
-    def test_prod_in_output(self):
-        """Output containing 'prod' returns prod."""
-        assert _guess_cluster("some_tool", "error on prod") == "prod"
-
-    def test_default_stage(self):
-        """Default case returns stage."""
-        assert _guess_cluster("some_tool", "some error") == "stage"
+    @pytest.mark.parametrize(
+        "tool_name,output,expected",
+        [
+            ("bonfire_namespace_reserve", "", "ephemeral"),
+            ("some_tool", "error on ephemeral cluster", "ephemeral"),
+            ("konflux_build_check", "", "konflux"),
+            ("some_tool", "error on prod", "prod"),
+            ("some_tool", "some error", "stage"),
+        ],
+        ids=[
+            "bonfire_tool",
+            "ephemeral_output",
+            "konflux_tool",
+            "prod_output",
+            "default_stage",
+        ],
+    )
+    def test_cluster_guessing(self, tool_name, output, expected):
+        """Cluster is guessed correctly from tool name and output."""
+        assert _guess_cluster(tool_name, output) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +385,6 @@ class TestGuessCluster:
 
 class TestConvertResultToString:
     """Tests for _convert_result_to_string function."""
-
-    def test_string_passthrough(self):
-        """String returns as-is via str()."""
-        assert _convert_result_to_string("hello") == "hello"
 
     def test_list_with_text_attr(self):
         """List item with .text attribute uses that."""
@@ -444,20 +398,19 @@ class TestConvertResultToString:
         result = _convert_result_to_string([42])
         assert result == "42"
 
-    def test_empty_list(self):
-        """Empty list falls back to str(result)."""
-        result = _convert_result_to_string([])
-        assert result == "[]"
-
-    def test_non_iterable(self):
-        """Non-iterable uses str()."""
-        result = _convert_result_to_string(42)
-        assert result == "42"
-
-    def test_none_value(self):
-        """None is converted via str()."""
-        result = _convert_result_to_string(None)
-        assert result == "None"
+    @pytest.mark.parametrize(
+        "input_val,expected",
+        [
+            ("hello", "hello"),
+            ([], "[]"),
+            (42, "42"),
+            (None, "None"),
+        ],
+        ids=["string", "empty_list", "non_iterable", "none"],
+    )
+    def test_fallback_to_str(self, input_val, expected):
+        """Various non-list inputs fall back to str()."""
+        assert _convert_result_to_string(input_val) == expected
 
 
 # ---------------------------------------------------------------------------

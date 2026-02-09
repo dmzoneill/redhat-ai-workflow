@@ -229,14 +229,14 @@ class WorkingHoursEnforcer:
 
         if status["is_working_hours"]:
             return (
-                f"Working hours: ACTIVE\n"
+                "Working hours: ACTIVE\n"
                 f"  Time: {self._now().strftime('%Y-%m-%d %H:%M %Z')}\n"
                 f"  Hours: {status['working_hours']}\n"
                 f"  Days: {', '.join(status['working_days'])}"
             )
         else:
             return (
-                f"Working hours: OUTSIDE\n"
+                "Working hours: OUTSIDE\n"
                 f"  Current: {self._now().strftime('%Y-%m-%d %H:%M %Z')}\n"
                 f"  Next window: {status.get('next_working_time', 'N/A')}\n"
                 f"  Wait: {status.get('wait_hours', 0)} hours"

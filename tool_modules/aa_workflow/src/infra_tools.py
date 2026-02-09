@@ -113,7 +113,7 @@ async def _vpn_connect_impl() -> list[TextContent]:
     # This works across different processes and module instances
     lock_fd = None
     try:
-        lock_fd = open(_VPN_LOCK_FILE, "w")
+        lock_fd = open(_VPN_LOCK_FILE, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)  # Exclusive lock, blocks until acquired
 
         # Double-check after acquiring lock (another process may have connected)
@@ -325,7 +325,7 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
         return [
             TextContent(
                 type="text",
-                text="""❌ Unknown cluster: {cluster}
+                text=f"""❌ Unknown cluster: {cluster}
 
 **Valid options:**
 - `s` or `stage` = Stage cluster
@@ -362,7 +362,7 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
     # Use file-based lock to prevent multiple simultaneous login attempts
     lock_fd = None
     try:
-        lock_fd = open(_KUBE_LOCK_FILE, "w")
+        lock_fd = open(_KUBE_LOCK_FILE, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)  # Exclusive lock, blocks until acquired
 
         # Double-check after acquiring lock (another process may have logged in)
@@ -431,10 +431,8 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 pattern in output.lower() for pattern in oauth_failure_patterns
             )
 
-            login_success = False
             if success and not oauth_failed:
                 lines.append(f"✅ Logged into {cluster_names[short_cluster]} cluster")
-                login_success = True  # noqa: F841
             elif oauth_failed:
                 lines.append("❌ OAuth authentication failed")
                 lines.append("")
@@ -447,10 +445,10 @@ async def _kube_login_impl(cluster: str) -> list[TextContent]:
                 lines.append("")
                 lines.append("**To fix:**")
                 lines.append(
-                    "1. Try running `kube-clean {short_cluster}` to clear stale tokens"
+                    f"1. Try running `kube-clean {short_cluster}` to clear stale tokens"
                 )
                 lines.append(
-                    "2. Run `kube {short_cluster}` manually and complete browser SSO"
+                    f"2. Run `kube {short_cluster}` manually and complete browser SSO"
                 )
                 lines.append("3. Ensure VPN is connected if required")
             else:

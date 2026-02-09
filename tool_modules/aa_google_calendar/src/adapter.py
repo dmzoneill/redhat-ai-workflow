@@ -17,10 +17,11 @@ from services.memory_abstraction.models import (
     SourceFilter,
 )
 from services.memory_abstraction.registry import memory_adapter
+from tool_modules.common import get_google_calendar_settings
 
 logger = logging.getLogger(__name__)
 
-TIMEZONE = "Europe/Dublin"
+TIMEZONE = get_google_calendar_settings()["timezone"]
 
 
 @memory_adapter(
@@ -177,17 +178,20 @@ class GoogleCalendarAdapter:
 
                 summary_text = f"{time_str}: {summary}"
 
-                content = f"Event: {summary}\n"
-                content += f"When: {time_str}\n"
+                content_parts = [
+                    f"Event: {summary}",
+                    f"When: {time_str}",
+                ]
                 if event.get("location"):
-                    content += f"Location: {event['location']}\n"
+                    content_parts.append(f"Location: {event['location']}")
                 if meet_link:
-                    content += f"Meet: {meet_link}\n"
+                    content_parts.append(f"Meet: {meet_link}")
                 if attendees:
-                    content += f"Attendees: {', '.join(attendees)}\n"
+                    content_parts.append(f"Attendees: {', '.join(attendees)}")
                 if event.get("description"):
                     desc = event["description"][:200]
-                    content += f"Description: {desc}\n"
+                    content_parts.append(f"Description: {desc}")
+                content = "\n".join(content_parts) + "\n"
 
                 items.append(
                     MemoryItem(

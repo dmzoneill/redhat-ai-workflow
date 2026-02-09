@@ -31,38 +31,37 @@ class TestCalculateAgeScore:
         assert score == 0
         assert reason == ""
 
-    def test_recent_issue(self):
-        recent = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
-        score, reason = calculate_age_score(recent)
-        assert score == 5
-        assert "Recent" in reason
+    @pytest.mark.parametrize(
+        "days_ago,expected_score,expected_reason_substr",
+        [
+            (2, 5, "Recent"),
+            (10, 10, "Week old"),
+            (20, 20, "stale"),
+            (45, 30, "Aging"),
+        ],
+        ids=["recent", "week_old", "stale", "aging"],
+    )
+    def test_age_buckets(self, days_ago, expected_score, expected_reason_substr):
+        date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        score, reason = calculate_age_score(date_str)
+        assert score == expected_score
+        assert expected_reason_substr in reason
 
-    def test_week_old(self):
-        week_old = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d")
-        score, reason = calculate_age_score(week_old)
-        assert score == 10
-        assert "Week old" in reason
-
-    def test_stale(self):
-        stale = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
-        score, reason = calculate_age_score(stale)
-        assert score == 20
-        assert "stale" in reason
-
-    def test_aging(self):
-        old = (datetime.now() - timedelta(days=45)).strftime("%Y-%m-%d")
-        score, reason = calculate_age_score(old)
-        assert score == 30
-        assert "Aging" in reason
-
-    def test_iso_format_with_T(self):
-        iso_date = (datetime.now() - timedelta(days=5)).isoformat()
-        score, reason = calculate_age_score(iso_date)
-        assert score == 5
-
-    def test_iso_format_with_Z(self):
-        iso_date = (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        score, reason = calculate_age_score(iso_date)
+    @pytest.mark.parametrize(
+        "fmt",
+        [
+            pytest.param("isoformat", id="iso_with_T"),
+            pytest.param("Z_suffix", id="iso_with_Z"),
+        ],
+    )
+    def test_iso_date_formats(self, fmt):
+        if fmt == "isoformat":
+            iso_date = (datetime.now() - timedelta(days=5)).isoformat()
+        else:
+            iso_date = (datetime.now() - timedelta(days=5)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+        score, _ = calculate_age_score(iso_date)
         assert score == 5
 
     def test_invalid_date(self):
@@ -77,44 +76,25 @@ class TestCalculateAgeScore:
 
 
 class TestCalculatePointsScore:
-    def test_none_points(self):
-        score, reason = calculate_points_score(None)
-        assert score == 10
-        assert "Unestimated" in reason
-
-    def test_zero_points(self):
-        score, reason = calculate_points_score(0)
-        assert score == 10
-        assert "Unestimated" in reason
-
-    def test_quick_win(self):
-        score, reason = calculate_points_score(1)
-        assert score == 40
-        assert "Quick win" in reason
-
-    def test_two_points(self):
-        score, reason = calculate_points_score(2)
-        assert score == 40
-        assert "Quick win" in reason
-
-    def test_medium_effort(self):
-        score, reason = calculate_points_score(3)
-        assert score == 30
-        assert "Medium effort" in reason
-
-    def test_five_points(self):
-        score, reason = calculate_points_score(5)
-        assert score == 30
-
-    def test_larger_effort(self):
-        score, reason = calculate_points_score(8)
-        assert score == 20
-        assert "Larger effort" in reason
-
-    def test_large_item(self):
-        score, reason = calculate_points_score(13)
-        assert score == 10
-        assert "Large item" in reason
+    @pytest.mark.parametrize(
+        "points,expected_score,expected_reason_substr",
+        [
+            (None, 10, "Unestimated"),
+            (0, 10, "Unestimated"),
+            (1, 40, "Quick win"),
+            (2, 40, "Quick win"),
+            (3, 30, "Medium effort"),
+            (5, 30, None),
+            (8, 20, "Larger effort"),
+            (13, 10, "Large item"),
+        ],
+        ids=["none", "zero", "1pt", "2pt", "3pt", "5pt", "8pt", "13pt"],
+    )
+    def test_points_scoring(self, points, expected_score, expected_reason_substr):
+        score, reason = calculate_points_score(points)
+        assert score == expected_score
+        if expected_reason_substr is not None:
+            assert expected_reason_substr in reason
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +343,8 @@ class TestGetPrioritySummary:
             ),
         ]
         summary = get_priority_summary(issues)
-        summary.split("\n")
+        lines = summary.split("\n")
+        assert len(lines) > 0, "Summary should have at least one line"
         text = summary
         # Should have different icons for different statuses
         assert "\U0001f534" in text  # red circle (blocked)

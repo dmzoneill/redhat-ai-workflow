@@ -372,7 +372,7 @@ async def ensure_cluster_auth(
     short_name = get_cluster_short_name(environment)
     return False, (
         f"❌ {environment.title()} cluster authentication failed.\n\n"
-        f"A browser window should have opened for SSO login.\n"
+        "A browser window should have opened for SSO login.\n"
         f"If not, manually run: `kube-clean {short_name} && kube {short_name}`\n\n"
         "Then retry the command."
     )
@@ -1002,8 +1002,8 @@ def get_service_url(service: str, environment: str) -> str:
     if not environment or not environment.strip():
         raise ValueError(
             f"{service.capitalize()} URL not configured for empty environment. "
-            f"The 'environment' parameter is required. "
-            f"Check that the environment is being passed correctly from the skill."
+            "The 'environment' parameter is required. "
+            "Check that the environment is being passed correctly from the skill."
         )
 
     env_config = get_env_config(environment, service)

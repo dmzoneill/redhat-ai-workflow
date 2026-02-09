@@ -110,8 +110,11 @@ class MeetDevices:
             return False
 
         try:
+            # Map device_type to WebRTC device kind
+            kind = "audioinput" if device_type == "microphone" else "audiooutput"
+
             # First, find the device in the browser's device list
-            js_find_device = """
+            js_find_device = f"""
             async () => {{
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 const matches = devices.filter(d => d.kind === '{kind}');

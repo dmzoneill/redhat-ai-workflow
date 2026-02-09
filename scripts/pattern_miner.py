@@ -28,14 +28,14 @@ def mine_patterns_from_failures():
         return []
 
     try:
-        with open(failures_file) as f:
+        with open(failures_file, encoding="utf-8") as f:
             failures = yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError) as e:
         print(f"Warning: Could not load failures file: {e}")
         return []
 
     try:
-        with open(patterns_file) as f:
+        with open(patterns_file, encoding="utf-8") as f:
             patterns = yaml.safe_load(f) or {}
     except (OSError, yaml.YAMLError) as e:
         print(f"Warning: Could not load patterns file: {e}")

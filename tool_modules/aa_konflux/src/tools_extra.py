@@ -5,22 +5,24 @@ Authentication: Uses ~/.kube/config.k for Konflux cluster access.
 """
 
 import json
+import logging
 import os
 import tempfile
 
 from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
-from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+from tool_modules.common import PROJECT_ROOT  # noqa: E402  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
+from server.auto_heal_decorator import auto_heal_konflux  # noqa: E402
+from server.tool_registry import ToolRegistry  # noqa: E402
+from server.utils import truncate_output  # noqa: E402
 
-from server.auto_heal_decorator import auto_heal_konflux
-from server.tool_registry import ToolRegistry
-from server.utils import truncate_output
+from .common import DEFAULT_NAMESPACE, run_cmd  # noqa: E402
 
-from .common import DEFAULT_NAMESPACE, run_cmd
+logger = logging.getLogger(__name__)
 
 # ==================== PIPELINE RUNS ====================
 
@@ -203,7 +205,7 @@ async def _konflux_create_release_impl(
         "apiVersion: appstudio.redhat.com/v1alpha1\n"
         "kind: Release\n"
         "metadata:\n"
-        f"  generateName: release-\n"
+        "  generateName: release-\n"
         f"  namespace: {namespace}\n"
         "spec:\n"
         f"  snapshot: {snapshot}\n"
@@ -222,8 +224,8 @@ async def _konflux_create_release_impl(
         if tmp_path:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("OS operation failed: %s", exc)
 
     if not success:
         return f"❌ Failed to create release: {output}"
@@ -253,15 +255,15 @@ async def _konflux_create_release_impl(
                     conditions[-1].get("reason", "Pending") if conditions else "Pending"
                 )
                 return (
-                    f"✅ Release created successfully\n\n"
+                    "✅ Release created successfully\n\n"
                     f"- **Name:** {name}\n"
                     f"- **Snapshot:** {snapshot}\n"
                     f"- **ReleasePlan:** {release_plan}\n"
                     f"- **Status:** {status_str}\n"
                     f"- **Namespace:** {namespace}"
                 )
-        except (json.JSONDecodeError, KeyError, IndexError):
-            pass
+        except (json.JSONDecodeError, KeyError, IndexError) as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     return f"✅ Release created: {output.strip()}\n\nSnapshot: {snapshot}\nReleasePlan: {release_plan}"
 

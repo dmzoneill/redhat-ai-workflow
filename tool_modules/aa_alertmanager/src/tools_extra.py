@@ -4,11 +4,9 @@ Provides 5 tools for Alertmanager silences and status,
 plus 3 Grafana dashboard and annotation tools.
 """
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastmcp import FastMCP
 
@@ -49,26 +47,24 @@ async def get_grafana_config(environment: str) -> tuple[str, str | None]:
     # 1. Try config.json grafana section
     grafana_url = ""
     try:
-        config_path = Path(__file__).parent.parent.parent.parent / "config.json"
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-            grafana_url = (
-                config.get("grafana", {})
-                .get("environments", {})
-                .get(env_key, {})
-                .get("url", "")
-            )
-    except Exception:
-        pass
+        from server.config_manager import config as config_manager
+
+        grafana_url = (
+            (config_manager.get("grafana") or {})
+            .get("environments", {})
+            .get(env_key, {})
+            .get("url", "")
+        )
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     # 2. Fall back to deriving from Prometheus URL
     if not grafana_url:
         try:
             prom_url = get_service_url("prometheus", environment)
             grafana_url = prom_url.replace("prometheus", "grafana")
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.debug("Invalid value encountered: %s", exc)
 
     # 3. Fall back to environment variable
     if not grafana_url:
@@ -78,7 +74,7 @@ async def get_grafana_config(environment: str) -> tuple[str, str | None]:
         raise ValueError(
             f"Grafana URL not configured for {environment}. "
             f"Set GRAFANA_{environment.upper()}_URL, configure grafana in config.json, "
-            f"or ensure Prometheus URL is configured (Grafana URL is derived from it)."
+            "or ensure Prometheus URL is configured (Grafana URL is derived from it)."
         )
 
     # Get token - try grafana-specific config first, fall back to prometheus config

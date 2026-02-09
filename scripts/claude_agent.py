@@ -129,7 +129,7 @@ def _get_available_skills_description() -> str:
     skills = []
     for f in sorted(SKILLS_DIR.glob("*.yaml")):
         try:
-            with open(f) as fp:
+            with open(f, encoding="utf-8") as fp:
                 data = skill_yaml.safe_load(fp)
             name = data.get("name", f.stem)
             desc = data.get("description", "").split("\n")[0][
@@ -1619,7 +1619,7 @@ Please verify the image exists before proceeding."""
 
         # Load and execute the skill
         try:
-            with open(skill_file) as f:
+            with open(skill_file, encoding="utf-8") as f:
                 skill = skill_yaml.safe_load(f)
 
             # Create executor and run

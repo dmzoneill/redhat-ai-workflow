@@ -55,10 +55,6 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 logger = logging.getLogger(__name__)
 
-# GitHub configuration for error reporting (used by skill_engine)
-GITHUB_REPO = "dmzoneill/redhat-ai-workflow"
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
-
 
 async def create_github_issue(
     tool: str,

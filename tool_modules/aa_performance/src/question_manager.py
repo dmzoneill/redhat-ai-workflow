@@ -32,7 +32,7 @@ class QuestionManager:
         """Load questions from file or create from template."""
         if self.questions_file.exists():
             try:
-                with open(self.questions_file) as f:
+                with open(self.questions_file, encoding="utf-8") as f:
                     return json.load(f)
             except Exception as e:
                 logger.error(f"Failed to load questions: {e}")
@@ -46,7 +46,7 @@ class QuestionManager:
         default_questions = []
         if COMPETENCIES_FILE.exists():
             try:
-                with open(COMPETENCIES_FILE) as f:
+                with open(COMPETENCIES_FILE, encoding="utf-8") as f:
                     config = json.load(f)
                     default_questions = config.get("quarterly_questions", {}).get(
                         "default_questions", []
@@ -124,7 +124,7 @@ class QuestionManager:
             data = self.questions_data
 
         self.perf_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.questions_file, "w") as f:
+        with open(self.questions_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
     def get_questions(self) -> list[dict]:
@@ -308,13 +308,13 @@ class QuestionManager:
         # Load events from daily files
         for daily_file in daily_dir.glob("*.json"):
             try:
-                with open(daily_file) as f:
+                with open(daily_file, encoding="utf-8") as f:
                     data = json.load(f)
                     for event in data.get("events", []):
                         if event.get("id") in evidence_ids:
                             events.append(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         return events
 

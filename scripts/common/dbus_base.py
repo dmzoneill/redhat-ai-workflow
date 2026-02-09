@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # Re-export everything from the new location for backward compatibility
-from services.base.dbus import (
+from services.base.dbus import (  # noqa: E402
     DBUS_AVAILABLE,
     DaemonClient,
     DaemonDBusBase,

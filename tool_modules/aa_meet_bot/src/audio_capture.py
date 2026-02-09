@@ -158,7 +158,9 @@ class PulseAudioCapture:
         self.chunk_samples = int(sample_rate * chunk_ms / 1000)
         self.sink_input_index = sink_input_index
 
-        self._process: Optional[asyncio.subprocess.Process] = None  # pylint: disable=no-member
+        self._process: Optional[asyncio.subprocess.Process] = (
+            None  # pylint: disable=no-member
+        )
         self._process_pid: Optional[int] = None  # Track PID for cleanup
         self._running = False
         self._buffer = RingBuffer(max_seconds=30.0, sample_rate=sample_rate)
@@ -630,7 +632,7 @@ class RealtimeSTTPipeline:
                                 await self._transcribe_buffer(is_final=True)
                             else:
                                 logger.info(
-                                    f"🎧 NPU STT: Skipping short speech"
+                                    "🎧 NPU STT: Skipping short speech"
                                     f" ({speech_duration:.1f}s < {self.min_speech_duration}s)"
                                 )
 

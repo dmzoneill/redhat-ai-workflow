@@ -116,7 +116,7 @@ def load_sprint_state() -> SprintState:
         return SprintState(last_updated=datetime.now().isoformat())
 
     try:
-        with open(SPRINT_STATE_FILE_V2) as f:
+        with open(SPRINT_STATE_FILE_V2, encoding="utf-8") as f:
             data = json.load(f)
 
         if not data:
@@ -198,7 +198,7 @@ def save_sprint_state(state: SprintState) -> None:
     existing_sprint = {}
     if SPRINT_STATE_FILE_V2.exists():
         try:
-            with open(SPRINT_STATE_FILE_V2) as f:
+            with open(SPRINT_STATE_FILE_V2, encoding="utf-8") as f:
                 existing_sprint = json.load(f)
         except (json.JSONDecodeError, IOError):
             existing_sprint = {}
@@ -267,7 +267,7 @@ def save_sprint_state(state: SprintState) -> None:
     }
 
     # Write sprint state directly to its own file
-    with open(SPRINT_STATE_FILE_V2, "w") as f:
+    with open(SPRINT_STATE_FILE_V2, "w", encoding="utf-8") as f:
         json.dump(sprint_data, f, indent=2)
 
 
@@ -284,7 +284,7 @@ def load_sprint_history(limit: int = 10) -> list[CompletedSprint]:
         return []
 
     try:
-        with open(SPRINT_HISTORY_FILE) as f:
+        with open(SPRINT_HISTORY_FILE, encoding="utf-8") as f:
             data = json.load(f)
 
         sprints = []
@@ -417,7 +417,7 @@ def save_sprint_to_history(sprint: CompletedSprint) -> None:
         "lastUpdated": datetime.now().isoformat(),
     }
 
-    with open(SPRINT_HISTORY_FILE, "w") as f:
+    with open(SPRINT_HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 

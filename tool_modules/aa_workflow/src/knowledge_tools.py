@@ -87,7 +87,7 @@ def _load_knowledge(persona: str, project: str) -> dict | None:
         return None
 
     try:
-        with open(knowledge_path) as f:
+        with open(knowledge_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
     except Exception as e:
         logger.warning(f"Failed to load knowledge {knowledge_path}: {e}")
@@ -112,7 +112,7 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
         knowledge["metadata"]["project"] = project
         knowledge["metadata"]["persona"] = persona
 
-        with open(knowledge_path, "w") as f:
+        with open(knowledge_path, "w", encoding="utf-8") as f:
             yaml.dump(knowledge, f, default_flow_style=False, sort_keys=False)
 
         # Log notifications
@@ -332,7 +332,7 @@ def _scan_project_structure(project_path: Path) -> dict:
 
     if "package.json" in result["config_files"]:
         try:
-            with open(project_path / "package.json") as f:
+            with open(project_path / "package.json", encoding="utf-8") as f:
                 pkg = json.load(f)
             deps = list(pkg.get("dependencies", {}).keys())[:20]
             result["dependencies"] = deps
@@ -832,7 +832,7 @@ async def _knowledge_query_impl(
             TextContent(
                 type="text",
                 text=f"❌ Section not found: {section}\n\n"
-                f"Available sections: metadata, architecture, patterns, gotchas, learned_from_tasks",
+                "Available sections: metadata, architecture, patterns, gotchas, learned_from_tasks",
             )
         ]
 
@@ -931,7 +931,7 @@ async def _knowledge_learn_impl(
     return [
         TextContent(
             type="text",
-            text=f"✅ **Learning recorded!**\n\n"
+            text="✅ **Learning recorded!**\n\n"
             f"**Project:** {project}\n"
             f"**Persona:** {persona}\n"
             f"**Section:** {section}\n"
@@ -974,7 +974,7 @@ async def _knowledge_list_impl() -> list[TextContent]:
                 project = kf.stem
                 # Load to get confidence
                 try:
-                    with open(kf) as f:
+                    with open(kf, encoding="utf-8") as f:
                         data = yaml.safe_load(f) or {}
                     confidence = data.get("metadata", {}).get("confidence", 0)
                     confidence_emoji = (

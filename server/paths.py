@@ -12,6 +12,11 @@ from pathlib import Path
 # Base directory for all state
 AA_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
 
+# Cursor IDE workspace storage directory
+CURSOR_WORKSPACE_STORAGE = (
+    Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
+)
+
 
 def ensure_config_dir() -> None:
     """Create the config directory if it doesn't exist.
@@ -87,6 +92,7 @@ CRON_HISTORY_FILE = AA_CONFIG_DIR / "cron_history.json"
 
 SKILL_EXECUTION_FILE = AA_CONFIG_DIR / "skill_execution.json"
 AGENT_STATS_FILE = AA_CONFIG_DIR / "agent_stats.json"
+INFERENCE_STATS_FILE = AA_CONFIG_DIR / "inference_stats.json"
 NOTIFICATIONS_FILE = AA_CONFIG_DIR / "notifications.json"
 
 # =============================================================================

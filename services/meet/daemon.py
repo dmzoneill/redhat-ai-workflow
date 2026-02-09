@@ -523,6 +523,98 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def _build_meet_state(self, status: dict, calendars: list) -> dict:
+        """Build the meet state dict from scheduler status and calendars.
+
+        This is used by both _handle_get_state (D-Bus) and _write_state (file).
+        """
+        meet_state = {
+            "schedulerRunning": self.is_running,
+            "upcomingMeetings": [
+                {
+                    "id": m.get("event_id", ""),
+                    "title": m.get("title", "Untitled"),
+                    "url": m.get("meet_url", ""),
+                    "startTime": m.get("start", ""),
+                    "endTime": m.get("end", ""),
+                    "organizer": m.get("organizer", ""),
+                    "status": m.get("status", "scheduled"),
+                    "botMode": m.get("bot_mode", "notes"),
+                    "calendarName": m.get("calendar_name", ""),
+                }
+                for m in status.get("upcoming_meetings", [])
+            ],
+            "currentMeetings": [
+                {
+                    "id": m.get("event_id", ""),
+                    "sessionId": m.get("event_id", ""),
+                    "title": m.get("title", "Untitled"),
+                    "url": m.get("meet_url", ""),
+                    "startTime": m.get("start", ""),
+                    "endTime": m.get("end", ""),
+                    "organizer": m.get("organizer", ""),
+                    "status": "joined",
+                    "botMode": m.get("bot_mode", "notes"),
+                    "screenshotPath": m.get("screenshot_path"),
+                    "screenshotUpdated": m.get("screenshot_updated"),
+                }
+                for m in status.get("current_meetings", [])
+            ],
+            "monitoredCalendars": [
+                {"id": c.calendar_id, "name": c.name, "enabled": c.enabled}
+                for c in calendars
+            ],
+            "lastPoll": status.get("last_poll"),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        self._add_countdown(meet_state)
+        return meet_state
+
+    def _add_countdown(self, meet_state: dict) -> None:
+        """Add countdown info for the next upcoming meeting to meet_state."""
+        upcoming = meet_state.get("upcomingMeetings", [])
+        if not upcoming:
+            return
+
+        next_meeting = None
+        for m in upcoming:
+            if m.get("status") in ("scheduled", "approved", "joining"):
+                next_meeting = m
+                break
+
+        if not next_meeting:
+            return
+
+        meet_state["nextMeeting"] = next_meeting
+        try:
+            start_str = next_meeting.get("startTime", "")
+            if not start_str:
+                return
+            start_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            now = (
+                datetime.now(start_time.tzinfo) if start_time.tzinfo else datetime.now()
+            )
+            total_seconds = int((start_time - now).total_seconds())
+            meet_state["countdownSeconds"] = max(0, total_seconds)
+
+            if total_seconds <= 0:
+                meet_state["countdown"] = "Starting now"
+            elif total_seconds < 60:
+                meet_state["countdown"] = f"{total_seconds}s"
+            elif total_seconds < 3600:
+                meet_state["countdown"] = f"{total_seconds // 60}m"
+            elif total_seconds < 86400:
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                meet_state["countdown"] = f"{hours}h {minutes}m"
+            else:
+                days = total_seconds // 86400
+                hours = (total_seconds % 86400) // 3600
+                meet_state["countdown"] = f"{days}d {hours}h"
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
+
     async def _handle_get_state(self, **kwargs) -> dict:
         """Get full meet state for UI.
 
@@ -534,94 +626,9 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return {"success": False, "error": "Scheduler not initialized"}
 
         try:
-            # Get current status from scheduler
             status = await self._scheduler.get_status()
             calendars = await self._scheduler.list_calendars()
-
-            # Build meet state (same structure as _write_state)
-            meet_state = {
-                "schedulerRunning": self.is_running,
-                "upcomingMeetings": [
-                    {
-                        "id": m.get("event_id", ""),
-                        "title": m.get("title", "Untitled"),
-                        "url": m.get("meet_url", ""),
-                        "startTime": m.get("start", ""),
-                        "endTime": m.get("end", ""),
-                        "organizer": m.get("organizer", ""),
-                        "status": m.get("status", "scheduled"),
-                        "botMode": m.get("bot_mode", "notes"),
-                        "calendarName": m.get("calendar_name", ""),
-                    }
-                    for m in status.get("upcoming_meetings", [])
-                ],
-                "currentMeetings": [
-                    {
-                        "id": m.get("event_id", ""),
-                        "sessionId": m.get("event_id", ""),
-                        "title": m.get("title", "Untitled"),
-                        "url": m.get("meet_url", ""),
-                        "startTime": m.get("start", ""),
-                        "endTime": m.get("end", ""),
-                        "organizer": m.get("organizer", ""),
-                        "status": "joined",
-                        "botMode": m.get("bot_mode", "notes"),
-                        "screenshotPath": m.get("screenshot_path"),
-                        "screenshotUpdated": m.get("screenshot_updated"),
-                    }
-                    for m in status.get("current_meetings", [])
-                ],
-                "monitoredCalendars": [
-                    {"id": c.calendar_id, "name": c.name, "enabled": c.enabled}
-                    for c in calendars
-                ],
-                "lastPoll": status.get("last_poll"),
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Calculate countdown to next meeting
-            upcoming = meet_state["upcomingMeetings"]
-            if upcoming:
-                next_meeting = None
-                for m in upcoming:
-                    if m.get("status") in ("scheduled", "approved", "joining"):
-                        next_meeting = m
-                        break
-
-                if next_meeting:
-                    meet_state["nextMeeting"] = next_meeting
-                    try:
-                        start_str = next_meeting.get("startTime", "")
-                        if start_str:
-                            start_time = datetime.fromisoformat(
-                                start_str.replace("Z", "+00:00")
-                            )
-                            now = (
-                                datetime.now(start_time.tzinfo)
-                                if start_time.tzinfo
-                                else datetime.now()
-                            )
-                            delta = start_time - now
-                            total_seconds = int(delta.total_seconds())
-                            meet_state["countdownSeconds"] = max(0, total_seconds)
-
-                            if total_seconds <= 0:
-                                meet_state["countdown"] = "Starting now"
-                            elif total_seconds < 60:
-                                meet_state["countdown"] = f"{total_seconds}s"
-                            elif total_seconds < 3600:
-                                meet_state["countdown"] = f"{total_seconds // 60}m"
-                            elif total_seconds < 86400:
-                                hours = total_seconds // 3600
-                                minutes = (total_seconds % 3600) // 60
-                                meet_state["countdown"] = f"{hours}h {minutes}m"
-                            else:
-                                days = total_seconds // 86400
-                                hours = (total_seconds % 86400) // 3600
-                                meet_state["countdown"] = f"{days}d {hours}h"
-                    except Exception:
-                        pass
-
+            meet_state = await self._build_meet_state(status, calendars)
             return {"success": True, "state": meet_state}
 
         except Exception as e:
@@ -772,93 +779,9 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return
 
         try:
-            # Get current status from scheduler
             status = await self._scheduler.get_status()
             calendars = await self._scheduler.list_calendars()
-
-            # Build meet state
-            meet_state = {
-                "schedulerRunning": self.is_running,
-                "upcomingMeetings": [
-                    {
-                        "id": m.get("event_id", ""),
-                        "title": m.get("title", "Untitled"),
-                        "url": m.get("meet_url", ""),
-                        "startTime": m.get("start", ""),
-                        "endTime": m.get("end", ""),
-                        "organizer": m.get("organizer", ""),
-                        "status": m.get("status", "scheduled"),
-                        "botMode": m.get("bot_mode", "notes"),
-                        "calendarName": m.get("calendar_name", ""),
-                    }
-                    for m in status.get("upcoming_meetings", [])
-                ],
-                "currentMeetings": [
-                    {
-                        "id": m.get("event_id", ""),
-                        "sessionId": m.get("event_id", ""),
-                        "title": m.get("title", "Untitled"),
-                        "url": m.get("meet_url", ""),
-                        "startTime": m.get("start", ""),
-                        "endTime": m.get("end", ""),
-                        "organizer": m.get("organizer", ""),
-                        "status": "joined",
-                        "botMode": m.get("bot_mode", "notes"),
-                        "screenshotPath": m.get("screenshot_path"),
-                        "screenshotUpdated": m.get("screenshot_updated"),
-                    }
-                    for m in status.get("current_meetings", [])
-                ],
-                "monitoredCalendars": [
-                    {"id": c.calendar_id, "name": c.name, "enabled": c.enabled}
-                    for c in calendars
-                ],
-                "lastPoll": status.get("last_poll"),
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Calculate countdown to next meeting
-            upcoming = meet_state["upcomingMeetings"]
-            if upcoming:
-                next_meeting = None
-                for m in upcoming:
-                    if m.get("status") in ("scheduled", "approved", "joining"):
-                        next_meeting = m
-                        break
-
-                if next_meeting:
-                    meet_state["nextMeeting"] = next_meeting
-                    try:
-                        start_str = next_meeting.get("startTime", "")
-                        if start_str:
-                            start_time = datetime.fromisoformat(
-                                start_str.replace("Z", "+00:00")
-                            )
-                            now = (
-                                datetime.now(start_time.tzinfo)
-                                if start_time.tzinfo
-                                else datetime.now()
-                            )
-                            delta = start_time - now
-                            total_seconds = int(delta.total_seconds())
-                            meet_state["countdownSeconds"] = max(0, total_seconds)
-
-                            if total_seconds <= 0:
-                                meet_state["countdown"] = "Starting now"
-                            elif total_seconds < 60:
-                                meet_state["countdown"] = f"{total_seconds}s"
-                            elif total_seconds < 3600:
-                                meet_state["countdown"] = f"{total_seconds // 60}m"
-                            elif total_seconds < 86400:
-                                hours = total_seconds // 3600
-                                minutes = (total_seconds % 3600) // 60
-                                meet_state["countdown"] = f"{hours}h {minutes}m"
-                            else:
-                                days = total_seconds // 86400
-                                hours = (total_seconds % 86400) // 3600
-                                meet_state["countdown"] = f"{days}d {hours}h"
-                    except Exception:
-                        pass
+            meet_state = await self._build_meet_state(status, calendars)
 
             # Write atomically
             MEET_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -872,8 +795,8 @@ class MeetDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             except Exception:
                 try:
                     Path(temp_path).unlink()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("OS operation failed: %s", exc)
                 raise
 
         except Exception as e:

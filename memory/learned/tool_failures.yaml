@@ -1,0 +1,721 @@
+failures:
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:25:56.291459'
+  tool: some_tool
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:33.798079'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:34.194635'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:27:35.504136'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:27:35.577329'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:35.633381'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:27:39.955542'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:27:40.116191'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:40.172252'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:27:40.227721'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:43.507255'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:27:43.581829'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:38.309391'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:38.751088'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:29:39.958630'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:29:40.028346'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:40.078497'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:29:44.338340'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:29:44.500711'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:44.555882'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:29:44.611176'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:48.004350'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:29:48.081176'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:44.197013'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:44.632546'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:31:45.969890'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:31:46.051973'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:46.111022'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:31:50.435971'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:31:50.631105'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:50.689179'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:31:50.743253'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:54.041915'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:31:54.118966'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:41.974166'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:42.531834'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:34:43.740502'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:34:43.814592'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:43.871301'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:34:48.143800'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:34:48.303028'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:48.355617'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T00:34:48.411647'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:51.693548'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T00:34:51.770209'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:25.961737'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:36:26.029162'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:26.095844'
+  tool: some_tool
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:26.297959'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:36:26.662301'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:26.778958'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:36:26.995794'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:29.098935'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:36:29.255797'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:36:29.520363'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:33.516275'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:38.741408'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:39:43.341602'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:39:43.407005'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:43.456827'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:39:47.762020'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:39:48.029825'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:48.105588'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:39:48.165480'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:51.566250'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:39:51.704977'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:41:47.260020'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:41:53.247138'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:41:54.860953'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:41:54.930687'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:41:54.985003'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:41:59.910303'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:42:00.193315'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:42:00.295433'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:42:00.378937'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:42:03.833970'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:42:03.976501'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:45:59.684835'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:45:59.788917'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:45:59.870991'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:45:59.953576'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:46:00.314338'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:46:00.464621'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: null
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:51:11.860377'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:46:04.759151'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:46:31.697201'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:45.821650'
+  tool: kubectl_get_pods
+- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
+    - 401 must authenticate...'
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:46.160318'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:48:46.410677'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401 error
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:48:46.562858'
+  tool: kubectl_get_pods
+- error_snippet: no route to host
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:46.674998'
+  tool: some_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:48:47.654265'
+  tool: target_tool
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:47.769995'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:48:47.884856'
+  tool: t
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:48:49.181956'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:49.408598'
+  tool: kubectl_get_pods
+- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
+    host api.example.com...'
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:48:49.570852'
+  tool: t
+- error_snippet: unauthorized - 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-08T11:51:11.721431'
+  tool: kubectl_get_pods
+- error_snippet: unauthorized 401
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-08T11:51:11.849577'
+  tool: kubectl_get_pods
+stats:
+  auto_fixed: 167
+  manual_required: 201
+  total_failures: 368

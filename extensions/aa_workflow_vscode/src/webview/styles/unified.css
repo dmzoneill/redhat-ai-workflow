@@ -1792,10 +1792,10 @@ select {
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
-  height: 120px;
-  padding: 16px 8px 8px;
+  padding: 12px 12px 8px;
   background: var(--bg-secondary);
   border-radius: 8px;
+  overflow: hidden;
 }
 
 .history-bar-container {
@@ -1828,12 +1828,14 @@ select {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-primary);
+  line-height: 1;
 }
 
 .history-bar-label {
   font-size: 0.7rem;
   color: var(--text-muted);
   text-transform: uppercase;
+  line-height: 1;
 }
 
 .history-legend {

@@ -188,7 +188,7 @@ class MemoryNotificationBackend(NotificationBackend):
             # Load existing notifications
             notifications = []
             if self.notifications_file.exists():
-                with open(self.notifications_file) as f:
+                with open(self.notifications_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                     notifications = data.get("notifications", [])
 
@@ -209,7 +209,7 @@ class MemoryNotificationBackend(NotificationBackend):
 
             # Save
             self.notifications_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.notifications_file, "w") as f:
+            with open(self.notifications_file, "w", encoding="utf-8") as f:
                 yaml.dump(
                     {"notifications": notifications},
                     f,
@@ -359,7 +359,7 @@ class NotificationEngine:
 
         try:
             if memory_backend.notifications_file.exists():
-                with open(memory_backend.notifications_file) as f:
+                with open(memory_backend.notifications_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                     notifications = data.get("notifications", [])
                     return notifications[-limit:]

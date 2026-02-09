@@ -246,7 +246,7 @@ def process_claude_sessions():
         for session_file in session_files:
             session_count += 1
             try:
-                with open(session_file, "r", errors="ignore") as f:
+                with open(session_file, "r", errors="ignore", encoding="utf-8") as f:
                     for _line_num, line in enumerate(f):
                         line = line.strip()
                         if not line:
@@ -340,7 +340,7 @@ def process_gemini_sessions():
 
     for session_file in session_files:
         try:
-            with open(session_file, "r", errors="ignore") as f:
+            with open(session_file, "r", errors="ignore", encoding="utf-8") as f:
                 data = json.load(f)
 
             messages = data.get("messages", [])
@@ -408,7 +408,7 @@ def process_codex_sessions():
 
     for session_file in session_files:
         try:
-            with open(session_file, "r", errors="ignore") as f:
+            with open(session_file, "r", errors="ignore", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:

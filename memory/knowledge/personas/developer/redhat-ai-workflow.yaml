@@ -1,0 +1,250 @@
+metadata:
+  project: redhat-ai-workflow
+  persona: developer
+  last_updated: '2026-02-09T23:30:16.345893'
+  last_scanned: '2026-02-07T20:58:17.876220'
+  confidence: 1.0
+  auto_generated: true
+architecture:
+  overview: "<picture>\n  <source media=\"(prefers-color-scheme: dark)\" srcset=\"\
+    https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Your%20AI-Powered%20Development%20Command%20Center&descSize=20&descAlignY=55\"\
+    >\n  <img src=\"https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=t"
+  key_modules:
+  - path: services/
+    purpose: Services module
+    notes: Auto-detected from project structure
+  - path: tests/
+    purpose: Tests module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies:
+  - mcp
+  - fastmcp
+  - pyyaml
+  - jinja2
+  - python-dotenv
+  - pydantic
+  - httpx
+  - aiosqlite
+  - dbus-next
+  - anthropic
+  - google-api-python-client
+  - google-auth-httplib2
+  - google-auth-oauthlib
+  - crc-bonfire
+  - apscheduler
+  - croniter
+  - websockets
+  - pycookiecheat
+  - lancedb
+  - sentence-transformers
+patterns:
+  coding:
+  - pattern: Python project
+    location: pyproject.toml
+  testing:
+  - pattern: pytest test suite
+    example: pytest tests/
+  deployment: []
+gotchas: []
+learned_from_tasks:
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work
+- date: '2026-02-09'
+  task: AAP-999
+  learning: Started work on AAP-999
+  skill: start_work

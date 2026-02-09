@@ -92,7 +92,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         # Load messages
         messages = []
         try:
-            with open(corpus_file) as f:
+            with open(corpus_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line:
@@ -125,7 +125,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         if save_profile:
             STYLE_DIR.mkdir(parents=True, exist_ok=True)
             profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
-            with open(profile_file, "w") as f:
+            with open(profile_file, "w", encoding="utf-8") as f:
                 yaml.dump(profile, f, default_flow_style=False, allow_unicode=True)
 
         # Generate summary
@@ -137,24 +137,24 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         signoffs = profile.get("signoffs", {})
 
         summary = (
-            f"✅ Style analysis complete\n\n"
+            "✅ Style analysis complete\n\n"
             f"**Messages analyzed:** {len(messages):,}\n\n"
-            f"## Vocabulary\n"
+            "## Vocabulary\n"
             f"- Top words: {', '.join(vocab.get('top_words', [])[:10])}\n"
             f"- Unique phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n"
             f"- Filler words: {', '.join(vocab.get('filler_words', [])[:5])}\n\n"
-            f"## Sentence Patterns\n"
+            "## Sentence Patterns\n"
             f"- Average length: {sentence.get('avg_length', 0):.1f} words\n"
             f"- Exclamation rate: {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%}\n"
             f"- Question rate: {sentence.get('punctuation', {}).get('question_rate', 0):.0%}\n"
             f"- Capitalization: {sentence.get('capitalization', 'unknown')}\n\n"
-            f"## Tone\n"
+            "## Tone\n"
             f"- Formality: {tone.get('formality', 0):.0%}\n"
             f"- Directness: {tone.get('directness', 0):.0%}\n\n"
-            f"## Emoji\n"
+            "## Emoji\n"
             f"- Usage rate: {emoji_data.get('frequency', 0):.0%}\n"
             f"- Favorites: {', '.join(emoji_data.get('favorites', [])[:5])}\n\n"
-            f"## Greetings & Signoffs\n"
+            "## Greetings & Signoffs\n"
             f"- Common greetings: {', '.join(greetings.get('common', [])[:5])}\n"
             f"- Common signoffs: {', '.join(signoffs.get('common', [])[:5])}\n"
         )
@@ -184,7 +184,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 "Run `style_analyze` first to create a profile."
             )
 
-        with open(profile_file) as f:
+        with open(profile_file, encoding="utf-8") as f:
             profile = yaml.safe_load(f)
 
         return f"**Style Profile: {profile_name}**\n\n```yaml\n{yaml.dump(profile, default_flow_style=False)}\n```"
@@ -221,14 +221,14 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 "Run `style_analyze` first to create a profile."
             )
 
-        with open(profile_file) as f:
+        with open(profile_file, encoding="utf-8") as f:
             profile = yaml.safe_load(f)
 
         # Load corpus for examples
         corpus_file = STYLE_DIR / "slack_corpus.jsonl"
         examples = []
         if corpus_file.exists():
-            with open(corpus_file) as f:
+            with open(corpus_file, encoding="utf-8") as f:
                 all_messages = [json.loads(line) for line in f if line.strip()]
 
             # Select diverse examples
@@ -246,20 +246,20 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         yaml_file = PERSONAS_DIR / f"{persona_name}.yaml"
         md_file = PERSONAS_DIR / f"{persona_name}.md"
 
-        with open(yaml_file, "w") as f:
+        with open(yaml_file, "w", encoding="utf-8") as f:
             yaml.dump(persona_yaml, f, default_flow_style=False, allow_unicode=True)
 
-        with open(md_file, "w") as f:
+        with open(md_file, "w", encoding="utf-8") as f:
             f.write(persona_md)
 
         return (
             f"✅ Persona generated: {persona_name}\n\n"
-            f"**Files created:**\n"
+            "**Files created:**\n"
             f"- `{yaml_file}` - Persona configuration\n"
             f"- `{md_file}` - Style guide with {len(examples)} examples\n\n"
-            f"**To use:**\n"
+            "**To use:**\n"
             f'```\npersona_load("{persona_name}")\n```\n\n'
-            f"**To test:**\n"
+            "**To test:**\n"
             f'```\npersona_test_style("{persona_name}")\n```'
         )
 
@@ -292,7 +292,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         if not profile_file.exists():
             return f"❌ Style profile not found: {persona_name}"
 
-        with open(profile_file) as f:
+        with open(profile_file, encoding="utf-8") as f:
             profile = yaml.safe_load(f)
 
         # Default test prompts
@@ -311,7 +311,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         corpus_file = STYLE_DIR / "slack_corpus.jsonl"
         real_examples = []
         if corpus_file.exists():
-            with open(corpus_file) as f:
+            with open(corpus_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         msg = json.loads(line)
@@ -386,7 +386,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         if not persona_file.exists():
             return f"❌ Persona not found: {persona_name}"
 
-        with open(persona_file) as f:
+        with open(persona_file, encoding="utf-8") as f:
             yaml.safe_load(f)  # Validate persona exists and is valid
 
         changes = []
@@ -419,7 +419,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             refinement_log = STYLE_DIR / f"{persona_name}_refinements.yaml"
             refinements = []
             if refinement_log.exists():
-                with open(refinement_log) as f:
+                with open(refinement_log, encoding="utf-8") as f:
                     refinements = yaml.safe_load(f) or []
 
             refinements.append(
@@ -431,7 +431,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 }
             )
 
-            with open(refinement_log, "w") as f:
+            with open(refinement_log, "w", encoding="utf-8") as f:
                 yaml.dump(refinements, f, default_flow_style=False)
 
             changes.append("Logged feedback to refinement history")
@@ -448,7 +448,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
         return (
             f"✅ Persona refined: {persona_name}\n\n"
-            f"**Changes:**\n"
+            "**Changes:**\n"
             + "\n".join(f"- {c}" for c in changes)
             + f'\n\n**To re-test:** `persona_test_style("{persona_name}")`'
         )

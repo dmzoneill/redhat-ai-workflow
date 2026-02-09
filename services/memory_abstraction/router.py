@@ -92,22 +92,24 @@ class QueryRouter:
         """Route to explicitly specified sources."""
         result = []
 
-        for filter in filters:
-            info = ADAPTER_MANIFEST.get_adapter(filter.name)
+        for source_filter in filters:
+            info = ADAPTER_MANIFEST.get_adapter(source_filter.name)
             if not info:
-                logger.warning(f"Unknown adapter: {filter.name}")
+                logger.warning(f"Unknown adapter: {source_filter.name}")
                 continue
 
             if capability not in info.capabilities:
-                logger.warning(f"Adapter {filter.name} doesn't support {capability}")
+                logger.warning(
+                    f"Adapter {source_filter.name} doesn't support {capability}"
+                )
                 continue
 
             # Check health (cached)
-            if not await self._is_healthy(filter.name):
-                logger.warning(f"Adapter {filter.name} is unhealthy, skipping")
+            if not await self._is_healthy(source_filter.name):
+                logger.warning(f"Adapter {source_filter.name} is unhealthy, skipping")
                 continue
 
-            result.append((info, filter))
+            result.append((info, source_filter))
 
         return result
 
@@ -139,8 +141,8 @@ class QueryRouter:
                 continue
 
             # Create default filter for this source
-            filter = SourceFilter(name=source_name)
-            result.append((info, filter))
+            source_filter = SourceFilter(name=source_name)
+            result.append((info, source_filter))
 
         # Sort by priority (highest first)
         result.sort(key=lambda x: x[0].priority, reverse=True)

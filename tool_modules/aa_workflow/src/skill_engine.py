@@ -47,8 +47,8 @@ class AttrDict(dict):
     def __getattr__(self, key):
         try:
             return self[key]
-        except KeyError:
-            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
+        except KeyError as e:
+            raise AttributeError(f"'AttrDict' object has no attribute '{key}'") from e
 
     def __setattr__(self, key, value):
         self[key] = value
@@ -56,8 +56,8 @@ class AttrDict(dict):
     def __delattr__(self, key):
         try:
             del self[key]
-        except KeyError:
-            raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
+        except KeyError as e:
+            raise AttributeError(f"'AttrDict' object has no attribute '{key}'") from e
 
 
 # Layer 5: Usage Pattern Learning integration
@@ -120,7 +120,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     try:
         patterns_file = SKILLS_DIR.parent / "memory" / "learned" / "patterns.yaml"
         if patterns_file.exists():
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns = yaml.safe_load(f) or {}
 
             # Check all pattern categories
@@ -148,7 +148,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
         # Check tool_fixes.yaml
         fixes_file = SKILLS_DIR.parent / "memory" / "learned" / "tool_fixes.yaml"
         if fixes_file.exists():
-            with open(fixes_file) as f:
+            with open(fixes_file, encoding="utf-8") as f:
                 fixes = yaml.safe_load(f) or {}
 
             for fix in fixes.get("tool_fixes", []):
@@ -173,8 +173,8 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
                             }
                         )
 
-    except Exception:
-        pass
+    except (yaml.YAMLError, OSError) as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     return matches
 
@@ -558,7 +558,7 @@ class SkillExecutor:
                     Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
                 )
                 debug_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(debug_file, "a") as f:
+                with open(debug_file, "a", encoding="utf-8") as f:
                     from datetime import datetime
 
                     skill_name = skill.get("name", "unknown")
@@ -576,12 +576,12 @@ class SkillExecutor:
                         Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
                     )
                     debug_file.parent.mkdir(parents=True, exist_ok=True)
-                    with open(debug_file, "a") as f:
+                    with open(debug_file, "a", encoding="utf-8") as f:
                         f.write(
                             f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n"
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
         # Layer 5: Initialize usage pattern learner
         self.usage_learner = None
@@ -652,7 +652,7 @@ class SkillExecutor:
             if not patterns_file.exists():
                 return None, None
 
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns_data = yaml.safe_load(f) or {}
 
             # Check each category for matches
@@ -877,7 +877,7 @@ class SkillExecutor:
                 return
 
             # Atomic read-modify-write with file locking
-            with open(patterns_file, "r+") as f:
+            with open(patterns_file, "r+", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
                 try:
@@ -1032,7 +1032,7 @@ class SkillExecutor:
             if not patterns_file.exists():
                 return None
 
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns_data = yaml.safe_load(f) or {}
 
             error_patterns = patterns_data.get("error_patterns", [])
@@ -1050,16 +1050,15 @@ class SkillExecutor:
                     meaning = pattern.get("meaning", "")
                     commands = pattern.get("commands", [])
 
-                    suggestion = f"\n   💡 **Known pattern: {pattern.get('pattern')}**"
+                    parts = [f"\n   💡 **Known pattern: {pattern.get('pattern')}**"]
                     if meaning:
-                        suggestion += f"\n   *{meaning}*"
+                        parts.append(f"\n   *{meaning}*")
                     if fix:
-                        suggestion += f"\n   **Fix:** {fix}"
+                        parts.append(f"\n   **Fix:** {fix}")
                     if commands:
-                        suggestion += "\n   **Try:**"
-                        for cmd in commands[:3]:
-                            suggestion += f"\n   - `{cmd}`"
-                    return suggestion
+                        parts.append("\n   **Try:**")
+                        parts.extend(f"\n   - `{cmd}`" for cmd in commands[:3])
+                    return "".join(parts)
 
             return None
         except Exception as e:
@@ -1230,7 +1229,7 @@ class SkillExecutor:
 
     def _handle_skip_action(self, error_info: dict, step_name: str):
         """Handle skip action for interactive recovery."""
-        print(f"\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
+        print("\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
 
         self.error_recovery.log_fix_attempt(
             error_info, action="skip", success=False, details="User chose to skip"
@@ -1290,8 +1289,8 @@ class SkillExecutor:
                 from scripts.common import memory as memory_helpers
 
                 memory_helper = memory_helpers
-            except ImportError:
-                pass
+            except ImportError as exc:
+                logger.debug("Optional import not available: %s", exc)
 
             self.error_recovery = SkillErrorRecovery(memory_helper=memory_helper)
             return True
@@ -1371,7 +1370,7 @@ class SkillExecutor:
                 if not skill_file.exists():
                     return {"success": False, "error": f"Skill not found: {skill_name}"}
 
-                with open(skill_file) as f:
+                with open(skill_file, encoding="utf-8") as f:
                     nested_skill = yaml.safe_load(f)
 
                 # Create a new executor for the nested skill
@@ -1646,8 +1645,8 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
             return {"success": False, "error": str(e)}
 
     async def _load_and_execute_module_tool(
@@ -1656,6 +1655,7 @@ class SkillExecutor:
         """Load a tool module and execute the specified tool."""
         import importlib.util
         import time
+        import types
 
         self._debug(f"  → Loading module: {module}")
         self._debug(f"  → TOOL_MODULES_DIR: {TOOL_MODULES_DIR}")
@@ -1675,12 +1675,44 @@ class SkillExecutor:
 
         try:
             temp_server = FastMCP(f"skill-{module}")
-            spec = importlib.util.spec_from_file_location(f"skill_{module}", tools_file)
-            if spec is None or spec.loader is None:
-                return {"success": False, "error": f"Could not load: {module}"}
 
-            loaded_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(loaded_module)
+            # Set up parent package chain so relative imports work
+            # (e.g., "from .common import run_glab" in aa_gitlab/src/tools_basic.py)
+            # Without this, modules loaded via spec_from_file_location have no
+            # __package__ context and relative imports fail with:
+            # "attempted relative import with no known parent package"
+            pkg_name = f"tool_modules.aa_{module}.src"
+            parts = pkg_name.split(".")
+            for i in range(1, len(parts) + 1):
+                partial = ".".join(parts[:i])
+                if partial not in sys.modules:
+                    stub = types.ModuleType(partial)
+                    stub.__package__ = partial
+                    stub.__path__ = [
+                        str(TOOL_MODULES_DIR.parent / partial.replace(".", "/"))
+                    ]
+                    sys.modules[partial] = stub
+
+            full_module_name = f"{pkg_name}.{tools_file.stem}"
+
+            # Reuse already-loaded modules to preserve in-memory state
+            # (e.g. HTTP sessions stored in module-level dicts).
+            # Without this, each skill step re-executes the module which
+            # resets module globals like _http_sessions = {}.
+            if full_module_name in sys.modules:
+                loaded_module = sys.modules[full_module_name]
+                self._debug(f"  → Reusing already-loaded module: {full_module_name}")
+            else:
+                spec = importlib.util.spec_from_file_location(
+                    full_module_name, tools_file
+                )
+                if spec is None or spec.loader is None:
+                    return {"success": False, "error": f"Could not load: {module}"}
+
+                loaded_module = importlib.util.module_from_spec(spec)
+                loaded_module.__package__ = pkg_name
+                sys.modules[full_module_name] = loaded_module
+                spec.loader.exec_module(loaded_module)
 
             if hasattr(loaded_module, "register_tools"):
                 loaded_module.register_tools(temp_server)
@@ -1704,8 +1736,8 @@ class SkillExecutor:
             try:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, False, 0)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
             return {
                 "success": False,
                 "error": str(e),
@@ -1784,8 +1816,8 @@ class SkillExecutor:
                                 agent_stats.record_tool_call(
                                     tool_name, True, duration_ms
                                 )
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                logger.debug("Suppressed error: %s", exc)
 
                             return self._format_tool_result(retry_result, duration)
                         except Exception as retry_e:
@@ -1961,7 +1993,7 @@ class SkillExecutor:
 
             # Load or create
             if failures_file.exists():
-                with open(failures_file) as f:
+                with open(failures_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
             else:
                 data = {
@@ -2008,7 +2040,7 @@ class SkillExecutor:
                 data["failures"] = data["failures"][-100:]
 
             # Write back
-            with open(failures_file, "w") as f:
+            with open(failures_file, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False)
 
             self._debug(f"Logged auto-heal for {tool} to memory (success={success})")
@@ -2083,8 +2115,8 @@ class SkillExecutor:
                         else "vpn_connect()"
                     )
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
                 retry_result = await self._attempt_auto_heal(
                     heal_type, cluster, tool, step, output_lines
@@ -2129,8 +2161,8 @@ class SkillExecutor:
                         )
 
                         notify_auto_heal_succeeded(step_name, heal_type)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                     self.step_results.append(
                         {
@@ -2174,8 +2206,8 @@ class SkillExecutor:
                         )
 
                         notify_auto_heal_failed(step_name, error_msg[:100])
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Suppressed error: %s", exc)
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -2272,8 +2304,8 @@ class SkillExecutor:
                 )
 
                 notify_step_failed(skill_name, step_name, error_msg[:150])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
             self.step_results.append(
                 {
@@ -2298,8 +2330,8 @@ class SkillExecutor:
                         parsed[key.strip().lower().replace(" ", "_")] = val.strip()
                 if parsed:
                     self.context[f"{output_name}_parsed"] = parsed
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     def _detect_soft_failure(self, result_text: str) -> tuple[bool, str | None]:
         """Detect if a successful tool result actually contains an error (soft failure).
@@ -2767,8 +2799,8 @@ class SkillExecutor:
                 from .skill_execution_events import set_emitter
 
                 set_emitter(None)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         # Emit skill complete event (WebSocket)
         if self.ws_server and self.ws_server.is_running:
@@ -2906,40 +2938,28 @@ class SkillExecutor:
                 return
 
             # Extract learning based on skill type
-            learning = None
             task = self.inputs.get("issue_key", skill_name)
 
-            # Skills that produce learnable outcomes
-            if skill_name == "start_work":
-                issue_key = self.inputs.get("issue_key", "")
-                if issue_key:
-                    learning = f"Started work on {issue_key}"
+            # Map skill -> (input_key, template)
+            _learning_templates = {
+                "start_work": ("issue_key", "Started work on {}"),
+                "create_mr": ("issue_key", "Created MR for {}"),
+                "review_pr": ("mr_id", "Reviewed MR !{}"),
+                "review_all_prs": ("mr_id", "Reviewed MR !{}"),
+                "test_mr_ephemeral": (
+                    "mr_id",
+                    "Tested MR !{} in ephemeral environment",
+                ),
+                "investigate_alert": ("alert_name", "Investigated alert: {}"),
+                "close_issue": ("issue_key", "Closed issue {}"),
+            }
 
-            elif skill_name == "create_mr":
-                issue_key = self.inputs.get("issue_key", "")
-                if issue_key:
-                    learning = f"Created MR for {issue_key}"
-
-            elif skill_name in ["review_pr", "review_all_prs"]:
-                # Extract review insights
-                mr_id = self.inputs.get("mr_id", "")
-                if mr_id:
-                    learning = f"Reviewed MR !{mr_id}"
-
-            elif skill_name == "test_mr_ephemeral":
-                mr_id = self.inputs.get("mr_id", "")
-                if mr_id:
-                    learning = f"Tested MR !{mr_id} in ephemeral environment"
-
-            elif skill_name == "investigate_alert":
-                alert = self.inputs.get("alert_name", "")
-                if alert:
-                    learning = f"Investigated alert: {alert}"
-
-            elif skill_name == "close_issue":
-                issue_key = self.inputs.get("issue_key", "")
-                if issue_key:
-                    learning = f"Closed issue {issue_key}"
+            learning = None
+            if skill_name in _learning_templates:
+                input_key, template = _learning_templates[skill_name]
+                value = self.inputs.get(input_key, "")
+                if value:
+                    learning = template.format(value)
 
             # Save learning if we extracted one
             if learning:
@@ -2987,7 +3007,7 @@ def _skill_list_impl() -> list[TextContent]:
             if f.name == "README.md":
                 continue
             try:
-                with open(f) as fp:
+                with open(f, encoding="utf-8") as fp:
                     data = yaml.safe_load(fp)
                 skills.append(
                     {
@@ -3098,7 +3118,7 @@ async def _skill_run_impl(
         ]
 
     try:
-        with open(skill_file) as f:
+        with open(skill_file, encoding="utf-8") as f:
             skill = yaml.safe_load(f)
 
         try:

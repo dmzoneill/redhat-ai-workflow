@@ -30,6 +30,7 @@ For the new unified memory interface, see:
 - tool_modules/aa_workflow/src/memory_unified.py - Unified MCP tools
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,8 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 # Support both package import and direct loading
 try:
@@ -88,9 +91,9 @@ def _resolve_memory_path(key: str) -> Path:
                 from .chat_context import get_project_work_state_path
 
                 return get_project_work_state_path()
-            except ImportError:
+            except ImportError as exc:
                 # Fallback to global path if chat_context not available
-                pass
+                logger.debug("Optional import not available: %s", exc)
 
     # Global path
     if not key.endswith(".yaml"):
@@ -124,8 +127,8 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 
                 project = await get_workspace_project(ctx)
                 return MEMORY_DIR / "state" / "projects" / project / "current_work.yaml"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         # Fall back to sync version
         try:
@@ -139,8 +142,8 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
                 from .chat_context import get_project_work_state_path
 
                 return get_project_work_state_path()
-            except ImportError:
-                pass
+            except ImportError as exc:
+                logger.debug("Optional import not available: %s", exc)
 
     # Global path
     if not key.endswith(".yaml"):
@@ -184,9 +187,9 @@ def _load_patterns_from_memory() -> dict:
         return {}
 
     try:
-        with open(patterns_file) as f:
+        with open(patterns_file, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    except Exception:
+    except (yaml.YAMLError, OSError):
         return {}
 
 
@@ -197,10 +200,10 @@ def _load_tool_fixes_from_memory() -> list:
         return []
 
     try:
-        with open(fixes_file) as f:
+        with open(fixes_file, encoding="utf-8") as f:
             fixes_data = yaml.safe_load(f) or {}
             return fixes_data.get("tool_fixes", [])
-    except Exception:
+    except (yaml.YAMLError, OSError):
         return []
 
 
@@ -260,7 +263,7 @@ def _collect_autoheal_stats() -> dict:
     if not failures_file.exists():
         return {}
 
-    with open(failures_file) as f:
+    with open(failures_file, encoding="utf-8") as f:
         failures_data = yaml.safe_load(f) or {}
 
     total_failures = failures_data.get("stats", {}).get("total_failures", 0)
@@ -290,7 +293,7 @@ def _collect_pattern_stats() -> dict:
     if not patterns_file.exists():
         return {}
 
-    with open(patterns_file) as f:
+    with open(patterns_file, encoding="utf-8") as f:
         patterns_data = yaml.safe_load(f) or {}
 
     pattern_categories = [
@@ -419,21 +422,23 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
         lines = ["## Available Memory\n"]
         for subdir in ["state", "learned", "sessions"]:
             d = MEMORY_DIR / subdir
-            if d.exists():
-                lines.append(f"### {subdir}/")
-                for f in d.glob("*.yaml"):
-                    lines.append(f"- {subdir}/{f.stem}")
-                # Also list project-specific state
-                if subdir == "state":
-                    projects_dir = d / "projects"
-                    if projects_dir.exists():
-                        for project_dir in projects_dir.iterdir():
-                            if project_dir.is_dir():
-                                lines.append(
-                                    f"  - {subdir}/projects/{project_dir.name}/"
-                                )
-                                for f in project_dir.glob("*.yaml"):
-                                    lines.append(f"    - {f.stem}")
+            if not d.exists():
+                continue
+            lines.append(f"### {subdir}/")
+            for f in d.glob("*.yaml"):
+                lines.append(f"- {subdir}/{f.stem}")
+            # Also list project-specific state
+            if subdir != "state":
+                continue
+            projects_dir = d / "projects"
+            if not projects_dir.exists():
+                continue
+            for project_dir in projects_dir.iterdir():
+                if not project_dir.is_dir():
+                    continue
+                lines.append(f"  - {subdir}/projects/{project_dir.name}/")
+                for f in project_dir.glob("*.yaml"):
+                    lines.append(f"    - {f.stem}")
         return [TextContent(type="text", text="\n".join(lines))]
 
     # Resolve the memory path (handles project-specific keys, workspace-aware)
@@ -446,7 +451,7 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ No work state for current project.\n\n"
+                    text="❌ No work state for current project.\n\n"
                     f"File would be at: `{memory_file}`\n\n"
                     "Use `start_work` skill to begin tracking work for this project.",
                 )
@@ -553,7 +558,7 @@ async def _memory_update_impl(
 
     try:
         # Load existing
-        with open(memory_file) as f:
+        with open(memory_file, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         # Parse the new value
@@ -569,7 +574,7 @@ async def _memory_update_impl(
         target[parts[-1]] = new_value
 
         # Write back
-        with open(memory_file, "w") as f:
+        with open(memory_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
@@ -617,7 +622,7 @@ async def _memory_append_impl(
 
     try:
         # Load existing
-        with open(memory_file) as f:
+        with open(memory_file, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         # Parse the new item
@@ -640,7 +645,7 @@ async def _memory_append_impl(
         target[parts[-1]].append(new_item)
 
         # Write back
-        with open(memory_file, "w") as f:
+        with open(memory_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
@@ -700,7 +705,7 @@ async def _memory_query_impl(
 
     try:
         # Load memory file
-        with open(memory_file) as f:
+        with open(memory_file, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         # Parse and execute JSONPath query
@@ -770,7 +775,7 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
     try:
         # Load existing or create new
         if session_file.exists():
-            with open(session_file) as f:
+            with open(session_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {"date": today, "entries": []}
@@ -789,7 +794,7 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
         data["entries"].append(entry)
 
         # Write back
-        with open(session_file, "w") as f:
+        with open(session_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
         return [TextContent(type="text", text=f"✅ Logged: {action}")]
@@ -904,7 +909,7 @@ async def _learn_tool_fix_impl(
     try:
         # Load existing or create new
         if fixes_file.exists():
-            with open(fixes_file) as f:
+            with open(fixes_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {"tool_fixes": [], "common_mistakes": {}}
@@ -933,7 +938,7 @@ async def _learn_tool_fix_impl(
                 existing["fix_applied"] = fix_description
                 existing["date_learned"] = new_fix["date_learned"]
 
-                with open(fixes_file, "w") as f:
+                with open(fixes_file, "w", encoding="utf-8") as f:
                     yaml.dump(data, f, default_flow_style=False)
 
                 return [
@@ -950,13 +955,13 @@ async def _learn_tool_fix_impl(
         data["tool_fixes"].append(new_fix)
 
         # Write back
-        with open(fixes_file, "w") as f:
+        with open(fixes_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
         return [
             TextContent(
                 type="text",
-                text=f"✅ Saved tool fix to memory!\n\n"
+                text="✅ Saved tool fix to memory!\n\n"
                 f"**Tool:** `{tool_name}`\n"
                 f"**Pattern:** `{error_pattern}`\n"
                 f"**Root cause:** {root_cause}\n"
@@ -1005,7 +1010,7 @@ async def _memory_stats_impl() -> list[TextContent]:
 
             today_actions = 0
             if today_file.exists():
-                with open(today_file) as f:
+                with open(today_file, encoding="utf-8") as f:
                     today_data = yaml.safe_load(f) or {}
                     today_actions = len(today_data.get("entries", []))
 

@@ -46,10 +46,11 @@ if isinstance(repos_data, dict):
 else:
     REPO_PATHS = {}
 
-# GitHub configuration for error reporting
-GITHUB_REPO = "dmzoneill/redhat-ai-workflow"
-GITHUB_ISSUES_URL = f"https://github.com/{GITHUB_REPO}/issues/new"
-GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/issues"
+# GitHub configuration for error reporting - single source of truth in constants.py
+try:
+    from .constants import GITHUB_API_URL, GITHUB_ISSUES_URL
+except ImportError:
+    from constants import GITHUB_API_URL, GITHUB_ISSUES_URL  # type: ignore[no-redef]
 
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}

@@ -100,7 +100,7 @@ def _detect_default_branch(project_path: Path) -> str:
         if result.returncode == 0:
             # refs/remotes/origin/main -> main
             return result.stdout.strip().split("/")[-1]
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         logger.debug(f"Suppressed error in _detect_default_branch (symbolic-ref): {e}")
 
     # Fallback: check if main or master exists
@@ -118,7 +118,7 @@ def _detect_default_branch(project_path: Path) -> str:
                 return "main"
             if "origin/master" in branches:
                 return "master"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         logger.debug(f"Suppressed error in _detect_default_branch (branch list): {e}")
 
     return "main"  # Default
@@ -150,7 +150,7 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
                 if path.endswith(".git"):
                     path = path[:-4]
                 return path
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         logger.debug(f"Suppressed error in _detect_gitlab_remote: {e}")
     return None
 
@@ -175,14 +175,14 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
     if language == "javascript":
         if (project_path / "package.json").exists():
             try:
-                with open(project_path / "package.json") as f:
+                with open(project_path / "package.json", encoding="utf-8") as f:
                     pkg = json.load(f)
                 scripts = pkg.get("scripts", {})
                 if "lint" in scripts:
                     return "npm run lint"
                 if "eslint" in scripts:
                     return "npm run eslint"
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.debug(
                     f"Suppressed error in _detect_lint_command (package.json): {e}"
                 )
@@ -206,12 +206,12 @@ def _detect_test_command(project_path: Path, language: str) -> str:
     if language == "javascript":
         if (project_path / "package.json").exists():
             try:
-                with open(project_path / "package.json") as f:
+                with open(project_path / "package.json", encoding="utf-8") as f:
                     pkg = json.load(f)
                 scripts = pkg.get("scripts", {})
                 if "test" in scripts:
                     return "npm test"
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.debug(
                     f"Suppressed error in _detect_test_command (package.json): {e}"
                 )
@@ -386,20 +386,6 @@ async def _project_detect_impl(path: str) -> list[TextContent]:
     test_command = _detect_test_command(project_path, language)
     scopes = _detect_scopes(project_path)
     test_setup = _generate_test_setup(project_path, language)
-
-    # Build detected config
-    detected = {  # noqa: F841
-        "name": project_path.name,
-        "path": str(project_path),
-        "language": language,
-        "default_branch": default_branch,
-        "gitlab": gitlab or "<NEEDS_INPUT>",
-        "jira_project": "<NEEDS_INPUT>",
-        "lint_command": lint_command,
-        "test_command": test_command,
-        "scopes": scopes,
-        "test_setup": test_setup,
-    }
 
     lines = [f"## 🔍 Detected Project Settings: {project_path.name}\n"]
     lines.append(f"**Language:** {language}")

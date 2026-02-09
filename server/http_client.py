@@ -262,15 +262,20 @@ def grafana_client(
     )
 
 
-def quay_client(token: str | None = None, timeout: float = 30.0) -> APIClient:
+def quay_client(
+    token: str | None = None,
+    timeout: float = 30.0,
+    base_url: str = "https://quay.io/api/v1",
+) -> APIClient:
     """Create an API client configured for Quay.io.
 
     Args:
         token: Bearer token for authentication (optional for public repos)
         timeout: Request timeout in seconds
+        base_url: Quay API base URL
     """
     return APIClient(
-        base_url="https://quay.io/api/v1",
+        base_url=base_url,
         bearer_token=token,
         timeout=timeout,
     )

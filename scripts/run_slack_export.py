@@ -143,8 +143,12 @@ async def run_export(months: int = 1):
     print("-" * 60)
 
     try:
-        f_out = open(output_file, "w")
-        f_ctx = open(context_file, "w")
+        f_out = open(output_file, "w", encoding="utf-8")
+        try:
+            f_ctx = open(context_file, "w", encoding="utf-8")
+        except OSError:
+            f_out.close()
+            raise
     except OSError as e:
         print(f"❌ Failed to open output files: {e}")
         return
@@ -262,7 +266,7 @@ async def run_export(months: int = 1):
 
     metadata_file = STYLE_DIR / "export_metadata.json"
     try:
-        with open(metadata_file, "w") as f:
+        with open(metadata_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
     except OSError as e:
         print(f"⚠️ Failed to write metadata: {e}")

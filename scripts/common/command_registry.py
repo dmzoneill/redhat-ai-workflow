@@ -462,7 +462,7 @@ class CommandRegistry:
 
         for skill_file in self.skills_dir.glob("*.yaml"):
             try:
-                with open(skill_file) as f:
+                with open(skill_file, encoding="utf-8") as f:
                     skill_data = yaml.safe_load(f)
 
                 if not skill_data:

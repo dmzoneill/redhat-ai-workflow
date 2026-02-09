@@ -4,22 +4,15 @@ Tests for Usage Pattern Checker (Layer 5 Phase 3).
 Tests prevention warnings before tool execution.
 """
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from server.usage_pattern_checker import UsagePatternChecker
-from server.usage_pattern_storage import UsagePatternStorage
 
 
 @pytest.fixture
-def temp_storage():
-    """Create temporary storage for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        patterns_file = Path(tmpdir) / "usage_patterns.yaml"
-        storage = UsagePatternStorage(patterns_file)
-        yield storage
+def temp_storage(usage_pattern_storage):
+    """Alias shared fixture for backward compatibility."""
+    return usage_pattern_storage
 
 
 @pytest.fixture

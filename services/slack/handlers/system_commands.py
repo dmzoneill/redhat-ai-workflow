@@ -109,9 +109,8 @@ async def handle_watch(
     lines = ["*\U0001f4e1 Channel Info*\n"]
     lines.append(f"\u2022 *Channel ID:* `{channel_id}`")
     lines.append(f"\u2022 *Type:* {channel_type}")
-    lines.append(
-        f"\u2022 *Currently watched:* {'\u2705 Yes' if is_watched else '\u274c No'}"
-    )
+    watched_status = "\u2705 Yes" if is_watched else "\u274c No"
+    lines.append(f"\u2022 *Currently watched:* {watched_status}")
 
     if not is_watched:
         lines.append("\n*To watch this channel:*")

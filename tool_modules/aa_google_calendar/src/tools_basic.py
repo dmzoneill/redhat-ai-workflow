@@ -15,67 +15,38 @@ Setup:
 3. Run the server once to complete OAuth flow and save token.json
 """
 
-import os
+import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
-from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
+from tool_modules.common import (  # noqa: E402  # Sets up sys.path
+    PROJECT_ROOT,
+    get_google_calendar_settings,
+    get_google_config_dir,
+    get_google_oauth_scopes,
+)
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
+from server.tool_registry import ToolRegistry  # noqa: E402
 
-from server.tool_registry import ToolRegistry
-from server.utils import load_config
+logger = logging.getLogger(__name__)
 
-
-def _get_google_calendar_config_dir() -> Path:
-    """Get Google Calendar config directory from config.json or default."""
-    config = load_config()
-    # Check google_calendar.config_dir first (primary location)
-    gc_config = config.get("google_calendar", {}).get("config_dir")
-    if gc_config:
-        return Path(os.path.expanduser(gc_config))
-    # Fallback to paths.google_calendar_config
-    paths_cfg = config.get("paths", {})
-    gc_config = paths_cfg.get("google_calendar_config")
-    if gc_config:
-        return Path(os.path.expanduser(gc_config))
-    # Default (with hyphen to match existing setup)
-    return Path.home() / ".config" / "google-calendar"
-
-
-# Config paths - use config.json paths section if available
-CONFIG_DIR = _get_google_calendar_config_dir()
+# Shared Google config (single source of truth in tool_modules.common)
+CONFIG_DIR = get_google_config_dir()
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
+SCOPES = get_google_oauth_scopes()
 
-# Scopes required for calendar, gmail, slides, and drive access
-# NOTE: All Google tool modules should use this SAME scope list to share one token
-SCOPES = [
-    # Calendar
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly",
-    # Gmail
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    # Slides
-    "https://www.googleapis.com/auth/presentations",
-    "https://www.googleapis.com/auth/presentations.readonly",
-    # Drive
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
-]
-
-# CONSTRAINTS
-TIMEZONE = "Europe/Dublin"
-MEETING_START_HOUR = 15  # 3pm Irish time
-MEETING_END_HOUR = 19  # 7pm Irish time
+# Calendar-specific settings from config.json google_calendar section
+_cal_settings = get_google_calendar_settings()
+TIMEZONE = _cal_settings["timezone"]
+MEETING_START_HOUR = _cal_settings["meeting_start_hour"]
+MEETING_END_HOUR = _cal_settings["meeting_end_hour"]
 DEFAULT_DURATION = 30  # minutes
 
 
@@ -89,8 +60,8 @@ def _try_load_oauth_token(credentials_cls, scopes):
     if TOKEN_FILE.exists():
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
     return None
 
 
@@ -99,11 +70,11 @@ def _try_refresh_credentials(creds, request_cls):
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(request_cls())
-            with open(TOKEN_FILE, "w") as f:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
     return None
 
 
@@ -114,8 +85,8 @@ def _try_service_account(service_account, scopes):
             return service_account.Credentials.from_service_account_file(
                 str(SERVICE_ACCOUNT_FILE), scopes=scopes
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
     return None
 
 
@@ -130,7 +101,7 @@ def _try_oauth_flow(scopes):
             )
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(TOKEN_FILE, "w") as f:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds, None
         except Exception as e:
@@ -753,8 +724,8 @@ async def _google_calendar_quick_meeting_impl(
                     duration_minutes=duration_minutes,
                     auto_find_slot=False,
                 )
-            except ValueError:
-                pass  # Fall through to natural language parsing
+            except ValueError as exc:
+                logger.debug("Invalid value encountered: %s", exc)
 
         # Extract time component - look for time after T, space, or "at"
         # Patterns: "15:00", "3pm", "3:30pm", "at 15:00"
@@ -847,17 +818,17 @@ def _check_duplicate_meeting(
 
         if existing and "error" not in existing:
             return (
-                f"📅 **Meeting Already Scheduled**\n"
-                f"\n"
-                f"A meeting for this topic already exists:\n"
-                f"\n"
+                "📅 **Meeting Already Scheduled**\n"
+                "\n"
+                "A meeting for this topic already exists:\n"
+                "\n"
                 f"**Title:** {existing['title']}\n"
                 f"**When:** {existing['when']} Irish time\n"
                 f"**Link:** {existing['link']}\n"
-                f"\n"
-                f"⚠️ No new meeting created to avoid duplicate invites.\n"
-                f"\n"
-                f"If you really need a new meeting, use `skip_duplicate_check=True`."
+                "\n"
+                "⚠️ No new meeting created to avoid duplicate invites.\n"
+                "\n"
+                "If you really need a new meeting, use `skip_duplicate_check=True`."
             )
     return None
 
@@ -926,7 +897,7 @@ def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
             f"❌ Meeting time {start_dt.strftime('%H:%M')} is outside allowed window.\n"
             f"📍 Meetings must be between {MEETING_START_HOUR}:00 "
             f"and {MEETING_END_HOUR}:00 Irish time.\n\n"
-            f"Use `google_calendar_check_mutual_availability` to find valid slots."
+            "Use `google_calendar_check_mutual_availability` to find valid slots."
         )
 
     # Check if end time exceeds window
@@ -937,7 +908,7 @@ def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
         return None, (
             f"❌ Meeting would end at {end_dt.strftime('%H:%M')}, "
             f"past the {MEETING_END_HOUR}:00 cutoff.\n"
-            f"Consider a shorter duration or earlier start time."
+            "Consider a shorter duration or earlier start time."
         )
 
     # Validate weekend
@@ -983,10 +954,10 @@ async def _google_calendar_schedule_meeting_impl(
         )
         if not start_dt:
             return (
-                f"❌ No mutual free slots found in the next 5 business days.\n"
-                f"📍 Meeting window: 15:00-19:00 Irish time\n"
+                "❌ No mutual free slots found in the next 5 business days.\n"
+                "📍 Meeting window: 15:00-19:00 Irish time\n"
                 f"⏱️ Duration needed: {duration_minutes} minutes\n\n"
-                f"Use `google_calendar_check_mutual_availability` to see detailed availability."
+                "Use `google_calendar_check_mutual_availability` to see detailed availability."
             )
     else:
         # Parse and validate provided start time

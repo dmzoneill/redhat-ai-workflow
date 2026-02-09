@@ -18,15 +18,17 @@ Setup:
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tool_modules.common import PROJECT_ROOT
+from tool_modules.common import (
+    PROJECT_ROOT,
+    get_google_config_dir,
+    get_google_oauth_scopes,
+)
 
 __project_root__ = PROJECT_ROOT
 
 from server.tool_registry import ToolRegistry
-from server.utils import load_config
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -69,39 +71,11 @@ def _validate_drive_file_id(file_id: str) -> str | None:
     return None
 
 
-def _get_google_config_dir() -> Path:
-    """Get Google config directory (shared with calendar)."""
-    config = load_config()
-    gc_config = config.get("google_calendar", {}).get("config_dir")
-    if gc_config:
-        import os
-
-        return Path(os.path.expanduser(gc_config))
-    paths_cfg = config.get("paths", {})
-    gc_config = paths_cfg.get("google_calendar_config")
-    if gc_config:
-        import os
-
-        return Path(os.path.expanduser(gc_config))
-    return Path.home() / ".config" / "google-calendar"
-
-
-CONFIG_DIR = _get_google_config_dir()
+# Shared Google config (single source of truth in tool_modules.common)
+CONFIG_DIR = get_google_config_dir()
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
-
-# Scopes - same as calendar (shared token)
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/presentations",
-    "https://www.googleapis.com/auth/presentations.readonly",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
-]
+SCOPES = get_google_oauth_scopes()
 
 
 def get_drive_service():
@@ -128,14 +102,14 @@ def get_drive_service():
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     # Refresh if expired
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            with open(TOKEN_FILE, "w") as f:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
         except Exception:
             creds = None
@@ -144,7 +118,7 @@ def get_drive_service():
     if not creds or not creds.valid:
         return (
             None,
-            f"Not authenticated. Run `google_calendar_status()` first to authenticate.\n"
+            "Not authenticated. Run `google_calendar_status()` first to authenticate.\n"
             f"Token file: {TOKEN_FILE}",
         )
 
@@ -409,7 +383,7 @@ async def _gdrive_get_file_content_impl(
         else:
             return (
                 f"❌ Cannot extract text from file type: {mime_type}\n"
-                f"Supported types: Google Docs, Sheets, Slides, plain text"
+                "Supported types: Google Docs, Sheets, Slides, plain text"
             )
 
         # Truncate if too long

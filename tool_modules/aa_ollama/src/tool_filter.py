@@ -10,7 +10,6 @@ This module is workspace-aware: cache keys include workspace_uri to ensure
 different Cursor chats/workspaces have separate cache entries.
 """
 
-import json
 import logging
 import re
 import time
@@ -58,7 +57,7 @@ def _load_persona_config(persona_name: str) -> dict:
         return {}
 
     try:
-        with open(persona_file) as f:
+        with open(persona_file, encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
             _persona_cache[persona_name] = config
             return config
@@ -153,11 +152,8 @@ class HybridToolFilter:
         """Initialize the filter.
 
         Args:
-            config_path: Path to config.json (defaults to project root)
+            config_path: Deprecated, ignored. Uses ConfigManager.
         """
-        if config_path is None:
-            config_path = Path(__file__).parents[4] / "config.json"
-
         self.config = self._load_config(config_path)
         self.registry = load_registry()
         self.skill_discovery = SkillToolDiscovery()
@@ -180,14 +176,14 @@ class HybridToolFilter:
             "fallback_strategy", "keyword_match"
         )
 
-    def _load_config(self, path: Path) -> dict:
-        """Load config.json."""
-        if path.exists():
-            try:
-                with open(path) as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to load config: {e}")
+    def _load_config(self, path: Optional[Path] = None) -> dict:
+        """Load config via ConfigManager."""
+        try:
+            from server.config_manager import config as config_manager
+
+            return config_manager.get_all()
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
         return {}
 
     def _init_inference_client(self) -> None:

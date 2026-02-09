@@ -1704,7 +1704,7 @@ async def _meet_notes_export_state_impl() -> str:
     # Write to state file
     MEETBOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(MEETBOT_STATE_FILE, "w") as f:
+    with open(MEETBOT_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
     return (

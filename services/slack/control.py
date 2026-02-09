@@ -23,6 +23,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,8 @@ from typing import TYPE_CHECKING
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.paths import AA_CONFIG_DIR  # noqa: E402
 
 if TYPE_CHECKING:
     from services.slack.dbus import SlackAgentClient
@@ -261,8 +264,8 @@ async def cmd_stop(client: SlackAgentClient, args):
 def cmd_start(args):
     """Start the daemon in background."""
     daemon_script = PROJECT_ROOT / "scripts" / "slack_daemon.py"
-    log_file = Path.home() / ".config" / "aa-workflow" / "slack_daemon.log"
-    pid_file = Path("/tmp/slack-daemon.pid")
+    log_file = AA_CONFIG_DIR / "slack_daemon.log"
+    pid_file = Path(tempfile.gettempdir()) / "slack-daemon.pid"
 
     # Check if already running
     if pid_file.exists():
@@ -289,7 +292,7 @@ def cmd_start(args):
     if args.llm:
         cmd.append("--llm")
 
-    with open(log_file, "w") as log:
+    with open(log_file, "w", encoding="utf-8") as log:
         process = subprocess.Popen(
             cmd,
             stdout=log,

@@ -147,7 +147,7 @@ def load_persona(persona_name: str) -> dict | None:
         return None
 
     try:
-        with open(persona_file) as f:
+        with open(persona_file, encoding="utf-8") as f:
             return yaml.safe_load(f)
     except yaml.YAMLError as e:
         print(f"Error parsing {persona_file}: {e}")

@@ -102,9 +102,9 @@ def _get_bitwarden_password(
         raise RuntimeError(f"No matching credentials found for {item_name}")
 
     except subprocess.TimeoutExpired:
-        raise RuntimeError("Bitwarden CLI timed out")
+        raise RuntimeError("Bitwarden CLI timed out") from None
     except json.JSONDecodeError as e:
-        raise RuntimeError(f"Failed to parse Bitwarden response: {e}")
+        raise RuntimeError(f"Failed to parse Bitwarden response: {e}") from e
 
 
 def _get_pass_password(pass_path: str) -> str:
@@ -127,8 +127,8 @@ def _get_pass_password(pass_path: str) -> str:
 
         raise RuntimeError(f"Empty password in pass entry: {pass_path}")
 
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("Pass command timed out")
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("Pass command timed out") from e
 
 
 def _get_redhatter_token() -> str:
@@ -163,7 +163,7 @@ def _fetch_concur_credentials(token: str, headless: bool = True) -> tuple[str, s
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = response.read().decode("utf-8")
     except urllib.error.URLError as e:
-        raise RuntimeError(f"Failed to get Concur credentials: {e}")
+        raise RuntimeError(f"Failed to get Concur credentials: {e}") from e
 
     # Parse response: "username,password"
     sanitized = payload.replace('"', "").replace("\n", "").strip()
@@ -287,7 +287,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ GOMO credentials loaded from Bitwarden\n"
+                    text="✅ GOMO credentials loaded from Bitwarden\n"
                     f"**Username:** {username}\n"
                     f"**Password:** {'*' * 8} (loaded)",
                 )
@@ -302,7 +302,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 return [
                     TextContent(
                         type="text",
-                        text=f"✅ GOMO credentials loaded from pass\n"
+                        text="✅ GOMO credentials loaded from pass\n"
                         f"**Username:** {username}\n"
                         f"**Password:** {'*' * 8} (loaded)",
                     )
@@ -311,10 +311,10 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ Failed to load GOMO credentials\n\n"
+                        text="❌ Failed to load GOMO credentials\n\n"
                         f"**Bitwarden error:** {bw_error}\n"
                         f"**Pass error:** {pass_error}\n\n"
-                        f"**Fix:** Run `export BW_SESSION=$(bw unlock --raw)` or ensure pass entry exists",
+                        "**Fix:** Run `export BW_SESSION=$(bw unlock --raw)` or ensure pass entry exists",
                     )
                 ]
 
@@ -335,7 +335,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Concur SSO credentials loaded\n"
+                    text="✅ Concur SSO credentials loaded\n"
                     f"**Username:** {username}\n"
                     f"**Password:** {'*' * 8} (loaded)",
                 )
@@ -344,9 +344,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Failed to load Concur credentials\n\n"
+                    text="❌ Failed to load Concur credentials\n\n"
                     f"**Error:** {e}\n\n"
-                    f"**Fix:** Ensure redhatter service is running on localhost:8009",
+                    "**Fix:** Ensure redhatter service is running on localhost:8009",
                 )
             ]
 
@@ -384,8 +384,8 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 if reader.pages:
                     text = reader.pages[0].extract_text() or ""
                     amount = _extract_amount_from_text(text)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         return [
             TextContent(
@@ -394,11 +394,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 f"**Report Name:** {report_name}\n"
                 f"**Report Date:** {report_date}\n"
                 f"**Month:** {month_slug}\n\n"
-                f"### Files\n"
+                "### Files\n"
                 f"- **Full PDF:** `{full_pdf}` {'✅' if full_exists else '❌ not found'}\n"
                 f"- **First Page:** `{first_page_pdf}` {'✅' if first_exists else '❌ not found'}\n"
                 f"- **Amount:** €{amount or 'unknown'}\n\n"
-                f"### Concur Settings\n"
+                "### Concur Settings\n"
                 f"- **Expense Type:** {config.get('concur', {}).get('expense_type', 'Remote Worker Expense')}\n"
                 f"- **Payment Type:** {config.get('concur', {}).get('payment_type', 'Cash')}\n"
                 f"- **Max USD:** ${config.get('concur', {}).get('max_usd_amount', 40.00)}",
@@ -429,7 +429,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Bill details extracted\n\n"
+                    text="✅ Bill details extracted\n\n"
                     f"**Amount:** €{amount}\n"
                     f"**First Page:** `{first_page}`",
                 )
@@ -438,7 +438,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Failed to extract bill details\n\n" f"**Error:** {e}",
+                    text="❌ Failed to extract bill details\n\n" f"**Error:** {e}",
                 )
             ]
 
@@ -481,7 +481,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                                 text=f"✅ Receipt ready for {month_slug}\n\n"
                                 f"**Amount:** €{amount}\n"
                                 f"**File:** `{first_page_pdf}`\n\n"
-                                f"*Ready to submit expense*",
+                                "*Ready to submit expense*",
                             )
                         ]
             except ImportError:
@@ -491,8 +491,8 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                         type="text",
                         text=f"✅ Receipt file exists for {month_slug}\n\n"
                         f"**File:** `{first_page_pdf}`\n"
-                        f"**Amount:** *(install pypdf to extract)*\n\n"
-                        f"*Receipt file ready, run `uv add pypdf` for amount extraction*",
+                        "**Amount:** *(install pypdf to extract)*\n\n"
+                        "*Receipt file ready, run `uv add pypdf` for amount extraction*",
                     )
                 ]
             except Exception as e:
@@ -504,7 +504,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 text=f"❌ Receipt not ready for {month_slug}\n\n"
                 f"**Full PDF:** {'✅' if full_exists else '❌'} `{full_pdf}`\n"
                 f"**First Page:** {'✅' if first_exists else '❌'} `{first_page_pdf}`\n\n"
-                f"*Need to download bill from GOMO*",
+                "*Need to download bill from GOMO*",
             )
         ]
 
@@ -533,7 +533,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 TextContent(
                     type="text",
                     text=f"❌ GOMO script not found at `{GOMO_SCRIPT}`\n\n"
-                    f"Expected: `~/src/aa-concur/scripts/gomo_to_concur.py`",
+                    "Expected: `~/src/aa-concur/scripts/gomo_to_concur.py`",
                 )
             ]
 
@@ -601,13 +601,13 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                         if reader.pages:
                             text = reader.pages[0].extract_text() or ""
                             amount = _extract_amount_from_text(text)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Suppressed error: %s", exc)
 
                 return [
                     TextContent(
                         type="text",
-                        text=f"✅ GOMO bill downloaded successfully\n\n"
+                        text="✅ GOMO bill downloaded successfully\n\n"
                         f"**Month:** {month_slug}\n"
                         f"**Amount:** €{amount or 'unknown'}\n"
                         f"**Full PDF:** `{full_pdf}`\n"
@@ -638,7 +638,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 TextContent(
                     type="text",
                     text=f"❌ GOMO download error: {e}\n\n"
-                    f"Try running manually: `cd ~/src/aa-concur && make run-gomo-headless`",
+                    "Try running manually: `cd ~/src/aa-concur && make run-gomo-headless`",
                 )
             ]
 
@@ -701,7 +701,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 return [
                     TextContent(
                         type="text",
-                        text=f"✅ Full automation completed successfully!\n\n"
+                        text="✅ Full automation completed successfully!\n\n"
                         f"**Output:**\n```\n{result.stdout[-1000:] if result.stdout else 'No output'}\n```",
                     )
                 ]
@@ -779,7 +779,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 return [
                     TextContent(
                         type="text",
-                        text=f"✅ Cleanup completed\n\n"
+                        text="✅ Cleanup completed\n\n"
                         f"**Deleted:** {count} unsubmitted expense reports\n\n"
                         f"**Output:**\n```\n{output[-500:] if output else 'No output'}\n```",
                     )

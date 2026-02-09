@@ -30,14 +30,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from server.paths import (
+    AA_CONFIG_DIR,
+    AGENT_STATS_FILE,
+    INFERENCE_STATS_FILE,
+    SKILL_EXECUTION_FILE,
+)
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
-
-# Stats files
-AA_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
-AGENT_STATS_FILE = AA_CONFIG_DIR / "agent_stats.json"
-INFERENCE_STATS_FILE = AA_CONFIG_DIR / "inference_stats.json"
-SKILL_EXECUTION_FILE = AA_CONFIG_DIR / "skill_execution.json"
 
 
 def get_performance_summary_path() -> Path:
@@ -189,7 +189,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 return self._stats_cache[key]
 
             # Load fresh data
-            with open(filepath) as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
             self._stats_cache[key] = data
             self._last_modified[key] = mtime

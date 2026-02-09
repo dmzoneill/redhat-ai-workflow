@@ -71,8 +71,8 @@ def _restricted_import(name, globals=None, locals=None, fromlist=(), level=0):
     if name not in _ALLOWED_COMPUTE_MODULES:
         raise ImportError(
             f"Import of '{name}' is not allowed in skill compute blocks. "
-            f"Use the modules already provided in the execution context "
-            f"(re, os, json, yaml, datetime, Path, etc.) or use MCP tools."
+            "Use the modules already provided in the execution context "
+            "(re, os, json, yaml, datetime, Path, etc.) or use MCP tools."
         )
     return __import__(name, globals, locals, fromlist, level)
 
@@ -146,7 +146,7 @@ class SkillComputeEngine:
                 if not skill_file.exists():
                     return {"success": False, "error": f"Skill not found: {skill_name}"}
 
-                with open(skill_file) as f:
+                with open(skill_file, encoding="utf-8") as f:
                     nested_skill = yaml.safe_load(f)
 
                 # Create a new executor for the nested skill

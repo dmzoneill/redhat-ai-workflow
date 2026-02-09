@@ -221,13 +221,13 @@ class SlackPersonaSync:
     def _load_metadata(self) -> dict[str, Any]:
         """Load sync metadata."""
         if self.metadata_file.exists():
-            with open(self.metadata_file) as f:
+            with open(self.metadata_file, encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
     def _save_metadata(self, metadata: dict[str, Any]) -> None:
         """Save sync metadata."""
-        with open(self.metadata_file, "w") as f:
+        with open(self.metadata_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
     # -------------------------------------------------------------------------
@@ -237,13 +237,13 @@ class SlackPersonaSync:
     def _load_channel_state(self) -> dict[str, Any]:
         """Load per-channel sync state."""
         if self.channel_state_file.exists():
-            with open(self.channel_state_file) as f:
+            with open(self.channel_state_file, encoding="utf-8") as f:
                 return json.load(f)
         return {}
 
     def _save_channel_state(self, state: dict[str, Any]) -> None:
         """Save per-channel sync state."""
-        with open(self.channel_state_file, "w") as f:
+        with open(self.channel_state_file, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
 
     def _is_day_synced(
@@ -743,7 +743,7 @@ class SlackPersonaSync:
             "newest_date": datetime.now().strftime("%Y-%m-%d"),
             "last_updated": datetime.now().isoformat(),
         }
-        with open(stats_file, "w") as f:
+        with open(stats_file, "w", encoding="utf-8") as f:
             json.dump(stats_data, f, indent=2)
 
         elapsed = (datetime.now() - start_time).total_seconds()

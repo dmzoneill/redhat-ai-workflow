@@ -698,8 +698,8 @@ async def _inscope_save_token_impl(token: str, cookie: str = "") -> str:
         claims = jwt.decode(token, options={"verify_signature": False})
         if "exp" in claims:
             expires_at = claims["exp"]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     token_data = {
         "token": token,

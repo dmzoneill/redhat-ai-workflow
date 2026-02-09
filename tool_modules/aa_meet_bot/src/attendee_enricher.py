@@ -112,7 +112,7 @@ class AppInterfaceScanner:
         count = 0
 
         try:
-            with open(yaml_file) as f:
+            with open(yaml_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
         except Exception as e:
             logger.debug(f"Failed to parse {yaml_file}: {e}")

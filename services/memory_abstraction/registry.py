@@ -241,8 +241,8 @@ def memory_adapter(
         source_file = ""
         try:
             source_file = inspect.getfile(cls)
-        except (TypeError, OSError):
-            pass
+        except (TypeError, OSError) as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # If inspect.getfile failed, try to get from module
         if not source_file:
@@ -250,8 +250,8 @@ def memory_adapter(
                 module = inspect.getmodule(cls)
                 if module and hasattr(module, "__file__"):
                     source_file = module.__file__ or ""
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         # Extract module name from path
         # tool_modules/aa_code_search/src/adapter.py -> code_search

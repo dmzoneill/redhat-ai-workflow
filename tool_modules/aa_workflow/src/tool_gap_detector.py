@@ -96,7 +96,7 @@ class ToolGapDetector:
         """Load existing gaps from file."""
         if TOOL_GAP_FILE.exists():
             try:
-                with open(TOOL_GAP_FILE) as f:
+                with open(TOOL_GAP_FILE, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                     self._gaps = data.get("tool_requests", [])
                     logger.debug(f"Loaded {len(self._gaps)} tool gap requests")
@@ -110,7 +110,7 @@ class ToolGapDetector:
         """Save gaps to file."""
         try:
             TOOL_GAP_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(TOOL_GAP_FILE, "w") as f:
+            with open(TOOL_GAP_FILE, "w", encoding="utf-8") as f:
                 yaml.dump(
                     {
                         "tool_requests": self._gaps,
@@ -236,10 +236,10 @@ class ToolGapDetector:
                 tool_exists = registry.tool_exists(tool_name)
             elif registry and hasattr(registry, "get_tool"):
                 tool_exists = registry.get_tool(tool_name) is not None
-        except ImportError:
+        except ImportError as exc:
             # If we can't import the registry, check a simpler way
             # Just assume the tool doesn't exist and log the gap
-            pass
+            logger.debug("Optional import not available: %s", exc)
         except Exception as e:
             logger.debug(f"Error checking tool existence: {e}")
 

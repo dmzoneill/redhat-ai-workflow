@@ -1,5 +1,6 @@
 """Tests for server.config module."""
 
+import subprocess
 from unittest.mock import MagicMock, patch
 
 from server.config import get_token_from_kubeconfig
@@ -71,7 +72,7 @@ class TestGetTokenFromKubeconfig:
             patch("server.config.Path.exists", return_value=True),
             patch("subprocess.run") as mock_run,
         ):
-            mock_run.side_effect = Exception("Unexpected error")
+            mock_run.side_effect = subprocess.SubprocessError("Unexpected error")
 
             token = get_token_from_kubeconfig("~/.kube/config.s")
 

@@ -145,8 +145,8 @@ def register_tools(server: "FastMCP") -> int:
 
                         source_filters = [SourceFilter(name=s) for s in fast_sources]
                         logger.debug(f"Using fast sources only: {fast_sources}")
-                except ImportError:
-                    pass  # Fall back to all sources
+                except ImportError as exc:
+                    logger.debug("Optional import not available: %s", exc)
 
             # Query memory
             result = await memory.query(

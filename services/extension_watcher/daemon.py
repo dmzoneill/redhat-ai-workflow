@@ -22,11 +22,14 @@ To reload Cursor after compilation:
     Or: Ctrl+Shift+P → "Developer: Reload Window"
 """
 
+import logging
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Configuration
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -57,9 +60,9 @@ def send_notification(title: str, message: str):
             capture_output=True,
             timeout=5,
         )
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # notify-send not available
-        pass
+        logger.debug("File not found: %s", exc)
     except Exception as e:
         log(f"Notification failed: {e}")
 
@@ -98,16 +101,16 @@ def get_file_mtimes() -> dict[Path, float]:
         for f in EXTENSION_SRC.rglob(f"*{ext}"):
             try:
                 mtimes[f] = f.stat().st_mtime
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("OS operation failed: %s", exc)
 
     # Also watch package.json
     package_json = EXTENSION_DIR / "package.json"
     if package_json.exists():
         try:
             mtimes[package_json] = package_json.stat().st_mtime
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("OS operation failed: %s", exc)
 
     return mtimes
 

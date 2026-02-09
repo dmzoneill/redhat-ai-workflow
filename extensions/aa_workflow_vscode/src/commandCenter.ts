@@ -122,6 +122,10 @@ export class CommandCenterPanel {
   // Cached personas for skill lookup
   private _personasCache: Persona[] | null = null;
 
+  // Throttle for tab re-renders to prevent flickering during rapid skill updates
+  private _rerenderThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+  private _rerenderThrottleMs = 200; // Max ~5 re-renders/sec
+
   // Message router for handling webview messages
   private _messageRouter: MessageRouter;
 
@@ -3915,13 +3919,23 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     if (cycleSecond % 5 === 0) {
       const activeTab = this._tabManager.getTab(this._currentTab);
       if (activeTab) {
-        // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
         const skillsTab = this._tabManager.getTab("skills") as any;
-        const skipRerender = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
 
-        if (skipRerender) {
+        // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
+        const skipForMindMap = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+
+        // Skip FULL re-render if Skills tab is showing a running workflow.
+        // The workflow uses incremental CSS updates for step progress -
+        // a full re-render would cause visible flickering and undo smooth transitions.
+        const skipForWorkflow = this._currentTab === "skills" &&
+          skillsTab?.skillView === "workflow" &&
+          skillsTab?.detailedExecution?.status === "running";
+
+        if (skipForMindMap) {
           debugLog("Tiered sync: Skipping re-render - mind map is active");
-          // Still update badges
+          this._updateAllTabBadges();
+        } else if (skipForWorkflow) {
+          debugLog("Tiered sync: Skipping full re-render - workflow using incremental updates");
           this._updateAllTabBadges();
         } else {
           this._logActivity(`Refreshing ${this._currentTab}`);
@@ -4158,6 +4172,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Trigger a re-render of the active tab's content.
    * Called when a tab's internal state changes (e.g., view mode toggle).
+   *
+   * Throttled to prevent flickering - rapid calls within _rerenderThrottleMs
+   * are coalesced. The render always uses the latest state when it fires.
    */
   private _triggerTabRerender(): void {
     if (!this._panel.webview) {
@@ -4165,17 +4182,38 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       return;
     }
 
+    // If a render is already scheduled, skip - it will pick up latest state
+    if (this._rerenderThrottleTimer) {
+      debugLog("_triggerTabRerender: throttled (render already scheduled)");
+      return;
+    }
+
+    this._rerenderThrottleTimer = setTimeout(() => {
+      this._rerenderThrottleTimer = null;
+      this._doTabRerender();
+    }, this._rerenderThrottleMs);
+  }
+
+  /**
+   * Perform the actual tab re-render (called by throttled _triggerTabRerender).
+   */
+  private _doTabRerender(): void {
+    if (!this._panel.webview) {
+      debugLog("_doTabRerender: No webview, skipping");
+      return;
+    }
+
     // Get the active tab's content and send it to the webview
     const activeTabId = this._tabManager.getActiveTabId();
     const activeTab = this._tabManager.getActiveTab();
-    debugLog(`_triggerTabRerender: activeTabId=${activeTabId}, _currentTab=${this._currentTab}`);
+    debugLog(`_doTabRerender: activeTabId=${activeTabId}, _currentTab=${this._currentTab}`);
 
     // Use _currentTab as fallback if TabManager's activeTabId is out of sync
     const targetTabId = this._currentTab || activeTabId;
     const targetTab = this._tabManager.getTab(targetTabId) || activeTab;
 
     if (!targetTab) {
-      debugLog("_triggerTabRerender: No target tab found");
+      debugLog("_doTabRerender: No target tab found");
       return;
     }
 
@@ -4186,11 +4224,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const styles = targetTab.getStyles();
       const script = targetTab.getScript();
 
-      debugLog(`_triggerTabRerender: Tab ${targetTab.getId()}, content length: ${content?.length || 0}, script length: ${script?.length || 0}`);
+      debugLog(`_doTabRerender: Tab ${targetTab.getId()}, content length: ${content?.length || 0}, script length: ${script?.length || 0}`);
 
       // Log first 200 chars of content for debugging
       if (content) {
-        debugLog(`_triggerTabRerender: Content preview: ${content.substring(0, 200).replace(/\n/g, ' ')}...`);
+        debugLog(`_doTabRerender: Content preview: ${content.substring(0, 200).replace(/\n/g, ' ')}...`);
       }
 
       this._panel.webview.postMessage({
@@ -4200,9 +4238,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         styles,
         script,
       });
-      debugLog("_triggerTabRerender: Message sent");
+      debugLog("_doTabRerender: Message sent");
     } catch (err) {
-      debugLog(`_triggerTabRerender: Error - ${err}`);
+      debugLog(`_doTabRerender: Error - ${err}`);
     }
   }
 

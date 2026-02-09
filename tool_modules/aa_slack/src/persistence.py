@@ -44,16 +44,6 @@ def parse_slack_sidebar_html(html_content: str) -> list[dict[str, str]]:
     # data-qa-channel-sidebar-channel-id="C01CPSKFG0P"
     # data-qa="channel_sidebar_name_team-clouddot-automation-analytics"
 
-    # Find all channel IDs
-    _channel_ids = re.findall(  # noqa: F841
-        r'data-qa-channel-sidebar-channel-id="([^"]+)"',
-        html_content,
-    )
-
-    # Find all channel names (they follow a specific pattern)
-    name_pattern = r'data-qa="channel_sidebar_name_([^"]+)"'
-    names = re.findall(name_pattern, html_content)  # noqa: F841
-
     # Build a mapping - names appear after their IDs in the HTML
     # We need to correlate them by position in the HTML
     id_positions = [

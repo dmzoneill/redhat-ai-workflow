@@ -32,14 +32,11 @@ except ImportError:
     _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
 
 
-# Default retry configuration
-DEFAULT_RETRY_CONFIG = {
-    "max_attempts": 2,
-    "backoff": "exponential",
-    "initial_delay_seconds": 30,
-    "max_delay_seconds": 300,
-    "retry_on": ["auth", "network"],
-}
+# Default retry configuration - single source of truth in scheduler_config.py
+try:
+    from .scheduler_config import DEFAULT_RETRY_CONFIG
+except ImportError:
+    from scheduler_config import DEFAULT_RETRY_CONFIG  # type: ignore[no-redef]
 
 
 @dataclass
@@ -155,8 +152,13 @@ class SchedulerConfig:
             config_data = self._load_config()
 
         schedules = config_data.get("schedules", {})
-        # Enabled state comes from state.json
-        self.enabled = state_manager.is_service_enabled("scheduler")
+        # Enabled state: config.json is the source of truth, state.json can override
+        config_enabled = schedules.get("enabled", False)
+        state_override = state_manager.get("services", "scheduler", {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            self.enabled = state_override["enabled"]  # runtime override wins
+        else:
+            self.enabled = config_enabled  # config.json default
         self.timezone = schedules.get("timezone", "UTC")
         self.jobs = schedules.get("jobs", [])
         self.poll_sources = schedules.get("poll_sources", {})
@@ -169,21 +171,40 @@ class SchedulerConfig:
         """Load config using ConfigManager (auto-reloads if file changed)."""
         return config_manager.get_all()
 
+    def _is_job_enabled(self, job_config: dict) -> bool:
+        """Resolve job enabled state: config.json first, state.json override.
+
+        Args:
+            job_config: The job configuration dict from config.json
+
+        Returns:
+            True if the job is enabled
+        """
+        job_name = job_config.get("name", "")
+        config_enabled = job_config.get("enabled", True)  # config.json per-job field
+        state_override = state_manager.get("jobs", job_name, {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            return state_override["enabled"]  # runtime override wins
+        return config_enabled  # config.json default
+
     def get_cron_jobs(self) -> list[dict]:
-        """Get jobs that use cron triggers (not poll triggers) and are enabled."""
-        return [
-            j
-            for j in self.jobs
-            if j.get("cron") and state_manager.is_job_enabled(j.get("name", ""))
-        ]
+        """Get jobs that use cron triggers (not poll triggers) and are enabled.
+
+        Enabled resolution: config.json per-job 'enabled' field first,
+        then state.json runtime override if present.
+        """
+        return [j for j in self.jobs if j.get("cron") and self._is_job_enabled(j)]
 
     def get_poll_jobs(self) -> list[dict]:
-        """Get jobs that use poll triggers and are enabled."""
+        """Get jobs that use poll triggers and are enabled.
+
+        Enabled resolution: config.json per-job 'enabled' field first,
+        then state.json runtime override if present.
+        """
         return [
             j
             for j in self.jobs
-            if j.get("trigger") == "poll"
-            and state_manager.is_job_enabled(j.get("name", ""))
+            if j.get("trigger") == "poll" and self._is_job_enabled(j)
         ]
 
     def get_retry_config(self, job_config: dict) -> RetryConfig:
@@ -213,10 +234,10 @@ class JobExecutionLog:
         """Load execution history from file."""
         try:
             if self.HISTORY_FILE.exists():
-                with open(self.HISTORY_FILE) as f:
+                with open(self.HISTORY_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     self.entries = data.get("executions", [])[-self.max_entries :]
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning(f"Failed to load cron history: {e}")
             self.entries = []
 
@@ -225,9 +246,9 @@ class JobExecutionLog:
         try:
             # Ensure directory exists
             self.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.HISTORY_FILE, "w") as f:
+            with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({"executions": self.entries}, f, indent=2)
-        except Exception as e:
+        except OSError as e:
             logger.warning(f"Failed to save cron history: {e}")
 
     def log_execution(
@@ -339,10 +360,10 @@ class CronScheduler:
         try:
             log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
             log_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now().isoformat()} - {message}\n")
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     def _cleanup_skill_execution_state(self, skill_name: str, error: str):
         """Clean up stale skill execution state after timeout or crash.
@@ -363,13 +384,13 @@ class CronScheduler:
                 return
 
             # Read current state to check if it's the same skill
-            with open(execution_file) as f:
+            with open(execution_file, encoding="utf-8") as f:
                 current_state = json.load(f)
 
             # Only clean up if it's the same skill and still "running"
             if current_state.get("skillName") != skill_name:
                 self._log_to_file(
-                    f"Skill execution state is for different skill "
+                    "Skill execution state is for different skill "
                     f"({current_state.get('skillName')}), not cleaning up"
                 )
                 return
@@ -401,7 +422,7 @@ class CronScheduler:
 
             # Write atomically
             tmp_file = execution_file.with_suffix(".tmp")
-            with open(tmp_file, "w") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(current_state, f, indent=2)
             tmp_file.rename(execution_file)
 
@@ -611,8 +632,8 @@ class CronScheduler:
             )
 
             notify_cron_job_started(job_name, skill)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # Use default retry config if not provided
         if retry_config is None:
@@ -736,8 +757,8 @@ class CronScheduler:
                 )
 
                 notify_cron_job_failed(job_name, skill, error_msg or "Unknown error")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # Log execution with retry info
         self.execution_log.log_execution(
@@ -918,10 +939,17 @@ class CronScheduler:
         import os
 
         try:
-            # Try to find VPN connect script
-            vpn_script = os.path.expanduser(
-                "~/src/redhatter/src/redhatter_vpn/vpn-connect"
-            )
+            # Try to find VPN connect script - read from config.json like infra_tools.py
+            from scripts.common.config_loader import load_config as _load_cfg
+
+            _cfg = _load_cfg()
+            vpn_script = _cfg.get("paths", {}).get("vpn_connect_script")
+            if not vpn_script:
+                vpn_script = os.path.expanduser(
+                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+                )
+            else:
+                vpn_script = os.path.expanduser(vpn_script)
 
             if not os.path.exists(vpn_script):
                 logger.warning(f"VPN script not found: {vpn_script}")
@@ -1037,7 +1065,7 @@ Begin execution now."""
                 prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(Path.home() / "src" / "redhat-ai-workflow"),
+                cwd=str(PROJECT_ROOT),
             )
 
             # Wait for completion with configurable timeout
@@ -1059,7 +1087,7 @@ Begin execution now."""
             error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
 
             # Write to log file
-            with open(log_file, "w") as f:
+            with open(log_file, "w", encoding="utf-8") as f:
                 f.write(f"=== Cron Job: {job_name} ===\n")
                 f.write(f"Skill: {skill}\n")
                 f.write(f"Session: {session_name}\n")
@@ -1109,7 +1137,7 @@ Begin execution now."""
         if not skill_file.exists():
             raise FileNotFoundError(f"Skill not found: {skill_name}")
 
-        with open(skill_file) as f:
+        with open(skill_file, encoding="utf-8") as f:
             skill = yaml.safe_load(f)
 
         executor = SkillExecutor(
@@ -1294,12 +1322,18 @@ Begin execution now."""
                 "retry_on": retry_config.retry_on,
             }
 
+        # Resolve enabled: config.json first, state.json override
+        if job_config:
+            is_enabled = self.config._is_job_enabled(job_config)
+        else:
+            is_enabled = False
+
         return {
             "name": job_name,
             "skill": job_config.get("skill") if job_config else "unknown",
             "cron": job_config.get("cron") if job_config else "unknown",
             "next_run": next_run,
-            "enabled": job_config.get("enabled", True) if job_config else False,
+            "enabled": is_enabled,
             "notify": job_config.get("notify", []) if job_config else [],
             "retry": retry_info,
             "recent_executions": self.execution_log.get_for_job(job_name),
@@ -1311,10 +1345,12 @@ Begin execution now."""
 
         for job_config in self.config.jobs:
             job_name = job_config.get("name", "unnamed")
+            # Resolve enabled: config.json first, state.json override
+            is_enabled = self.config._is_job_enabled(job_config)
             job_info = {
                 "name": job_name,
                 "skill": job_config.get("skill", ""),
-                "enabled": job_config.get("enabled", True),
+                "enabled": is_enabled,
                 "notify": job_config.get("notify", []),
             }
 

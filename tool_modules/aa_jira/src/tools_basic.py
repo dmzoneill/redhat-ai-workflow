@@ -53,16 +53,16 @@ async def run_rh_issue(
         # Check for common auth issues
         if "JIRA_JPAT" in output or "401" in output or "Unauthorized" in output:
             return False, (
-                f"❌ Jira authentication failed.\n\n"
-                f"Ensure these are in your ~/.bashrc:\n"
-                f"  export JIRA_JPAT='your-token'\n"
+                "❌ Jira authentication failed.\n\n"
+                "Ensure these are in your ~/.bashrc:\n"
+                "  export JIRA_JPAT='your-token'\n"
                 f"  export JIRA_URL='{_get_jira_url()}'\n\n"
                 f"Original error: {output}"
             )
         if "No module named" in output:
             return False, (
-                f"❌ rh-issue dependency missing.\n\n"
-                f"Run: cd ~/src/jira-creator && pipenv install\n\n"
+                "❌ rh-issue dependency missing.\n\n"
+                "Run: cd ~/src/jira-creator && pipenv install\n\n"
                 f"Original error: {output}"
             )
         return False, output
@@ -408,7 +408,7 @@ async def _jira_assign_impl(issue_key: str, assignee: str) -> str:
     Returns:
         Confirmation of the assignment.
     """
-    success, output = await run_rh_issue(["assign", issue_key, assignee])
+    success, output = await run_rh_issue(["assign", issue_key, assignee], timeout=60)
 
     if not success:
         return f"❌ Failed to assign: {output}"
@@ -815,7 +815,7 @@ async def _jira_transition_impl(issue_key: str, status: str) -> str:
     Returns:
         Confirmation of the transition.
     """
-    success, output = await run_rh_issue(["set-status", issue_key, status])
+    success, output = await run_rh_issue(["set-status", issue_key, status], timeout=60)
     if not success:
         return f"❌ Failed: {output}"
     return f"✅ {issue_key} transitioned to '{status}'"

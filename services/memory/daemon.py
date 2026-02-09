@@ -399,8 +399,8 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                 if isinstance(value, str):
                     try:
                         value = json.loads(value)
-                    except json.JSONDecodeError:
-                        pass
+                    except json.JSONDecodeError as exc:
+                        logger.debug("Invalid JSON: %s", exc)
                 content[key].append(value)
             self._write_yaml(path, content)
             return {"success": True}
@@ -457,7 +457,7 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write file
-        with open(file_path, "w") as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(content, f, default_flow_style=False, allow_unicode=True)
 
         # Update cache
@@ -478,8 +478,8 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             for f in MEMORY_DIR.rglob("*.yaml"):
                 try:
                     total_size += f.stat().st_size
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
             # Count session logs
             sessions_dir = MEMORY_DIR / "sessions"
@@ -500,8 +500,8 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                         for v in content.values():
                             if isinstance(v, list):
                                 patterns += len(v)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
         # Format size
         if total_size > 1024 * 1024:

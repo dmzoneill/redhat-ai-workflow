@@ -45,10 +45,10 @@ class TestStateManager:
 
         manager = StateManager()
 
-        # Should have default services
+        # Services section should exist but be empty (no hardcoded defaults)
+        # config.json is the source of truth for service enabled flags
         assert manager.get("services") is not None
-        assert "scheduler" in manager.get("services")
-        assert "sprint_bot" in manager.get("services")
+        assert isinstance(manager.get("services"), dict)
 
     def test_load_existing_state(self):
         """Test loading state from existing file."""
@@ -81,7 +81,6 @@ class TestStateManager:
 
         services = manager.get("services")
         assert isinstance(services, dict)
-        assert "scheduler" in services
 
     def test_get_key(self):
         """Test getting specific key from section."""
@@ -119,16 +118,23 @@ class TestStateManager:
 
     def test_is_service_enabled(self):
         """Test is_service_enabled convenience method."""
+        from unittest.mock import MagicMock, patch
+
         from server.state_manager import StateManager
 
         manager = StateManager()
 
-        # Default should be False
-        assert manager.is_service_enabled("scheduler") is False
+        # With no state.json override, falls back to config.json
+        mock_config = MagicMock()
+        mock_config.get.return_value = False
+        with patch("server.state_manager.config_mgr", mock_config, create=True):
+            # Set runtime override to True
+            manager.set_service_enabled("scheduler", True, flush=True)
+            assert manager.is_service_enabled("scheduler") is True
 
-        # Set to True
-        manager.set_service_enabled("scheduler", True, flush=True)
-        assert manager.is_service_enabled("scheduler") is True
+            # Set runtime override to False
+            manager.set_service_enabled("scheduler", False, flush=True)
+            assert manager.is_service_enabled("scheduler") is False
 
     def test_set_service_enabled(self):
         """Test set_service_enabled convenience method."""

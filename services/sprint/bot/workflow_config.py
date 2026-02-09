@@ -32,6 +32,10 @@ from server.state_manager import state as state_manager
 
 logger = logging.getLogger(__name__)
 
+# Canonical status lists used by both daemon.py and sprint_planner.py
+COMPLETED_STATUSES = ["done", "closed", "resolved"]
+REVIEW_STATUSES = ["in review", "review", "code review", "peer review"]
+
 
 class WorkflowConfig:
     """Loads and provides access to sprint workflow configuration from config.json."""
@@ -43,21 +47,22 @@ class WorkflowConfig:
         self._load_config()
 
     def _load_config(self) -> None:
-        """Load the configuration from ConfigManager."""
-        try:
-            sprint_config = config_manager.get("sprint")
-            if sprint_config and isinstance(sprint_config, dict):
-                self._config = sprint_config
-                self._build_status_mapping()
-                logger.debug("Loaded sprint workflow config from config.json")
-            else:
-                logger.warning("Sprint config not found in config.json, using defaults")
-                self._config = self._default_config()
-                self._build_status_mapping()
-        except Exception as e:
-            logger.error(f"Failed to load workflow config: {e}")
-            self._config = self._default_config()
+        """Load the configuration from ConfigManager.
+
+        Raises:
+            RuntimeError: If sprint config is missing from config.json
+        """
+        sprint_config = config_manager.get("sprint")
+        if sprint_config and isinstance(sprint_config, dict):
+            self._config = sprint_config
             self._build_status_mapping()
+            logger.debug("Loaded sprint workflow config from config.json")
+        else:
+            raise RuntimeError(
+                "Sprint config not found in config.json. "
+                "The 'sprint' section is required. "
+                "See config.json.example for the expected structure."
+            )
 
     def reload(self) -> None:
         """Reload the configuration from ConfigManager."""
@@ -72,76 +77,6 @@ class WorkflowConfig:
         ).items():  # noqa: B007
             for jira_status in config.get("jira_statuses", []):
                 self._status_to_stage[jira_status.lower()] = stage
-
-    def _default_config(self) -> dict:
-        """Return default configuration if not found in config.json."""
-        return {
-            "status_mappings": {
-                "not_ready": {
-                    "display_name": "Not Ready",
-                    "icon": "⚠️",
-                    "jira_statuses": ["new", "refinement"],
-                    "bot_can_work": False,
-                    "ui_order": 1,
-                },
-                "ready": {
-                    "display_name": "Ready",
-                    "icon": "📋",
-                    "jira_statuses": ["to do", "open", "backlog", "ready"],
-                    "bot_can_work": True,
-                    "ui_order": 2,
-                },
-                "in_progress": {
-                    "display_name": "In Progress",
-                    "icon": "🔄",
-                    "jira_statuses": ["in progress", "in development"],
-                    "bot_can_work": False,
-                    "ui_order": 3,
-                },
-                "review": {
-                    "display_name": "Review",
-                    "icon": "👀",
-                    "jira_statuses": ["review", "in review", "code review"],
-                    "bot_can_work": False,
-                    "ui_order": 4,
-                },
-                "done": {
-                    "display_name": "Done",
-                    "icon": "✅",
-                    "jira_statuses": ["done", "closed", "resolved"],
-                    "bot_can_work": False,
-                    "ui_order": 5,
-                },
-            },
-            "jira_transitions": {
-                "in_progress": "In Progress",
-                "in_review": "In Review",
-                "done": "Done",
-            },
-            "issue_classification": {
-                "spike": {
-                    "issue_types": ["spike", "research"],
-                    "keywords": ["research", "investigate", "spike", "poc"],
-                    "workflow": {"creates_mr": False, "final_status": "done"},
-                },
-                "code_change": {
-                    "default": True,
-                    "issue_types": ["story", "task", "bug"],
-                    "workflow": {"creates_mr": True, "final_status": "review"},
-                },
-            },
-            "merge_hold_patterns": ["don't merge", "do not merge", "hold off", "wip"],
-            "project_detection": {
-                "automation-analytics-backend": {
-                    "keywords": ["backend", "api"],
-                    "default": True,
-                }
-            },
-            "commit_format": {
-                "pattern": "{issue_key} - {type}({scope}): {description}",
-                "types": ["feat", "fix", "refactor", "docs", "test", "chore"],
-            },
-        }
 
     # ==================== STATUS METHODS ====================
 
@@ -365,16 +300,14 @@ class WorkflowConfig:
         return self._config.get("scheduling", {})
 
     def get_working_hours(self) -> dict:
-        """Get working hours configuration."""
-        return self._config.get(
-            "working_hours",
-            {
-                "timezone": "Europe/Dublin",
-                "start_hour": 9,
-                "end_hour": 17,
-                "weekdays_only": True,
-            },
-        )
+        """Get working hours configuration from config.json sprint.working_hours."""
+        working_hours = self._config.get("working_hours")
+        if not working_hours or not isinstance(working_hours, dict):
+            raise RuntimeError(
+                "working_hours not found in config.json sprint section. "
+                "The 'sprint.working_hours' section is required."
+            )
+        return working_hours
 
     # ==================== NOTIFICATIONS ====================
 
@@ -397,8 +330,18 @@ class WorkflowConfig:
     # ==================== BOT BEHAVIOR ====================
 
     def is_sprint_bot_enabled(self) -> bool:
-        """Check if sprint bot service is enabled (from state.json)."""
-        return state_manager.is_service_enabled("sprint_bot")
+        """Check if sprint bot service is enabled.
+
+        Checks config.json sprint.enabled first (source of truth),
+        then state.json for runtime override.
+        """
+        # Check state.json for runtime override first
+        service_state = state_manager.get("services", "sprint_bot", {})
+        if isinstance(service_state, dict) and "enabled" in service_state:
+            return service_state["enabled"]
+
+        # Fall back to config.json as source of truth
+        return bool(config_manager.get("sprint", "enabled", False))
 
     def set_sprint_bot_enabled(self, enabled: bool) -> None:
         """Enable or disable sprint bot service (in state.json)."""

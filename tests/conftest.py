@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -181,3 +182,24 @@ async def cleanup_meetbot_devices():
                         stdout=asyncio.subprocess.DEVNULL,
                         stderr=asyncio.subprocess.DEVNULL,
                     )
+
+
+# ============================================================================
+# Usage Pattern Testing Fixtures (shared across test_usage_* modules)
+# ============================================================================
+
+
+@pytest.fixture
+def usage_pattern_storage():
+    """Create a temporary UsagePatternStorage backed by a temp directory.
+
+    Shared across test_usage_pattern_checker, test_usage_pattern_learner,
+    test_usage_phase4_integration, and test_usage_phase5_optimization to
+    eliminate duplicate fixture definitions.
+    """
+    from server.usage_pattern_storage import UsagePatternStorage
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        patterns_file = Path(tmpdir) / "usage_patterns.yaml"
+        storage = UsagePatternStorage(patterns_file)
+        yield storage

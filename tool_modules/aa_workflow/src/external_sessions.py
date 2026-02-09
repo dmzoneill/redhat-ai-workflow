@@ -186,7 +186,7 @@ def _load_claude_session(session_file: Path) -> Optional[ClaudeSession]:
     metadata = {}
 
     try:
-        with open(session_file, "r") as f:
+        with open(session_file, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:

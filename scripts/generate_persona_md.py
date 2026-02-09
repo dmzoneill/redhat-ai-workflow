@@ -14,7 +14,7 @@ PERSONAS_DIR = PROJECT_ROOT / "personas"
 # Load profile
 profile_file = STYLE_DIR / "dave_style_profile.yaml"
 try:
-    with open(profile_file) as f:
+    with open(profile_file, encoding="utf-8") as f:
         profile = yaml.safe_load(f)
 except FileNotFoundError:
     print(f"❌ Profile file not found: {profile_file}")
@@ -27,7 +27,7 @@ except yaml.YAMLError as e:
 corpus_file = STYLE_DIR / "slack_corpus.jsonl"
 messages = []
 try:
-    with open(corpus_file) as f:
+    with open(corpus_file, encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 messages.append(json.loads(line))
@@ -224,7 +224,7 @@ lines.append("5. **Minimal punctuation** - Few exclamations, occasional question
 md_file = PERSONAS_DIR / "dave.md"
 try:
     PERSONAS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(md_file, "w") as f:
+    with open(md_file, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"✅ Persona markdown saved to: {md_file}")
 except OSError as e:

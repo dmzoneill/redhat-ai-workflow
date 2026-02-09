@@ -54,10 +54,10 @@ def load_agent_config(agent_name: str) -> list[str] | None:
     try:
         import yaml
 
-        with open(agent_file) as f:
+        with open(agent_file, encoding="utf-8") as f:
             config = yaml.safe_load(f)
         return cast(list[str], config.get("tools", []))
-    except Exception:
+    except (yaml.YAMLError, OSError):
         return None
 
 
@@ -335,10 +335,10 @@ async def init_scheduler(server: FastMCP) -> bool:
         try:
             log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
             log_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{datetime.now().isoformat()} - [main.py] {msg}\n")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     _log("init_scheduler called")
 
@@ -359,11 +359,10 @@ async def init_scheduler(server: FastMCP) -> bool:
         config = load_config()
         schedules_config = config.get("schedules", {})
 
+        # Check config.json first (source of truth), state.json for runtime override
         scheduler_enabled = state_manager.is_service_enabled("scheduler")
         if not scheduler_enabled:
-            logger.info(
-                "Scheduler disabled in state.json (will start config watcher only)"
-            )
+            logger.info("Scheduler disabled (will start config watcher only)")
 
         # Initialize notification engine
         init_notification_engine(server=server, config=config)

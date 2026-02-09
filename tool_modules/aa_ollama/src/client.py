@@ -95,8 +95,8 @@ class OllamaClient:
                 if response.status_code == 200:
                     data = response.json()
                     return [m.get("name", "") for m in data.get("models", [])]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
         return []
 
     def generate(

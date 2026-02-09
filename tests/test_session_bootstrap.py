@@ -4,7 +4,7 @@ Tests the _get_bootstrap_context function that provides intelligent
 context gathering and persona suggestions when starting a session.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -35,8 +35,6 @@ class TestGetBootstrapContext:
         """Test graceful fallback when memory abstraction is unavailable."""
         with patch.dict("sys.modules", {"services.memory_abstraction": None}):
             # Force reimport to trigger ImportError path
-            import importlib
-
             import tool_modules.aa_workflow.src.session_tools as session_tools
 
             # The function should handle ImportError gracefully

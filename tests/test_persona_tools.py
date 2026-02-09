@@ -6,8 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastmcp import Context, FastMCP
 
-from server.workspace_state import WorkspaceRegistry
-
 # ==================== _list_personas_impl ====================
 
 

@@ -51,7 +51,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Import centralized paths
-from server.paths import SESSION_STATE_FILE
+from server.paths import CURSOR_WORKSPACE_STORAGE, SESSION_STATE_FILE
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
@@ -201,9 +201,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         results = []
 
         try:
-            workspace_storage = (
-                Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-            )
+            workspace_storage = CURSOR_WORKSPACE_STORAGE
             if not workspace_storage.exists():
                 return {
                     "results": [],
@@ -270,23 +268,24 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                         content_matches = []
                         for msg in conversation:
                             text = msg.get("text", "") or msg.get("content", "")
-                            if text and query_lower in text.lower():
-                                # Extract snippet around match
-                                match = query_pattern.search(text)
-                                if match:
-                                    start = max(0, match.start() - 50)
-                                    end = min(len(text), match.end() + 50)
-                                    snippet = text[start:end]
-                                    if start > 0:
-                                        snippet = "..." + snippet
-                                    if end < len(text):
-                                        snippet = snippet + "..."
-                                    content_matches.append(
-                                        {
-                                            "snippet": snippet,
-                                            "role": msg.get("role", "unknown"),
-                                        }
-                                    )
+                            if not text or query_lower not in text.lower():
+                                continue
+                            match = query_pattern.search(text)
+                            if not match:
+                                continue
+                            start = max(0, match.start() - 50)
+                            end = min(len(text), match.end() + 50)
+                            snippet = text[start:end]
+                            if start > 0:
+                                snippet = "..." + snippet
+                            if end < len(text):
+                                snippet = snippet + "..."
+                            content_matches.append(
+                                {
+                                    "snippet": snippet,
+                                    "role": msg.get("role", "unknown"),
+                                }
+                            )
 
                         if name_match or content_matches:
                             # Get project name from workspace path
@@ -430,9 +429,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     def _compute_state_hash(self) -> str:
         """Compute a hash of the current Cursor session state."""
         try:
-            workspace_storage = (
-                Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-            )
+            workspace_storage = CURSOR_WORKSPACE_STORAGE
             if not workspace_storage.exists():
                 return ""
 
@@ -479,9 +476,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._workspace_storage_map: dict[str, Path] = (
             {}
         )  # workspace_uri -> storage_dir
-        workspace_storage = (
-            Path.home() / ".config" / "Cursor" / "User" / "workspaceStorage"
-        )
+        workspace_storage = CURSOR_WORKSPACE_STORAGE
 
         if not workspace_storage.exists():
             return
@@ -634,7 +629,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             ):
                 logger.info(
                     f"Session count changed: {self._last_session_count} -> {session_count}, "
-                    f"triggering full sync"
+                    "triggering full sync"
                 )
                 # Trigger a full sync to update the registry with adds/removes
                 await self._do_sync()
@@ -942,8 +937,8 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         except Exception:
             try:
                 Path(temp_path).unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("OS operation failed: %s", exc)
             raise
 
     async def _fast_sync_loop(self):
@@ -1064,7 +1059,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         await self.start_sleep_monitor()
 
         logger.info(
-            f"Session daemon ready with tiered sync: "
+            "Session daemon ready with tiered sync: "
             f"fast={self._fast_sync_interval}s, "
             f"recent={self._recent_sync_interval}s (top {self._recent_session_count}), "
             f"background={self._background_sync_interval}s (batch {self._background_batch_size})"

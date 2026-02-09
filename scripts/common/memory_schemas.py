@@ -144,8 +144,8 @@ class CurrentWork(BaseModel):
         """Ensure timestamp is valid ISO format."""
         try:
             datetime.fromisoformat(v.replace("Z", "+00:00"))
-        except ValueError:
-            raise ValueError("last_updated must be valid ISO timestamp")
+        except ValueError as e:
+            raise ValueError("last_updated must be valid ISO timestamp") from e
         return v
 
 

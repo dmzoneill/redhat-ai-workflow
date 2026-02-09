@@ -1,0 +1,469 @@
+last_full_bootstrap:
+  error_count: 0
+  personas:
+  - admin
+  - code
+  - database
+  - developer
+  - devops
+  - github
+  - incident
+  - infra
+  - meetings
+  - observability
+  - performance
+  - presentations
+  - project
+  - release
+  - researcher
+  - security
+  - slack
+  - slop
+  - universal
+  - workspace
+  projects:
+  - automation-analytics-backend
+  - pdf-generator
+  - app-interface
+  - konflux-release-data
+  - redhat-ai-workflow
+  - dataverse-integration
+  - aapautomationanalytics-dbt
+  success_count: 0
+  timestamp: '2026-02-09T23:28:48.282551'
+last_updated: '2026-02-09T23:28:48.282622'
+projects:
+  aapautomationanalytics-dbt:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934130'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934131'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934131'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934132'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934133'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934134'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934135'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934136'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934137'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934138'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934139'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934140'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934140'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934141'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934142'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934143'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934144'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934145'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934146'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934146'
+  app-interface:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934046'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934047'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934048'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934049'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934050'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934051'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934052'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934053'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934054'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934055'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934056'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934057'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934058'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934059'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934060'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934061'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934063'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934063'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934064'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934065'
+  automation-analytics-backend:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934000'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934003'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934005'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934006'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934007'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934008'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934010'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934010'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934012'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934013'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934014'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934016'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934017'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934018'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934019'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934020'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934021'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934022'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934023'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934024'
+  dataverse-integration:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934104'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934105'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934106'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934107'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934108'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934109'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934110'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934110'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934119'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934120'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934120'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934121'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934122'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934123'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934124'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934125'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934126'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934127'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934128'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934128'
+  konflux-release-data:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934066'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934067'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934068'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934069'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934070'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934071'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934072'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934073'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934074'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934075'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934076'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934077'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934078'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934079'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934080'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934081'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934082'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934083'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934084'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934085'
+  pdf-generator:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934026'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934027'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934028'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934029'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934030'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934031'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934033'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934034'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934035'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934036'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934037'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934038'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934039'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934039'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934040'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934041'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934042'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934043'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934044'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934045'
+  redhat-ai-workflow:
+    personas:
+      admin:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934086'
+      code:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934087'
+      database:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934088'
+      developer:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934089'
+      devops:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934090'
+      github:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934090'
+      incident:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934091'
+      infra:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934092'
+      meetings:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934093'
+      observability:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934094'
+      performance:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934095'
+      presentations:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934096'
+      project:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934097'
+      release:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934098'
+      researcher:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934098'
+      security:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934100'
+      slack:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934101'
+      slop:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934102'
+      universal:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934102'
+      workspace:
+        action: missing
+        last_generated: '2026-02-07T20:58:17.934103'

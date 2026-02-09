@@ -33,7 +33,7 @@ import yaml  # noqa: E402
 def load_skill(path: Path) -> dict | None:
     """Load and parse a skill YAML file."""
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f)
     except yaml.YAMLError as e:
         return {"_error": f"YAML parse error: {e}"}

@@ -1,0 +1,31 @@
+metadata:
+  project: automation-analytics-backend
+  persona: slop
+  last_updated: '2026-02-07T20:58:17.806154'
+  last_scanned: '2026-02-07T20:58:17.806074'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: 'Tower Analytics Backend
+
+    ======================='
+  key_modules:
+  - path: test/
+    purpose: Test module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding:
+  - pattern: Python project
+    location: pyproject.toml
+  testing:
+  - pattern: pytest test suite
+    example: pytest tests/
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+  - pattern: Docker containerization
+    notes: Dockerfile present
+gotchas: []
+learned_from_tasks: []

@@ -9,7 +9,6 @@ Provides a registry of all tools organized by category with methods for:
 import json
 import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 from .categories import CORE_CATEGORIES, TOOL_CATEGORIES
@@ -146,19 +145,17 @@ def load_registry() -> ToolRegistry:
         return _registry
 
     # Try loading from config.json
-    config_path = Path(__file__).parents[4] / "config.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
+    try:
+        from server.config_manager import config as config_manager
 
-            custom_categories = config.get("tool_filtering", {}).get("categories")
-            if custom_categories:
-                logger.info("Loading tool categories from config.json")
-                _registry = ToolRegistry.from_dict(custom_categories)
-                return _registry
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning(f"Failed to load categories from config.json: {e}")
+        tool_filtering = config_manager.get("tool_filtering") or {}
+        custom_categories = tool_filtering.get("categories")
+        if custom_categories:
+            logger.info("Loading tool categories from config.json")
+            _registry = ToolRegistry.from_dict(custom_categories)
+            return _registry
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning(f"Failed to load categories from config.json: {e}")
 
     # Fall back to built-in categories
     logger.info("Loading built-in tool categories")

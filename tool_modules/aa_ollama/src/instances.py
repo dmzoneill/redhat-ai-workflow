@@ -8,10 +8,12 @@ Supports 4 Ollama instances running on different hardware:
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,8 +31,8 @@ class OllamaInstance:
         self.host = self.host.rstrip("/")
 
 
-# Default instance configurations
-DEFAULT_INSTANCES = {
+# Hardcoded fallback instance configurations (used only if config.json is unavailable)
+_FALLBACK_INSTANCES = {
     "npu": OllamaInstance(
         name="npu",
         host=os.getenv("OLLAMA_NPU_HOST", "http://localhost:11434"),
@@ -48,7 +50,7 @@ DEFAULT_INSTANCES = {
     "nvidia": OllamaInstance(
         name="nvidia",
         host=os.getenv("OLLAMA_NVIDIA_HOST", "http://localhost:11436"),
-        default_model="llama3:7b",
+        default_model="llama3:8b",
         power_watts="40-60W",
         best_for=["complex_reasoning", "code_generation", "long_context"],
     ),
@@ -61,45 +63,46 @@ DEFAULT_INSTANCES = {
     ),
 }
 
+# Keep DEFAULT_INSTANCES as a public alias for backward compatibility
+DEFAULT_INSTANCES = _FALLBACK_INSTANCES
+
 # Cached instances (loaded from config.json if available)
 _instances: Optional[dict[str, OllamaInstance]] = None
 
 
 def _load_instances_from_config() -> dict[str, OllamaInstance]:
-    """Load instance configuration from config.json if available."""
-    instances = dict(DEFAULT_INSTANCES)
+    """Load instance configuration from config.json first, falling back to hardcoded defaults."""
+    # Start with hardcoded fallbacks
+    instances = dict(_FALLBACK_INSTANCES)
 
-    # Try to load from config.json
-    config_path = Path(__file__).parents[4] / "config.json"
-    if config_path.exists():
-        try:
-            with open(config_path) as f:
-                config = json.load(f)
+    # Try to load from config.json (config.json values take priority)
+    try:
+        from server.config_manager import config as config_manager
 
-            ollama_config = config.get("ollama", {}).get("instances", {})
-            for name, cfg in ollama_config.items():
-                if name in instances:
-                    # Update existing instance
-                    instances[name] = OllamaInstance(
-                        name=name,
-                        host=cfg.get("host", instances[name].host),
-                        default_model=cfg.get(
-                            "default_model", instances[name].default_model
-                        ),
-                        power_watts=cfg.get("power_watts", instances[name].power_watts),
-                        best_for=cfg.get("best_for", instances[name].best_for),
-                    )
-                else:
-                    # Add new instance
-                    instances[name] = OllamaInstance(
-                        name=name,
-                        host=cfg.get("host", "http://localhost:11434"),
-                        default_model=cfg.get("default_model", "qwen2.5:0.5b"),
-                        power_watts=cfg.get("power_watts", "unknown"),
-                        best_for=cfg.get("best_for", []),
-                    )
-        except (json.JSONDecodeError, KeyError):
-            pass  # Use defaults
+        config = config_manager.get_all()
+        ollama_config = config.get("ollama", {}).get("instances", {})
+        for name, cfg in ollama_config.items():
+            fallback = instances.get(name)
+            if fallback:
+                # Config.json values take priority over hardcoded fallbacks
+                instances[name] = OllamaInstance(
+                    name=name,
+                    host=cfg.get("host", fallback.host),
+                    default_model=cfg.get("default_model", fallback.default_model),
+                    power_watts=cfg.get("power_watts", fallback.power_watts),
+                    best_for=cfg.get("best_for", fallback.best_for),
+                )
+            else:
+                # Add new instance from config.json
+                instances[name] = OllamaInstance(
+                    name=name,
+                    host=cfg.get("host", "http://localhost:11434"),
+                    default_model=cfg.get("default_model", "qwen2.5:0.5b"),
+                    power_watts=cfg.get("power_watts", "unknown"),
+                    best_for=cfg.get("best_for", []),
+                )
+    except (json.JSONDecodeError, KeyError) as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     return instances
 

@@ -290,8 +290,8 @@ class MemoryInterface:
                 error=f"Adapter {source} does not support storage",
             )
 
-        filter = SourceFilter(name=source, key=key)
-        return await instance.store(key, value, filter)
+        source_filter = SourceFilter(name=source, key=key)
+        return await instance.store(key, value, source_filter)
 
     async def learn(
         self,

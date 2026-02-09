@@ -17,7 +17,6 @@ Setup:
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,56 +25,25 @@ logger = logging.getLogger(__name__)
 from fastmcp import FastMCP  # noqa: E402
 
 # Setup project path for server imports (must be before server imports)
-from tool_modules.common import PROJECT_ROOT  # noqa: E402
+from tool_modules.common import (  # noqa: E402
+    PROJECT_ROOT,
+    get_google_config_dir,
+    get_google_oauth_scopes,
+)
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.tool_registry import ToolRegistry  # noqa: E402
-from server.utils import load_config  # noqa: E402
 
 if TYPE_CHECKING:
     from googleapiclient.discovery import Resource
 
-
-def _get_google_config_dir() -> Path:
-    """Get Google config directory from config.json or default."""
-    config = load_config()
-    # Check google_calendar.config_dir (shared OAuth)
-    gc_config = config.get("google_calendar", {}).get("config_dir")
-    if gc_config:
-        return Path(os.path.expanduser(gc_config))
-    # Fallback to paths.google_calendar_config
-    paths_cfg = config.get("paths", {})
-    gc_config = paths_cfg.get("google_calendar_config")
-    if gc_config:
-        return Path(os.path.expanduser(gc_config))
-    # Default
-    return Path.home() / ".config" / "google-calendar"
-
-
-# Config paths - use shared OAuth with Google Calendar
-CONFIG_DIR = _get_google_config_dir()
+# Shared Google config (single source of truth in tool_modules.common)
+CONFIG_DIR = get_google_config_dir()
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 TOKEN_FILE = CONFIG_DIR / "token.json"
 SERVICE_ACCOUNT_FILE = CONFIG_DIR / "service_account.json"
-
-# Scopes required - MUST match aa_google_calendar to share the same token
-# All Google tool modules use the same comprehensive scope list
-SCOPES = [
-    # Calendar
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.readonly",
-    # Gmail
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-    # Slides
-    "https://www.googleapis.com/auth/presentations",
-    "https://www.googleapis.com/auth/presentations.readonly",
-    # Drive
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
-]
+SCOPES = get_google_oauth_scopes()
 
 
 def _try_load_oauth_token(credentials_cls, scopes):
@@ -93,7 +61,7 @@ def _try_refresh_credentials(creds, request_cls):
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(request_cls())
-            with open(TOKEN_FILE, "w") as f:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds
         except Exception as e:
@@ -124,7 +92,7 @@ def _try_oauth_flow(scopes):
             )
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(TOKEN_FILE, "w") as f:
+            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds, None
         except Exception as e:

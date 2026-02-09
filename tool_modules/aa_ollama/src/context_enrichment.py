@@ -76,7 +76,7 @@ def load_memory_state(project: Optional[str] = None) -> dict:
         return result
 
     try:
-        with open(current_work_path) as f:
+        with open(current_work_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
         result["active_issues"] = data.get("active_issues", [])[:5]  # Limit to 5
@@ -148,23 +148,20 @@ def load_environment_status() -> dict:
         result["kubeconfigs"][env] = (kube_dir / filename).exists()
 
     # Load Ollama instances from config
-    config_path = Path(__file__).parents[4] / "config.json"
-    if config_path.exists():
-        try:
-            import json
+    try:
+        from server.config_manager import config as config_manager
 
-            with open(config_path) as f:
-                config = json.load(f)
-            for name, inst in config.get("ollama_instances", {}).items():
-                result["ollama_instances"].append(
-                    {
-                        "name": name,
-                        "url": inst.get("url", ""),
-                        "device": inst.get("device", "unknown"),
-                    }
-                )
-        except Exception as e:
-            logger.warning(f"Failed to load ollama instances: {e}")
+        ollama_instances = config_manager.get("ollama_instances") or {}
+        for name, inst in ollama_instances.items():
+            result["ollama_instances"].append(
+                {
+                    "name": name,
+                    "url": inst.get("url", ""),
+                    "device": inst.get("device", "unknown"),
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Failed to load ollama instances: {e}")
 
     return result
 
@@ -191,7 +188,7 @@ def load_learned_patterns(
         return []
 
     try:
-        with open(patterns_path) as f:
+        with open(patterns_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except Exception as e:
         logger.warning(f"Failed to load patterns.yaml: {e}")
@@ -259,7 +256,7 @@ def load_session_log(limit: int = 5) -> list[dict]:
         return []
 
     try:
-        with open(log_path) as f:
+        with open(log_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except Exception as e:
         logger.warning(f"Failed to load session log: {e}")
@@ -290,7 +287,7 @@ def load_persona_prompt(persona_name: str) -> str:
 
     if yaml_path.exists():
         try:
-            with open(yaml_path) as f:
+            with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("system_prompt", data.get("description", ""))[:500]
         except Exception as e:
@@ -367,8 +364,8 @@ def run_semantic_search(
                         current_snippet["relevance"] = (
                             float(line.split(":")[1].strip().rstrip("%")) / 100
                         )
-                    except (ValueError, IndexError):
-                        pass
+                    except (ValueError, IndexError) as exc:
+                        logger.debug("Suppressed error: %s", exc)
                 elif current_snippet and line.startswith("   "):
                     current_snippet["content"] += line[3:] + "\n"
 

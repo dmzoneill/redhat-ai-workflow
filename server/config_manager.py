@@ -116,7 +116,7 @@ def validate_config(config: dict[str, Any], strict: bool = False) -> list[str]:
             if isinstance(spec, tuple):
                 expected_type, required, default = spec
             else:
-                expected_type, required, default = spec, False, None  # noqa: F841
+                expected_type, required = spec, False
 
             if key not in section_data:
                 if required:
@@ -216,7 +216,7 @@ class ConfigManager:
         """Load config from disk (internal, no lock)."""
         try:
             if CONFIG_FILE.exists():
-                with open(CONFIG_FILE) as f:
+                with open(CONFIG_FILE, encoding="utf-8") as f:
                     self._cache = json.load(f)
                 self._last_mtime = CONFIG_FILE.stat().st_mtime
                 logger.debug(f"Config loaded, {len(self._cache)} sections")
@@ -239,8 +239,8 @@ class ConfigManager:
                 if current_mtime > self._last_mtime:
                     logger.info("Config file changed externally, reloading")
                     self._load()
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("OS operation failed: %s", exc)
 
     def _mark_dirty(self) -> None:
         """Mark config as dirty and schedule debounced write (internal, no lock)."""
@@ -270,7 +270,7 @@ class ConfigManager:
             CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
             # Write with exclusive file lock
-            with open(CONFIG_FILE, "w") as f:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     json.dump(self._cache, f, indent=2)
@@ -424,24 +424,22 @@ class ConfigManager:
 
             return False
 
+    def _cancel_debounce(self) -> None:
+        """Cancel any pending debounce timer. Must be called with self._lock held."""
+        if self._debounce_timer is not None:
+            self._debounce_timer.cancel()
+            self._debounce_timer = None
+
     def flush(self) -> None:
         """Force write pending changes to disk immediately."""
         with self._lock:
-            # Cancel pending debounce timer
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-                self._debounce_timer = None
-
+            self._cancel_debounce()
             self._flush_internal()
 
     def reload(self) -> None:
         """Force reload config from disk, discarding any pending changes."""
         with self._lock:
-            # Cancel pending debounce timer
-            if self._debounce_timer is not None:
-                self._debounce_timer.cancel()
-                self._debounce_timer = None
-
+            self._cancel_debounce()
             self._dirty = False
             self._load()
 

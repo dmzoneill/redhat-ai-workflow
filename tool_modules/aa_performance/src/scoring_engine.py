@@ -110,7 +110,7 @@ class ScoringEngine:
         seen = set()
         for daily_file in self.daily_dir.glob("*.json"):
             try:
-                with open(daily_file) as f:
+                with open(daily_file, encoding="utf-8") as f:
                     data = json.load(f)
                     for event in data.get("events", []):
                         seen.add(event.get("id", ""))
@@ -200,7 +200,7 @@ class ScoringEngine:
             "saved_at": datetime.now().isoformat(),
         }
 
-        with open(daily_file, "w") as f:
+        with open(daily_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, default=str)
 
         logger.info(f"Saved daily data to {daily_file}")
@@ -210,7 +210,7 @@ class ScoringEngine:
         """Load daily data for a specific date."""
         daily_file = self.daily_dir / f"{dt.isoformat()}.json"
         if daily_file.exists():
-            with open(daily_file) as f:
+            with open(daily_file, encoding="utf-8") as f:
                 return json.load(f)
         return None
 
@@ -224,7 +224,7 @@ class ScoringEngine:
         # Process all daily files
         for daily_file in sorted(self.daily_dir.glob("*.json")):
             try:
-                with open(daily_file) as f:
+                with open(daily_file, encoding="utf-8") as f:
                     data = json.load(f)
 
                 daily_points = data.get("daily_points", {})
@@ -284,7 +284,7 @@ class ScoringEngine:
 
         # Save summary
         summary_file = self.perf_dir / "summary.json"
-        with open(summary_file, "w") as f:
+        with open(summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
 
         return summary
@@ -321,8 +321,8 @@ class ScoringEngine:
             try:
                 dt = date.fromisoformat(daily_file.stem)
                 existing_dates.add(dt)
-            except ValueError:
-                pass
+            except ValueError as exc:
+                logger.debug("Invalid value encountered: %s", exc)
 
         missing = []
         current = start_date

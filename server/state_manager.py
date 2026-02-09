@@ -41,14 +41,12 @@ from server.paths import STATE_FILE
 logger = logging.getLogger(__name__)
 
 # Default state structure
+# NOTE: Service enabled flags are NOT stored here. config.json is the source
+# of truth for whether a service is enabled. state.json only stores runtime
+# overrides (e.g., temporarily disabling a service via the UI).
 DEFAULT_STATE: dict[str, Any] = {
     "version": 1,
-    "services": {
-        "scheduler": {"enabled": False},
-        "sprint_bot": {"enabled": False},
-        "google_calendar": {"enabled": False},
-        "gmail": {"enabled": False},
-    },
+    "services": {},  # Runtime overrides only, not defaults
     "jobs": {},
     "last_updated": None,
 }
@@ -114,16 +112,40 @@ class StateManager(JsonFileManager):
     def is_service_enabled(self, service: str) -> bool:
         """Check if a service is enabled.
 
+        Checks state.json for a runtime override first. If no override exists,
+        falls back to config.json as the source of truth for service enabled flags.
+
         Args:
             service: Service name (scheduler, sprint_bot, google_calendar, gmail)
 
         Returns:
             True if enabled, False otherwise
         """
+        # Check state.json for runtime override
         service_state = self.get("services", service, {})
-        if isinstance(service_state, dict):
-            return service_state.get("enabled", False)
-        return False
+        if isinstance(service_state, dict) and "enabled" in service_state:
+            return service_state["enabled"]
+
+        # Fall back to config.json as source of truth
+        try:
+            from server.config_manager import config as config_mgr
+
+            # Map service names to config.json sections
+            # e.g., "scheduler" -> config.schedules.enabled
+            #        "sprint_bot" -> config.sprint.enabled
+            service_to_config = {
+                "scheduler": ("schedules", "enabled"),
+                "sprint_bot": ("sprint", "enabled"),
+                "google_calendar": ("google_calendar", "enabled"),
+                "gmail": ("gmail", "enabled"),
+            }
+            if service in service_to_config:
+                section, key = service_to_config[service]
+                return bool(config_mgr.get(section, key, False))
+            # Generic: check config.<service>.enabled
+            return bool(config_mgr.get(service, "enabled", False))
+        except Exception:
+            return False
 
     def set_service_enabled(
         self, service: str, enabled: bool, flush: bool = False

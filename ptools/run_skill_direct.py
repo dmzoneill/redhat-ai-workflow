@@ -18,7 +18,7 @@ from skill_engine import SkillExecutor, SkillExecutorConfig  # noqa: E402
 
 async def run_coffee():
     skill_file = PROJECT_ROOT / "skills" / "coffee.yaml"
-    with open(skill_file) as f:
+    with open(skill_file, encoding="utf-8") as f:
         skill = yaml.safe_load(f)
 
     # Inputs for coffee skill

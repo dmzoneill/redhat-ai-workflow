@@ -163,7 +163,7 @@ def main():
             "reason": (
                 f"[Ralph Wiggum Loop {current_iteration + 1}/{max_iterations}] "
                 f"{incomplete} tasks remaining ({progress_pct}% complete). "
-                f"Continue working on TODO.md tasks."
+                "Continue working on TODO.md tasks."
             ),
         }
         print(json.dumps(output))

@@ -13,9 +13,12 @@ Usage:
 """
 
 import argparse
+import logging
 import re
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     import yaml
@@ -67,12 +70,15 @@ def extract_command_metadata(content: str, filename: str) -> dict:
             arg_names = re.findall(r'"(\w+)":', args_str)
             for arg in arg_names:
                 # Check if there's a placeholder like $JIRA_KEY
-                if f"${arg.upper()}" in content or f"${arg.upper().replace('_', '')}" in content:
+                if (
+                    f"${arg.upper()}" in content
+                    or f"${arg.upper().replace('_', '')}" in content
+                ):
                     arguments.append({"name": arg, "required": True})
                 else:
                     arguments.append({"name": arg, "required": False})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     return {
         "name": filename.replace(".md", ""),
@@ -168,7 +174,7 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
 
         # Load skill definition
         try:
-            with open(skill_file) as f:
+            with open(skill_file, encoding="utf-8") as f:
                 skill = yaml.safe_load(f)
         except Exception as e:
             if verbose:
@@ -208,7 +214,11 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
                         input_parts.append(f'"{inp_name}": ""')
             elif isinstance(inputs, dict):
                 for inp_name, inp_def in inputs.items():
-                    inp_required = inp_def.get("required", False) if isinstance(inp_def, dict) else False
+                    inp_required = (
+                        inp_def.get("required", False)
+                        if isinstance(inp_def, dict)
+                        else False
+                    )
                     if inp_required:
                         input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
                     else:
@@ -329,7 +339,9 @@ def sync_commands(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync commands between Cursor and Claude Code formats")
+    parser = argparse.ArgumentParser(
+        description="Sync commands between Cursor and Claude Code formats"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -364,7 +376,9 @@ def main():
         if not args.dry_run:
             CURSOR_COMMANDS.mkdir(parents=True, exist_ok=True)
 
-        created = generate_missing_commands(dry_run=args.dry_run, verbose=not args.quiet)
+        created = generate_missing_commands(
+            dry_run=args.dry_run, verbose=not args.quiet
+        )
 
         print(f"\n📊 Generated: {created} new commands")
 

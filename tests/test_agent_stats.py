@@ -672,8 +672,10 @@ def test_load_stats_missing_file(tmp_path):
         _cleanup()
 
 
-def test_save_stats_writes_file(tmp_path):
+def test_save_stats_writes_file(tmp_path, monkeypatch):
     try:
+        # Unset TESTING so _save_stats actually writes to disk
+        monkeypatch.delenv("TESTING", raising=False)
         stats_file = tmp_path / "agent_stats.json"
         agent_stats.AgentStats._instance = None
         with patch(

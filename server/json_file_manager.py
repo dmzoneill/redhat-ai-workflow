@@ -75,7 +75,7 @@ class JsonFileManager:
         """Load data from disk (internal, no lock)."""
         try:
             if self._file_path.exists():
-                with open(self._file_path) as f:
+                with open(self._file_path, encoding="utf-8") as f:
                     self._cache = json.load(f)
                 self._last_mtime = self._file_path.stat().st_mtime
                 logger.debug(f"{self._file_label} loaded, {len(self._cache)} sections")
@@ -112,8 +112,8 @@ class JsonFileManager:
                 if current_mtime > self._last_mtime:
                     logger.info(f"{self._file_label} changed externally, reloading")
                     self._load()
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("OS operation failed: %s", exc)
 
     def _mark_dirty(self) -> None:
         """Mark data as dirty and schedule debounced write (internal, no lock)."""
@@ -150,7 +150,7 @@ class JsonFileManager:
             self._on_pre_flush()
 
             # Write with exclusive file lock
-            with open(self._file_path, "w") as f:
+            with open(self._file_path, "w", encoding="utf-8") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 try:
                     json.dump(self._cache, f, indent=2)

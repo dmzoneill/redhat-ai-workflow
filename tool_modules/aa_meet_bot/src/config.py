@@ -104,7 +104,12 @@ class AvatarConfig:
     """Avatar image and video configuration."""
 
     # Static image for lip-sync (cropped face)
-    face_image: Path = Path("/home/daoneill/Documents/Identification/IMG_3249_.jpg")
+    face_image: Path = field(
+        default_factory=lambda: Path.home()
+        / "Documents"
+        / "Identification"
+        / "IMG_3249_.jpg"
+    )
 
     # Pre-generated video clips directory
     clips_dir: Path = field(default_factory=lambda: MEETBOT_CLIPS_DIR)

@@ -83,7 +83,7 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
             snapshot = json_module.loads(snapshot_json)
         else:
             # Assume file path
-            with open(snapshot_json) as f:
+            with open(snapshot_json, encoding="utf-8") as f:
                 snapshot = json_module.load(f)
 
         # Extract components
@@ -118,7 +118,7 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
                 TextContent(
                     type="text",
                     text=(
-                        f"❌ Invalid template_ref from snapshot: "
+                        "❌ Invalid template_ref from snapshot: "
                         f"`{template_ref}` ({len(template_ref)} chars, need 40)"
                     ),
                 )
@@ -129,7 +129,7 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
                 TextContent(
                     type="text",
                     text=(
-                        f"❌ Invalid image digest from snapshot: "
+                        "❌ Invalid image digest from snapshot: "
                         f"`{image_digest}` ({len(image_digest)} chars, need 64)"
                     ),
                 )
@@ -569,7 +569,7 @@ async def _bonfire_full_test_workflow_impl(
         f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`"
     )
     lines.append(
-        f"- Get logs: `kubectl_logs(pod_name='...', "
+        "- Get logs: `kubectl_logs(pod_name='...', "
         f"namespace='{namespace}', environment='ephemeral')`"
     )
     lines.append(

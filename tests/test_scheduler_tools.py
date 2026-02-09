@@ -125,7 +125,8 @@ async def test_cron_list_no_jobs():
         patch("tool_modules.aa_workflow.src.scheduler_tools.config_manager") as mock_cm,
     ):
         mock_sm.is_service_enabled.return_value = True
-        mock_cm.get.return_value = {"jobs": []}
+        mock_sm.get.return_value = {}  # No state.json override
+        mock_cm.get.return_value = {"enabled": True, "jobs": []}
 
         captured = {}
 
@@ -158,7 +159,9 @@ async def test_cron_list_with_cron_job():
     ):
         mock_sm.is_service_enabled.return_value = True
         mock_sm.is_job_enabled.return_value = True
+        mock_sm.get.return_value = {}  # No state.json override
         mock_cm.get.return_value = {
+            "enabled": True,
             "timezone": "US/Eastern",
             "default_retry": {"max_attempts": 3, "backoff": "linear"},
             "jobs": [
@@ -212,7 +215,9 @@ async def test_cron_list_poll_job():
     ):
         mock_sm.is_service_enabled.return_value = True
         mock_sm.is_job_enabled.return_value = False
+        mock_sm.get.return_value = {}  # No state.json override
         mock_cm.get.return_value = {
+            "enabled": True,
             "jobs": [
                 {
                     "name": "stale_prs",
@@ -261,7 +266,9 @@ async def test_cron_list_default_retry_badge():
     ):
         mock_sm.is_service_enabled.return_value = True
         mock_sm.is_job_enabled.return_value = True
+        mock_sm.get.return_value = {}  # No state.json override
         mock_cm.get.return_value = {
+            "enabled": True,
             "jobs": [
                 {"name": "j", "skill": "s", "cron": "* * * * *", "notify": []},
             ],
@@ -638,7 +645,12 @@ async def test_cron_status_no_scheduler():
         patch("tool_modules.aa_workflow.src.scheduler_tools.config_manager") as mock_cm,
     ):
         mock_sm.is_service_enabled.return_value = True
-        mock_cm.get.return_value = {"timezone": "UTC", "jobs": [{"name": "a"}]}
+        mock_sm.get.return_value = {}  # No state.json override
+        mock_cm.get.return_value = {
+            "enabled": True,
+            "timezone": "UTC",
+            "jobs": [{"name": "a"}],
+        }
         captured, _ = _build_captured_tools()
 
         mock_sched_module = MagicMock()
@@ -660,7 +672,9 @@ async def test_cron_status_with_scheduler_and_executions():
         patch("tool_modules.aa_workflow.src.scheduler_tools.config_manager") as mock_cm,
     ):
         mock_sm.is_service_enabled.return_value = True
+        mock_sm.get.return_value = {}  # No state.json override
         mock_cm.get.return_value = {
+            "enabled": True,
             "timezone": "US/Pacific",
             "default_retry": {"max_attempts": 2, "backoff": "exponential"},
             "jobs": [],

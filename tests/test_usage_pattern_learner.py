@@ -5,9 +5,6 @@ Tests pattern learning, merging, confidence evolution, and prevention tracking.
 Targets 90%+ coverage of server/usage_pattern_learner.py.
 """
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from server.usage_pattern_learner import UsagePatternLearner
@@ -19,12 +16,9 @@ from server.usage_pattern_storage import UsagePatternStorage
 
 
 @pytest.fixture
-def temp_storage():
-    """Create temporary storage for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        patterns_file = Path(tmpdir) / "usage_patterns.yaml"
-        storage = UsagePatternStorage(patterns_file)
-        yield storage
+def temp_storage(usage_pattern_storage):
+    """Alias shared fixture for backward compatibility."""
+    return usage_pattern_storage
 
 
 @pytest.fixture
@@ -408,7 +402,6 @@ class TestConfidenceEvolution:
     @pytest.mark.asyncio
     async def test_confidence_increases_with_observations(self, learner):
         """Confidence should increase as observations grow."""
-        _conf = 0.0
         for i in range(50):
             await learner.analyze_result(
                 tool_name="bonfire_deploy",

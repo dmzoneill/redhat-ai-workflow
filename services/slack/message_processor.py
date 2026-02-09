@@ -138,7 +138,9 @@ class AlertDetector:
         self._slack_config = slack_config or _get_slack_config()
         self.config = self._slack_config.get("listener", {})
         self.alert_channels = self.config.get("alert_channels", {})
-        self.alert_bot_names = ["app-sre-alerts", "alertmanager"]
+        self.alert_bot_names = self.config.get(
+            "alert_bot_names", ["app-sre-alerts", "alertmanager"]
+        )
 
     def is_alert_message(
         self,
@@ -186,13 +188,16 @@ class AlertDetector:
                     att_texts.append(att.lower())
             text_lower = " ".join(att_texts)
 
-        alert_indicators = [
-            "firing",
-            "resolved",
-            "alert:",
-            "alertmanager",
-            "prometheus",
-        ]
+        alert_indicators = self.config.get(
+            "alert_indicators",
+            [
+                "firing",
+                "resolved",
+                "alert:",
+                "alertmanager",
+                "prometheus",
+            ],
+        )
         has_alert_indicator = any(ind in text_lower for ind in alert_indicators)
 
         is_alert = is_from_alert_bot or (
@@ -212,12 +217,15 @@ class AlertDetector:
         if isinstance(info, dict):
             return info
 
-        return {
-            "environment": "unknown",
-            "namespace": "tower-analytics-stage",
-            "severity": "medium",
-            "auto_investigate": False,
-        }
+        return self.config.get(
+            "default_alert_info",
+            {
+                "environment": "unknown",
+                "namespace": "unknown",
+                "severity": "medium",
+                "auto_investigate": False,
+            },
+        )
 
     def should_auto_investigate(self, channel_id: str) -> bool:
         """Check if this channel has auto-investigate enabled."""

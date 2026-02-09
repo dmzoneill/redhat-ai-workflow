@@ -1,5 +1,7 @@
 """Tests for server/errors.py - Standardized error handling for MCP tools."""
 
+import pytest
+
 from server.errors import (
     ErrorCodes,
     ToolResult,
@@ -210,27 +212,30 @@ class TestToolInfo:
 
 
 class TestErrorCodes:
-    def test_auth_codes(self):
-        assert ErrorCodes.AUTH_FAILED == "AUTH_FAILED"
-        assert ErrorCodes.AUTH_EXPIRED == "AUTH_EXPIRED"
-        assert ErrorCodes.PERMISSION_DENIED == "PERMISSION_DENIED"
-
-    def test_resource_codes(self):
-        assert ErrorCodes.NOT_FOUND == "NOT_FOUND"
-        assert ErrorCodes.ALREADY_EXISTS == "ALREADY_EXISTS"
-        assert ErrorCodes.CONFLICT == "CONFLICT"
-
-    def test_operation_codes(self):
-        assert ErrorCodes.TIMEOUT == "TIMEOUT"
-        assert ErrorCodes.RATE_LIMITED == "RATE_LIMITED"
-        assert ErrorCodes.INVALID_INPUT == "INVALID_INPUT"
-        assert ErrorCodes.INVALID_STATE == "INVALID_STATE"
-
-    def test_system_codes(self):
-        assert ErrorCodes.INTERNAL_ERROR == "INTERNAL_ERROR"
-        assert ErrorCodes.SERVICE_UNAVAILABLE == "SERVICE_UNAVAILABLE"
-        assert ErrorCodes.DEPENDENCY_FAILED == "DEPENDENCY_FAILED"
-
-    def test_network_codes(self):
-        assert ErrorCodes.CONNECTION_FAILED == "CONNECTION_FAILED"
-        assert ErrorCodes.DNS_FAILED == "DNS_FAILED"
+    @pytest.mark.parametrize(
+        "attr,expected",
+        [
+            # Auth codes
+            ("AUTH_FAILED", "AUTH_FAILED"),
+            ("AUTH_EXPIRED", "AUTH_EXPIRED"),
+            ("PERMISSION_DENIED", "PERMISSION_DENIED"),
+            # Resource codes
+            ("NOT_FOUND", "NOT_FOUND"),
+            ("ALREADY_EXISTS", "ALREADY_EXISTS"),
+            ("CONFLICT", "CONFLICT"),
+            # Operation codes
+            ("TIMEOUT", "TIMEOUT"),
+            ("RATE_LIMITED", "RATE_LIMITED"),
+            ("INVALID_INPUT", "INVALID_INPUT"),
+            ("INVALID_STATE", "INVALID_STATE"),
+            # System codes
+            ("INTERNAL_ERROR", "INTERNAL_ERROR"),
+            ("SERVICE_UNAVAILABLE", "SERVICE_UNAVAILABLE"),
+            ("DEPENDENCY_FAILED", "DEPENDENCY_FAILED"),
+            # Network codes
+            ("CONNECTION_FAILED", "CONNECTION_FAILED"),
+            ("DNS_FAILED", "DNS_FAILED"),
+        ],
+    )
+    def test_error_code_values(self, attr, expected):
+        assert getattr(ErrorCodes, attr) == expected

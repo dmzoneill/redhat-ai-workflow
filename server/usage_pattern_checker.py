@@ -196,7 +196,7 @@ class UsagePatternChecker:
                     if len(str(param_value)) < 40 and "< 40" in check_str:
                         logger.debug(
                             f"Parameter '{param_name}' value '{param_value}' "
-                            f"failed length check (expected >= 40 chars)"
+                            "failed length check (expected >= 40 chars)"
                         )
                         return True
             except (AttributeError, TypeError, ValueError, KeyError) as e:
@@ -324,21 +324,26 @@ class UsagePatternChecker:
             level = "LOW"
 
         # Build warning message
-        warning = f"{emoji} **{level} CONFIDENCE WARNING** ({confidence:.0%}, {pattern['observations']} observations)\n"
-        warning += f"   Tool: `{pattern['tool']}`\n"
-        warning += f"   Issue: {pattern['root_cause']}\n"
-        warning += "\n   Prevention steps:\n"
+        parts = [
+            f"{emoji} **{level} CONFIDENCE WARNING** ({confidence:.0%}, {pattern['observations']} observations)",
+            f"   Tool: `{pattern['tool']}`",
+            f"   Issue: {pattern['root_cause']}",
+            "",
+            "   Prevention steps:",
+        ]
 
         for i, step in enumerate(pattern["prevention_steps"], 1):
             reason = step.get("reason", step.get("action", "Unknown"))
-            warning += f"   {i}. {reason}\n"
+            parts.append(f"   {i}. {reason}")
 
         if confidence >= 0.95:
-            warning += "\n   ⛔ **Execution blocked** to prevent known mistake (confidence >= 95%)\n"
+            parts.append(
+                "\n   ⛔ **Execution blocked** to prevent known mistake (confidence >= 95%)"
+            )
         elif confidence >= 0.85:
-            warning += "\n   ⚠️  **Strongly suggest** following prevention steps\n"
+            parts.append("\n   ⚠️  **Strongly suggest** following prevention steps")
 
-        return warning
+        return "\n".join(parts) + "\n"
 
     def get_prevention_summary(
         self, tool_name: str, min_confidence: float = 0.75
@@ -359,20 +364,22 @@ class UsagePatternChecker:
         if not patterns:
             return ""
 
-        summary = f"## ⚠️ Known Issues for {tool_name}\n\n"
-        summary += f"Found {len(patterns)} high-confidence patterns:\n\n"
+        parts = [
+            f"## ⚠️ Known Issues for {tool_name}\n",
+            f"Found {len(patterns)} high-confidence patterns:\n",
+        ]
 
         for i, pattern in enumerate(patterns, 1):
-            summary += f"{i}. **{pattern['root_cause']}** ({pattern['confidence']:.0%} confidence)\n"
-            summary += f"   Observations: {pattern['observations']}\n"
+            entry = f"{i}. **{pattern['root_cause']}** ({pattern['confidence']:.0%} confidence)\n"
+            entry += f"   Observations: {pattern['observations']}"
             if pattern.get("success_after_prevention", 0) > 0:
                 success_rate = (
                     pattern["success_after_prevention"] / pattern["observations"]
                 )
-                summary += f"   Prevention success rate: {success_rate:.0%}\n"
-            summary += "\n"
+                entry += f"\n   Prevention success rate: {success_rate:.0%}"
+            parts.append(entry)
 
-        return summary
+        return "\n".join(parts) + "\n"
 
     def clear_cache(self):
         """Clear the pattern cache."""

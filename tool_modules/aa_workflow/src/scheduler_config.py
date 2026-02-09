@@ -27,14 +27,31 @@ except ImportError:
     _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
 
 
-# Default retry configuration
-DEFAULT_RETRY_CONFIG = {
+# Hardcoded fallback retry configuration (used only if config.json lacks schedules.default_retry)
+_FALLBACK_RETRY_CONFIG = {
     "max_attempts": 2,
     "backoff": "exponential",
     "initial_delay_seconds": 30,
     "max_delay_seconds": 300,
     "retry_on": ["auth", "network"],
 }
+
+
+def _load_default_retry_config() -> dict:
+    """Load default retry config from config.json, falling back to hardcoded defaults."""
+    try:
+        from scripts.common.config_loader import load_config
+
+        config = load_config()
+        cfg_retry = config.get("schedules", {}).get("default_retry")
+        if isinstance(cfg_retry, dict) and cfg_retry:
+            return cfg_retry
+    except ImportError:
+        pass
+    return dict(_FALLBACK_RETRY_CONFIG)
+
+
+DEFAULT_RETRY_CONFIG = _load_default_retry_config()
 
 
 @dataclass
@@ -149,8 +166,13 @@ class SchedulerConfig:
             config_data = self._load_config()
 
         schedules = config_data.get("schedules", {})
-        # Enabled state comes from state.json
-        self.enabled = state_manager.is_service_enabled("scheduler")
+        # Enabled state: config.json is the source of truth, state.json can override
+        config_enabled = schedules.get("enabled", False)
+        state_override = state_manager.get("services", "scheduler", {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            self.enabled = state_override["enabled"]  # runtime override wins
+        else:
+            self.enabled = config_enabled  # config.json default
         self.timezone = schedules.get("timezone", "UTC")
         self.jobs = schedules.get("jobs", [])
         self.poll_sources = schedules.get("poll_sources", {})
@@ -163,21 +185,40 @@ class SchedulerConfig:
         """Load config using ConfigManager (auto-reloads if file changed)."""
         return config_manager.get_all()
 
+    def _is_job_enabled(self, job_config: dict) -> bool:
+        """Resolve job enabled state: config.json first, state.json override.
+
+        Args:
+            job_config: The job configuration dict from config.json
+
+        Returns:
+            True if the job is enabled
+        """
+        job_name = job_config.get("name", "")
+        config_enabled = job_config.get("enabled", True)  # config.json per-job field
+        state_override = state_manager.get("jobs", job_name, {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            return state_override["enabled"]  # runtime override wins
+        return config_enabled  # config.json default
+
     def get_cron_jobs(self) -> list[dict]:
-        """Get jobs that use cron triggers (not poll triggers) and are enabled."""
-        return [
-            j
-            for j in self.jobs
-            if j.get("cron") and state_manager.is_job_enabled(j.get("name", ""))
-        ]
+        """Get jobs that use cron triggers (not poll triggers) and are enabled.
+
+        Enabled resolution: config.json per-job 'enabled' field first,
+        then state.json runtime override if present.
+        """
+        return [j for j in self.jobs if j.get("cron") and self._is_job_enabled(j)]
 
     def get_poll_jobs(self) -> list[dict]:
-        """Get jobs that use poll triggers and are enabled."""
+        """Get jobs that use poll triggers and are enabled.
+
+        Enabled resolution: config.json per-job 'enabled' field first,
+        then state.json runtime override if present.
+        """
         return [
             j
             for j in self.jobs
-            if j.get("trigger") == "poll"
-            and state_manager.is_job_enabled(j.get("name", ""))
+            if j.get("trigger") == "poll" and self._is_job_enabled(j)
         ]
 
     def get_retry_config(self, job_config: dict) -> RetryConfig:
@@ -207,7 +248,7 @@ class JobExecutionLog:
         """Load execution history from file."""
         try:
             if self.HISTORY_FILE.exists():
-                with open(self.HISTORY_FILE) as f:
+                with open(self.HISTORY_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     self.entries = data.get("executions", [])[-self.max_entries :]
         except Exception as e:
@@ -219,7 +260,7 @@ class JobExecutionLog:
         try:
             # Ensure directory exists
             self.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.HISTORY_FILE, "w") as f:
+            with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({"executions": self.entries}, f, indent=2)
         except Exception as e:
             logger.warning(f"Failed to save cron history: {e}")

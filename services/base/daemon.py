@@ -146,7 +146,7 @@ class SingleInstance:
             True if lock acquired, False if another instance is running.
         """
         try:
-            self._lock_file = open(self.lock_path, "w")
+            self._lock_file = open(self.lock_path, "w", encoding="utf-8")
             fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Write PID for external status checks
             self.pid_path.write_text(str(os.getpid()))
@@ -161,13 +161,13 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
         self._acquired = False
 
     def get_running_pid(self) -> Optional[int]:
@@ -183,8 +183,8 @@ class SingleInstance:
                 # Check if process exists
                 os.kill(pid, 0)
                 return pid
-            except (ValueError, OSError):
-                pass
+            except (ValueError, OSError) as exc:
+                logger.debug("Suppressed error: %s", exc)
         return None
 
     @property
@@ -341,8 +341,8 @@ class BaseDaemon(ABC):
             try:
                 await asyncio.wait_for(self._shutdown_event.wait(), timeout=interval)
                 break  # Shutdown requested
-            except asyncio.TimeoutError:
-                pass  # Normal timeout, continue loop
+            except asyncio.TimeoutError as exc:
+                logger.debug("Operation timed out: %s", exc)
 
     async def _verify_health(self) -> bool:
         """

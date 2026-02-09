@@ -1,11 +1,11 @@
 """
 Meeting Scheduler Service.
 
-Monitors calendars and automatically joins meetings to capture notes.
+Monitors calendars and joins meetings to capture notes.
 
 Features:
 - Polls configured calendars for upcoming meetings
-- Automatically joins meetings with Google Meet links
+- Meetings default to "scheduled" status (require manual approval to join)
 - Supports multiple calendars (personal, shared, team)
 - Configurable join buffer (join X minutes before start)
 - Handles meeting end detection
@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from tool_modules.common import PROJECT_ROOT
+from tool_modules.common import PROJECT_ROOT, get_meet_bot_timezone
 
 __project_root__ = PROJECT_ROOT
 
@@ -45,8 +45,8 @@ from tool_modules.aa_meet_bot.src.notes_database import (
 
 logger = logging.getLogger(__name__)
 
-# Default timezone
-TIMEZONE = "Europe/Dublin"
+# Timezone from config.json (meet_bot.timezone > schedules.timezone > google_calendar.timezone)
+TIMEZONE = get_meet_bot_timezone()
 
 
 @dataclass
@@ -361,10 +361,10 @@ class MeetingScheduler:
                                 f"Using persisted status '{persisted_status}' for: {event['title']}"
                             )
                         elif calendar.auto_join:
-                            # If calendar has auto_join=True, pre-approve the meeting
-                            initial_status = "approved"
+                            # Even with auto_join, default to scheduled (requires manual approval)
+                            initial_status = "scheduled"
                         else:
-                            # Otherwise it stays "scheduled" and requires manual approval
+                            # Non-auto-join calendars also stay "scheduled"
                             initial_status = "scheduled"
 
                         meeting = ScheduledMeeting(
@@ -381,9 +381,9 @@ class MeetingScheduler:
                             status=initial_status,
                         )
                         new_meetings.append(meeting)
-                        if initial_status == "approved" and not persisted_status:
+                        if not persisted_status:
                             logger.info(
-                                f"Auto-approved meeting: {event['title']} (calendar: {calendar.name})"
+                                f"New meeting (pending approval): {event['title']} (calendar: {calendar.name})"
                             )
 
             except Exception as e:
@@ -544,7 +544,7 @@ class MeetingScheduler:
                         continue
 
                     logger.info(
-                        f"Time to join pre-approved meeting: {meeting.title} "
+                        f"Time to join approved meeting: {meeting.title} "
                         f"(attempt {meeting.join_attempts + 1}/{meeting.max_join_attempts})"
                     )
                     meeting.status = "joining"

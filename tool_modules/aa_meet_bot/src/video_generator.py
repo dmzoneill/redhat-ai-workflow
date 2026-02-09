@@ -97,6 +97,10 @@ CV_YELLOW = (0, 255, 255)
 CV_RED = (0, 0, 200)
 CV_DARK_GREEN = (0, 100, 0)
 
+# Memory management thresholds (in MB)
+MEMORY_WARNING_MB = 3000  # Trigger GC warning
+MEMORY_CRITICAL_MB = 4000  # Trigger emergency cleanup
+
 # Pre-compute RGB to YUV conversion matrices (BT.601)
 # These are used for fast vectorized color conversion
 _RGB_TO_Y = np.array([66, 129, 25], dtype=np.int16)
@@ -240,10 +244,10 @@ class GPUColorConverter:
         """
         try:
             import pyopencl as cl
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "pyopencl required for GPU acceleration. Install with: uv add pyopencl"
-            )
+            ) from e
 
         self.width = width
         self.height = height
@@ -470,10 +474,10 @@ class UltraLowCPURenderer:
         """
         try:
             import pyopencl as cl
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "pyopencl required for ultra-low CPU mode. Install with: uv add pyopencl"
-            )
+            ) from e
 
         self.width = config.width
         self.height = config.height
@@ -2061,7 +2065,9 @@ class RealtimeVideoRenderer:
                 else:
                     raise RuntimeError("GPU text init failed")
             except Exception as e:
-                raise RuntimeError(f"GPU text renderer required but not available: {e}")
+                raise RuntimeError(
+                    f"GPU text renderer required but not available: {e}"
+                ) from e
         else:
             raise RuntimeError(
                 "GPU text renderer (OpenGL) is required but not available"
@@ -3252,7 +3258,7 @@ class RealtimeVideoRenderer:
                 logger.error(f"Failed to initialize GPU renderer: {e}")
                 raise RuntimeError(
                     f"GPU renderer required but failed to initialize: {e}"
-                )
+                ) from e
 
         # Pre-compute attendee-specific data
         attendee_data = self._precompute_attendee_data(attendee)
@@ -3331,10 +3337,10 @@ class RealtimeVideoRenderer:
                     f"stt_history: {stt_history_len} | frame: {frame_num}"
                 )
                 # Warn if memory is growing dangerously
-                if mem_mb > 3000:
+                if mem_mb > MEMORY_WARNING_MB:
                     logger.warning(f"HIGH MEMORY: {mem_mb:.0f}MB - running GC...")
                     gc.collect()
-                if mem_mb > 4000:
+                if mem_mb > MEMORY_CRITICAL_MB:
                     logger.error(f"CRITICAL MEMORY: {mem_mb:.0f}MB - forcing cleanup")
                     self._stt_write_pos = 0  # Reset STT buffer
                     # Force full GC with all generations

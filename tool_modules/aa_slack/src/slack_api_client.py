@@ -222,9 +222,9 @@ class SlackApiClient:
             f"https://{self.SLACK_HOST}/api/{api_method}"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
     @staticmethod
@@ -360,4 +360,4 @@ class SlackApiClient:
             )
             raise ValueError(
                 f"Edge API request to {edge_path} failed: {e.response.status_code}"
-            )
+            ) from e

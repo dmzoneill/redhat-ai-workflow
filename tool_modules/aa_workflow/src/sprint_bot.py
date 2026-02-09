@@ -227,7 +227,7 @@ def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
 
     # Filter to only show issues assigned to current user
     try:
-        from server.config import load_config
+        from server.utils import load_config
 
         user_config = load_config()
         user_info = user_config.get("user", {})

@@ -1,0 +1,14 @@
+usage_patterns: []
+stats:
+  total_usage_patterns: 0
+  high_confidence: 0
+  medium_confidence: 0
+  low_confidence: 0
+  by_category:
+    INCORRECT_PARAMETER: 0
+    PARAMETER_FORMAT: 0
+    MISSING_PREREQUISITE: 0
+    WORKFLOW_SEQUENCE: 0
+    WRONG_TOOL_SELECTION: 0
+  prevention_success_rate: 0.0
+  last_updated: null

@@ -130,8 +130,8 @@ class SleepWakeMonitor:
         if self._bus:
             try:
                 self._bus.disconnect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
             self._bus = None
 
         logger.info("Sleep/wake monitor stopped")
@@ -258,8 +258,7 @@ class SleepWakeAwareDaemon(ABC):
         """
         pass
 
-    @abstractmethod
-    async def on_system_sleep(self):
+    async def on_system_sleep(self):  # noqa: B027
         """
         Called before system goes to sleep.
 

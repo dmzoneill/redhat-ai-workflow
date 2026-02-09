@@ -108,8 +108,9 @@ class TestLoadConfig:
         assert "x" in resolver.repos
 
     def test_load_no_file(self):
-        with patch.object(
-            ContextResolver, "CONFIG_PATHS", [Path("/nonexistent/config.json")]
+        with patch(
+            "scripts.common.context_resolver.ContextResolver._load_config",
+            return_value={},
         ):
             resolver = ContextResolver()
             assert resolver.repos == {}

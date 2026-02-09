@@ -365,7 +365,7 @@ Available sources: code, slack, yaml, inscope, jira"""
                 "query_hash": hashlib.md5(query.encode()).hexdigest()[:8],
             }
 
-            with open(training_file, "a") as f:
+            with open(training_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
 
             logger.info(
@@ -413,7 +413,7 @@ Available sources: code, slack, yaml, inscope, jira"""
         intents: dict[str, int] = {}
 
         try:
-            with open(training_file) as f:
+            with open(training_file, encoding="utf-8") as f:
                 for line in f:
                     entry = json.loads(line)
                     count += 1

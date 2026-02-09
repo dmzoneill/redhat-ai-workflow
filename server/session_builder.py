@@ -17,6 +17,7 @@ The assembled context can be:
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,8 @@ from typing import Optional
 import yaml
 
 from server.utils import load_config
+
+logger = logging.getLogger(__name__)
 
 # Workspace paths
 WORKSPACE_ROOT = Path(__file__).parent.parent
@@ -61,12 +64,13 @@ class SessionBuilder:
         self.config = self._load_config()
 
     def _load_config(self) -> dict:
-        """Load the main config.json."""
-        if CONFIG_FILE.exists():
-            try:
-                return json.loads(CONFIG_FILE.read_text())
-            except (json.JSONDecodeError, IOError):
-                pass
+        """Load the main config.json via ConfigManager."""
+        try:
+            from server.config_manager import config as config_manager
+
+            return config_manager.get_all()
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
         return {}
 
     def add_persona(self, persona_id: str) -> bool:
@@ -96,10 +100,8 @@ class SessionBuilder:
                 context += f"### System Prompt\n{persona['system_prompt']}\n\n"
 
             if persona.get("tools"):
-                context += "### Available Tools\n"
-                for tool in persona["tools"]:
-                    context += f"- {tool}\n"
-                context += "\n"
+                tool_lines = [f"- {tool}" for tool in persona["tools"]]
+                context += "### Available Tools\n" + "\n".join(tool_lines) + "\n\n"
 
             self.context_sections["persona"] = context
             self.token_counts["persona"] = estimate_tokens(context)
@@ -131,22 +133,22 @@ class SessionBuilder:
                 context += f"{skill['description']}\n\n"
 
             if skill.get("inputs"):
-                context += "### Inputs\n"
+                input_lines = []
                 for inp in skill["inputs"]:
                     req = " (required)" if inp.get("required") else ""
-                    context += (
-                        f"- **{inp['name']}**{req}: {inp.get('description', '')}\n"
+                    input_lines.append(
+                        f"- **{inp['name']}**{req}: {inp.get('description', '')}"
                     )
-                context += "\n"
+                context += "### Inputs\n" + "\n".join(input_lines) + "\n\n"
 
             if skill.get("steps"):
-                context += "### Steps\n"
+                step_lines = []
                 for i, step in enumerate(skill["steps"], 1):
-                    context += f"{i}. {step.get('name', 'Step')}"
+                    line = f"{i}. {step.get('name', 'Step')}"
                     if step.get("tool"):
-                        context += f" (tool: {step['tool']})"
-                    context += "\n"
-                context += "\n"
+                        line += f" (tool: {step['tool']})"
+                    step_lines.append(line)
+                context += "### Steps\n" + "\n".join(step_lines) + "\n\n"
 
             # Add to existing skills or create new section
             if "skills" not in self.context_sections:
@@ -195,8 +197,8 @@ class SessionBuilder:
                     self.context_sections["memory"] += context
                     self.token_counts["memory"] += estimate_tokens(context)
                     return True
-                except (yaml.YAMLError, json.JSONDecodeError, IOError):
-                    pass
+                except (yaml.YAMLError, json.JSONDecodeError, IOError) as exc:
+                    logger.debug("Suppressed error: %s", exc)
 
         return False
 
@@ -254,10 +256,14 @@ class SessionBuilder:
         if not results:
             context += "*No matching messages found*\n\n"
         else:
+            parts = []
             for msg in results[:10]:  # Limit to 10 messages
-                context += f"**{msg.get('user', 'Unknown')}** in #{msg.get('channel', 'unknown')} "
-                context += f"({msg.get('timestamp', 'unknown time')}):\n"
-                context += f"> {msg.get('text', '')}\n\n"
+                parts.append(
+                    f"**{msg.get('user', 'Unknown')}** in #{msg.get('channel', 'unknown')} "
+                    f"({msg.get('timestamp', 'unknown time')}):\n"
+                    f"> {msg.get('text', '')}\n"
+                )
+            context += "\n".join(parts) + "\n"
 
         self.context_sections["slack"] = context
         self.token_counts["slack"] = estimate_tokens(context)
@@ -279,17 +285,19 @@ class SessionBuilder:
         if not results:
             context += "*No matching code found*\n\n"
         else:
+            parts = []
             for result in results[:5]:  # Limit to 5 results
-                context += f"### {result.get('file', 'Unknown file')}"
+                header = f"### {result.get('file', 'Unknown file')}"
                 if result.get("line"):
-                    context += f" (line {result['line']})"
-                context += "\n\n"
-
+                    header += f" (line {result['line']})"
+                header += "\n"
+                part = header
                 if result.get("snippet"):
-                    context += f"```\n{result['snippet']}\n```\n\n"
-
+                    part += f"\n```\n{result['snippet']}\n```\n"
                 if result.get("relevance"):
-                    context += f"*Relevance: {result['relevance']:.2f}*\n\n"
+                    part += f"\n*Relevance: {result['relevance']:.2f}*\n"
+                parts.append(part)
+            context += "\n".join(parts) + "\n"
 
         self.context_sections["code"] = context
         self.token_counts["code"] = estimate_tokens(context)
@@ -306,10 +314,8 @@ class SessionBuilder:
         Returns:
             True if successful
         """
-        context = f"## Meeting: {meeting_id}\n\n"
-
-        for excerpt in excerpts:
-            context += f"> {excerpt}\n\n"
+        excerpt_lines = [f"> {excerpt}" for excerpt in excerpts]
+        context = f"## Meeting: {meeting_id}\n\n" + "\n\n".join(excerpt_lines) + "\n\n"
 
         self.context_sections["meeting"] = context
         self.token_counts["meeting"] = estimate_tokens(context)

@@ -1,0 +1,28 @@
+metadata:
+  project: aapautomationanalytics-dbt
+  persona: security
+  last_updated: '2026-02-07T20:58:17.926905'
+  last_scanned: '2026-02-07T20:58:17.926883'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: Automation Analytics is a comprehensive data analytics platform for Red
+    Hat Ansible Automation Platform (AAP). This data product provides insights into
+    automation usage, performance metrics, AI/LightSpeed analytics, and operational
+    intelligence across enterprise automation deployments. The platform processes
+    data from Automation Controller, Ansible Galaxy, Ansible LightSpeed, AAP Metrics
+    Billing, and Event-Driven Ansible to deliver actionable business intelligence.
+  key_modules:
+  - path: models/
+    purpose: Models module
+    notes: Auto-detected from project structure
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+gotchas: []
+learned_from_tasks: []

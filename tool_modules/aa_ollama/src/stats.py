@@ -209,7 +209,7 @@ class FilterStats:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(self.to_dict(), f, indent=2)
             logger.debug(f"Saved stats to {path}")
         except Exception as e:
@@ -231,7 +231,7 @@ class FilterStats:
             return cls()
 
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
 
             stats = cls()

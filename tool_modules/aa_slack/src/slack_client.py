@@ -106,37 +106,24 @@ class SlackSession:
     @classmethod
     def from_config(cls) -> "SlackSession":
         """Create session from config.json (preferred) or fall back to environment variables."""
-        import json
-        from pathlib import Path
-
-        # Try to load from config.json first
-        config_paths = [
-            Path(__file__).parent.parent.parent.parent.parent
-            / "config.json",  # tool_modules/aa_slack/src -> project root
-            Path.cwd() / "config.json",
-            Path.home() / "src" / "redhat-ai-workflow" / "config.json",
-        ]
-
+        # Try to load from config.json via ConfigManager
         xoxc_token = ""
         d_cookie = ""
         workspace_id = ""
         enterprise_id = ""
 
-        for config_path in config_paths:
-            if config_path.exists():
-                try:
-                    with open(config_path) as f:
-                        config = json.load(f)
-                    slack_auth = config.get("slack", {}).get("auth", {})
-                    xoxc_token = slack_auth.get("xoxc_token", "")
-                    d_cookie = slack_auth.get("d_cookie", "")
-                    workspace_id = slack_auth.get("workspace_id", "")
-                    enterprise_id = slack_auth.get("enterprise_id", "")
-                    if xoxc_token and d_cookie:
-                        logger.info(f"Loaded Slack credentials from {config_path}")
-                        break
-                except Exception as e:
-                    logger.debug(f"Failed to load config from {config_path}: {e}")
+        try:
+            from server.config_manager import config as config_manager
+
+            slack_auth = (config_manager.get("slack") or {}).get("auth", {})
+            xoxc_token = slack_auth.get("xoxc_token", "")
+            d_cookie = slack_auth.get("d_cookie", "")
+            workspace_id = slack_auth.get("workspace_id", "")
+            enterprise_id = slack_auth.get("enterprise_id", "")
+            if xoxc_token and d_cookie:
+                logger.info("Loaded Slack credentials from ConfigManager")
+        except Exception as e:
+            logger.debug(f"Failed to load config from ConfigManager: {e}")
 
         # Fall back to environment variables if config.json doesn't have tokens
         if not xoxc_token:
@@ -291,6 +278,56 @@ class SlackSession:
 
         raise ValueError(f"Max retries ({self.max_retries}) exceeded for {method}")
 
+    def _build_web_api_request(
+        self,
+        api_method: str,
+        form_parts: list[tuple[str, str]],
+    ) -> tuple[str, str, dict[str, str]]:
+        """Build a web-client-style API request with multipart form data.
+
+        Many internal Slack APIs require the same URL format and multipart
+        encoding. This helper constructs all three components.
+
+        Args:
+            api_method: Slack API method (e.g. "users.conversations")
+            form_parts: List of (name, value) tuples for the form body.
+                        The token is prepended automatically.
+
+        Returns:
+            (url, body, headers) tuple ready for client.post().
+        """
+        eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+
+        url = (
+            f"https://{self.SLACK_HOST}/api/{api_method}"
+            f"?_x_id={x_id}"
+            f"&slack_route={eid}%3A{eid}"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
+        )
+
+        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex[:16]}"
+        all_parts = [("token", self.xoxc_token)] + form_parts
+
+        body_lines: list[str] = []
+        for name, value in all_parts:
+            body_lines.append(f"--{boundary}")
+            body_lines.append(f'Content-Disposition: form-data; name="{name}"')
+            body_lines.append("")
+            body_lines.append(value)
+        body_lines.append(f"--{boundary}--")
+        body_lines.append("")
+
+        body = "\r\n".join(body_lines)
+        headers = {
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Origin": "https://app.slack.com",
+        }
+
+        return url, body, headers
+
     async def validate_session(self) -> dict[str, Any]:
         """
         Validate the current session by calling auth.test.
@@ -306,7 +343,7 @@ class SlackSession:
             self._user_id = result.get("user_id", "")
             return result
         except Exception as e:
-            raise ValueError(f"Session validation failed: {e}")
+            raise ValueError(f"Session validation failed: {e}") from e
 
     @property
     def user_id(self) -> str:
@@ -371,51 +408,18 @@ class SlackSession:
         Returns:
             List of conversation objects
         """
-        # Get enterprise ID for routing
-        eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
-
-        # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
-
-        url = (
-            f"https://{self.SLACK_HOST}/api/users.conversations"
-            f"?_x_id={x_id}"
-            f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+        url, body, headers = self._build_web_api_request(
+            "users.conversations",
+            [
+                ("types", types),
+                ("limit", str(limit)),
+                ("exclude_archived", "true"),
+                ("_x_reason", "conversations-list-fetch"),
+                ("_x_mode", "online"),
+                ("_x_sonic", "true"),
+                ("_x_app_name", "client"),
+            ],
         )
-
-        # Build multipart form data
-        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex[:16]}"
-
-        parts = [
-            ("token", self.xoxc_token),
-            ("types", types),
-            ("limit", str(limit)),
-            ("exclude_archived", "true"),
-            ("_x_reason", "conversations-list-fetch"),
-            ("_x_mode", "online"),
-            ("_x_sonic", "true"),
-            ("_x_app_name", "client"),
-        ]
-
-        # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
-
-        headers = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Origin": "https://app.slack.com",
-        }
 
         client = await self.get_client()
 
@@ -445,52 +449,19 @@ class SlackSession:
         Returns:
             Dict with 'ims' (DMs), 'mpims' (group DMs), and 'channels' arrays
         """
-        # Get enterprise ID for routing
-        eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
-
-        # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
-
-        url = (
-            f"https://{self.SLACK_HOST}/api/client.counts"
-            f"?_x_id={x_id}"
-            f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+        url, body, headers = self._build_web_api_request(
+            "client.counts",
+            [
+                ("thread_counts_by_channel", "true"),
+                ("org_wide_aware", "true"),
+                ("include_file_channels", "true"),
+                ("include_all_unreads", "true"),
+                ("_x_reason", "fetchClientCounts"),
+                ("_x_mode", "online"),
+                ("_x_sonic", "true"),
+                ("_x_app_name", "client"),
+            ],
         )
-
-        # Build multipart form data
-        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex[:16]}"
-
-        parts = [
-            ("token", self.xoxc_token),
-            ("thread_counts_by_channel", "true"),
-            ("org_wide_aware", "true"),
-            ("include_file_channels", "true"),
-            ("include_all_unreads", "true"),
-            ("_x_reason", "fetchClientCounts"),
-            ("_x_mode", "online"),
-            ("_x_sonic", "true"),
-            ("_x_app_name", "client"),
-        ]
-
-        # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
-
-        headers = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Origin": "https://app.slack.com",
-        }
 
         client = await self.get_client()
 
@@ -644,24 +615,7 @@ class SlackSession:
         Returns:
             Dict with messages, has_more, pagination info, etc.
         """
-        # Get enterprise ID for routing
-        eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
-
-        # Build URL with query params like the web client
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
-
-        url = (
-            f"https://redhat.enterprise.slack.com/api/conversations.replies"
-            f"?_x_id={x_id}"
-            f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-        )
-
-        # Build multipart form data
-        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex[:16]}"
-
-        parts = [
-            ("token", self.xoxc_token),
+        form_parts = [
             ("channel", channel_id),
             ("ts", thread_ts),
             ("inclusive", "true" if inclusive else "false"),
@@ -669,10 +623,9 @@ class SlackSession:
         ]
 
         if latest:
-            parts.append(("latest", latest))
+            form_parts.append(("latest", latest))
 
-        # Add web client metadata
-        parts.extend(
+        form_parts.extend(
             [
                 ("_x_reason", "history-api/fetchReplies"),
                 ("_x_mode", "online"),
@@ -681,22 +634,9 @@ class SlackSession:
             ]
         )
 
-        # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
-
-        headers = {
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "Origin": "https://app.slack.com",
-        }
+        url, body, headers = self._build_web_api_request(
+            "conversations.replies", form_parts
+        )
 
         client = await self.get_client()
 
@@ -927,9 +867,9 @@ class SlackSession:
             f"https://{self.SLACK_HOST}/api/chat.postMessage"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
         # Build multipart form data
@@ -1388,7 +1328,7 @@ class SlackSession:
             logger.error(
                 f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
             )
-            raise ValueError(f"Channel search failed: {e.response.status_code}")
+            raise ValueError(f"Channel search failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"Channel search error: {e}")
             raise
@@ -1606,7 +1546,7 @@ class SlackSession:
             logger.error(
                 f"Edge API user search error: {e.response.status_code} - {e.response.text[:200]}"
             )
-            raise ValueError(f"User search failed: {e.response.status_code}")
+            raise ValueError(f"User search failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"User search error: {e}")
             raise
@@ -1693,7 +1633,9 @@ class SlackSession:
             logger.error(
                 f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
             )
-            raise ValueError(f"Channel members list failed: {e.response.status_code}")
+            raise ValueError(
+                f"Channel members list failed: {e.response.status_code}"
+            ) from e
         except Exception as e:
             logger.error(f"Channel members list error: {e}")
             raise
@@ -1780,7 +1722,7 @@ class SlackSession:
             )
             raise ValueError(
                 f"Channel membership check failed: {e.response.status_code}"
-            )
+            ) from e
         except Exception as e:
             logger.error(f"Channel membership check error: {e}")
             raise
@@ -1877,9 +1819,9 @@ class SlackSession:
             f"https://{self.SLACK_HOST}/api/users.channelSections.list"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
         # Build multipart form data
@@ -2014,9 +1956,9 @@ class SlackSession:
             f"https://{self.SLACK_HOST}/api/conversations.history"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
         # Build multipart form data
@@ -2251,9 +2193,9 @@ class SlackSession:
             f"https://{self.SLACK_HOST}/api/client.appCommands"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
         # Build multipart form data
@@ -2400,9 +2342,9 @@ class SlackSession:
             f"https://{self.SLACK_HOST}/api/users.profile.getSections"
             f"?_x_id={x_id}"
             f"&slack_route={eid}%3A{eid}"
-            f"&_x_gantry=true"
-            f"&fp=14"
-            f"&_x_num_retries=0"
+            "&_x_gantry=true"
+            "&fp=14"
+            "&_x_num_retries=0"
         )
 
         client = await self.get_client()
@@ -2455,7 +2397,7 @@ class SlackSession:
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Profile API error: {e.response.status_code}")
-            raise ValueError(f"Profile fetch failed: {e.response.status_code}")
+            raise ValueError(f"Profile fetch failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"Profile fetch error: {e}")
             raise

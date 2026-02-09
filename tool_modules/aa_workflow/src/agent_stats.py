@@ -17,6 +17,7 @@ to global stats. Use workspace_uri parameter to track workspace-specific stats.
 
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -79,7 +80,7 @@ class AgentStats:
         """Load stats from disk or create new."""
         try:
             if STATS_FILE.exists():
-                with open(STATS_FILE) as f:
+                with open(STATS_FILE, encoding="utf-8") as f:
                     return json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load stats: {e}")
@@ -151,12 +152,18 @@ class AgentStats:
             del self._stats["daily"][date]
 
     def _save_stats(self) -> None:
-        """Save stats to disk."""
+        """Save stats to disk.
+
+        Skips writing when TESTING=1 to prevent test runs from polluting
+        the real agent_stats.json.
+        """
+        if os.environ.get("TESTING") == "1":
+            return
         try:
             STATS_DIR.mkdir(parents=True, exist_ok=True)
             self._stats["last_updated"] = datetime.now().isoformat()
             tmp_file = STATS_FILE.with_suffix(".tmp")
-            with open(tmp_file, "w") as f:
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(self._stats, f, indent=2)
             tmp_file.rename(STATS_FILE)
         except Exception as e:

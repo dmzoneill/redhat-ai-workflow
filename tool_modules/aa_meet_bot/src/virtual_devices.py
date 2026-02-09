@@ -391,10 +391,10 @@ class InstanceDeviceManager:
             "channels=1",
             "format=s16le",
             f'source_properties=device.description="MeetBot_{self.instance_id}_Mic"'
-            f" node.priority.session=0"
-            f" node.priority.driver=0"
-            f" priority.session=0"
-            f" priority.driver=0",
+            " node.priority.session=0"
+            " node.priority.driver=0"
+            " priority.session=0"
+            " priority.driver=0",
         ]
 
         success, output = await run_cmd(cmd)
@@ -870,7 +870,7 @@ class InstanceDeviceManager:
             import glob
 
             for card_path in glob.glob("/sys/devices/virtual/video4linux/video*/name"):
-                with open(card_path) as f:
+                with open(card_path, encoding="utf-8") as f:
                     name = f.read().strip()
                     if name == self.video_device_name:
                         # Extract video number from path
@@ -1541,7 +1541,7 @@ def _find_parec_via_proc(existing_pids: set[int]) -> list[tuple[int, str]]:
     try:
         for proc_dir in glob.glob("/proc/[0-9]*/cmdline"):
             try:
-                with open(proc_dir, "r") as f:
+                with open(proc_dir, "r", encoding="utf-8") as f:
                     cmdline = f.read().replace("\x00", " ").strip()
                     if "parec" in cmdline:
                         pid = int(proc_dir.split("/")[2])

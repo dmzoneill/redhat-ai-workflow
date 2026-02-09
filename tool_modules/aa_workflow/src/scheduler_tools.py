@@ -65,7 +65,15 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
         """
         schedules = _get_schedules_config()
 
-        if not state_manager.is_service_enabled("scheduler"):
+        # Resolve scheduler enabled: config.json first, state.json override
+        config_enabled = schedules.get("enabled", False)
+        state_override = state_manager.get("services", "scheduler", {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            scheduler_enabled = state_override["enabled"]
+        else:
+            scheduler_enabled = config_enabled
+
+        if not scheduler_enabled:
             return [
                 TextContent(
                     type="text",
@@ -98,8 +106,13 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
         for job in jobs:
             name = job.get("name", "unnamed")
             skill = job.get("skill", "")
-            # Get enabled state from state.json
-            enabled = state_manager.is_job_enabled(name)
+            # Resolve enabled: config.json per-job field first, state.json override
+            config_job_enabled = job.get("enabled", True)
+            job_state_override = state_manager.get("jobs", name, {})
+            if isinstance(job_state_override, dict) and "enabled" in job_state_override:
+                enabled = job_state_override["enabled"]
+            else:
+                enabled = config_job_enabled
             notify = job.get("notify", [])
             persona = job.get("persona", "")
             retry = job.get("retry")
@@ -311,8 +324,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
                 cron_iter = croniter(cron, datetime.now())
                 next_run = cron_iter.get_next(datetime)
                 lines.append(f"**Next run:** {next_run.strftime('%Y-%m-%d %H:%M')}")
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
         else:
             lines.append(f"**Poll interval:** {poll_interval}")
             if poll_condition:
@@ -512,8 +525,13 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
 
         lines = ["## 🕐 Scheduler Status\n"]
 
-        # Basic config status
-        enabled = state_manager.is_service_enabled("scheduler")
+        # Resolve scheduler enabled: config.json first, state.json override
+        config_enabled = schedules.get("enabled", False)
+        state_override = state_manager.get("services", "scheduler", {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            enabled = state_override["enabled"]
+        else:
+            enabled = config_enabled
         timezone = schedules.get("timezone", "UTC")
         total_jobs = len(schedules.get("jobs", []))
 
@@ -653,8 +671,12 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
         """
         Enable or disable the entire scheduler at runtime.
 
-        This updates state.json and starts/stops the scheduler immediately,
-        without requiring a server restart.
+        This creates a runtime override in state.json that takes precedence
+        over the config.json 'schedules.enabled' value. The override persists
+        until state.json is cleared or the override is removed.
+
+        Config.json remains the source of truth for the default enabled state.
+        State.json stores runtime overrides that can be toggled without editing config.
 
         Args:
             enabled: True to enable and start the scheduler, False to disable and stop it

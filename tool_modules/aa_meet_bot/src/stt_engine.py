@@ -260,7 +260,6 @@ class NPUWhisperSTT:
         audio_buffer = []
         total_samples = 0
         silence_samples = 0
-        last_speech_time = time.time()
 
         async for chunk in audio_stream:
             # Add to buffer
@@ -274,7 +273,6 @@ class NPUWhisperSTT:
                     silence_samples += len(chunk)
                 else:
                     silence_samples = 0
-                    last_speech_time = time.time()  # noqa: F841
 
             buffer_duration = total_samples / config.sample_rate
             silence_duration = silence_samples / config.sample_rate

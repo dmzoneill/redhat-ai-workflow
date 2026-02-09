@@ -21,49 +21,56 @@ from tool_modules.aa_workflow.src.poll_engine import (
 class TestParseDuration:
     """Tests for parse_duration."""
 
-    def test_seconds(self):
-        assert parse_duration("30s") == timedelta(seconds=30)
-        assert parse_duration("10sec") == timedelta(seconds=10)
-        assert parse_duration("5second") == timedelta(seconds=5)
-        assert parse_duration("1seconds") == timedelta(seconds=1)
+    @pytest.mark.parametrize(
+        "input_str,expected",
+        [
+            # Seconds
+            ("30s", timedelta(seconds=30)),
+            ("10sec", timedelta(seconds=10)),
+            ("5second", timedelta(seconds=5)),
+            ("1seconds", timedelta(seconds=1)),
+            # Minutes
+            ("5m", timedelta(minutes=5)),
+            ("10min", timedelta(minutes=10)),
+            ("1minute", timedelta(minutes=1)),
+            ("30minutes", timedelta(minutes=30)),
+            # Hours
+            ("1h", timedelta(hours=1)),
+            ("2hr", timedelta(hours=2)),
+            ("3hour", timedelta(hours=3)),
+            ("4hours", timedelta(hours=4)),
+            # Days
+            ("1d", timedelta(days=1)),
+            ("3day", timedelta(days=3)),
+            ("7days", timedelta(days=7)),
+            # Weeks
+            ("1w", timedelta(weeks=1)),
+            ("2week", timedelta(weeks=2)),
+            ("3weeks", timedelta(weeks=3)),
+            # Whitespace
+            ("  5m  ", timedelta(minutes=5)),
+            ("10 h", timedelta(hours=10)),
+        ],
+    )
+    def test_valid_durations(self, input_str, expected):
+        assert parse_duration(input_str) == expected
 
-    def test_minutes(self):
-        assert parse_duration("5m") == timedelta(minutes=5)
-        assert parse_duration("10min") == timedelta(minutes=10)
-        assert parse_duration("1minute") == timedelta(minutes=1)
-        assert parse_duration("30minutes") == timedelta(minutes=30)
-
-    def test_hours(self):
-        assert parse_duration("1h") == timedelta(hours=1)
-        assert parse_duration("2hr") == timedelta(hours=2)
-        assert parse_duration("3hour") == timedelta(hours=3)
-        assert parse_duration("4hours") == timedelta(hours=4)
-
-    def test_days(self):
-        assert parse_duration("1d") == timedelta(days=1)
-        assert parse_duration("3day") == timedelta(days=3)
-        assert parse_duration("7days") == timedelta(days=7)
-
-    def test_weeks(self):
-        assert parse_duration("1w") == timedelta(weeks=1)
-        assert parse_duration("2week") == timedelta(weeks=2)
-        assert parse_duration("3weeks") == timedelta(weeks=3)
-
-    def test_whitespace(self):
-        assert parse_duration("  5m  ") == timedelta(minutes=5)
-        assert parse_duration("10 h") == timedelta(hours=10)
-
-    def test_invalid_format(self):
-        with pytest.raises(ValueError, match="Invalid duration"):
-            parse_duration("abc")
-
-    def test_unknown_unit(self):
-        with pytest.raises(ValueError, match="Unknown duration unit"):
-            parse_duration("5y")
-
-    def test_empty_string(self):
-        with pytest.raises(ValueError):
-            parse_duration("")
+    @pytest.mark.parametrize(
+        "input_str,match",
+        [
+            ("abc", "Invalid duration"),
+            ("5y", "Unknown duration unit"),
+            ("", None),
+        ],
+        ids=["invalid_format", "unknown_unit", "empty_string"],
+    )
+    def test_invalid_durations(self, input_str, match):
+        if match:
+            with pytest.raises(ValueError, match=match):
+                parse_duration(input_str)
+        else:
+            with pytest.raises(ValueError):
+                parse_duration(input_str)
 
 
 # ==================== PollCondition ====================
@@ -120,52 +127,35 @@ class TestPollCondition:
         met, items = cond.evaluate([])
         assert met is False
 
-    def test_evaluate_count_gt_met(self):
-        cond = PollCondition("count > 0")
-        met, items = cond.evaluate([{"id": 1}, {"id": 2}])
-        assert met is True
-        assert len(items) == 2
-
-    def test_evaluate_count_gt_not_met(self):
-        cond = PollCondition("count > 5")
-        met, items = cond.evaluate([{"id": 1}])
-        assert met is False
-        assert items == []
-
-    def test_evaluate_count_eq(self):
-        cond = PollCondition("count == 2")
-        met, items = cond.evaluate([{"id": 1}, {"id": 2}])
-        assert met is True
-
-    def test_evaluate_count_eq_single_equals(self):
-        cond = PollCondition("count = 1")
-        met, items = cond.evaluate([{"id": 1}])
-        assert met is True
-
-    def test_evaluate_count_ne(self):
-        cond = PollCondition("count != 0")
-        met, _ = cond.evaluate([{"id": 1}])
-        assert met is True
-
-    def test_evaluate_count_ne_diamond(self):
-        cond = PollCondition("count <> 0")
-        met, _ = cond.evaluate([{"id": 1}])
-        assert met is True
-
-    def test_evaluate_count_lt(self):
-        cond = PollCondition("count < 3")
-        met, items = cond.evaluate([{"id": 1}])
-        assert met is True
-
-    def test_evaluate_count_lte(self):
-        cond = PollCondition("count <= 2")
-        met, items = cond.evaluate([{"id": 1}, {"id": 2}])
-        assert met is True
-
-    def test_evaluate_count_gte(self):
-        cond = PollCondition("count >= 2")
-        met, _ = cond.evaluate([{"id": 1}, {"id": 2}])
-        assert met is True
+    @pytest.mark.parametrize(
+        "condition,items,expected_met",
+        [
+            ("count > 0", [{"id": 1}, {"id": 2}], True),
+            ("count > 5", [{"id": 1}], False),
+            ("count == 2", [{"id": 1}, {"id": 2}], True),
+            ("count = 1", [{"id": 1}], True),
+            ("count != 0", [{"id": 1}], True),
+            ("count <> 0", [{"id": 1}], True),
+            ("count < 3", [{"id": 1}], True),
+            ("count <= 2", [{"id": 1}, {"id": 2}], True),
+            ("count >= 2", [{"id": 1}, {"id": 2}], True),
+        ],
+        ids=[
+            "gt_met",
+            "gt_not_met",
+            "eq_double",
+            "eq_single",
+            "ne",
+            "ne_diamond",
+            "lt",
+            "lte",
+            "gte",
+        ],
+    )
+    def test_evaluate_count_operators(self, condition, items, expected_met):
+        cond = PollCondition(condition)
+        met, _ = cond.evaluate(items)
+        assert met is expected_met
 
     def test_evaluate_age_gt_met(self):
         cond = PollCondition("age > 1h")

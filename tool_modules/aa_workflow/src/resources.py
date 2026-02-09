@@ -5,10 +5,13 @@ Provides MCP resources for:
 - Configuration (agents, skills, repositories)
 """
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Support both package import and direct loading
 try:
@@ -81,7 +84,7 @@ async def _get_personas() -> str:
     if PERSONAS_DIR.exists():
         for f in PERSONAS_DIR.glob("*.yaml"):
             try:
-                with open(f) as fp:
+                with open(f, encoding="utf-8") as fp:
                     data = yaml.safe_load(fp)
                 personas.append(
                     {
@@ -91,8 +94,8 @@ async def _get_personas() -> str:
                         "skills": data.get("skills", []),
                     }
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
     return yaml.dump({"personas": personas}, default_flow_style=False)
 
 
@@ -102,7 +105,7 @@ async def _get_skills() -> str:
     if SKILLS_DIR.exists():
         for f in SKILLS_DIR.glob("*.yaml"):
             try:
-                with open(f) as fp:
+                with open(f, encoding="utf-8") as fp:
                     data = yaml.safe_load(fp)
                 skills.append(
                     {
@@ -111,8 +114,8 @@ async def _get_skills() -> str:
                         "inputs": [i.get("name") for i in data.get("inputs", [])],
                     }
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
     return yaml.dump({"skills": skills}, default_flow_style=False)
 
 

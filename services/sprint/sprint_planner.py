@@ -11,7 +11,12 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from services.sprint.bot.workflow_config import WorkflowConfig, get_workflow_config
+from services.sprint.bot.workflow_config import (
+    COMPLETED_STATUSES,
+    REVIEW_STATUSES,
+    WorkflowConfig,
+    get_workflow_config,
+)
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -108,8 +113,11 @@ class SprintPlanner:
 
     # ==================== Jira Integration ====================
 
-    async def refresh_from_jira(self) -> None:
+    async def refresh_from_jira(self, jira_project: str = "AAP") -> None:
         """Refresh sprint issues from Jira by calling the Jira API directly.
+
+        Args:
+            jira_project: Jira project key to fetch issues from.
 
         Fetches sprint info and issues, then saves to state file.
         """
@@ -134,7 +142,7 @@ class SprintPlanner:
 
             config = SprintBotConfig(
                 working_hours=WorkingHours(),
-                jira_project="AAP",
+                jira_project=jira_project,
             )
 
             # Fetch active sprint info first (for currentSprint metadata)
@@ -161,7 +169,7 @@ class SprintPlanner:
                 return
 
             # Filter to only show issues assigned to current user
-            from server.config import load_config
+            from server.utils import load_config
 
             user_config = load_config()
             user_info = user_config.get("user", {})
@@ -249,8 +257,7 @@ class SprintPlanner:
             completed_points = sum(
                 i.story_points
                 for i in new_issues
-                if i.jira_status
-                and i.jira_status.lower() in ["done", "closed", "resolved"]
+                if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
             )
 
             # Update currentSprint with calculated points
@@ -297,9 +304,8 @@ class SprintPlanner:
         issues = state.get("issues", [])
 
         # Find issues in Review status
-        review_statuses = ["in review", "review", "code review", "peer review"]
         review_issues = [
-            i for i in issues if i.get("jiraStatus", "").lower() in review_statuses
+            i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES
         ]
 
         if not review_issues:

@@ -11,7 +11,9 @@ from tool_modules.aa_workflow.src.claude_code_integration import (
     create_ask_question_wrapper,
     get_claude_code_capabilities,
     is_claude_code_context,
-    test_ask_question,
+)
+from tool_modules.aa_workflow.src.claude_code_integration import (
+    test_ask_question as _test_ask_question,
 )
 
 # ---------------------------------------------------------------------------
@@ -277,32 +279,32 @@ class TestGetClaudeCodeCapabilities:
 
 class TestTestAskQuestion:
     async def test_returns_false_when_fn_is_none(self):
-        result = await test_ask_question(None)
+        result = await _test_ask_question(None)
         assert result is False
 
     async def test_returns_true_when_fn_returns_answers(self):
         ask_fn = AsyncMock(return_value={"answers": ["Yes"]})
-        result = await test_ask_question(ask_fn)
+        result = await _test_ask_question(ask_fn)
         assert result is True
 
     async def test_returns_false_when_fn_returns_none(self):
         ask_fn = AsyncMock(return_value=None)
-        result = await test_ask_question(ask_fn)
+        result = await _test_ask_question(ask_fn)
         assert result is False
 
     async def test_returns_false_when_fn_returns_no_answers_key(self):
         ask_fn = AsyncMock(return_value={"result": "ok"})
-        result = await test_ask_question(ask_fn)
+        result = await _test_ask_question(ask_fn)
         assert result is False
 
     async def test_returns_false_on_exception(self):
         ask_fn = AsyncMock(side_effect=RuntimeError("test failure"))
-        result = await test_ask_question(ask_fn)
+        result = await _test_ask_question(ask_fn)
         assert result is False
 
     async def test_passes_correct_data_to_fn(self):
         ask_fn = AsyncMock(return_value={"answers": ["Yes"]})
-        await test_ask_question(ask_fn)
+        await _test_ask_question(ask_fn)
         call_args = ask_fn.call_args[0][0]
         assert "questions" in call_args
         assert len(call_args["questions"]) == 1

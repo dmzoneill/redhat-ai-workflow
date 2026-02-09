@@ -40,6 +40,8 @@ from typing import Optional
 
 import aiosqlite
 
+from server.paths import AA_CONFIG_DIR
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,9 +118,8 @@ class SlopDatabase:
         if db_path:
             self.db_path = Path(db_path)
         else:
-            config_dir = Path.home() / ".config" / "aa-workflow"
-            config_dir.mkdir(parents=True, exist_ok=True)
-            self.db_path = config_dir / "slop.db"
+            AA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            self.db_path = AA_CONFIG_DIR / "slop.db"
 
         self._db: Optional[aiosqlite.Connection] = None
         self._initialized = False

@@ -289,25 +289,25 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
             tf = content_box.text_frame
             tf.word_wrap = True
 
-            first_para = True
+            para_index = [0]  # mutable counter so nested fn can update it
+
+            def _next_para(text_frame, _idx=para_index):
+                """Get the next paragraph, reusing the first one."""
+                if _idx[0] == 0:
+                    _idx[0] += 1
+                    return text_frame.paragraphs[0]
+                return text_frame.add_paragraph()
+
             for item in slide_data.content:
                 if item["type"] == "bullet":
-                    if first_para:
-                        p = tf.paragraphs[0]
-                        first_para = False
-                    else:
-                        p = tf.add_paragraph()
+                    p = _next_para(tf)
                     p.text = f"• {item['content']}"
                     p.font.size = Pt(18)
                     p.font.color.rgb = TEXT_COLOR
                     p.space_after = Pt(8)
 
                 elif item["type"] == "header":
-                    if first_para:
-                        p = tf.paragraphs[0]
-                        first_para = False
-                    else:
-                        p = tf.add_paragraph()
+                    p = _next_para(tf)
                     p.text = item["content"]
                     p.font.size = Pt(20)
                     p.font.bold = True
@@ -316,11 +316,7 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
                     p.space_after = Pt(4)
 
                 elif item["type"] == "code":
-                    if first_para:
-                        p = tf.paragraphs[0]
-                        first_para = False
-                    else:
-                        p = tf.add_paragraph()
+                    p = _next_para(tf)
                     # Truncate long code blocks
                     code_lines = item["content"].split("\n")[:8]
                     if len(item["content"].split("\n")) > 8:
@@ -336,11 +332,7 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
                     rows = item["content"]
                     if rows:
                         # Header row
-                        if first_para:
-                            p = tf.paragraphs[0]
-                            first_para = False
-                        else:
-                            p = tf.add_paragraph()
+                        p = _next_para(tf)
                         header = " | ".join(rows[0])
                         p.text = header
                         p.font.size = Pt(14)

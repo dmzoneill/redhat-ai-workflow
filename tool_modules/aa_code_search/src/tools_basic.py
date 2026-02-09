@@ -198,8 +198,8 @@ def _get_lancedb():
             import lancedb
 
             _lancedb = lancedb
-        except ImportError:
-            raise ImportError("lancedb not installed. Run: uv add lancedb")
+        except ImportError as e:
+            raise ImportError("lancedb not installed. Run: uv add lancedb") from e
     return _lancedb
 
 
@@ -247,10 +247,10 @@ def _get_embedding_model():
 
             _sentence_transformer = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
             logger.info("Using sentence-transformers embedding backend")
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "sentence-transformers not installed. Run: uv add sentence-transformers"
-            )
+            ) from e
     return _sentence_transformer
 
 
@@ -486,16 +486,13 @@ def _load_onnx_model():
 
 
 def _load_config() -> dict:
-    """Load config.json from project root."""
-    config_paths = [
-        Path.cwd() / "config.json",
-        Path(__file__).parent.parent.parent.parent.parent / "config.json",
-    ]
-    for config_path in config_paths:
-        if config_path.exists():
-            with open(config_path) as f:
-                return json.load(f)
-    return {}
+    """Load config via ConfigManager."""
+    try:
+        from server.config_manager import config as config_manager
+
+        return config_manager.get_all()
+    except Exception:
+        return {}
 
 
 def _get_project_path(project: str) -> Path | None:
@@ -782,7 +779,7 @@ def _is_index_stale(project: str, max_age_minutes: int = INDEX_STALE_MINUTES) ->
         return True  # Not indexed at all
 
     try:
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
         indexed_at = datetime.fromisoformat(metadata.get("indexed_at", ""))
@@ -833,7 +830,7 @@ def _index_project(project: str, force: bool = False) -> dict:
     metadata_path = VECTOR_DB_PATH / project / "metadata.json"
     existing_hashes = {}
     if metadata_path.exists() and not force:
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             existing_hashes = json.load(f).get("file_hashes", {})
 
     new_hashes = {}
@@ -1000,7 +997,7 @@ def _index_project(project: str, force: bool = False) -> dict:
         },
     }
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(metadata_path, "w") as f:
+    with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     return stats
@@ -1070,9 +1067,9 @@ def _search_code(
     # Set nprobes if using IVF index
     try:
         search_query = search_query.nprobes(nprobes)
-    except (AttributeError, TypeError):
+    except (AttributeError, TypeError) as exc:
         # nprobes not supported (FLAT index or old LanceDB version)
-        pass
+        logger.debug("Suppressed error: %s", exc)
 
     # Execute search with error handling for corrupted/empty indexes
     try:
@@ -1172,7 +1169,7 @@ def _get_index_stats(project: str) -> dict:
     if not metadata_path.exists():
         return {"indexed": False, "project": project}
 
-    with open(metadata_path) as f:
+    with open(metadata_path, encoding="utf-8") as f:
         metadata = json.load(f)
 
     # Get table stats
@@ -1183,8 +1180,8 @@ def _get_index_stats(project: str) -> dict:
         if table_name in db.table_names():
             table = db.open_table(table_name)
             chunk_count = len(table)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     # Calculate disk size
     disk_size_bytes = 0
@@ -1218,8 +1215,8 @@ def _get_index_stats(project: str) -> dict:
             else:
                 index_age = "just now"
             is_stale = age > timedelta(minutes=INDEX_STALE_MINUTES)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
     # Get search stats
     search_stats = metadata.get("search_stats", {})
@@ -1269,7 +1266,7 @@ def _update_search_stats(
         return
 
     try:
-        with open(metadata_path) as f:
+        with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
         search_stats = metadata.get(
@@ -1317,7 +1314,7 @@ def _update_search_stats(
 
         metadata["search_stats"] = search_stats
 
-        with open(metadata_path, "w") as f:
+        with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
     except Exception as e:
         logger.debug(f"Failed to update search stats: {e}")
@@ -1566,7 +1563,7 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             if stats.get("index_note"):
                 index_info += f"\n- Note: {stats['index_note']}"
 
-            result = """✅ **Indexed {project}**
+            result = f"""✅ **Indexed {project}**
 
 📊 **Statistics:**
 - Files indexed: {stats['files_indexed']}
@@ -1575,11 +1572,14 @@ def register_tools(registry: Any) -> None:  # noqa: C901
 {index_info}
 """
             if stats["errors"]:
-                result += f"\n⚠️ **Errors ({len(stats['errors'])}):**\n"
-                for err in stats["errors"][:5]:
-                    result += f"- {err}\n"
+                err_lines = [f"- {err}" for err in stats["errors"][:5]]
                 if len(stats["errors"]) > 5:
-                    result += f"- ... and {len(stats['errors']) - 5} more\n"
+                    err_lines.append(f"- ... and {len(stats['errors']) - 5} more")
+                result += (
+                    f"\n⚠️ **Errors ({len(stats['errors'])}):**\n"
+                    + "\n".join(err_lines)
+                    + "\n"
+                )
 
             result += f"\n💡 Now use `code_search('{project}', 'your query')` to search semantically."
             result += "\n🏥 Use `code_health()` to check performance metrics."
@@ -1662,22 +1662,22 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             if "error" in results[0]:
                 return [TextContent(type="text", text=f"❌ {results[0]['error']}")]
 
-            output = f'## 🔍 Search Results for: "{query}"\n\n'
+            parts = [f'## 🔍 Search Results for: "{query}"\n']
 
             for i, result in enumerate(results, 1):
-                output += f"### {i}. `{result['file_path']}` (lines {result['start_line']}-{result['end_line']})\n"
-                output += (
-                    f"**Type:** {result['type']} | **Name:** {result['name']}"
-                    f" | **Relevance:** {result['similarity']:.0%}\n\n"
-                )
-
                 # Truncate long content
                 content = result["content"]
                 if len(content) > 800:
                     content = content[:800] + "\n... (truncated)"
 
-                output += f"```{result['language']}\n{content}\n```\n\n"
+                parts.append(
+                    f"### {i}. `{result['file_path']}` (lines {result['start_line']}-{result['end_line']})\n"
+                    f"**Type:** {result['type']} | **Name:** {result['name']}"
+                    f" | **Relevance:** {result['similarity']:.0%}\n\n"
+                    f"```{result['language']}\n{content}\n```\n"
+                )
 
+            output = "\n".join(parts)
             return [TextContent(type="text", text=output)]
 
         except ImportError as e:
@@ -1937,11 +1937,11 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                 results = _search_code(query, project, limit=5)
                 if results and "error" not in results[0]:
                     findings[key] = results
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         # Format findings for Claude to analyze
-        output = """## 🔬 Deep Scan Results: {project}
+        output = f"""## 🔬 Deep Scan Results: {project}
 
 **Indexed:** {stats.get('chunks_count', 0)} code chunks from {stats.get('file_count', 0)} files
 
@@ -1952,13 +1952,13 @@ def register_tools(registry: Any) -> None:  # noqa: C901
 """
 
         for key, results in findings.items():
-            output += f"#### {key.replace('_', ' ').title()}\n\n"
+            category_lines = [f"#### {key.replace('_', ' ').title()}\n"]
             for r in results[:3]:  # Top 3 per category
-                output += (
+                category_lines.append(
                     f"- `{r['file_path']}:{r['start_line']}` - {r['type']}"
-                    f" `{r['name']}` ({r['similarity']:.0%} match)\n"
+                    f" `{r['name']}` ({r['similarity']:.0%} match)"
                 )
-            output += "\n"
+            output += "\n".join(category_lines) + "\n\n"
 
         output += """---
 
@@ -2027,15 +2027,19 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
                     )
                 ]
 
-            output = "## 👁️ Code Watchers\n\n"
+            watcher_parts = ["## 👁️ Code Watchers\n"]
             for proj, watcher in watchers.items():
                 status = watcher.status
-                output += f"### {'🟢' if status['running'] else '🔴'} {proj}\n"
-                output += f"- **Running:** {status['running']}\n"
-                output += f"- **Last update:** {status['last_update'] or 'Never'}\n"
-                output += f"- **Pending changes:** {status['changes_pending']}\n"
-                output += f"- **Debounce:** {status['debounce_seconds']}s\n\n"
+                icon = "🟢" if status["running"] else "🔴"
+                watcher_parts.append(
+                    f"### {icon} {proj}\n"
+                    f"- **Running:** {status['running']}\n"
+                    f"- **Last update:** {status['last_update'] or 'Never'}\n"
+                    f"- **Pending changes:** {status['changes_pending']}\n"
+                    f"- **Debounce:** {status['debounce_seconds']}s\n"
+                )
 
+            output = "\n".join(watcher_parts)
             return [TextContent(type="text", text=output)]
 
         if not project:
@@ -2076,7 +2080,7 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
                 return [
                     TextContent(
                         type="text",
-                        text="""✅ **Started watching {project}**
+                        text=f"""✅ **Started watching {project}**
 
 📁 Path: `{project_path}`
 ⏱️ Debounce: {debounce_seconds}s (waits for quiet period before re-indexing)
@@ -2200,16 +2204,16 @@ Use `code_watch('{project}', 'stop')` to stop watching.
         """
         try:
             health = get_vector_health()
-            stats = get_all_vector_stats()  # noqa: F841 - used in template string below
+            stats = get_all_vector_stats()
 
             # Status emoji
-            status_emoji = {  # noqa: F841 - used in template string below
+            status_emoji = {
                 "healthy": "🟢",
                 "degraded": "🟡",
                 "unhealthy": "🔴",
             }.get(health["status"], "⚪")
 
-            output = """## 🏥 Vector Search Health
+            output = f"""## 🏥 Vector Search Health
 
 ### Status: {status_emoji} {health['status'].upper()}
 
@@ -2250,16 +2254,14 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 """
 
             if health["issues"]:
-                output += "---\n\n### ⚠️ Issues\n\n"
-                for issue in health["issues"]:
-                    output += f"- {issue}\n"
-                output += "\n"
+                issue_lines = [f"- {issue}" for issue in health["issues"]]
+                output += "---\n\n### ⚠️ Issues\n\n" + "\n".join(issue_lines) + "\n\n"
 
             if health["recommendations"]:
-                output += "---\n\n### 💡 Recommendations\n\n"
-                for rec in health["recommendations"]:
-                    output += f"- {rec}\n"
-                output += "\n"
+                rec_lines = [f"- {rec}" for rec in health["recommendations"]]
+                output += (
+                    "---\n\n### 💡 Recommendations\n\n" + "\n".join(rec_lines) + "\n\n"
+                )
 
             return [TextContent(type="text", text=output)]
 
@@ -2289,9 +2291,9 @@ Use `code_watch('{project}', 'stop')` to stop watching.
             _embedding_cache.clear()
             return [TextContent(type="text", text="✅ Embedding cache cleared")]
 
-        stats = _embedding_cache.stats()  # noqa: F841 - used in template string below
+        stats = _embedding_cache.stats()
 
-        output = """## 🗄️ Embedding Cache
+        output = f"""## 🗄️ Embedding Cache
 
 | Metric | Value |
 |--------|-------|

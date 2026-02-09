@@ -22,7 +22,6 @@ from server.main import (
 from server.persona_loader import PersonaLoader
 from server.websocket_server import SkillWebSocketServer
 from tool_modules.aa_workflow.src.poll_engine import PollEngine
-from tool_modules.aa_workflow.src.scheduler import CronScheduler
 
 # ────────────────────────────────────────────────────────────────────
 # setup_logging

@@ -36,6 +36,7 @@ import fcntl
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Add project root to path
@@ -56,7 +57,7 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-LOCK_FILE = Path("/tmp/slack_persona_sync.lock")
+LOCK_FILE = Path(tempfile.gettempdir()) / "slack_persona_sync.lock"
 
 
 class SingleInstance:
@@ -69,7 +70,7 @@ class SingleInstance:
     def acquire(self) -> bool:
         """Try to acquire the lock. Returns True if successful."""
         try:
-            self._lock_file = open(LOCK_FILE, "w")
+            self._lock_file = open(LOCK_FILE, "w", encoding="utf-8")
             fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             self._lock_file.write(str(os.getpid()))
             self._lock_file.flush()
@@ -84,13 +85,13 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
         if LOCK_FILE.exists():
             try:
                 LOCK_FILE.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
     def __enter__(self):
         return self

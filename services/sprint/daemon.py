@@ -49,7 +49,12 @@ from services.sprint.bot.execution_tracer import (
     StepStatus,
     WorkflowState,
 )
-from services.sprint.bot.workflow_config import WorkflowConfig, get_workflow_config
+from services.sprint.bot.workflow_config import (
+    COMPLETED_STATUSES,
+    REVIEW_STATUSES,
+    WorkflowConfig,
+    get_workflow_config,
+)
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
@@ -97,21 +102,33 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._last_jira_refresh = datetime.min
         self._last_review_check = datetime.min
 
-        # Configuration
+        # Configuration - read from config.json sprint section
+        from server.utils import load_config
+
+        full_config = load_config()
+        sprint_config = full_config.get("sprint", {})
+        scheduling = sprint_config.get("scheduling", {})
+
         self._config = {
-            "jira_project": "AAP",
-            "jira_component": None,
-            "working_hours": {
-                "start_hour": 9,
-                "start_minute": 0,
-                "end_hour": 17,
-                "end_minute": 0,
-                "weekdays_only": True,
-                "timezone": "Europe/Dublin",
-            },
-            "check_interval_seconds": 300,  # Check every 5 minutes
-            "jira_refresh_interval_seconds": 1800,  # Refresh from Jira every 30 minutes
-            "skip_blocked_after_minutes": 30,
+            "jira_project": sprint_config.get("jira", {}).get("project", "AAP"),
+            "jira_component": sprint_config.get("jira", {}).get("component"),
+            "working_hours": sprint_config.get("working_hours", {}),
+            "check_interval_seconds": scheduling.get("issue_processing", {}).get(
+                "interval_seconds", 300
+            ),
+            "jira_refresh_interval_seconds": scheduling.get("jira_refresh", {}).get(
+                "interval_seconds", 1800
+            ),
+            "review_check_interval_seconds": scheduling.get("review_check", {}).get(
+                "interval_hours", 8
+            )
+            * 3600,
+            "skip_blocked_after_minutes": sprint_config.get(
+                "skip_blocked_after_minutes", 30
+            ),
+            "claude_cli_timeout_seconds": sprint_config.get(
+                "claude_cli_timeout_seconds", 1800
+            ),
         }
 
         # Register custom D-Bus method handlers
@@ -252,7 +269,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     return {
                         "success": False,
                         "error": f"Issue {issue_key} is not actionable (status: {jira_status}). "
-                        f"Bot only works on issues in New/Refinement/Backlog.",
+                        "Bot only works on issues in New/Refinement/Backlog.",
                     }
 
                 issue["approvalStatus"] = "approved"
@@ -551,14 +568,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return {"success": False, "error": "issue_key required"}
 
         try:
-            traces_dir = (
-                Path.home()
-                / "src"
-                / "redhat-ai-workflow"
-                / "memory"
-                / "state"
-                / "sprint_traces"
-            )
+            traces_dir = PROJECT_ROOT / "memory" / "state" / "sprint_traces"
             trace_file = traces_dir / f"{issue_key}.yaml"
 
             if not trace_file.exists():
@@ -566,7 +576,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             import yaml
 
-            with open(trace_file) as f:
+            with open(trace_file, encoding="utf-8") as f:
                 trace = yaml.safe_load(f)
 
             return {"success": True, "trace": trace}
@@ -580,14 +590,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         Returns a list of trace summaries (issue key, state, started_at).
         """
         try:
-            traces_dir = (
-                Path.home()
-                / "src"
-                / "redhat-ai-workflow"
-                / "memory"
-                / "state"
-                / "sprint_traces"
-            )
+            traces_dir = PROJECT_ROOT / "memory" / "state" / "sprint_traces"
             traces = []
 
             if traces_dir.exists():
@@ -595,7 +598,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
                 for trace_file in traces_dir.glob("*.yaml"):
                     try:
-                        with open(trace_file) as f:
+                        with open(trace_file, encoding="utf-8") as f:
                             trace = yaml.safe_load(f)
                         if trace:
                             traces.append(
@@ -1050,8 +1053,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             except Exception:
                 try:
                     Path(temp_path).unlink()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("OS operation failed: %s", exc)
                 raise
 
         except Exception as e:
@@ -1160,7 +1163,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             config = SprintBotConfig(
                 working_hours=WorkingHours(),
-                jira_project="AAP",
+                jira_project=self._config.get("jira_project", "AAP"),
             )
 
             # Fetch active sprint info first (for currentSprint metadata)
@@ -1188,7 +1191,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 return
 
             # Filter to only show issues assigned to current user
-            from server.config import load_config
+            from server.utils import load_config
 
             user_config = load_config()
             user_info = user_config.get("user", {})
@@ -1277,8 +1280,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             completed_points = sum(
                 i.story_points
                 for i in new_issues
-                if i.jira_status
-                and i.jira_status.lower() in ["done", "closed", "resolved"]
+                if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
             )
 
             # Update currentSprint with calculated points
@@ -1324,9 +1326,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         issues = state.get("issues", [])
 
         # Find issues in Review status
-        review_statuses = ["in review", "review", "code review", "peer review"]
         review_issues = [
-            i for i in issues if i.get("jiraStatus", "").lower() in review_statuses
+            i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES
         ]
 
         if not review_issues:
@@ -2315,8 +2316,8 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         try:
             import shutil
@@ -2368,21 +2369,27 @@ Also output the MR ID if found: [MR_ID: <number>]
                 cwd=str(PROJECT_ROOT),
             )
 
+            cli_timeout = self._config.get("claude_cli_timeout_seconds", 1800)
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=1800,  # 30 minute timeout for actual work
+                    timeout=cli_timeout,
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+                timeout_mins = cli_timeout // 60
                 self._log_action(
-                    issue_key, "timeout", "Claude CLI timed out after 30 minutes"
+                    issue_key,
+                    "timeout",
+                    f"Claude CLI timed out after {timeout_mins} minutes",
                 )
                 tracer.end_step(
-                    step_id, status=StepStatus.FAILED, error="Timeout after 30 minutes"
+                    step_id,
+                    status=StepStatus.FAILED,
+                    error=f"Timeout after {timeout_mins} minutes",
                 )
-                tracer.mark_failed("Claude CLI timed out after 30 minutes")
+                tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
                 work_log = self._load_work_log(issue_key)
                 work_log["status"] = "timeout"
                 work_log["completed"] = datetime.now().isoformat()
@@ -2444,8 +2451,8 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
 
                     notify_sprint_issue_completed(issue_key)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2481,8 +2488,8 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
 
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2802,8 +2809,8 @@ Also output the MR ID if found: [MR_ID: <number>]
                 ).total_seconds() > refresh_interval:
                     await self._refresh_from_jira()
 
-                # Check issues in Review for merge readiness (3x daily = every 8 hours)
-                review_check_interval = 8 * 60 * 60  # 8 hours
+                # Check issues in Review for merge readiness (interval from config)
+                review_check_interval = self._config["review_check_interval_seconds"]
                 if (
                     datetime.now() - self._last_review_check
                 ).total_seconds() > review_check_interval:

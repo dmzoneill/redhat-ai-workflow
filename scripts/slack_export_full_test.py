@@ -86,7 +86,10 @@ async def run_export():
     total_messages = 0
     my_messages = 0
 
-    with open(output_file, "w") as f_out, open(context_file, "w") as f_ctx:
+    with (
+        open(output_file, "w", encoding="utf-8") as f_out,
+        open(context_file, "w", encoding="utf-8") as f_ctx,
+    ):
         for i, conv in enumerate(conversations[:10]):  # Limit to 10 DMs for test
             channel_id = conv.get("id", "")
             print(f"   [{i+1}/10] Processing {channel_id}...", end=" ")
@@ -153,7 +156,7 @@ async def run_export():
     }
 
     metadata_file = STYLE_DIR / "export_metadata.json"
-    with open(metadata_file, "w") as f:
+    with open(metadata_file, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     print("\n" + "=" * 60)
@@ -167,7 +170,7 @@ async def run_export():
     # Show sample
     if my_messages > 0:
         print("\n📝 Sample of exported messages:")
-        with open(output_file) as f:
+        with open(output_file, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i >= 3:
                     break

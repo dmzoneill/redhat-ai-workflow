@@ -114,11 +114,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         if _export_state["running"]:
             progress = _export_state["progress"]
             return (
-                f"⏳ Export already in progress\n"
+                "⏳ Export already in progress\n"
                 f"Started: {_export_state['start_time']}\n"
                 f"Channels processed: {progress.get('channels_done', 0)}/{progress.get('channels_total', '?')}\n"
                 f"Messages exported: {progress.get('messages', 0)}\n"
-                f"Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
+                "Use `slack_export_status` for detailed progress or `slack_export_cancel` to stop."
             )
 
         # Initialize export state
@@ -250,7 +250,10 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             total_messages = 0
             my_messages = 0
 
-            with open(output_file, "w") as f_out, open(context_file, "w") as f_ctx:
+            with (
+                open(output_file, "w", encoding="utf-8") as f_out,
+                open(context_file, "w", encoding="utf-8") as f_ctx,
+            ):
                 for conv in conversations:
                     if _export_state["cancelled"]:
                         break
@@ -470,7 +473,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             }
 
             metadata_file = STYLE_DIR / "export_metadata.json"
-            with open(metadata_file, "w") as f:
+            with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
 
             _export_state["running"] = False
@@ -479,17 +482,17 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
             return (
                 f"✅ Export complete{cancelled_note}\n\n"
-                f"**Results:**\n"
+                "**Results:**\n"
                 f"- Your messages: {my_messages:,}\n"
                 f"- Total scanned: {total_messages:,}\n"
                 f"- Channels: {_export_state['progress']['channels_done']}\n"
                 f"- Duration: {duration_str}\n"
                 f"- Errors: {len(_export_state['progress']['errors'])}\n\n"
-                f"**Files:**\n"
+                "**Files:**\n"
                 f"- Corpus: `{output_file}`\n"
                 f"- Context: `{context_file}`\n"
                 f"- Metadata: `{metadata_file}`\n\n"
-                f"Next step: Run `style_analyze` to analyze your writing patterns."
+                "Next step: Run `style_analyze` to analyze your writing patterns."
             )
 
         except Exception as e:
@@ -510,11 +513,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             # Check if we have previous export data
             metadata_file = STYLE_DIR / "export_metadata.json"
             if metadata_file.exists():
-                with open(metadata_file) as f:
+                with open(metadata_file, encoding="utf-8") as f:
                     metadata = json.load(f)
                 return (
-                    f"No export in progress.\n\n"
-                    f"**Last export:**\n"
+                    "No export in progress.\n\n"
+                    "**Last export:**\n"
                     f"- Date: {metadata.get('export_date', 'unknown')}\n"
                     f"- Messages: {metadata.get('my_messages_exported', 0):,}\n"
                     f"- Duration: {metadata.get('duration', 'unknown')}\n"
@@ -538,14 +541,14 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             est_str = "calculating..."
 
         return (
-            f"📊 Export in progress\n\n"
-            f"**Progress:**\n"
+            "📊 Export in progress\n\n"
+            "**Progress:**\n"
             f"- Channels: {channels_done}/{channels_total}\n"
             f"- Current: {progress.get('current_channel', 'starting...')}\n"
             f"- Messages scanned: {progress.get('messages', 0):,}\n"
             f"- Your messages: {progress.get('my_messages', 0):,}\n"
             f"- Errors: {len(progress.get('errors', []))}\n\n"
-            f"**Time:**\n"
+            "**Time:**\n"
             f"- Elapsed: {elapsed_str}\n"
             f"- Est. remaining: {est_str}\n"
         )

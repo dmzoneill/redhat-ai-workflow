@@ -487,7 +487,7 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         try:
             logger.info(
-                f"Updating audio source: sink_input_index "
+                "Updating audio source: sink_input_index "
                 f"{getattr(self, '_sink_input_index', None)} -> {new_sink_input_index}"
             )
             self._sink_input_index = new_sink_input_index
@@ -548,8 +548,8 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 self._render_task.cancel()
                 try:
                     await asyncio.wait_for(self._render_task, timeout=5.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
-                    pass
+                except (asyncio.CancelledError, asyncio.TimeoutError) as exc:
+                    logger.debug("Suppressed error: %s", exc)
                 self._render_task = None
 
             # Clean up renderer - use async stop if available
@@ -669,8 +669,8 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             try:
                 streaming_stats = self._streaming_pipeline.get_stats()
                 stats["streaming"] = streaming_stats
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         return stats
 
@@ -929,8 +929,8 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if self._renderer:
                 try:
                     await self._renderer.stop_async()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
                 self._renderer = None
 
     # =========================================================================

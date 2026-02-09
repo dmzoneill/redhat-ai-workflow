@@ -68,15 +68,21 @@ class TestGetConfigSection:
         result = get_config_section("not_a_section_xyz", None)
         assert result == {}
 
-    @patch("scripts.common.config_loader.load_config")
-    def test_get_config_section_existing(self, mock_load):
+    def test_get_config_section_existing(self):
         """get_config_section should return existing section."""
-        mock_load.return_value = {"jira": {"url": "https://jira.example.com"}}
+        from unittest.mock import MagicMock
 
-        from scripts.common.config_loader import get_config_section
+        mock_cm = MagicMock()
+        mock_cm.get.return_value = {"url": "https://jira.example.com"}
 
-        result = get_config_section("jira")
-        assert result == {"url": "https://jira.example.com"}
+        # get_config_section imports config_manager inside the function body via
+        # ``from server.config_manager import config as config_manager``
+        # so we patch the singleton at its canonical location.
+        with patch("server.config_manager.config", mock_cm):
+            from scripts.common.config_loader import get_config_section
+
+            result = get_config_section("jira")
+            assert result == {"url": "https://jira.example.com"}
 
 
 class TestGetUserConfig:

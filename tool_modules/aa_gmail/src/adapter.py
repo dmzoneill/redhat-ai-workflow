@@ -147,10 +147,12 @@ class GmailAdapter:
 
                 summary = f"Email from {from_addr}: {subject}"
 
-                content = f"Subject: {subject}\n"
-                content += f"From: {from_addr}\n"
-                content += f"Date: {_format_email_date(date)}\n"
-                content += f"\n{snippet}"
+                content = (
+                    f"Subject: {subject}\n"
+                    f"From: {from_addr}\n"
+                    f"Date: {_format_email_date(date)}\n"
+                    f"\n{snippet}"
+                )
 
                 items.append(
                     MemoryItem(

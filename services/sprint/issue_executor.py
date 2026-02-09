@@ -768,21 +768,37 @@ class IssueExecutor:
                 cwd=str(PROJECT_ROOT),
             )
 
+            # Read timeout from config (fall back to 30 minutes)
+            try:
+                from server.utils import load_config
+
+                cli_timeout = (
+                    load_config()
+                    .get("sprint", {})
+                    .get("claude_cli_timeout_seconds", 1800)
+                )
+            except Exception:
+                cli_timeout = 1800
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=1800,  # 30 minute timeout for actual work
+                    timeout=cli_timeout,
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+                timeout_mins = cli_timeout // 60
                 self.history.log_action(
-                    issue_key, "timeout", "Claude CLI timed out after 30 minutes"
+                    issue_key,
+                    "timeout",
+                    f"Claude CLI timed out after {timeout_mins} minutes",
                 )
                 tracer.end_step(
-                    step_id, status=StepStatus.FAILED, error="Timeout after 30 minutes"
+                    step_id,
+                    status=StepStatus.FAILED,
+                    error=f"Timeout after {timeout_mins} minutes",
                 )
-                tracer.mark_failed("Claude CLI timed out after 30 minutes")
+                tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
                 work_log = self.history.load_work_log(issue_key)
                 work_log["status"] = "timeout"
                 work_log["completed"] = datetime.now().isoformat()

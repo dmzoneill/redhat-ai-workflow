@@ -83,30 +83,28 @@ class ContextResolver:
     - Repository names → full config
     """
 
-    CONFIG_PATHS = [
-        Path.cwd() / "config.json",
-        Path(__file__).parent.parent.parent / "config.json",
-        Path.home() / "src/redhat-ai-workflow/config.json",
-    ]
-
     def __init__(self, config_path: Optional[Path] = None):
         self.config = self._load_config(config_path)
         self.repos = self.config.get("repositories", {})
         self._build_indexes()
 
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
-        """Load config.json from known paths."""
-        paths = [config_path] if config_path else self.CONFIG_PATHS
+        """Load config via ConfigManager, or from explicit path if provided."""
+        if config_path is not None:
+            # Explicit path provided — load directly (used in tests)
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    result: Dict[str, Any] = json.load(f)
+                    return result
+            except Exception as e:
+                logger.debug(f"Suppressed error in _load_config: {e}")
+                return {}
+        try:
+            from server.config_manager import config as config_manager
 
-        for path in paths:
-            if path and path.exists():
-                try:
-                    with open(path) as f:
-                        result: Dict[str, Any] = json.load(f)
-                        return result
-                except Exception as e:
-                    logger.debug(f"Suppressed error in _load_config: {e}")
-                    continue
+            return config_manager.get_all()
+        except Exception as e:
+            logger.debug(f"Suppressed error in _load_config: {e}")
         return {}
 
     def _build_indexes(self) -> None:

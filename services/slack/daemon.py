@@ -365,7 +365,7 @@ class CommandHandler:
         if not cmd_info:
             return (
                 f"\u274c Unknown command: `{parsed.command}`\n\n"
-                f"Use `@me help` to list available commands."
+                "Use `@me help` to list available commands."
             )
 
         # Get explicit inputs from parsed command
@@ -754,8 +754,8 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 pending = await self.state_db.get_pending_messages(limit=100)
                 stats["messages_pending"] = len(pending)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
 
         return stats
 
@@ -994,7 +994,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                 reply_thread_ts = None  # No threading in debug DMs
                 debug_prefix = (
                     f"🐛 *DEBUG MODE* - Alert response (would go to #{msg.channel_name})\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 )
                 self.ui.print_info("🐛 DEBUG: Alert response will go to self-DM")
             else:
@@ -1167,8 +1167,8 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 )
 
                 notify_slack_message(msg.channel_name, msg.user_name, msg.text[:100])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Suppressed error: %s", exc)
         else:
             logger.debug(
                 f"Skipping notification for {msg.timestamp} - already notified"
@@ -1274,7 +1274,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                     debug_header = (
                         f"🐛 *DEBUG MODE* - Would have sent to #{msg.channel_name} "
                         f"(reply to {msg.user_name})\n"
-                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     )
                     response = debug_header + response
                     thread_ts = None  # No threading in debug DMs
@@ -1556,8 +1556,8 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                         f"Discovered {len(discovered)} DMs from sidebar ({dm_count} DMs, {mpdm_count} MPDMs)"
                     )
                     return discovered
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Suppressed error: %s", exc)
 
         # Method 3: Try conversations.list API (usually blocked on enterprise)
         try:

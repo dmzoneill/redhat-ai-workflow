@@ -86,46 +86,31 @@ class TestEnabled:
 
 
 class TestIsWorkingHours:
-    def test_during_working_hours(self):
+    @pytest.mark.parametrize(
+        "day,hour,expected",
+        [
+            (6, 10, True),  # Monday 10:00 AM - during hours
+            (6, 8, False),  # Monday 8:00 AM - before start
+            (6, 9, True),  # Monday 9:00 AM - at start (inclusive)
+            (6, 17, False),  # Monday 17:00 - at end (exclusive)
+            (6, 20, False),  # Monday 20:00 - after end
+            (11, 10, False),  # Saturday 10:00 - weekend
+            (12, 10, False),  # Sunday 10:00 - weekend
+        ],
+        ids=[
+            "during",
+            "before_start",
+            "at_start",
+            "at_end",
+            "after_end",
+            "saturday",
+            "sunday",
+        ],
+    )
+    def test_default_schedule(self, day, hour, expected):
         e = WorkingHoursEnforcer()
-        # Monday 10:00 AM
-        with patch.object(e, "_now", return_value=_make_dt(hour=10)):
-            assert e.is_working_hours() is True
-
-    def test_before_start(self):
-        e = WorkingHoursEnforcer()
-        # Monday 8:00 AM (before 9)
-        with patch.object(e, "_now", return_value=_make_dt(hour=8)):
-            assert e.is_working_hours() is False
-
-    def test_at_start(self):
-        e = WorkingHoursEnforcer()
-        # Monday 9:00 AM exactly
-        with patch.object(e, "_now", return_value=_make_dt(hour=9)):
-            assert e.is_working_hours() is True
-
-    def test_at_end(self):
-        e = WorkingHoursEnforcer()
-        # Monday 17:00 exactly (end is exclusive)
-        with patch.object(e, "_now", return_value=_make_dt(hour=17)):
-            assert e.is_working_hours() is False
-
-    def test_after_end(self):
-        e = WorkingHoursEnforcer()
-        with patch.object(e, "_now", return_value=_make_dt(hour=20)):
-            assert e.is_working_hours() is False
-
-    def test_weekend_saturday(self):
-        e = WorkingHoursEnforcer()
-        # 2025-01-11 is a Saturday
-        with patch.object(e, "_now", return_value=_make_dt(day=11, hour=10)):
-            assert e.is_working_hours() is False
-
-    def test_weekend_sunday(self):
-        e = WorkingHoursEnforcer()
-        # 2025-01-12 is a Sunday
-        with patch.object(e, "_now", return_value=_make_dt(day=12, hour=10)):
-            assert e.is_working_hours() is False
+        with patch.object(e, "_now", return_value=_make_dt(day=day, hour=hour)):
+            assert e.is_working_hours() is expected
 
     def test_disabled_always_true(self):
         e = WorkingHoursEnforcer({"enabled": False})

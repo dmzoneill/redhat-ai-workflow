@@ -4,23 +4,16 @@ Tests for Layer 5 Phase 4: Claude Integration.
 Tests warning visibility, prevention tracking, and context injection.
 """
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from server.usage_context_injector import UsageContextInjector
-from server.usage_pattern_storage import UsagePatternStorage
 from server.usage_prevention_tracker import UsagePreventionTracker
 
 
 @pytest.fixture
-def temp_storage():
-    """Create temporary storage for testing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        patterns_file = Path(tmpdir) / "usage_patterns.yaml"
-        storage = UsagePatternStorage(patterns_file)
-        yield storage
+def temp_storage(usage_pattern_storage):
+    """Alias shared fixture for backward compatibility."""
+    return usage_pattern_storage
 
 
 @pytest.fixture

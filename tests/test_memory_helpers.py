@@ -433,7 +433,6 @@ class TestWriteMemoryValidation:
 
     def test_write_io_error(self, temp_memory_dir):
         """Test write_memory returns False on IOError."""
-        _data = {"test": "data"}
         with patch("builtins.open", side_effect=IOError("disk full")):
             # get_memory_path needs to work, so only patch open for the write
             path = memory.get_memory_path("state/ioerror")

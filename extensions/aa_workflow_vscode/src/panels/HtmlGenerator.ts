@@ -518,6 +518,63 @@ export class HtmlGenerator {
               }
             }
             break;
+          case 'stepStatusUpdate':
+            // Incremental step status update - avoids full DOM replacement.
+            // Updates individual step nodes by changing CSS class and icon.
+            if (message.steps && Array.isArray(message.steps)) {
+              const statusClasses = ['pending', 'running', 'success', 'failed', 'skipped'];
+              message.steps.forEach(function(stepUpdate) {
+                // Find step node by data-step-index (works for both horizontal and vertical)
+                const stepNode = document.querySelector('[data-step-index="' + stepUpdate.index + '"]');
+                if (!stepNode) return;
+
+                // Remove old status classes and add new one
+                statusClasses.forEach(function(cls) { stepNode.classList.remove(cls); });
+                stepNode.classList.add(stepUpdate.status);
+
+                // Update the icon
+                const iconEl = stepNode.querySelector('.step-icon-h') || stepNode.querySelector('.step-icon');
+                if (iconEl && stepUpdate.icon) {
+                  iconEl.textContent = stepUpdate.icon;
+                }
+
+                // Update tooltip if provided
+                if (stepUpdate.tooltip) {
+                  stepNode.title = stepUpdate.tooltip;
+                }
+
+                // Update lifecycle indicators if provided
+                if (stepUpdate.lifecycleHtml !== undefined) {
+                  const lifecycleEl = stepNode.querySelector('.step-lifecycle-h');
+                  if (stepUpdate.lifecycleHtml && !lifecycleEl) {
+                    // Add lifecycle container
+                    const div = document.createElement('div');
+                    div.className = 'step-lifecycle-h';
+                    div.innerHTML = stepUpdate.lifecycleHtml;
+                    // Insert before icon
+                    const iconContainer = stepNode.querySelector('.step-icon-h');
+                    if (iconContainer) {
+                      stepNode.insertBefore(div, iconContainer);
+                    }
+                  } else if (lifecycleEl) {
+                    lifecycleEl.innerHTML = stepUpdate.lifecycleHtml || '';
+                  }
+                }
+              });
+
+              // Also update the workflow meta status text if provided
+              if (message.metaHtml) {
+                const metaEl = document.querySelector('.workflow-meta');
+                if (metaEl) {
+                  metaEl.innerHTML = message.metaHtml;
+                  // Update class for status coloring
+                  if (message.metaClass) {
+                    metaEl.className = 'workflow-meta ' + message.metaClass;
+                  }
+                }
+              }
+            }
+            break;
           case 'inferenceTestResult':
             // Handle inference test result
             if (message.data) {

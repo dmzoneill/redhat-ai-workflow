@@ -85,6 +85,11 @@ def format_email_lookup_not_found(email: str) -> dict:
 
 # ==================== Rate Limiting ====================
 
+# Rate limiting constants
+SECONDS_PER_DAY = 86400
+SEARCH_COOLDOWN_SECONDS = 5
+DAILY_SEARCH_LIMIT = 20
+
 
 def check_search_rate_limit(rate_limit: dict) -> dict | None:
     """
@@ -100,13 +105,13 @@ def check_search_rate_limit(rate_limit: dict) -> dict | None:
     now = time.time()
 
     # Reset daily count if it's a new day
-    if now - rate_limit["daily_reset"] > 86400:  # 24 hours
+    if now - rate_limit["daily_reset"] > SECONDS_PER_DAY:
         rate_limit["daily_count"] = 0
         rate_limit["daily_reset"] = now
 
-    # Check per-search rate limit (5 seconds)
-    if now - rate_limit["last_search"] < 5:
-        wait_time = 5 - (now - rate_limit["last_search"])
+    # Check per-search rate limit
+    if now - rate_limit["last_search"] < SEARCH_COOLDOWN_SECONDS:
+        wait_time = SEARCH_COOLDOWN_SECONDS - (now - rate_limit["last_search"])
         return {
             "success": False,
             "error": f"Rate limited. Please wait {wait_time:.1f} seconds.",
@@ -115,11 +120,11 @@ def check_search_rate_limit(rate_limit: dict) -> dict | None:
             "messages": [],
         }
 
-    # Check daily limit (20 searches)
-    if rate_limit["daily_count"] >= 20:
+    # Check daily limit
+    if rate_limit["daily_count"] >= DAILY_SEARCH_LIMIT:
         return {
             "success": False,
-            "error": "Daily search limit (20) reached. Try again tomorrow.",
+            "error": f"Daily search limit ({DAILY_SEARCH_LIMIT}) reached. Try again tomorrow.",
             "rate_limited": True,
             "daily_limit_reached": True,
             "messages": [],
@@ -154,7 +159,7 @@ def format_search_results(query: str, results: dict, daily_count: int) -> dict:
             }
             for m in messages
         ],
-        "searches_remaining_today": 20 - daily_count,
+        "searches_remaining_today": DAILY_SEARCH_LIMIT - daily_count,
     }
 
 

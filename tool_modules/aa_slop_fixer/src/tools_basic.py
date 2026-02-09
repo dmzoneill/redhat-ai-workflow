@@ -357,16 +357,17 @@ def register_tools(server: "FastMCP") -> int:
         commit_hash = ""
         if not dry_run and fixed_files and commit:
             unique_files = list(set(fixed_files))
-            commit_msg = (
-                f"fix(slop): auto-fix {len(fixed_ids)} high-confidence issues\n\n"
-            )
-            commit_msg += "Categories fixed:\n"
             categories = set(f["category"] for f in findings if f["id"] in fixed_ids)
+            cat_lines = []
             for cat in categories:
                 count = sum(
                     1 for f in findings if f["id"] in fixed_ids and f["category"] == cat
                 )
-                commit_msg += f"- {cat}: {count}\n"
+                cat_lines.append(f"- {cat}: {count}")
+            commit_msg = (
+                f"fix(slop): auto-fix {len(fixed_ids)} high-confidence issues\n\n"
+                "Categories fixed:\n" + "\n".join(cat_lines) + "\n"
+            )
 
             commit_hash = await _commit_fixes(unique_files, commit_msg)
 

@@ -134,7 +134,7 @@ def read_memory(key: str) -> Dict[str, Any]:
     path = get_memory_path(key)
     if path.exists():
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 return yaml.safe_load(f) or {}
         except (yaml.YAMLError, IOError):
             return {}
@@ -175,7 +175,7 @@ def write_memory(key: str, data: Dict[str, Any], validate: bool = True) -> bool:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         data["last_updated"] = datetime.now().isoformat()
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
         return True
     except (IOError, yaml.YAMLError):
@@ -204,7 +204,7 @@ def append_to_list(
 
     # Atomic read-modify-write with exclusive lock
     try:
-        with open(path, "r+" if path.exists() else "w+") as f:
+        with open(path, "r+" if path.exists() else "w+", encoding="utf-8") as f:
             # Acquire exclusive lock (blocks until available)
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
@@ -272,7 +272,7 @@ def remove_from_list(key: str, list_path: str, match_key: str, match_value: Any)
         return 0
 
     try:
-        with open(path, "r+") as f:
+        with open(path, "r+", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
             try:
@@ -323,7 +323,7 @@ def update_field(key: str, field_path: str, value: Any) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        with open(path, "r+" if path.exists() else "w+") as f:
+        with open(path, "r+" if path.exists() else "w+", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
             try:
@@ -638,7 +638,7 @@ def mark_discovered_work_synced(task: str, jira_key: str) -> bool:
         return False
 
     try:
-        with open(path, "r+") as f:
+        with open(path, "r+", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
 
             try:
@@ -1179,7 +1179,7 @@ def check_known_issues(tool_name: str = "", error_text: str = "") -> Dict[str, A
         # Check patterns.yaml
         patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
         if patterns_file.exists():
-            with open(patterns_file) as f:
+            with open(patterns_file, encoding="utf-8") as f:
                 patterns = yaml.safe_load(f) or {}
 
             # Check all pattern categories
@@ -1208,7 +1208,7 @@ def check_known_issues(tool_name: str = "", error_text: str = "") -> Dict[str, A
         # Check tool_fixes.yaml
         fixes_file = MEMORY_DIR / "learned" / "tool_fixes.yaml"
         if fixes_file.exists():
-            with open(fixes_file) as f:
+            with open(fixes_file, encoding="utf-8") as f:
                 fixes = yaml.safe_load(f) or {}
 
             for fix in fixes.get("tool_fixes", []):
@@ -1277,7 +1277,7 @@ def learn_tool_fix(
 
         # Load existing fixes
         if fixes_file.exists():
-            with open(fixes_file) as f:
+            with open(fixes_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {"tool_fixes": [], "stats": {"total_learned": 0}}
@@ -1319,7 +1319,7 @@ def learn_tool_fix(
         data["last_updated"] = datetime.now().isoformat()
 
         # Write back
-        with open(fixes_file, "w") as f:
+        with open(fixes_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
         logger.debug(f"Learned fix for {tool_name}: {error_pattern}")
@@ -1355,7 +1355,7 @@ def record_tool_failure(
 
         # Load existing failures
         if failures_file.exists():
-            with open(failures_file) as f:
+            with open(failures_file, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
         else:
             data = {"failures": [], "stats": {"total_failures": 0}}
@@ -1380,7 +1380,7 @@ def record_tool_failure(
         data["last_updated"] = datetime.now().isoformat()
 
         # Write back
-        with open(failures_file, "w") as f:
+        with open(failures_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
         return True

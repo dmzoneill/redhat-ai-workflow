@@ -1,0 +1,18 @@
+metadata:
+  project: dataverse-integration
+  persona: github
+  last_updated: '2026-02-07T20:58:17.907030'
+  last_scanned: '2026-02-07T20:58:17.907008'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: '# Dataverse Integration for Automation Analytics'
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment: []
+gotchas: []
+learned_from_tasks: []

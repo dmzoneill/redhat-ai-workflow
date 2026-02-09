@@ -26,6 +26,20 @@ def ensure_loops_dir() -> None:
     LOOPS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _add_todo_stats(config: dict) -> None:
+    """Add computed todo stats (task counts, hard stop) to a loop config in-place."""
+    todo_path_str = config.get("todo_path")
+    if not todo_path_str:
+        return
+    todo_path = Path(todo_path_str)
+    if not todo_path.exists():
+        return
+    content = todo_path.read_text()
+    config["incomplete_tasks"] = content.count("- [ ]")
+    config["complete_tasks"] = content.count("- [x]") + content.count("- [X]")
+    config["has_hard_stop"] = "**HARD STOP**" in content
+
+
 def start_ralph_loop(
     session_id: str,
     max_iterations: int = 10,
@@ -109,18 +123,7 @@ def get_loop_status(session_id: str) -> Optional[dict]:
 
     try:
         config = json.loads(config_path.read_text())
-
-        # Add computed fields
-        if config.get("todo_path"):
-            todo_path = Path(config["todo_path"])
-            if todo_path.exists():
-                content = todo_path.read_text()
-                config["incomplete_tasks"] = content.count("- [ ]")
-                config["complete_tasks"] = content.count("- [x]") + content.count(
-                    "- [X]"
-                )
-                config["has_hard_stop"] = "**HARD STOP**" in content
-
+        _add_todo_stats(config)
         return config
     except (json.JSONDecodeError, IOError):
         return None
@@ -139,17 +142,7 @@ def list_active_loops() -> list[dict]:
     for config_path in LOOPS_DIR.glob("session_*.json"):
         try:
             config = json.loads(config_path.read_text())
-
-            # Add computed fields
-            if config.get("todo_path"):
-                todo_path = Path(config["todo_path"])
-                if todo_path.exists():
-                    content = todo_path.read_text()
-                    config["incomplete_tasks"] = content.count("- [ ]")
-                    config["complete_tasks"] = content.count("- [x]") + content.count(
-                        "- [X]"
-                    )
-
+            _add_todo_stats(config)
             loops.append(config)
         except (json.JSONDecodeError, IOError):
             continue
