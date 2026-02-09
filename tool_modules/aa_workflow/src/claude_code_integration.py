@@ -125,7 +125,9 @@ def _try_mcp_client_strategy():
                     from mcp import Client
 
                     async with Client(mcp_socket) as client:
-                        result = await client.call_tool("AskUserQuestion", questions_data)
+                        result = await client.call_tool(
+                            "AskUserQuestion", questions_data
+                        )
                         return result
                 except Exception as e:
                     logger.debug(f"MCP client call failed: {e}")

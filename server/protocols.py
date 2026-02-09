@@ -136,7 +136,7 @@ def is_tool_module(obj: Any) -> bool:
     if not hasattr(obj, "register_tools"):
         return False
 
-    register_fn = getattr(obj, "register_tools")
+    register_fn = obj.register_tools  # type: ignore[union-attr]
     if not callable(register_fn):
         return False
 
@@ -150,7 +150,10 @@ def is_tool_module(obj: Any) -> bool:
         if len(params) < 1:
             return False
         # First param should not be *args or **kwargs
-        if params[0].kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+        if params[0].kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
             return False
         return True
     except (ValueError, TypeError):
@@ -175,7 +178,7 @@ def validate_tool_module(module: Any, module_name: str) -> list[str]:
         errors.append(f"{module_name}: Missing register_tools function")
         return errors
 
-    register_fn = getattr(module, "register_tools")
+    register_fn = module.register_tools  # type: ignore[union-attr]
 
     # Check it's callable
     if not callable(register_fn):
@@ -190,12 +193,17 @@ def validate_tool_module(module: Any, module_name: str) -> list[str]:
         params = list(sig.parameters.values())
 
         if len(params) < 1:
-            errors.append(f"{module_name}: register_tools must accept at least one parameter (server)")
+            errors.append(
+                f"{module_name}: register_tools must accept at least one parameter (server)"
+            )
 
         # Check return type annotation if present
         if sig.return_annotation != inspect.Signature.empty:
             if sig.return_annotation not in (int, "int", None):
-                errors.append(f"{module_name}: register_tools should return int, " f"got {sig.return_annotation}")
+                errors.append(
+                    f"{module_name}: register_tools should return int, "
+                    f"got {sig.return_annotation}"
+                )
 
     except (ValueError, TypeError) as e:
         errors.append(f"{module_name}: Could not inspect register_tools signature: {e}")

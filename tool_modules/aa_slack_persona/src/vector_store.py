@@ -173,7 +173,9 @@ class SlackVectorStore:
         query_embedding = self._generate_embedding(query)
 
         # Build search
-        search = self.table.search(query_embedding).limit(limit * 2)  # Get extra for filtering
+        search = self.table.search(query_embedding).limit(
+            limit * 2
+        )  # Get extra for filtering
 
         # Apply filters if specified
         if channel_type:

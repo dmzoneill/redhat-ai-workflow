@@ -46,9 +46,17 @@ def _parse_jira_table(output: str) -> List[dict]:
 
     # Parse header - split by | or multiple spaces
     if "|" in header_line:
-        headers = [h.strip().lower().replace(" ", "_") for h in header_line.split("|") if h.strip()]
+        headers = [
+            h.strip().lower().replace(" ", "_")
+            for h in header_line.split("|")
+            if h.strip()
+        ]
     else:
-        headers = [h.strip().lower().replace(" ", "_") for h in re.split(r"\s{2,}", header_line) if h.strip()]
+        headers = [
+            h.strip().lower().replace(" ", "_")
+            for h in re.split(r"\s{2,}", header_line)
+            if h.strip()
+        ]
 
     # Skip separator line (----)
     if data_start < len(lines) and "---" in lines[data_start]:
@@ -153,7 +161,8 @@ class JiraPreloader:
             # Update the LLM responder's context
             responder = get_llm_responder()
             responder.update_jira_context(
-                issues=[i.to_dict() for i in sprint_issues], my_issues=[i.to_dict() for i in my_issues]
+                issues=[i.to_dict() for i in sprint_issues],
+                my_issues=[i.to_dict() for i in my_issues],
             )
 
             # Update sprint info in context
@@ -165,7 +174,9 @@ class JiraPreloader:
             self.my_issues = my_issues
             self.last_refresh = datetime.now()
 
-            logger.info(f"Loaded {len(my_issues)} personal issues, {len(sprint_issues)} sprint issues")
+            logger.info(
+                f"Loaded {len(my_issues)} personal issues, {len(sprint_issues)} sprint issues"
+            )
             return True
 
         except Exception as e:
@@ -203,7 +214,9 @@ class JiraPreloader:
             # Get Jira credentials from environment
             jira_url = os.environ.get("JIRA_URL", "https://issues.redhat.com")
             # Try JIRA_JPAT first (used by rh-issue), then JIRA_TOKEN
-            jira_token = os.environ.get("JIRA_JPAT", "") or os.environ.get("JIRA_TOKEN", "")
+            jira_token = os.environ.get("JIRA_JPAT", "") or os.environ.get(
+                "JIRA_TOKEN", ""
+            )
 
             if not jira_token:
                 # Try to read from config file
@@ -234,7 +247,9 @@ class JiraPreloader:
             req.add_header("Content-Type", "application/json")
 
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=30))
+            response = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(req, timeout=30)
+            )
 
             data = json.loads(response.read().decode("utf-8"))
 

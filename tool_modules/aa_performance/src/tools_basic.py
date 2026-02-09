@@ -60,7 +60,12 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
                 q_num = int(quarter[1])
                 year = int(quarter.split()[1])
             except (IndexError, ValueError):
-                return [TextContent(type="text", text=f"❌ Invalid quarter format: {quarter}. Use 'Q1 2026' format.")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Invalid quarter format: {quarter}. Use 'Q1 2026' format.",
+                    )
+                ]
         else:
             year, q_num, _, _, _ = get_quarter_info()
 
@@ -74,7 +79,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         overall_pct = summary.get("overall_percentage", 0)
 
         lines.append(f"**Day {day_of_quarter} of 90** | Overall: **{overall_pct}%**")
-        lines.append(f"**Period:** {summary.get('quarter_start', '')} to {summary.get('quarter_end', '')}")
+        lines.append(
+            f"**Period:** {summary.get('quarter_start', '')} to {summary.get('quarter_end', '')}"
+        )
         lines.append(f"**Total Events:** {summary.get('total_events', 0)}")
         lines.append("")
 
@@ -127,7 +134,12 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
             try:
                 dt = date.fromisoformat(target_date)
             except ValueError:
-                return [TextContent(type="text", text=f"❌ Invalid date format: {target_date}. Use YYYY-MM-DD.")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Invalid date format: {target_date}. Use YYYY-MM-DD.",
+                    )
+                ]
         else:
             dt = date.today()
 
@@ -148,7 +160,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         lines.append("4. Scan local git repos for commits")
         lines.append("")
         lines.append("```")
-        lines.append('skill_run("performance/collect_daily", \'{{"date": "{dt.isoformat()}"}}\')')
+        lines.append(
+            'skill_run("performance/collect_daily", \'{{"date": "{dt.isoformat()}"}}\')'
+        )
         lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -223,7 +237,14 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
             performance_log_activity("mentorship", "1:1 mentoring session with junior dev")
             performance_log_activity("blog", "Published blog post on AI workflow automation")
         """
-        valid_categories = ["speaking", "mentorship", "presentation", "demo", "blog", "other"]
+        valid_categories = [
+            "speaking",
+            "mentorship",
+            "presentation",
+            "demo",
+            "blog",
+            "other",
+        ]
         if category.lower() not in valid_categories:
             return [
                 TextContent(
@@ -277,7 +298,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
 
         # Add event
         data["events"].append(event)
-        data["daily_points"][comp_id] = data["daily_points"].get(comp_id, 0) + actual_points
+        data["daily_points"][comp_id] = (
+            data["daily_points"].get(comp_id, 0) + actual_points
+        )
         data["daily_total"] = sum(data["daily_points"].values())
 
         with open(daily_file, "w") as f:
@@ -347,7 +370,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
 
         lines.append("")
         lines.append(f"**Total:** {total_points} points from {total_events} events")
-        lines.append(f"**Average:** {total_points // len(daily_files) if daily_files else 0} pts/day")
+        lines.append(
+            f"**Average:** {total_points // len(daily_files) if daily_files else 0} pts/day"
+        )
 
         return [TextContent(type="text", text="\n".join(lines))]
 
@@ -375,7 +400,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         gaps.sort(key=lambda x: x[1])
 
         if not gaps:
-            lines.append("✅ No significant gaps! All competencies are at 50% or above.")
+            lines.append(
+                "✅ No significant gaps! All competencies are at 50% or above."
+            )
             return [TextContent(type="text", text="\n".join(lines))]
 
         for comp_id, pct in gaps:
@@ -446,7 +473,11 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
                                 "title": event.get("title", ""),
                                 "source": event.get("source", ""),
                                 "points": total,
-                                "competencies": list(points.keys()) if isinstance(points, dict) else [],
+                                "competencies": (
+                                    list(points.keys())
+                                    if isinstance(points, dict)
+                                    else []
+                                ),
                             }
                         )
 
@@ -497,18 +528,24 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
             lines.append(f"**{text}**")
             if q.get("subtext"):
                 lines.append(f"_{q.get('subtext')}_")
-            lines.append(f"📊 {evidence_count} evidence | 📝 {notes_count} notes | {status}")
+            lines.append(
+                f"📊 {evidence_count} evidence | 📝 {notes_count} notes | {status}"
+            )
             lines.append("")
 
         lines.append("**Actions:**")
         lines.append("- `performance_question_note(id, note)` - Add a manual note")
         lines.append("- `performance_evaluate(id)` - Run AI evaluation")
-        lines.append("- `performance_question_add(text, categories)` - Add custom question")
+        lines.append(
+            "- `performance_question_add(text, categories)` - Add custom question"
+        )
 
         return [TextContent(type="text", text="\n".join(lines))]
 
     @registry.tool()
-    async def performance_question_note(question_id: str, note: str) -> list[TextContent]:
+    async def performance_question_note(
+        question_id: str, note: str
+    ) -> list[TextContent]:
         """
         Add a manual note to a quarterly question.
 
@@ -524,9 +561,15 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         question_mgr = QuestionManager(perf_dir)
 
         if question_mgr.add_note(question_id, note):
-            return [TextContent(type="text", text=f"✅ Added note to question '{question_id}'")]
+            return [
+                TextContent(
+                    type="text", text=f"✅ Added note to question '{question_id}'"
+                )
+            ]
         else:
-            return [TextContent(type="text", text=f"❌ Question not found: {question_id}")]
+            return [
+                TextContent(type="text", text=f"❌ Question not found: {question_id}")
+            ]
 
     @registry.tool()
     async def performance_question_add(
@@ -601,9 +644,13 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         )
 
         if result:
-            return [TextContent(type="text", text=f"✅ Updated question '{question_id}'")]
+            return [
+                TextContent(type="text", text=f"✅ Updated question '{question_id}'")
+            ]
         else:
-            return [TextContent(type="text", text=f"❌ Question not found: {question_id}")]
+            return [
+                TextContent(type="text", text=f"❌ Question not found: {question_id}")
+            ]
 
     @registry.tool()
     async def performance_evaluate(question_id: str = "") -> list[TextContent]:
@@ -621,7 +668,9 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         lines.append("")
         lines.append("```")
         if question_id:
-            lines.append('skill_run("performance/evaluate_questions", \'{{"question_id": "{question_id}"}}\')')
+            lines.append(
+                'skill_run("performance/evaluate_questions", \'{{"question_id": "{question_id}"}}\')'
+            )
         else:
             lines.append('skill_run("performance/evaluate_questions")')
         lines.append("```")
@@ -730,7 +779,12 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         with open(report_file, "w") as f:
             f.write(report_text)
 
-        return [TextContent(type="text", text=f"📄 Report exported to: {report_file}\n\n---\n\n{report_text}")]
+        return [
+            TextContent(
+                type="text",
+                text=f"📄 Report exported to: {report_file}\n\n---\n\n{report_text}",
+            )
+        ]
 
     return registry.count
 

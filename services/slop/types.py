@@ -210,7 +210,9 @@ def calculate_fix_confidence(category: SlopCategory, tool: str = "") -> float:
     return (category_score * 0.6) + (tool_score * 0.4)
 
 
-def is_auto_fixable(category: SlopCategory, tool: str = "", min_confidence: float = 0.90) -> bool:
+def is_auto_fixable(
+    category: SlopCategory, tool: str = "", min_confidence: float = 0.90
+) -> bool:
     """
     Check if a finding should be auto-fixed.
 

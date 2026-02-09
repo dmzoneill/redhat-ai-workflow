@@ -324,7 +324,9 @@ class StyleAnalyzer:
             words = clean_text.lower().split()
 
             # Filter stop words for top words
-            filtered_words = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
+            filtered_words = [
+                w for w in words if w not in self.STOP_WORDS and len(w) > 2
+            ]
             all_words.extend(filtered_words)
 
             # Extract phrases (2-4 word combinations)
@@ -520,11 +522,18 @@ class StyleAnalyzer:
                 # Categorize by context
                 text_lower = text.lower()
                 for emoji in emojis:
-                    if any(p in text_lower for p in ["yes", "agree", "good", "ok", "sure"]):
+                    if any(
+                        p in text_lower for p in ["yes", "agree", "good", "ok", "sure"]
+                    ):
                         agreement_emojis[emoji] += 1
-                    if any(p in text_lower for p in ["think", "hmm", "wonder", "maybe"]):
+                    if any(
+                        p in text_lower for p in ["think", "hmm", "wonder", "maybe"]
+                    ):
                         thinking_emojis[emoji] += 1
-                    if any(p in text_lower for p in ["great", "awesome", "nice", "love", "thanks"]):
+                    if any(
+                        p in text_lower
+                        for p in ["great", "awesome", "nice", "love", "thanks"]
+                    ):
                         positive_emojis[emoji] += 1
 
         total = len(texts) or 1

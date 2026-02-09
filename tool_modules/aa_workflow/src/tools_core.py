@@ -102,9 +102,15 @@ def register_tools(server: "FastMCP") -> int:
     ask_question_fn = None
     try:
         try:
-            from .claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+            from .claude_code_integration import (
+                create_ask_question_wrapper,
+                get_claude_code_capabilities,
+            )
         except ImportError:
-            from claude_code_integration import create_ask_question_wrapper, get_claude_code_capabilities
+            from claude_code_integration import (
+                create_ask_question_wrapper,
+                get_claude_code_capabilities,
+            )
 
         capabilities = get_claude_code_capabilities()
         logger.info(f"Claude Code detection: {capabilities}")
@@ -122,7 +128,9 @@ def register_tools(server: "FastMCP") -> int:
     tool_count += register_prompts(server)
     tool_count += register_resources(server, load_config)
     tool_count += register_skill_tools(server, create_github_issue, ask_question_fn)
-    tool_count += register_infra_tools(server)  # vpn_connect, kube_login for auto-healing
+    tool_count += register_infra_tools(
+        server
+    )  # vpn_connect, kube_login for auto-healing
 
     # Register unified memory abstraction tools (memory_ask, memory_search, etc.)
     try:

@@ -287,7 +287,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
             if retry_max_attempts > 0:
                 retry_config["max_attempts"] = retry_max_attempts
             if retry_on:
-                retry_config["retry_on"] = [t.strip() for t in retry_on.split(",") if t.strip()]
+                retry_config["retry_on"] = [
+                    t.strip() for t in retry_on.split(",") if t.strip()
+                ]
             if retry_config:
                 job["retry"] = retry_config
 
@@ -405,7 +407,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
         return [
             TextContent(
                 type="text",
-                text=f"{emoji} Job **{name}** is now **{status}**\n\n" "The change takes effect immediately.",
+                text=f"{emoji} Job **{name}** is now **{status}**\n\n"
+                "The change takes effect immediately.",
             )
         ]
 
@@ -478,7 +481,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Job **{name}** executed successfully.\n\n" "Check `cron_status` for execution details.",
+                    text=f"✅ Job **{name}** executed successfully.\n\n"
+                    "Check `cron_status` for execution details.",
                 )
             ]
         else:
@@ -526,7 +530,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
 
         if scheduler:
             status = scheduler.get_status()
-            lines.append(f"**Scheduler running:** {'✅ Yes' if status['running'] else '❌ No'}")
+            lines.append(
+                f"**Scheduler running:** {'✅ Yes' if status['running'] else '❌ No'}"
+            )
             lines.append(f"**Cron jobs active:** {status['cron_jobs']}")
             lines.append(f"**Poll jobs active:** {status['poll_jobs']}")
 
@@ -563,7 +569,9 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
                         else:
                             retry_badge = f" 🔄 (failed after {attempts} attempts)"
 
-                    lines.append(f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms){retry_badge}")
+                    lines.append(
+                        f"- {emoji} `{timestamp}` **{job_name}** ({duration}ms){retry_badge}"
+                    )
 
                     if not success and entry.get("error"):
                         lines.append(f"  Error: {entry['error'][:100]}")
@@ -610,7 +618,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text="No recent notifications.\n\n" "Notifications will appear here after scheduled jobs run.",
+                    text="No recent notifications.\n\n"
+                    "Notifications will appear here after scheduled jobs run.",
                 )
             ]
 
@@ -712,7 +721,8 @@ def register_scheduler_tools(server: "FastMCP") -> int:  # noqa: C901
                 return [
                     TextContent(
                         type="text",
-                        text="⏸️ Scheduler **disabled** in config.\n\n" "Scheduler was not running.",
+                        text="⏸️ Scheduler **disabled** in config.\n\n"
+                        "Scheduler was not running.",
                     )
                 ]
 

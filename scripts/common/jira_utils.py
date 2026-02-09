@@ -41,7 +41,9 @@ def markdown_to_jira(text: str) -> str:
     text = re.sub(r"^#\s+(.+)$", r"h1. \1", text, flags=re.MULTILINE)
 
     # Code blocks: ```lang\n...\n``` -> {code:lang}\n...\n{code}
-    text = re.sub(r"```(\w+)\n(.*?)\n```", r"{code:\1}\n\2\n{code}", text, flags=re.DOTALL)
+    text = re.sub(
+        r"```(\w+)\n(.*?)\n```", r"{code:\1}\n\2\n{code}", text, flags=re.DOTALL
+    )
     text = re.sub(r"```\n?(.*?)\n?```", r"{code}\n\1\n{code}", text, flags=re.DOTALL)
 
     # Inline code: `code` -> {{code}} (before bold/italic to avoid conflicts)
@@ -129,7 +131,10 @@ def normalize_issue_type(issue_type: str) -> str:
     normalized = aliases.get(normalized, normalized)
 
     if normalized not in valid_types:
-        raise ValueError(f"Invalid issue type: '{issue_type}'. " f"Valid types: {', '.join(sorted(valid_types))}")
+        raise ValueError(
+            f"Invalid issue type: '{issue_type}'. "
+            f"Valid types: {', '.join(sorted(valid_types))}"
+        )
 
     return normalized
 
@@ -196,7 +201,9 @@ def normalize_field_name(field_name: str) -> str:
     return " ".join(word.capitalize() for word in field_name.replace("_", " ").split())
 
 
-def normalize_jira_input(data: Dict[str, Any], convert_markdown: bool = True) -> Dict[str, Any]:
+def normalize_jira_input(
+    data: Dict[str, Any], convert_markdown: bool = True
+) -> Dict[str, Any]:
     """
     Normalize a dictionary of Jira fields.
 
@@ -224,7 +231,11 @@ def normalize_jira_input(data: Dict[str, Any], convert_markdown: bool = True) ->
     for key, value in data.items():
         normalized_key = normalize_field_name(key)
 
-        if convert_markdown and normalized_key in text_fields and isinstance(value, str):
+        if (
+            convert_markdown
+            and normalized_key in text_fields
+            and isinstance(value, str)
+        ):
             value = markdown_to_jira(value)
 
         result[normalized_key] = value
@@ -272,21 +283,35 @@ def build_jira_yaml(
     data: Dict[str, Any] = {"Summary": summary}
 
     if description:
-        data["Description"] = markdown_to_jira(description) if convert_markdown else description
+        data["Description"] = (
+            markdown_to_jira(description) if convert_markdown else description
+        )
 
     if user_story:
-        data["User Story"] = markdown_to_jira(user_story) if convert_markdown else user_story
+        data["User Story"] = (
+            markdown_to_jira(user_story) if convert_markdown else user_story
+        )
 
     if acceptance_criteria:
-        data["Acceptance Criteria"] = markdown_to_jira(acceptance_criteria) if convert_markdown else acceptance_criteria
+        data["Acceptance Criteria"] = (
+            markdown_to_jira(acceptance_criteria)
+            if convert_markdown
+            else acceptance_criteria
+        )
 
     if supporting_documentation:
         data["Supporting Documentation"] = (
-            markdown_to_jira(supporting_documentation) if convert_markdown else supporting_documentation
+            markdown_to_jira(supporting_documentation)
+            if convert_markdown
+            else supporting_documentation
         )
 
     if definition_of_done:
-        data["Definition of Done"] = markdown_to_jira(definition_of_done) if convert_markdown else definition_of_done
+        data["Definition of Done"] = (
+            markdown_to_jira(definition_of_done)
+            if convert_markdown
+            else definition_of_done
+        )
 
     if labels:
         data["Labels"] = labels
@@ -300,5 +325,7 @@ def build_jira_yaml(
     if epic_link:
         data["Epic Link"] = epic_link
 
-    result: str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    result: str = yaml.dump(
+        data, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
     return result

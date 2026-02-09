@@ -28,7 +28,14 @@ logger = logging.getLogger(__name__)
 
 # Device configuration
 DEVICE_LABEL = "AI_Workflow"  # Our device label
-PREFERRED_DEVICE_NUMBERS = [10, 11, 12, 13, 14, 15]  # Avoid 0-9 which may be real cameras
+PREFERRED_DEVICE_NUMBERS = [
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+]  # Avoid 0-9 which may be real cameras
 
 # Global state for cleanup
 _active_device_path: Optional[str] = None
@@ -166,7 +173,9 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
             logger.info("Format already correct, reusing device")
             need_reload = False
         else:
-            logger.info(f"Format mismatch ({current_w}x{current_h} vs {width}x{height}), reloading module...")
+            logger.info(
+                f"Format mismatch ({current_w}x{current_h} vs {width}x{height}), reloading module..."
+            )
             need_reload = True
     elif not existing:
         device_num = find_free_device_number()
@@ -178,20 +187,33 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
     if need_reload:
         # Kill any processes using the device
         if os.path.exists(device_path):
-            subprocess.run(["sudo", "fuser", "-k", device_path], capture_output=True, timeout=5)
+            subprocess.run(
+                ["sudo", "fuser", "-k", device_path], capture_output=True, timeout=5
+            )
             time.sleep(0.3)
 
         # Unload module
         if module_loaded:
             logger.info("Unloading v4l2loopback module...")
             result = subprocess.run(
-                ["sudo", "modprobe", "-r", "v4l2loopback"], capture_output=True, text=True, timeout=10
+                ["sudo", "modprobe", "-r", "v4l2loopback"],
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             if result.returncode != 0:
                 # Force kill anything holding it
-                subprocess.run(["sudo", "fuser", "-k", "/dev/video*"], capture_output=True, shell=True)
+                subprocess.run(
+                    ["sudo", "fuser", "-k", "/dev/video*"],
+                    capture_output=True,
+                    shell=True,
+                )
                 time.sleep(0.5)
-                subprocess.run(["sudo", "modprobe", "-r", "v4l2loopback"], capture_output=True, timeout=10)
+                subprocess.run(
+                    ["sudo", "modprobe", "-r", "v4l2loopback"],
+                    capture_output=True,
+                    timeout=10,
+                )
             time.sleep(0.5)
 
         # Load with our configuration - max_width/max_height are CRITICAL
@@ -222,7 +244,9 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
                 break
             time.sleep(0.1)
         else:
-            raise RuntimeError(f"Device {device_path} did not appear after loading module")
+            raise RuntimeError(
+                f"Device {device_path} did not appear after loading module"
+            )
 
         # Small delay for device to stabilize
         time.sleep(0.3)
@@ -241,7 +265,9 @@ def setup_v4l2_device(width: int, height: int, force_reload: bool = False) -> st
     # Verify the format
     actual_w, actual_h = get_device_format(device_path)
     if actual_w > 0 and actual_h > 0 and (actual_w != width or actual_h != height):
-        logger.warning(f"Device format is {actual_w}x{actual_h}, expected {width}x{height}")
+        logger.warning(
+            f"Device format is {actual_w}x{actual_h}, expected {width}x{height}"
+        )
 
     logger.info(f"Device ready: {device_path} ({width}x{height})")
     _active_device_path = device_path
@@ -297,12 +323,19 @@ def unload_v4l2loopback() -> bool:
     for num in PREFERRED_DEVICE_NUMBERS:
         device_path = f"/dev/video{num}"
         if os.path.exists(device_path):
-            subprocess.run(["sudo", "fuser", "-k", device_path], capture_output=True, timeout=5)
+            subprocess.run(
+                ["sudo", "fuser", "-k", device_path], capture_output=True, timeout=5
+            )
 
     time.sleep(0.3)
 
     # Unload module
-    result = subprocess.run(["sudo", "modprobe", "-r", "v4l2loopback"], capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        ["sudo", "modprobe", "-r", "v4l2loopback"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
 
     if result.returncode == 0:
         logger.info("Unloaded v4l2loopback module")

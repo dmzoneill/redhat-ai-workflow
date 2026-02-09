@@ -64,7 +64,9 @@ class WorkingHoursEnforcer:
         self.config = {**self.DEFAULT_CONFIG, **(config or {})}
         self._tz = ZoneInfo(self.config["timezone"])
         self._working_days = {
-            self.DAY_NUMBERS[day.lower()] for day in self.config["days"] if day.lower() in self.DAY_NUMBERS
+            self.DAY_NUMBERS[day.lower()]
+            for day in self.config["days"]
+            if day.lower() in self.DAY_NUMBERS
         }
 
     @property
@@ -98,7 +100,9 @@ class WorkingHoursEnforcer:
 
         current_time = now.time()
         if not (start <= current_time < end):
-            logger.debug(f"Outside working hours: {current_time} (working: {start}-{end})")
+            logger.debug(
+                f"Outside working hours: {current_time} (working: {start}-{end})"
+            )
             return False
 
         return True
@@ -137,7 +141,9 @@ class WorkingHoursEnforcer:
         max_minutes = self.config.get("randomize_minutes", 15)
         delay_seconds = random.randint(0, max_minutes * 60)
 
-        logger.debug(f"Adding human delay: {delay_seconds}s ({delay_seconds // 60}m {delay_seconds % 60}s)")
+        logger.debug(
+            f"Adding human delay: {delay_seconds}s ({delay_seconds // 60}m {delay_seconds % 60}s)"
+        )
         return delay_seconds
 
     async def wait_for_delay(self) -> int:
@@ -241,7 +247,9 @@ class WorkingHoursEnforcer:
 _enforcer: WorkingHoursEnforcer | None = None
 
 
-def get_working_hours_enforcer(config: dict[str, Any] | None = None) -> WorkingHoursEnforcer:
+def get_working_hours_enforcer(
+    config: dict[str, Any] | None = None,
+) -> WorkingHoursEnforcer:
     """Get or create the working hours enforcer singleton.
 
     Args:

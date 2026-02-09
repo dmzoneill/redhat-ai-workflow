@@ -53,7 +53,14 @@ def _parse_sources(sources_str: str | None) -> list | None:
         # Try JSON first
         if sources_str.startswith("["):
             data = json.loads(sources_str)
-            return [SourceFilter.from_dict(s) if isinstance(s, dict) else SourceFilter(name=s) for s in data]
+            return [
+                (
+                    SourceFilter.from_dict(s)
+                    if isinstance(s, dict)
+                    else SourceFilter(name=s)
+                )
+                for s in data
+            ]
 
         # Simple comma-separated list
         names = [s.strip() for s in sources_str.split(",") if s.strip()]
@@ -130,7 +137,9 @@ def register_tools(server: "FastMCP") -> int:
                 try:
                     from services.memory_abstraction.registry import ADAPTER_MANIFEST
 
-                    fast_sources = ADAPTER_MANIFEST.list_fast_adapters(capability="query")
+                    fast_sources = ADAPTER_MANIFEST.list_fast_adapters(
+                        capability="query"
+                    )
                     if fast_sources:
                         from services.memory_abstraction import SourceFilter
 

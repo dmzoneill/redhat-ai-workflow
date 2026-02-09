@@ -245,7 +245,10 @@ Reply with category names separated by commas, or NONE if no categories apply:""
             matched = []
             result_lower = result.lower()
             for cat in categories:
-                if cat.lower() in result_lower or cat.lower().replace("_", " ") in result_lower:
+                if (
+                    cat.lower() in result_lower
+                    or cat.lower().replace("_", " ") in result_lower
+                ):
                     matched.append(cat)
                     if len(matched) >= max_categories:
                         break

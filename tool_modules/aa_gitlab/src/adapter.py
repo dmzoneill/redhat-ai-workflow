@@ -11,7 +11,12 @@ This adapter provides memory access to GitLab data including:
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -102,12 +107,17 @@ class GitLabAdapter:
 
         try:
             # Query MRs if relevant
-            if any(kw in question_lower for kw in ["mr", "merge", "review", "pr", "open"]):
+            if any(
+                kw in question_lower for kw in ["mr", "merge", "review", "pr", "open"]
+            ):
                 mr_items = await self._query_mrs(question_lower, context)
                 items.extend(mr_items)
 
             # Query pipelines if relevant
-            if any(kw in question_lower for kw in ["pipeline", "ci", "build", "deploy", "status"]):
+            if any(
+                kw in question_lower
+                for kw in ["pipeline", "ci", "build", "deploy", "status"]
+            ):
                 pipeline_items = await self._query_pipelines(question_lower, context)
                 items.extend(pipeline_items)
 
@@ -146,7 +156,9 @@ class GitLabAdapter:
                 state = "opened"
 
             # Get project from context (default to automation-analytics-backend)
-            project = context.get("project") if context else "automation-analytics-backend"
+            project = (
+                context.get("project") if context else "automation-analytics-backend"
+            )
 
             # Call the MR list implementation
             # Note: project is required first positional arg
@@ -214,7 +226,9 @@ class GitLabAdapter:
             source="gitlab",
             type="merge_request",
             content=content,
-            summary=f"{mr_id}: {title[:50]}..." if len(title) > 50 else f"{mr_id}: {title}",
+            summary=(
+                f"{mr_id}: {title[:50]}..." if len(title) > 50 else f"{mr_id}: {title}"
+            ),
             relevance=0.8,
             metadata={
                 "id": f"gitlab-mr-{mr_id}",

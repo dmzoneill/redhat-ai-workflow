@@ -201,7 +201,11 @@ def register_tools(server: "FastMCP") -> int:
                 )
             ]
         else:
-            return [TextContent(type="text", text="❌ Classification failed - no category matched")]
+            return [
+                TextContent(
+                    type="text", text="❌ Classification failed - no category matched"
+                )
+            ]
 
     @registry.tool()
     async def ollama_test(

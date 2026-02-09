@@ -54,7 +54,16 @@ def detect_project_from_name(name: str, valid_projects: set[str]) -> str | None:
             return proj
 
     # Keywords that suggest automation-analytics-backend
-    backend_keywords = ["billing", "api", "fastapi", "ingestion", "reports", "backend", "analytics", "tower-analytics"]
+    backend_keywords = [
+        "billing",
+        "api",
+        "fastapi",
+        "ingestion",
+        "reports",
+        "backend",
+        "analytics",
+        "tower-analytics",
+    ]
     for kw in backend_keywords:
         if kw in name_lower:
             return "automation-analytics-backend"
@@ -80,7 +89,12 @@ def detect_project_from_issue_key(issue_key: str, config: dict) -> str | None:
 
     # Try to get component from Jira
     try:
-        result = subprocess.run(["rh-issue", "view", first_key, "--json"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["rh-issue", "view", first_key, "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         if result.returncode == 0:
             issue_data = json.loads(result.stdout)
             components = issue_data.get("fields", {}).get("components", [])
@@ -102,13 +116,25 @@ def detect_project_from_issue_key(issue_key: str, config: dict) -> str | None:
 def scan_cursor_chat_for_project(chat_id: str, valid_projects: set[str]) -> str | None:
     """Scan Cursor chat content for project indicators."""
     try:
-        global_db = Path.home() / ".config" / "Cursor" / "User" / "globalStorage" / "state.vscdb"
+        global_db = (
+            Path.home()
+            / ".config"
+            / "Cursor"
+            / "User"
+            / "globalStorage"
+            / "state.vscdb"
+        )
         if not global_db.exists():
             return None
 
         # Query chat content
         query = f"SELECT value FROM cursorDiskKV WHERE key LIKE 'bubbleId:{chat_id}:%'"
-        result = subprocess.run(["sqlite3", str(global_db), query], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            ["sqlite3", str(global_db), query],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
         if result.returncode != 0:
             return None
@@ -136,7 +162,10 @@ def scan_cursor_chat_for_project(chat_id: str, valid_projects: set[str]) -> str 
                         # session_start(project="proj") - high value
                         (rf'project\s*=\s*["\']({re.escape(proj)})["\']', 10),
                         # File paths
-                        (rf"/(?:home|Users)/[^/]+/(?:src|projects?)/({re.escape(proj)})/", 5),
+                        (
+                            rf"/(?:home|Users)/[^/]+/(?:src|projects?)/({re.escape(proj)})/",
+                            5,
+                        ),
                         # GitLab paths
                         (rf'[\w-]+/({re.escape(proj)})(?:\s|$|["\'\]])', 4),
                         # Direct mention
@@ -189,7 +218,7 @@ def fix_session_projects(apply: bool = False, verbose: bool = False) -> int:
     fixes_applied = 0
 
     workspaces = data.get("workspaces", {})
-    for workspace_uri, workspace_data in workspaces.items():
+    for _workspace_uri, workspace_data in workspaces.items():
         sessions = workspace_data.get("sessions", {})
 
         for session_id, session in sessions.items():
@@ -201,7 +230,9 @@ def fix_session_projects(apply: bool = False, verbose: bool = False) -> int:
             # Skip if project was explicitly set (not auto-detected)
             if not is_auto and current_project != "redhat-ai-workflow":
                 if verbose:
-                    print(f"  [{session_id[:8]}] {name[:40]:<40} - SKIP (explicit: {current_project})")
+                    print(
+                        f"  [{session_id[:8]}] {name[:40]:<40} - SKIP (explicit: {current_project})"
+                    )
                 continue
 
             # Try to detect correct project
@@ -255,9 +286,15 @@ def fix_session_projects(apply: bool = False, verbose: bool = False) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fix session projects in workspace_states.json")
-    parser.add_argument("--apply", action="store_true", help="Apply changes (default is dry run)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed analysis")
+    parser = argparse.ArgumentParser(
+        description="Fix session projects in workspace_states.json"
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="Apply changes (default is dry run)"
+    )
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed analysis"
+    )
 
     args = parser.parse_args()
 

@@ -157,7 +157,9 @@ class APIClient:
         headers: dict[str, str] | None = None,
     ) -> tuple[bool, dict | str]:
         """Make a POST request."""
-        return await self.request("POST", endpoint, params=params, json=json, headers=headers)
+        return await self.request(
+            "POST", endpoint, params=params, json=json, headers=headers
+        )
 
     async def delete(
         self,
@@ -181,7 +183,9 @@ class APIClient:
 # Convenience factory functions for common services
 
 
-def prometheus_client(url: str, token: str | None = None, timeout: float = 30.0) -> APIClient:
+def prometheus_client(
+    url: str, token: str | None = None, timeout: float = 30.0
+) -> APIClient:
     """Create an API client configured for Prometheus.
 
     Args:
@@ -197,7 +201,9 @@ def prometheus_client(url: str, token: str | None = None, timeout: float = 30.0)
     )
 
 
-def alertmanager_client(url: str, token: str | None = None, timeout: float = 30.0) -> APIClient:
+def alertmanager_client(
+    url: str, token: str | None = None, timeout: float = 30.0
+) -> APIClient:
     """Create an API client configured for Alertmanager.
 
     The Alertmanager API uses /api/v2 prefix.
@@ -217,7 +223,9 @@ def alertmanager_client(url: str, token: str | None = None, timeout: float = 30.
     )
 
 
-def kibana_client(url: str, token: str | None = None, timeout: float = 30.0) -> APIClient:
+def kibana_client(
+    url: str, token: str | None = None, timeout: float = 30.0
+) -> APIClient:
     """Create an API client configured for Kibana.
 
     Kibana requires the kbn-xsrf header for non-GET requests.
@@ -236,7 +244,9 @@ def kibana_client(url: str, token: str | None = None, timeout: float = 30.0) -> 
     )
 
 
-def grafana_client(url: str, token: str | None = None, timeout: float = 30.0) -> APIClient:
+def grafana_client(
+    url: str, token: str | None = None, timeout: float = 30.0
+) -> APIClient:
     """Create an API client configured for Grafana.
 
     Args:

@@ -74,7 +74,10 @@ async def apply_transform(
         try:
             ast.parse(new_content)
         except SyntaxError as e:
-            return {"success": False, "error": f"Transform produced invalid syntax: {e}"}
+            return {
+                "success": False,
+                "error": f"Transform produced invalid syntax: {e}",
+            }
 
         # Generate diff
         diff = "".join(
@@ -128,7 +131,9 @@ def _transform_unused_imports(lines: list[str], line_num: int, suggestion: str) 
     }
 
 
-def _transform_unused_variables(lines: list[str], line_num: int, suggestion: str) -> dict:
+def _transform_unused_variables(
+    lines: list[str], line_num: int, suggestion: str
+) -> dict:
     """Handle unused variable - prefix with _ or remove if simple assignment."""
     idx = line_num - 1
 
@@ -139,7 +144,9 @@ def _transform_unused_variables(lines: list[str], line_num: int, suggestion: str
 
     # Try to find the variable name from suggestion or line
     # Pattern: "variable 'foo'" or "foo = ..."
-    var_match = re.search(r"['\"](\w+)['\"]", suggestion) or re.search(r"^(\s*)(\w+)\s*=", target_line)
+    var_match = re.search(r"['\"](\w+)['\"]", suggestion) or re.search(
+        r"^(\s*)(\w+)\s*=", target_line
+    )
 
     if not var_match:
         return {"success": False, "error": "Could not identify variable name"}
@@ -254,7 +261,9 @@ def _transform_empty_except(lines: list[str], line_num: int, suggestion: str) ->
     return {"success": False, "error": "Could not identify empty except pattern"}
 
 
-def _transform_unreachable_code(lines: list[str], line_num: int, suggestion: str) -> dict:
+def _transform_unreachable_code(
+    lines: list[str], line_num: int, suggestion: str
+) -> dict:
     """Remove unreachable code after return/raise/break/continue."""
     idx = line_num - 1
 
@@ -285,7 +294,11 @@ def _transform_dead_code(lines: list[str], line_num: int, suggestion: str) -> di
     stripped = target_line.strip()
 
     # Check if it's a function or class definition
-    if not (stripped.startswith("def ") or stripped.startswith("class ") or stripped.startswith("async def ")):
+    if not (
+        stripped.startswith("def ")
+        or stripped.startswith("class ")
+        or stripped.startswith("async def ")
+    ):
         # For other dead code, just remove the line
         new_lines = lines[:idx] + lines[idx + 1 :]
         return {

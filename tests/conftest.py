@@ -78,16 +78,22 @@ def _check_pulseaudio() -> bool:
 def _check_pw_metadata() -> bool:
     """Check if pw-metadata is available."""
     try:
-        result = subprocess.run(["which", "pw-metadata"], capture_output=True, timeout=5)
+        result = subprocess.run(
+            ["which", "pw-metadata"], capture_output=True, timeout=5
+        )
         return result.returncode == 0
     except Exception:
         return False
 
 
 # Skip markers
-requires_pulseaudio = pytest.mark.skipif(not _check_pulseaudio(), reason="PulseAudio/PipeWire not available")
+requires_pulseaudio = pytest.mark.skipif(
+    not _check_pulseaudio(), reason="PulseAudio/PipeWire not available"
+)
 
-requires_pw_metadata = pytest.mark.skipif(not _check_pw_metadata(), reason="pw-metadata not available")
+requires_pw_metadata = pytest.mark.skipif(
+    not _check_pw_metadata(), reason="pw-metadata not available"
+)
 
 
 @pytest.fixture

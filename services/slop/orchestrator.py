@@ -104,7 +104,9 @@ class SlopOrchestrator:
             )
 
         self._initialized = True
-        logger.info(f"Orchestrator initialized with {len(self._loops)} loops, max {self.max_parallel} parallel")
+        logger.info(
+            f"Orchestrator initialized with {len(self._loops)} loops, max {self.max_parallel} parallel"
+        )
 
     async def run_all(self, parallel: bool = True) -> dict[str, LoopResult]:
         """
@@ -122,7 +124,9 @@ class SlopOrchestrator:
         self._running = True
         self._loop_results = {}
 
-        logger.info(f"Starting all loops (parallel={parallel}, max={self.max_parallel})")
+        logger.info(
+            f"Starting all loops (parallel={parallel}, max={self.max_parallel})"
+        )
 
         try:
             if parallel:
@@ -160,7 +164,9 @@ class SlopOrchestrator:
                 # Sequential execution
                 for name in PRIORITY_ORDER:
                     if name in self._loops:
-                        result = await self._loops[name].run(codebase_path=self.codebase_path)
+                        result = await self._loops[name].run(
+                            codebase_path=self.codebase_path
+                        )
                         self._loop_results[name] = result
 
         finally:
@@ -180,7 +186,9 @@ class SlopOrchestrator:
             logger.debug(f"Released semaphore for loop {loop_name}")
             return result
 
-    async def run_specific(self, loop_names: list[str], parallel: bool = True) -> dict[str, LoopResult]:
+    async def run_specific(
+        self, loop_names: list[str], parallel: bool = True
+    ) -> dict[str, LoopResult]:
         """
         Run specific loops by name.
 
@@ -207,7 +215,10 @@ class SlopOrchestrator:
 
         try:
             if parallel:
-                tasks = [asyncio.create_task(self._run_with_semaphore(name)) for name in valid_names]
+                tasks = [
+                    asyncio.create_task(self._run_with_semaphore(name))
+                    for name in valid_names
+                ]
                 task_results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 for i, name in enumerate(valid_names):
@@ -226,7 +237,9 @@ class SlopOrchestrator:
                         results[name] = result
             else:
                 for name in valid_names:
-                    results[name] = await self._loops[name].run(codebase_path=self.codebase_path)
+                    results[name] = await self._loops[name].run(
+                        codebase_path=self.codebase_path
+                    )
 
         finally:
             self._running = False

@@ -17,7 +17,12 @@ from mcp.types import TextContent
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import prometheus_client
 from server.tool_registry import ToolRegistry
-from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+from server.utils import (
+    get_bearer_token,
+    get_env_config,
+    get_kubeconfig,
+    get_service_url,
+)
 
 # Setup project path for server imports
 
@@ -226,10 +231,12 @@ async def _prometheus_namespace_metrics_impl(
         "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m]))',
         "Memory (GB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) / 1024 / 1024 / 1024',
         "Network RX (MB/s)": (
-            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) ' f"/ 1024 / 1024"
+            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) '
+            f"/ 1024 / 1024"
         ),
         "Network TX (MB/s)": (
-            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) ' f"/ 1024 / 1024"
+            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) '
+            f"/ 1024 / 1024"
         ),
     }
 
@@ -392,7 +399,11 @@ async def _prometheus_targets_impl(
 
     if not active_targets:
         filter_msg = f" with state={state}" if state else ""
-        return [TextContent(type="text", text=f"No active targets{filter_msg} in {environment}")]
+        return [
+            TextContent(
+                type="text", text=f"No active targets{filter_msg} in {environment}"
+            )
+        ]
 
     # Count by health
     up = len([t for t in active_targets if t.get("health") == "up"])

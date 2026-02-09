@@ -69,7 +69,9 @@ def get_color_for_name(name: str) -> Tuple[int, int, int]:
     return (int(b * 255), int(g * 255), int(r * 255))
 
 
-def generate_initials_avatar(name: str, size: int = 128, use_cache: bool = True) -> np.ndarray:
+def generate_initials_avatar(
+    name: str, size: int = 128, use_cache: bool = True
+) -> np.ndarray:
     """
     Generate an avatar with initials on a colored circle.
 
@@ -115,7 +117,16 @@ def generate_initials_avatar(name: str, size: int = 128, use_cache: bool = True)
     text_y = (size + text_h) // 2
 
     # Draw initials in white
-    cv2.putText(avatar, initials, (text_x, text_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    cv2.putText(
+        avatar,
+        initials,
+        (text_x, text_y),
+        font,
+        font_scale,
+        (255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
 
     # Save to cache
     if use_cache:
@@ -169,7 +180,16 @@ def generate_initials_avatar_rgba(name: str, size: int = 128) -> np.ndarray:
     text_y = (size + text_h) // 2
 
     # Draw initials in white
-    cv2.putText(avatar, initials, (text_x, text_y), font, font_scale, (255, 255, 255, 255), thickness, cv2.LINE_AA)
+    cv2.putText(
+        avatar,
+        initials,
+        (text_x, text_y),
+        font,
+        font_scale,
+        (255, 255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
 
     return avatar
 
@@ -181,7 +201,9 @@ def _get_cache_path(name: str, size: int) -> Path:
     return AVATAR_CACHE_DIR / f"{name_hash}_{size}.png"
 
 
-def load_or_generate_avatar(name: str, photo_path: Optional[str] = None, size: int = 128) -> np.ndarray:
+def load_or_generate_avatar(
+    name: str, photo_path: Optional[str] = None, size: int = 128
+) -> np.ndarray:
     """
     Load a profile photo or generate an initials avatar.
 

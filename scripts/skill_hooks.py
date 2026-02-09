@@ -33,14 +33,17 @@ class RateLimiter:
         """Check if we can send to this author."""
         now = time.time()
         # Clean old entries for this author
-        self._counts[author_id] = [ts for ts in self._counts[author_id] if now - ts < self.window_seconds]
+        self._counts[author_id] = [
+            ts for ts in self._counts[author_id] if now - ts < self.window_seconds
+        ]
 
         # Periodic cleanup: remove stale authors if over limit
         if len(self._counts) > self.max_tracked_authors:
             stale_authors = [
                 aid
                 for aid, timestamps in self._counts.items()
-                if not timestamps or all(now - ts >= self.window_seconds for ts in timestamps)
+                if not timestamps
+                or all(now - ts >= self.window_seconds for ts in timestamps)
             ]
             for aid in stale_authors:
                 del self._counts[aid]
@@ -111,7 +114,9 @@ class SkillHooks:
         self._client: Optional[httpx.AsyncClient] = None
 
         if self.debug_enabled and self.debug_redirect_to_self:
-            logger.info(f"🔧 DEBUG MODE: all messages will be sent to {self.debug_self_user_id}")
+            logger.info(
+                f"🔧 DEBUG MODE: all messages will be sent to {self.debug_self_user_id}"
+            )
 
     @classmethod
     def from_config(cls, config_path: Optional[Path] = None) -> "SkillHooks":
@@ -198,12 +203,18 @@ class SkillHooks:
         message = self._format_message(template, context)
 
         # Debug mode: redirect all messages to self
-        if self.debug_enabled and self.debug_redirect_to_self and self.debug_self_user_id:
+        if (
+            self.debug_enabled
+            and self.debug_redirect_to_self
+            and self.debug_self_user_id
+        ):
             debug_prefix = f"[DEBUG {event_type}] "
             if event_cfg.get("notify_author"):
                 debug_prefix += f"(would DM: {context.get('author', 'unknown')}) "
             if event_cfg.get("notify_channel"):
-                debug_prefix += f"(would post to: {self.channels.get('team', 'unknown')}) "
+                debug_prefix += (
+                    f"(would post to: {self.channels.get('team', 'unknown')}) "
+                )
 
             await self._send_dm(self.debug_self_user_id, debug_prefix + message)
             logger.info(f"debug: sent {event_type} to self instead of real recipients")

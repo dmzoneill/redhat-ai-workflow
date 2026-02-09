@@ -144,7 +144,8 @@ def get_drive_service():
     if not creds or not creds.valid:
         return (
             None,
-            f"Not authenticated. Run `google_calendar_status()` first to authenticate.\n" f"Token file: {TOKEN_FILE}",
+            f"Not authenticated. Run `google_calendar_status()` first to authenticate.\n"
+            f"Token file: {TOKEN_FILE}",
         )
 
     try:
@@ -243,8 +244,16 @@ async def _gdrive_list_files_impl(
         ]
 
         # Separate folders and files
-        folders = [f for f in files if f.get("mimeType") == "application/vnd.google-apps.folder"]
-        docs = [f for f in files if f.get("mimeType") != "application/vnd.google-apps.folder"]
+        folders = [
+            f
+            for f in files
+            if f.get("mimeType") == "application/vnd.google-apps.folder"
+        ]
+        docs = [
+            f
+            for f in files
+            if f.get("mimeType") != "application/vnd.google-apps.folder"
+        ]
 
         if folders:
             lines.append("## 📂 Folders")
@@ -371,19 +380,27 @@ async def _gdrive_get_file_content_impl(
 
     try:
         # Get file metadata first
-        file_meta = service.files().get(fileId=file_id, fields="name, mimeType").execute()
+        file_meta = (
+            service.files().get(fileId=file_id, fields="name, mimeType").execute()
+        )
         name = file_meta.get("name", "Unknown")
         mime_type = file_meta.get("mimeType", "")
 
         # For Google Docs, Sheets, Slides - export as text
         if mime_type == "application/vnd.google-apps.document":
-            content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            content = (
+                service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            )
             content = content.decode("utf-8") if isinstance(content, bytes) else content
         elif mime_type == "application/vnd.google-apps.spreadsheet":
-            content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+            content = (
+                service.files().export(fileId=file_id, mimeType="text/csv").execute()
+            )
             content = content.decode("utf-8") if isinstance(content, bytes) else content
         elif mime_type == "application/vnd.google-apps.presentation":
-            content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            content = (
+                service.files().export(fileId=file_id, mimeType="text/plain").execute()
+            )
             content = content.decode("utf-8") if isinstance(content, bytes) else content
         elif mime_type == "text/plain" or mime_type.startswith("text/"):
             # Plain text files - download directly
@@ -397,7 +414,9 @@ async def _gdrive_get_file_content_impl(
 
         # Truncate if too long
         if len(content) > max_chars:
-            content = content[:max_chars] + f"\n\n... (truncated, {len(content)} total chars)"
+            content = (
+                content[:max_chars] + f"\n\n... (truncated, {len(content)} total chars)"
+            )
 
         lines = [
             f"# 📄 {name}",
@@ -446,12 +465,17 @@ async def _gdrive_get_file_info_impl(file_id: str) -> str:
         lines.append(f"**Modified:** {_format_datetime(file_meta.get('modifiedTime'))}")
 
         if file_meta.get("owners"):
-            owners = [o.get("displayName", o.get("emailAddress", "?")) for o in file_meta["owners"]]
+            owners = [
+                o.get("displayName", o.get("emailAddress", "?"))
+                for o in file_meta["owners"]
+            ]
             lines.append(f"**Owner:** {', '.join(owners)}")
 
         if file_meta.get("lastModifyingUser"):
             user = file_meta["lastModifyingUser"]
-            lines.append(f"**Last Modified By:** {user.get('displayName', user.get('emailAddress', '?'))}")
+            lines.append(
+                f"**Last Modified By:** {user.get('displayName', user.get('emailAddress', '?'))}"
+            )
 
         if file_meta.get("description"):
             lines.append(f"**Description:** {file_meta['description']}")
@@ -609,13 +633,17 @@ async def _gdrive_status_impl() -> str:
         try:
             about = service.about().get(fields="user, storageQuota").execute()
             user = about.get("user", {})
-            lines.append(f"   User: {user.get('displayName', '?')} ({user.get('emailAddress', '?')})")
+            lines.append(
+                f"   User: {user.get('displayName', '?')} ({user.get('emailAddress', '?')})"
+            )
             quota = about.get("storageQuota", {})
             if quota.get("limit"):
                 used = int(quota.get("usage", 0))
                 limit = int(quota.get("limit", 1))
                 pct = (used / limit) * 100
-                lines.append(f"   Storage: {_format_file_size(used)} / {_format_file_size(limit)} ({pct:.1f}%)")
+                lines.append(
+                    f"   Storage: {_format_file_size(used)} / {_format_file_size(limit)} ({pct:.1f}%)"
+                )
         except Exception as e:
             lines.append(f"   (Could not fetch details: {e})")
     else:

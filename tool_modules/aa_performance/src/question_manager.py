@@ -48,7 +48,9 @@ class QuestionManager:
             try:
                 with open(COMPETENCIES_FILE) as f:
                     config = json.load(f)
-                    default_questions = config.get("quarterly_questions", {}).get("default_questions", [])
+                    default_questions = config.get("quarterly_questions", {}).get(
+                        "default_questions", []
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load default questions: {e}")
 
@@ -58,13 +60,20 @@ class QuestionManager:
                     "id": "accomplishments",
                     "text": "What accomplishments are you most proud of last quarter?",
                     "subtext": "Reflect not only on WHAT but also HOW.",
-                    "evidence_categories": ["technical_contribution", "creativity_innovation", "end_to_end_delivery"],
+                    "evidence_categories": [
+                        "technical_contribution",
+                        "creativity_innovation",
+                        "end_to_end_delivery",
+                    ],
                 },
                 {
                     "id": "priorities",
                     "text": "What are your top priorities for this quarter?",
                     "subtext": None,
-                    "evidence_categories": ["planning_execution", "opportunity_recognition"],
+                    "evidence_categories": [
+                        "planning_execution",
+                        "opportunity_recognition",
+                    ],
                 },
                 {
                     "id": "energy",
@@ -164,7 +173,10 @@ class QuestionManager:
         subtext: str | None = None,
     ) -> dict | None:
         """Edit an existing question."""
-        for q_list in [self.questions_data.get("questions", []), self.questions_data.get("custom_questions", [])]:
+        for q_list in [
+            self.questions_data.get("questions", []),
+            self.questions_data.get("custom_questions", []),
+        ]:
             for q in q_list:
                 if q.get("id") == question_id:
                     if text is not None:
@@ -177,7 +189,10 @@ class QuestionManager:
 
     def add_note(self, question_id: str, note: str) -> bool:
         """Add a manual note to a question."""
-        for q_list in [self.questions_data.get("questions", []), self.questions_data.get("custom_questions", [])]:
+        for q_list in [
+            self.questions_data.get("questions", []),
+            self.questions_data.get("custom_questions", []),
+        ]:
             for q in q_list:
                 if q.get("id") == question_id:
                     if "manual_notes" not in q:
@@ -194,7 +209,10 @@ class QuestionManager:
 
     def add_evidence(self, question_id: str, event_id: str) -> bool:
         """Add auto-evidence to a question."""
-        for q_list in [self.questions_data.get("questions", []), self.questions_data.get("custom_questions", [])]:
+        for q_list in [
+            self.questions_data.get("questions", []),
+            self.questions_data.get("custom_questions", []),
+        ]:
             for q in q_list:
                 if q.get("id") == question_id:
                     if "auto_evidence" not in q:
@@ -235,7 +253,9 @@ class QuestionManager:
             elif "blockers" in q_categories:
                 # Tag events with blocker labels
                 labels = event.get("labels", [])
-                if any(label in ["blocked", "blocker", "needs-help"] for label in labels):
+                if any(
+                    label in ["blocked", "blocker", "needs-help"] for label in labels
+                ):
                     should_tag = True
             else:
                 # Check if any competency matches
@@ -256,7 +276,10 @@ class QuestionManager:
 
     def set_evaluation(self, question_id: str, summary: str) -> bool:
         """Set the LLM evaluation summary for a question."""
-        for q_list in [self.questions_data.get("questions", []), self.questions_data.get("custom_questions", [])]:
+        for q_list in [
+            self.questions_data.get("questions", []),
+            self.questions_data.get("custom_questions", []),
+        ]:
             for q in q_list:
                 if q.get("id") == question_id:
                     q["llm_summary"] = summary
@@ -336,7 +359,10 @@ async def evaluate_question_with_llm(
     )
 
     # Build competency summary
-    comp_text = "\n".join(f"- {comp_id}: {data.get('percentage', 0)}%" for comp_id, data in competency_summary.items())
+    comp_text = "\n".join(
+        f"- {comp_id}: {data.get('percentage', 0)}%"
+        for comp_id, data in competency_summary.items()
+    )
 
     # Include manual notes
     notes = question.get("manual_notes", [])

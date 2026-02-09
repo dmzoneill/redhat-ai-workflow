@@ -58,7 +58,9 @@ async def get_google_credentials(email: str = "daoneill@redhat.com") -> Tuple[st
 
     token_file = Path.home() / ".cache/redhatter/auth_token"
     if not token_file.exists():
-        raise RuntimeError(f"Auth token not found at {token_file}. Start redhatter service first.")
+        raise RuntimeError(
+            f"Auth token not found at {token_file}. Start redhatter service first."
+        )
 
     token = token_file.read_text().strip()
     if not token:
@@ -68,7 +70,8 @@ async def get_google_credentials(email: str = "daoneill@redhat.com") -> Tuple[st
     async with aiohttp.ClientSession() as session:
         headers = {"Authorization": f"Bearer {token}"}
         async with session.get(
-            "http://localhost:8009/get_creds?context=associate&headless=false", headers=headers
+            "http://localhost:8009/get_creds?context=associate&headless=false",
+            headers=headers,
         ) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"Failed to get credentials: {resp.status}")
@@ -188,8 +191,12 @@ class ModelPaths:
     gpt_sovits_ref_audio: Optional[Path] = None
 
     # Wav2Lip model
-    wav2lip_checkpoint: Path = field(default_factory=lambda: MEETBOT_MODELS_DIR / "wav2lip.pth")
-    wav2lip_face_detect: Path = field(default_factory=lambda: MEETBOT_MODELS_DIR / "s3fd.pth")
+    wav2lip_checkpoint: Path = field(
+        default_factory=lambda: MEETBOT_MODELS_DIR / "wav2lip.pth"
+    )
+    wav2lip_face_detect: Path = field(
+        default_factory=lambda: MEETBOT_MODELS_DIR / "s3fd.pth"
+    )
 
     # Whisper model (fallback STT)
     whisper_model: str = "small"  # OpenVINO optimized
@@ -205,14 +212,18 @@ class MeetBotConfig:
     # Google accounts
     host_account: GoogleAccount = field(
         default_factory=lambda: GoogleAccount(
-            email="daoneill@redhat.com", profile_dir="~/.config/google-chrome/Default", is_bot_account=False
+            email="daoneill@redhat.com",
+            profile_dir="~/.config/google-chrome/Default",
+            is_bot_account=False,
         )
     )
 
     # Bot account - uses Red Hat SSO for authentication
     bot_account: GoogleAccount = field(
         default_factory=lambda: GoogleAccount(
-            email="daoneill@redhat.com", profile_dir="~/.config/meet-bot-chrome", is_bot_account=True
+            email="daoneill@redhat.com",
+            profile_dir="~/.config/meet-bot-chrome",
+            is_bot_account=True,
         )
     )
 

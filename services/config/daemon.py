@@ -97,7 +97,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("get_skills_list", self._handle_get_skills_list)
         self.register_handler("get_skill_definition", self._handle_get_skill_definition)
         self.register_handler("get_personas_list", self._handle_get_personas_list)
-        self.register_handler("get_persona_definition", self._handle_get_persona_definition)
+        self.register_handler(
+            "get_persona_definition", self._handle_get_persona_definition
+        )
         self.register_handler("get_tool_modules", self._handle_get_tool_modules)
         self.register_handler("get_config", self._handle_get_config)
         self.register_handler("get_skills_graph", self._handle_get_skills_graph)
@@ -122,10 +124,20 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         return {
             "skills_count": skills_count,
             "personas_count": personas_count,
-            "tool_modules_count": len(self._tool_modules_cache) if self._tool_modules_cache else 0,
-            "skills_loaded_at": self._skills_loaded_at.isoformat() if self._skills_loaded_at else None,
-            "personas_loaded_at": self._personas_loaded_at.isoformat() if self._personas_loaded_at else None,
-            "config_loaded_at": self._config_loaded_at.isoformat() if self._config_loaded_at else None,
+            "tool_modules_count": (
+                len(self._tool_modules_cache) if self._tool_modules_cache else 0
+            ),
+            "skills_loaded_at": (
+                self._skills_loaded_at.isoformat() if self._skills_loaded_at else None
+            ),
+            "personas_loaded_at": (
+                self._personas_loaded_at.isoformat()
+                if self._personas_loaded_at
+                else None
+            ),
+            "config_loaded_at": (
+                self._config_loaded_at.isoformat() if self._config_loaded_at else None
+            ),
         }
 
     async def get_service_status(self) -> dict:
@@ -135,8 +147,10 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             "status": "running" if self.is_running else "stopped",
             "cache_valid": all(
                 [
-                    self._skills_cache is not None or self._skills_list_cache is not None,
-                    self._personas_cache is not None or self._personas_list_cache is not None,
+                    self._skills_cache is not None
+                    or self._skills_list_cache is not None,
+                    self._personas_cache is not None
+                    or self._personas_list_cache is not None,
                     self._tool_modules_cache is not None,
                 ]
             ),
@@ -263,7 +277,14 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         # Category keywords for classification
         category_keywords = {
             "code": ["git", "commit", "branch", "mr", "pr", "review", "lint", "code"],
-            "deploy": ["deploy", "ephemeral", "namespace", "bonfire", "rollout", "scale"],
+            "deploy": [
+                "deploy",
+                "ephemeral",
+                "namespace",
+                "bonfire",
+                "rollout",
+                "scale",
+            ],
             "jira": ["jira", "issue", "sprint", "ticket", "hygiene"],
             "incident": ["alert", "incident", "debug", "investigate", "silence"],
             "daily": ["coffee", "beer", "standup", "weekly", "morning", "evening"],
@@ -563,7 +584,10 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         # Build lookup: module_name -> {core: N, basic: M, extra: P, total: T}
         default_tier = {"core": 0, "basic": 0, "extra": 0}
         tool_counts_by_module = {
-            m["name"]: m.get("tier_counts", {"core": 0, "basic": m["tool_count"], "extra": 0}) for m in tool_modules
+            m["name"]: m.get(
+                "tier_counts", {"core": 0, "basic": m["tool_count"], "extra": 0}
+            )
+            for m in tool_modules
         }
 
         personas = []
@@ -589,7 +613,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                             tool_count += tier_counts.get("core", 0)
                         elif mod.endswith("_basic"):
                             # Core + basic tools (basic includes core when loaded)
-                            tool_count += tier_counts.get("core", 0) + tier_counts.get("basic", 0)
+                            tool_count += tier_counts.get("core", 0) + tier_counts.get(
+                                "basic", 0
+                            )
                         elif mod.endswith("_extra"):
                             # Only extra tools
                             tool_count += tier_counts.get("extra", 0)
@@ -700,15 +726,28 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
 
                 # For workflow module, analyze tools_core.py and tools_basic.py imports
                 # to determine which source files belong to which tier
-                if module_name == "workflow" and tier_counts["basic"] == 0 and tier_counts["core"] == 0:
+                if (
+                    module_name == "workflow"
+                    and tier_counts["basic"] == 0
+                    and tier_counts["core"] == 0
+                ):
                     # Determine which tool files are imported by each tier file
-                    core_imports = self._get_workflow_tier_imports(src_dir / "tools_core.py")
-                    basic_imports = self._get_workflow_tier_imports(src_dir / "tools_basic.py")
+                    core_imports = self._get_workflow_tier_imports(
+                        src_dir / "tools_core.py"
+                    )
+                    basic_imports = self._get_workflow_tier_imports(
+                        src_dir / "tools_basic.py"
+                    )
 
                     # Scan all Python files that might contain tools
                     for py_file in src_dir.glob("*.py"):
                         # Skip the tier files themselves and __init__.py
-                        if py_file.name in ("tools_core.py", "tools_basic.py", "tools_extra.py", "__init__.py"):
+                        if py_file.name in (
+                            "tools_core.py",
+                            "tools_basic.py",
+                            "tools_extra.py",
+                            "__init__.py",
+                        ):
                             continue
 
                         try:
@@ -717,7 +756,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                                 continue
 
                             # Determine tier based on which file imports this module
-                            file_stem = py_file.stem  # e.g., "memory_tools", "skill_engine"
+                            file_stem = (
+                                py_file.stem
+                            )  # e.g., "memory_tools", "skill_engine"
                             if file_stem in core_imports:
                                 tier = "core"
                             elif file_stem in basic_imports:
@@ -830,7 +871,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                 if module.startswith("."):
                     module = module[1:]
                 # Check if any imported name contains "register" (tool registration function)
-                has_register = any("register" in alias.name.lower() for alias in node.names)
+                has_register = any(
+                    "register" in alias.name.lower() for alias in node.names
+                )
                 if has_register and module:
                     imports.add(module)
 
@@ -849,7 +892,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             return decorator.id
         return ""
 
-    def _parse_function_params(self, node: ast.AsyncFunctionDef, docstring: str) -> list[dict]:
+    def _parse_function_params(
+        self, node: ast.AsyncFunctionDef, docstring: str
+    ) -> list[dict]:
         """Parse function parameters from AST and docstring."""
         params = []
 
@@ -864,7 +909,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                     in_args = True
                     continue
                 if in_args:
-                    if stripped.startswith("Returns:") or stripped.startswith("Raises:"):
+                    if stripped.startswith("Returns:") or stripped.startswith(
+                        "Raises:"
+                    ):
                         break
                     # Check for param definition (name: description or name (type): description)
                     match = re.match(r"(\w+)(?:\s*\([^)]+\))?:\s*(.*)", stripped)
@@ -966,11 +1013,19 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         """Start file watchers for all config directories."""
         try:
             if SKILLS_DIR.exists():
-                self._watchers.append(asyncio.create_task(self._watch_directory(SKILLS_DIR, "skills")))
+                self._watchers.append(
+                    asyncio.create_task(self._watch_directory(SKILLS_DIR, "skills"))
+                )
             if PERSONAS_DIR.exists():
-                self._watchers.append(asyncio.create_task(self._watch_directory(PERSONAS_DIR, "personas")))
+                self._watchers.append(
+                    asyncio.create_task(self._watch_directory(PERSONAS_DIR, "personas"))
+                )
             if TOOL_MODULES_DIR.exists():
-                self._watchers.append(asyncio.create_task(self._watch_directory(TOOL_MODULES_DIR, "tool_modules")))
+                self._watchers.append(
+                    asyncio.create_task(
+                        self._watch_directory(TOOL_MODULES_DIR, "tool_modules")
+                    )
+                )
         except Exception as e:
             logger.warning(f"Failed to start file watchers: {e}")
 
@@ -1029,8 +1084,10 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
 
         checks = {
             "running": self.is_running,
-            "skills_loaded": self._skills_cache is not None or self._skills_list_cache is not None,
-            "personas_loaded": self._personas_cache is not None or self._personas_list_cache is not None,
+            "skills_loaded": self._skills_cache is not None
+            or self._skills_list_cache is not None,
+            "personas_loaded": self._personas_cache is not None
+            or self._personas_list_cache is not None,
             "tool_modules_loaded": self._tool_modules_cache is not None,
             "config_loaded": self._config_cache is not None,
         }
@@ -1040,7 +1097,9 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         return {
             "healthy": healthy,
             "checks": checks,
-            "message": "Config daemon is healthy" if healthy else "Some caches not loaded",
+            "message": (
+                "Config daemon is healthy" if healthy else "Some caches not loaded"
+            ),
             "timestamp": self._last_health_check,
         }
 

@@ -52,7 +52,8 @@ class UsagePreventionTracker:
         # Store in temporary tracking (could use in-memory dict or file)
         # For now, just log it
         logger.info(
-            f"Layer 5 prevention: Warned about {tool_name} " f"(patterns: {patterns_matched}, blocked: {was_blocked})"
+            f"Layer 5 prevention: Warned about {tool_name} "
+            f"(patterns: {patterns_matched}, blocked: {was_blocked})"
         )
 
     async def track_prevention_success(
@@ -83,8 +84,14 @@ class UsagePreventionTracker:
             success = await self.learner.record_prevention_success(pattern_id)
 
             if success:
-                logger.info(f"Layer 5: Prevention success for pattern {pattern_id} " f"(tool: {tool_name})")
-                logger.debug(f"Original params: {original_params}, " f"Corrected params: {corrected_params}")
+                logger.info(
+                    f"Layer 5: Prevention success for pattern {pattern_id} "
+                    f"(tool: {tool_name})"
+                )
+                logger.debug(
+                    f"Original params: {original_params}, "
+                    f"Corrected params: {corrected_params}"
+                )
 
             return success
 
@@ -121,7 +128,8 @@ class UsagePreventionTracker:
 
             if success:
                 logger.info(
-                    f"Layer 5: False positive for pattern {pattern_id} " f"(tool: {tool_name}, reason: {reason})"
+                    f"Layer 5: False positive for pattern {pattern_id} "
+                    f"(tool: {tool_name}, reason: {reason})"
                 )
                 logger.debug(f"Params: {params}")
 

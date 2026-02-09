@@ -40,7 +40,9 @@ class FilterCache:
         self._cache: dict[str, CacheEntry] = {}
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
 
-    def _make_key(self, message: str, persona: str, workspace_uri: str = "default") -> str:
+    def _make_key(
+        self, message: str, persona: str, workspace_uri: str = "default"
+    ) -> str:
         """Create cache key from message, persona, and workspace.
 
         Args:
@@ -56,7 +58,9 @@ class FilterCache:
         # Include workspace in key for isolation
         return f"{workspace_uri}:{persona}:{normalized}"
 
-    def get(self, message: str, persona: str, workspace_uri: str = "default") -> Optional[list[str]]:
+    def get(
+        self, message: str, persona: str, workspace_uri: str = "default"
+    ) -> Optional[list[str]]:
         """Get cached tools if valid.
 
         Args:
@@ -86,7 +90,13 @@ class FilterCache:
         logger.debug(f"Cache hit: {key[:30]}... (hits: {entry.hits})")
         return entry.tools
 
-    def set(self, message: str, persona: str, tools: list[str], workspace_uri: str = "default") -> None:
+    def set(
+        self,
+        message: str,
+        persona: str,
+        tools: list[str],
+        workspace_uri: str = "default",
+    ) -> None:
         """Cache tools for message/persona/workspace.
 
         Args:
@@ -107,7 +117,9 @@ class FilterCache:
         self._cache[key] = CacheEntry(tools=tools, created_at=datetime.now())
         logger.debug(f"Cache set: {key[:30]}... ({len(tools)} tools)")
 
-    def invalidate(self, message: str, persona: str, workspace_uri: str = "default") -> bool:
+    def invalidate(
+        self, message: str, persona: str, workspace_uri: str = "default"
+    ) -> bool:
         """Invalidate a specific cache entry.
 
         Args:
@@ -137,7 +149,9 @@ class FilterCache:
         for key in keys_to_remove:
             del self._cache[key]
         if keys_to_remove:
-            logger.debug(f"Invalidated {len(keys_to_remove)} cache entries for workspace {workspace_uri}")
+            logger.debug(
+                f"Invalidated {len(keys_to_remove)} cache entries for workspace {workspace_uri}"
+            )
         return len(keys_to_remove)
 
     def clear(self) -> int:

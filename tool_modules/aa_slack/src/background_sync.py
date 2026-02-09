@@ -92,13 +92,21 @@ class SyncStats:
                 "discovered": self.channels_discovered,
                 "synced": self.channels_synced,
                 "failed": self.channels_failed,
-                "progress": f"{self.channels_synced}/{self.channels_discovered}" if self.channels_discovered else "0/0",
+                "progress": (
+                    f"{self.channels_synced}/{self.channels_discovered}"
+                    if self.channels_discovered
+                    else "0/0"
+                ),
             },
             "users": {
                 "discovered": self.users_discovered,
                 "synced": self.users_synced,
                 "failed": self.users_failed,
-                "progress": f"{self.users_synced}/{self.users_discovered}" if self.users_discovered else "0/0",
+                "progress": (
+                    f"{self.users_synced}/{self.users_discovered}"
+                    if self.users_discovered
+                    else "0/0"
+                ),
             },
             "photos": {
                 "downloaded": self.photos_downloaded,
@@ -266,7 +274,9 @@ class BackgroundSync:
         """Main sync loop."""
         try:
             # Initial delay before starting
-            logger.info(f"Background sync waiting {self.config.delay_start_seconds}s before starting...")
+            logger.info(
+                f"Background sync waiting {self.config.delay_start_seconds}s before starting..."
+            )
             self.stats.current_operation = "startup_delay"
 
             try:
@@ -288,7 +298,9 @@ class BackgroundSync:
                     # Wait for next sync interval
                     self.stats.current_operation = "waiting_for_next_sync"
                     wait_seconds = self.config.full_sync_interval_hours * 3600
-                    logger.info(f"Full sync complete. Next sync in {self.config.full_sync_interval_hours} hours")
+                    logger.info(
+                        f"Full sync complete. Next sync in {self.config.full_sync_interval_hours} hours"
+                    )
 
                     try:
                         await asyncio.wait_for(
@@ -421,7 +433,9 @@ class BackgroundSync:
                         resolved_name = channel_info.get("name", channel_id)
                         purpose = channel_info.get("purpose", {}).get("value", "")
                         topic = channel_info.get("topic", {}).get("value", "")
-                        logger.debug(f"Resolved channel name: {channel_id} -> {resolved_name}")
+                        logger.debug(
+                            f"Resolved channel name: {channel_id} -> {resolved_name}"
+                        )
                 except Exception as e:
                     logger.debug(f"Could not fetch channel info for {channel_id}: {e}")
 
@@ -438,7 +452,9 @@ class BackgroundSync:
                 error = result.get("error", "Unknown error")
                 if "rate_limited" in error.lower() or "429" in error:
                     self.stats.rate_limit_hits += 1
-                    logger.warning(f"Rate limited, backing off for {self.config.rate_limit_backoff_seconds}s")
+                    logger.warning(
+                        f"Rate limited, backing off for {self.config.rate_limit_backoff_seconds}s"
+                    )
                     await asyncio.sleep(self.config.rate_limit_backoff_seconds)
                 raise ValueError(error)
 
@@ -470,7 +486,9 @@ class BackgroundSync:
             if cached_users:
                 await self.state_db.cache_users_bulk(cached_users)
                 self.stats.users_synced += len(cached_users)
-                logger.debug(f"Cached {len(cached_users)} users from channel {resolved_name or channel_id}")
+                logger.debug(
+                    f"Cached {len(cached_users)} users from channel {resolved_name or channel_id}"
+                )
 
             # Also update channel cache with member count and resolved name
             from .persistence import CachedChannel
@@ -564,7 +582,10 @@ class BackgroundSync:
         if not self.stats.is_running:
             return {"success": False, "error": "Background sync not running"}
 
-        if self.stats.current_operation not in ("waiting_for_next_sync", "sync_complete"):
+        if self.stats.current_operation not in (
+            "waiting_for_next_sync",
+            "sync_complete",
+        ):
             return {
                 "success": False,
                 "error": f"Sync already in progress: {self.stats.current_operation}",

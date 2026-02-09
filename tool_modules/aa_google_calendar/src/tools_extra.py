@@ -13,7 +13,10 @@ if TYPE_CHECKING:
 
 # Import shared utilities from basic tools
 from server.tool_registry import ToolRegistry
-from tool_modules.aa_google_calendar.src.tools_basic import TIMEZONE, get_calendar_service
+from tool_modules.aa_google_calendar.src.tools_basic import (
+    TIMEZONE,
+    get_calendar_service,
+)
 
 
 async def _google_calendar_decline_event_impl(
@@ -51,7 +54,10 @@ async def _google_calendar_decline_event_impl(
         found_self = False
 
         for attendee in attendees:
-            if attendee.get("self", False) or attendee.get("email", "").lower() == my_email.lower():
+            if (
+                attendee.get("self", False)
+                or attendee.get("email", "").lower() == my_email.lower()
+            ):
                 attendee["responseStatus"] = "declined"
                 if message:
                     attendee["comment"] = message
@@ -191,7 +197,10 @@ async def _google_calendar_decline_meetings_on_date_impl(
             attendees = event.get("attendees", [])
             my_status = None
             for attendee in attendees:
-                if attendee.get("self", False) or attendee.get("email", "").lower() == my_email:
+                if (
+                    attendee.get("self", False)
+                    or attendee.get("email", "").lower() == my_email
+                ):
                     my_status = attendee.get("responseStatus", "needsAction")
                     break
 
@@ -203,7 +212,9 @@ async def _google_calendar_decline_meetings_on_date_impl(
             # Format time for display
             try:
                 if "T" in start:
-                    dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
+                    dt = datetime.fromisoformat(
+                        start.replace("Z", "+00:00")
+                    ).astimezone(tz)
                     time_str = dt.strftime("%H:%M")
                 else:
                     time_str = "All day"
@@ -230,7 +241,9 @@ async def _google_calendar_decline_meetings_on_date_impl(
             lines.append("")
 
         if to_decline:
-            lines.append(f"## {'Would Decline' if dry_run else 'Declining'} ({len(to_decline)})")
+            lines.append(
+                f"## {'Would Decline' if dry_run else 'Declining'} ({len(to_decline)})"
+            )
             lines.append("")
             lines.append("| Time | Meeting |")
             lines.append("|------|---------|")
@@ -283,7 +296,9 @@ async def _google_calendar_decline_meetings_on_date_impl(
             lines.append("")
             lines.append("**To actually decline these meetings:**")
             lines.append("```")
-            lines.append(f"google_calendar_decline_meetings_on_date(date='{date}', dry_run=False)")
+            lines.append(
+                f"google_calendar_decline_meetings_on_date(date='{date}', dry_run=False)"
+            )
             lines.append("```")
 
         return "\n".join(lines)
@@ -383,7 +398,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of decline or error message
         """
-        return await _google_calendar_decline_event_impl(event_id, message, send_updates)
+        return await _google_calendar_decline_event_impl(
+            event_id, message, send_updates
+        )
 
     @registry.tool()
     async def google_calendar_decline_meetings_on_date(

@@ -77,7 +77,10 @@ class QueryRouter:
         else:
             adapters = await self._route_by_intent(intent, capability)
 
-        logger.debug(f"Routed query to {len(adapters)} adapters: " f"{[a[0].name for a in adapters]}")
+        logger.debug(
+            f"Routed query to {len(adapters)} adapters: "
+            f"{[a[0].name for a in adapters]}"
+        )
 
         return intent, adapters
 
@@ -257,7 +260,9 @@ class ParallelExecutor:
 
         # Execute with timeout
         try:
-            results = await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=self.timeout)
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=self.timeout
+            )
         except asyncio.TimeoutError:
             logger.warning(f"Parallel execution timed out after {self.timeout}s")
             results = [TimeoutError(f"Timeout after {self.timeout}s")] * len(tasks)

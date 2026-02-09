@@ -58,7 +58,11 @@ def parse_markdown(md_content: str) -> list[Slide]:
         if line.startswith("# AI Workflow Engineer Onboarding Slides"):
             i += 1
             continue
-        if line.startswith("> **Purpose**") or line.startswith("> **Duration**") or line.startswith("> **Audience**"):
+        if (
+            line.startswith("> **Purpose**")
+            or line.startswith("> **Duration**")
+            or line.startswith("> **Audience**")
+        ):
             i += 1
             continue
 
@@ -77,12 +81,16 @@ def parse_markdown(md_content: str) -> list[Slide]:
         if part_match:
             if current_slide:
                 slides.append(current_slide)
-            current_slide = Slide(title=part_match.group(1).strip(), slide_type="section")
+            current_slide = Slide(
+                title=part_match.group(1).strip(), slide_type="section"
+            )
             i += 1
             continue
 
         # Skip appendix and tips sections
-        if line.startswith("## Appendix") or line.startswith("## Tips for Google Slides"):
+        if line.startswith("## Appendix") or line.startswith(
+            "## Tips for Google Slides"
+        ):
             break
 
         # Skip horizontal rules
@@ -99,7 +107,9 @@ def parse_markdown(md_content: str) -> list[Slide]:
             if in_code_block:
                 # End of code block
                 if code_content:
-                    current_slide.content.append({"type": "code", "content": "\n".join(code_content)})
+                    current_slide.content.append(
+                        {"type": "code", "content": "\n".join(code_content)}
+                    )
                 code_content = []
                 in_code_block = False
             else:
@@ -114,7 +124,9 @@ def parse_markdown(md_content: str) -> list[Slide]:
             continue
 
         # Speaker notes
-        if line.startswith("> **Speaker Notes**:") or line.startswith("> Speaker Notes:"):
+        if line.startswith("> **Speaker Notes**:") or line.startswith(
+            "> Speaker Notes:"
+        ):
             in_speaker_notes = True
             notes_text = line.split(":", 1)[1].strip() if ":" in line else ""
             current_slide.speaker_notes = notes_text
@@ -144,7 +156,9 @@ def parse_markdown(md_content: str) -> list[Slide]:
             bullet_text = line[2:].strip()
             # Clean up markdown formatting
             bullet_text = re.sub(r"\*\*(.+?)\*\*", r"\1", bullet_text)  # Remove bold
-            bullet_text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", bullet_text)  # Remove links
+            bullet_text = re.sub(
+                r"\[(.+?)\]\(.+?\)", r"\1", bullet_text
+            )  # Remove links
             current_slide.content.append({"type": "bullet", "content": bullet_text})
             i += 1
             continue
@@ -177,7 +191,9 @@ def parse_markdown(md_content: str) -> list[Slide]:
             if len(parts) == 2:
                 header = parts[0].strip("*").strip()
                 content = parts[1].strip()
-                current_slide.content.append({"type": "header", "content": f"{header}: {content}"})
+                current_slide.content.append(
+                    {"type": "header", "content": f"{header}: {content}"}
+                )
             i += 1
             continue
 
@@ -212,13 +228,21 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
             slide = prs.slides.add_slide(slide_layout)
 
             # Add background shape
-            shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(0), Inches(0), prs.slide_width, prs.slide_height)
+            shape = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(0),
+                Inches(0),
+                prs.slide_width,
+                prs.slide_height,
+            )
             shape.fill.solid()
             shape.fill.fore_color.rgb = TITLE_COLOR
             shape.line.fill.background()
 
             # Add title
-            title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2.5), Inches(12.333), Inches(2))
+            title_box = slide.shapes.add_textbox(
+                Inches(0.5), Inches(2.5), Inches(12.333), Inches(2)
+            )
             tf = title_box.text_frame
             tf.word_wrap = True
             p = tf.paragraphs[0]
@@ -234,7 +258,9 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
             slide = prs.slides.add_slide(slide_layout)
 
             # Title
-            title_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(12.333), Inches(0.8))
+            title_box = slide.shapes.add_textbox(
+                Inches(0.5), Inches(0.3), Inches(12.333), Inches(0.8)
+            )
             tf = title_box.text_frame
             tf.word_wrap = True
             p = tf.paragraphs[0]
@@ -246,7 +272,9 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
             # Subtitle if present
             y_offset = Inches(1.2)
             if slide_data.subtitle:
-                sub_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.1), Inches(12.333), Inches(0.5))
+                sub_box = slide.shapes.add_textbox(
+                    Inches(0.5), Inches(1.1), Inches(12.333), Inches(0.5)
+                )
                 tf = sub_box.text_frame
                 p = tf.paragraphs[0]
                 p.text = slide_data.subtitle
@@ -255,7 +283,9 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
                 y_offset = Inches(1.7)
 
             # Content
-            content_box = slide.shapes.add_textbox(Inches(0.5), y_offset, Inches(12.333), Inches(5.5))
+            content_box = slide.shapes.add_textbox(
+                Inches(0.5), y_offset, Inches(12.333), Inches(5.5)
+            )
             tf = content_box.text_frame
             tf.word_wrap = True
 
@@ -337,10 +367,16 @@ def create_presentation(slides: list[Slide], output_path: Path) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate PowerPoint slides from markdown outline")
+    parser = argparse.ArgumentParser(
+        description="Generate PowerPoint slides from markdown outline"
+    )
     parser.add_argument("input_file", type=Path, help="Path to markdown outline file")
     parser.add_argument(
-        "-o", "--output", type=Path, default=None, help="Output PPTX file path (default: same name as input with .pptx)"
+        "-o",
+        "--output",
+        type=Path,
+        default=None,
+        help="Output PPTX file path (default: same name as input with .pptx)",
     )
 
     args = parser.parse_args()

@@ -209,10 +209,14 @@ class IntentClassifier:
             try:
                 result = await self._npu_classify(query)
                 if result and result.confidence > 0.7:
-                    logger.debug(f"NPU classification: {result.intent} ({result.confidence:.2f})")
+                    logger.debug(
+                        f"NPU classification: {result.intent} ({result.confidence:.2f})"
+                    )
                     return result
             except Exception as e:
-                logger.warning(f"NPU classification failed, falling back to keywords: {e}")
+                logger.warning(
+                    f"NPU classification failed, falling back to keywords: {e}"
+                )
 
         # Fall back to keyword-based classification
         return self._keyword_classify(query)
@@ -364,7 +368,9 @@ Available sources: code, slack, yaml, inscope, jira"""
             with open(training_file, "a") as f:
                 f.write(json.dumps(entry) + "\n")
 
-            logger.info(f"Recorded intent learning: {correct_intent} for '{query[:50]}...'")
+            logger.info(
+                f"Recorded intent learning: {correct_intent} for '{query[:50]}...'"
+            )
             return True
 
         except Exception as e:

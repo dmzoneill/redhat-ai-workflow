@@ -18,7 +18,12 @@ from services.base.dbus import (
     check_daemon_status,
     get_client,
 )
-from services.base.sleep_wake import RobustPeriodicTask, RobustTimer, SleepWakeAwareDaemon, SleepWakeMonitor
+from services.base.sleep_wake import (
+    RobustPeriodicTask,
+    RobustTimer,
+    SleepWakeAwareDaemon,
+    SleepWakeMonitor,
+)
 
 __all__ = [
     # daemon.py

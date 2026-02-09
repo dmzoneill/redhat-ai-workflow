@@ -104,8 +104,12 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         """Return memory-specific statistics."""
         return {
             "cached_files": len(self._file_cache),
-            "health_loaded_at": self._health_loaded_at.isoformat() if self._health_loaded_at else None,
-            "files_loaded_at": self._files_loaded_at.isoformat() if self._files_loaded_at else None,
+            "health_loaded_at": (
+                self._health_loaded_at.isoformat() if self._health_loaded_at else None
+            ),
+            "files_loaded_at": (
+                self._files_loaded_at.isoformat() if self._files_loaded_at else None
+            ),
         }
 
     async def get_service_status(self) -> dict:
@@ -155,8 +159,16 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                 return {
                     "success": True,
                     "work": {
-                        "activeIssue": content.get("active_issues", [{}])[0] if content.get("active_issues") else None,
-                        "activeMR": content.get("open_mrs", [{}])[0] if content.get("open_mrs") else None,
+                        "activeIssue": (
+                            content.get("active_issues", [{}])[0]
+                            if content.get("active_issues")
+                            else None
+                        ),
+                        "activeMR": (
+                            content.get("open_mrs", [{}])[0]
+                            if content.get("open_mrs")
+                            else None
+                        ),
                         "followUps": content.get("follow_ups", []),
                         "activeIssues": content.get("active_issues", []),
                         "openMRs": content.get("open_mrs", []),
@@ -239,9 +251,15 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                                     {
                                         "id": f"{pattern_type}_{idx}",
                                         "pattern": p.get("pattern", ""),
-                                        "context": pattern_type.replace("_", " ").title(),
-                                        "learned_at": usage_stats.get("last_matched", p.get("last_seen", "")),
-                                        "usage_count": usage_stats.get("times_matched", p.get("count", 1)),
+                                        "context": pattern_type.replace(
+                                            "_", " "
+                                        ).title(),
+                                        "learned_at": usage_stats.get(
+                                            "last_matched", p.get("last_seen", "")
+                                        ),
+                                        "usage_count": usage_stats.get(
+                                            "times_matched", p.get("count", 1)
+                                        ),
                                         "meaning": p.get("meaning", ""),
                                         "fix": p.get("fix", ""),
                                     }
@@ -287,16 +305,20 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             sessions_dir = MEMORY_DIR / "sessions"
             if sessions_dir.exists():
                 # Get recent session files
-                session_files = sorted(sessions_dir.glob("*.yaml"), key=lambda f: f.stat().st_mtime, reverse=True)[
-                    :limit
-                ]
+                session_files = sorted(
+                    sessions_dir.glob("*.yaml"),
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True,
+                )[:limit]
 
                 for session_file in session_files:
                     try:
                         content = yaml.safe_load(session_file.read_text())
                         if content:
                             # Extract log entries from session - handle both 'logs' and 'entries' keys
-                            session_logs = content.get("logs", content.get("entries", []))
+                            session_logs = content.get(
+                                "logs", content.get("entries", [])
+                            )
                             session_date = content.get("date", session_file.stem)
 
                             for log in session_logs[-5:]:  # Last 5 from each session
@@ -310,9 +332,15 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                                         {
                                             "timestamp": timestamp,
                                             "session_id": session_file.stem,
-                                            "session_name": content.get("name", session_date),
-                                            "action": log.get("action", log.get("type", "")),
-                                            "details": log.get("details", log.get("message", "")),
+                                            "session_name": content.get(
+                                                "name", session_date
+                                            ),
+                                            "action": log.get(
+                                                "action", log.get("type", "")
+                                            ),
+                                            "details": log.get(
+                                                "details", log.get("message", "")
+                                            ),
                                         }
                                     )
                     except Exception as e:
@@ -341,7 +369,9 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             logger.error(f"Failed to read {path}: {e}")
             return {"success": False, "error": str(e)}
 
-    async def _handle_write(self, path: str = None, content: Any = None, **kwargs) -> dict:
+    async def _handle_write(
+        self, path: str = None, content: Any = None, **kwargs
+    ) -> dict:
         """Write a memory file."""
         if not path:
             return {"success": False, "error": "path required"}
@@ -353,7 +383,9 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             logger.error(f"Failed to write {path}: {e}")
             return {"success": False, "error": str(e)}
 
-    async def _handle_append(self, path: str = None, key: str = None, value: Any = None, **kwargs) -> dict:
+    async def _handle_append(
+        self, path: str = None, key: str = None, value: Any = None, **kwargs
+    ) -> dict:
         """Append to a list in a memory file."""
         if not path or not key:
             return {"success": False, "error": "path and key required"}
@@ -514,7 +546,11 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         # Session files (limited to recent)
         sessions_dir = MEMORY_DIR / "sessions"
         if sessions_dir.exists():
-            session_files = sorted(sessions_dir.glob("*.yaml"), key=lambda f: f.stat().st_mtime, reverse=True)
+            session_files = sorted(
+                sessions_dir.glob("*.yaml"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
             result["sessions"] = [f.stem for f in session_files[:20]]
 
         # Knowledge files
@@ -564,7 +600,9 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             if MEMORY_DIR.exists():
                 import asyncio as _asyncio
 
-                self._watchers.append(_asyncio.create_task(self._watch_directory(MEMORY_DIR)))
+                self._watchers.append(
+                    _asyncio.create_task(self._watch_directory(MEMORY_DIR))
+                )
         except Exception as e:
             logger.warning(f"Failed to start file watchers: {e}")
 
@@ -629,7 +667,9 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         return {
             "healthy": healthy,
             "checks": checks,
-            "message": "Memory daemon is healthy" if healthy else "Memory daemon has issues",
+            "message": (
+                "Memory daemon is healthy" if healthy else "Memory daemon has issues"
+            ),
             "timestamp": self._last_health_check,
         }
 

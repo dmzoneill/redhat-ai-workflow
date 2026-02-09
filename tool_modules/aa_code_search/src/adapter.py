@@ -10,7 +10,12 @@ It wraps the existing code search tool implementations.
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -63,7 +68,10 @@ class CodeSearchAdapter:
         """
         try:
             # Import the existing code search implementation
-            from tool_modules.aa_code_search.src.tools_basic import _get_index_stats, _search_code
+            from tool_modules.aa_code_search.src.tools_basic import (
+                _get_index_stats,
+                _search_code,
+            )
 
             # Get parameters from filter
             project = filter.project if filter else None

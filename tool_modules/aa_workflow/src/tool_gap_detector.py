@@ -157,14 +157,17 @@ class ToolGapDetector:
                 # Update existing request
                 gap["vote_count"] = gap.get("vote_count", 1) + 1
                 gap["last_requested"] = datetime.now().isoformat()
-                gap["requesting_skills"] = list(set(gap.get("requesting_skills", []) + [skill]))
+                gap["requesting_skills"] = list(
+                    set(gap.get("requesting_skills", []) + [skill])
+                )
                 if workaround and not gap.get("workaround_used"):
                     gap["workaround_used"] = workaround
                 if context and not gap.get("context"):
                     gap["context"] = context
                 self._save()
                 logger.info(
-                    f"Tool gap '{suggested_tool_name}' requested again " f"(vote #{gap['vote_count']}) by {skill}"
+                    f"Tool gap '{suggested_tool_name}' requested again "
+                    f"(vote #{gap['vote_count']}) by {skill}"
                 )
                 return gap.get("id", suggested_tool_name)
 
@@ -267,7 +270,9 @@ class ToolGapDetector:
 
         return False, gap_id
 
-    def get_gaps(self, status: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    def get_gaps(
+        self, status: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
         """Get tool gaps, optionally filtered by status.
 
         Args:

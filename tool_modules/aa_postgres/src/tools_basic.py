@@ -475,6 +475,8 @@ def register_tools(server: FastMCP) -> int:
             schema_only: Dump schema only (no data)
             table: Specific table to dump
         """
-        return await _pg_dump_impl(database, host, 5432, user, password, schema_only, table)
+        return await _pg_dump_impl(
+            database, host, 5432, user, password, schema_only, table
+        )
 
     return registry.count

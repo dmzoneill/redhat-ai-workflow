@@ -101,12 +101,17 @@ class GitHubAdapter:
 
         try:
             # Query PRs if relevant
-            if any(kw in question_lower for kw in ["pr", "pull", "review", "merge", "open"]):
+            if any(
+                kw in question_lower for kw in ["pr", "pull", "review", "merge", "open"]
+            ):
                 pr_items = await self._query_prs(question_lower, context)
                 items.extend(pr_items)
 
             # Query workflows/actions if relevant
-            if any(kw in question_lower for kw in ["workflow", "action", "ci", "build", "run"]):
+            if any(
+                kw in question_lower
+                for kw in ["workflow", "action", "ci", "build", "run"]
+            ):
                 workflow_items = await self._query_workflows(question_lower, context)
                 items.extend(workflow_items)
 

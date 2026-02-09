@@ -107,7 +107,9 @@ def calculate_points_score(story_points: int | None) -> tuple[float, str]:
         return 10, f"Large item ({story_points} pts)"
 
 
-def prioritize_issues(issues: list[dict[str, Any]], config: dict[str, Any] | None = None) -> list[PrioritizedIssue]:
+def prioritize_issues(
+    issues: list[dict[str, Any]], config: dict[str, Any] | None = None
+) -> list[PrioritizedIssue]:
     """Order issues by weighted score, capturing reasoning for UI display.
 
     Args:
@@ -231,11 +233,15 @@ def get_priority_summary(prioritized: list[PrioritizedIssue]) -> str:
     lines = ["## Sprint Priority Order\n"]
 
     for issue in prioritized[:10]:  # Top 10
-        status_icon = "🔴" if issue.is_blocked else ("⏳" if issue.waiting_reason else "🟢")
+        status_icon = (
+            "🔴" if issue.is_blocked else ("⏳" if issue.waiting_reason else "🟢")
+        )
         lines.append(f"### {issue.rank}. {status_icon} {issue.key}")
         lines.append(f"**{issue.summary}**")
         lines.append(f"- Score: {issue.score:.1f}")
-        lines.append(f"- Points: {issue.story_points or '?'} | Priority: {issue.priority}")
+        lines.append(
+            f"- Points: {issue.story_points or '?'} | Priority: {issue.priority}"
+        )
         if issue.reasoning:
             lines.append(f"- Reasoning: {', '.join(issue.reasoning)}")
         lines.append("")
@@ -260,7 +266,11 @@ def to_sprint_issue_format(prioritized: list[PrioritizedIssue]) -> list[dict[str
             "priority": issue.priority,
             "jiraStatus": issue.status,
             "assignee": issue.assignee,
-            "approvalStatus": "blocked" if issue.is_blocked else ("waiting" if issue.waiting_reason else "pending"),
+            "approvalStatus": (
+                "blocked"
+                if issue.is_blocked
+                else ("waiting" if issue.waiting_reason else "pending")
+            ),
             "waitingReason": issue.waiting_reason,
             "priorityReasoning": issue.reasoning,
             "estimatedActions": ["start_work", "implement", "create_mr"],

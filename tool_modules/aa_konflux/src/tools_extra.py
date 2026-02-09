@@ -46,7 +46,9 @@ KONFLUX_KUBECONFIG = get_konflux_kubeconfig()
 DEFAULT_NAMESPACE = os.getenv("KONFLUX_NAMESPACE", "default")
 
 
-async def run_konflux_cmd(cmd: list[str], kubeconfig: str | None = None, timeout: int = 60) -> tuple[bool, str]:
+async def run_konflux_cmd(
+    cmd: list[str], kubeconfig: str | None = None, timeout: int = 60
+) -> tuple[bool, str]:
     """Run command with Konflux kubeconfig.
 
     Args:
@@ -74,7 +76,9 @@ run_cmd = run_konflux_cmd
 
 async def _konflux_get_application_impl(name: str, namespace: str) -> str:
     """Implementation of konflux_get_application tool."""
-    success, output = await run_cmd(["kubectl", "get", "application", name, "-n", namespace, "-o", "yaml"])
+    success, output = await run_cmd(
+        ["kubectl", "get", "application", name, "-n", namespace, "-o", "yaml"]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Application: {name}\n\n```yaml\n{truncate_output(output, max_length=10000)}\n```"
@@ -82,7 +86,9 @@ async def _konflux_get_application_impl(name: str, namespace: str) -> str:
 
 async def _konflux_get_pipeline_impl(name: str, namespace: str) -> str:
     """Implementation of konflux_get_pipeline tool."""
-    success, output = await run_cmd(["kubectl", "get", "pipelinerun", name, "-n", namespace, "-o", "yaml"])
+    success, output = await run_cmd(
+        ["kubectl", "get", "pipelinerun", name, "-n", namespace, "-o", "yaml"]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Pipeline: {name}\n\n```yaml\n{truncate_output(output, max_length=10000)}\n```"
@@ -90,7 +96,9 @@ async def _konflux_get_pipeline_impl(name: str, namespace: str) -> str:
 
 async def _konflux_list_environments_impl(namespace: str) -> str:
     """Implementation of konflux_list_environments tool."""
-    success, output = await run_cmd(["kubectl", "get", "environments", "-n", namespace, "-o", "wide"])
+    success, output = await run_cmd(
+        ["kubectl", "get", "environments", "-n", namespace, "-o", "wide"]
+    )
     if not success:
         # Try snapshotenvironmentbindings as fallback
         success, output = await run_cmd(
@@ -111,7 +119,9 @@ async def _konflux_list_environments_impl(namespace: str) -> str:
 
 async def _konflux_list_release_plans_impl(namespace: str) -> str:
     """Implementation of konflux_list_release_plans tool."""
-    success, output = await run_cmd(["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"])
+    success, output = await run_cmd(
+        ["kubectl", "get", "releaseplans", "-n", namespace, "-o", "wide"]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Release Plans: {namespace}\n\n```\n{output}\n```"
@@ -119,7 +129,9 @@ async def _konflux_list_release_plans_impl(namespace: str) -> str:
 
 async def _tkn_describe_pipelinerun_impl(name: str, namespace: str) -> str:
     """Implementation of tkn_describe_pipelinerun tool."""
-    success, output = await run_cmd(["tkn", "pipelinerun", "describe", name, "-n", namespace])
+    success, output = await run_cmd(
+        ["tkn", "pipelinerun", "describe", name, "-n", namespace]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Pipeline Run: {name}\n\n```\n{truncate_output(output, max_length=10000)}\n```"
@@ -138,7 +150,9 @@ async def _tkn_logs_impl(name: str, namespace: str, task: str) -> str:
 
 async def _tkn_pipeline_describe_impl(pipeline_name: str, namespace: str) -> str:
     """Implementation of tkn_pipeline_describe tool."""
-    success, output = await run_cmd(["tkn", "pipeline", "describe", pipeline_name, "-n", namespace])
+    success, output = await run_cmd(
+        ["tkn", "pipeline", "describe", pipeline_name, "-n", namespace]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Pipeline: {pipeline_name}\n\n```\n{output}\n```"
@@ -152,7 +166,9 @@ async def _tkn_pipeline_list_impl(namespace: str) -> str:
     return f"## Pipelines: {namespace}\n\n```\n{output}\n```"
 
 
-async def _tkn_pipeline_start_impl(pipeline_name: str, namespace: str, params: str) -> str:
+async def _tkn_pipeline_start_impl(
+    pipeline_name: str, namespace: str, params: str
+) -> str:
     """Implementation of tkn_pipeline_start tool."""
     args = ["tkn", "pipeline", "start", pipeline_name, "-n", namespace]
     if params:
@@ -166,7 +182,9 @@ async def _tkn_pipeline_start_impl(pipeline_name: str, namespace: str, params: s
 
 async def _tkn_task_describe_impl(task_name: str, namespace: str) -> str:
     """Implementation of tkn_task_describe tool."""
-    success, output = await run_cmd(["tkn", "task", "describe", task_name, "-n", namespace])
+    success, output = await run_cmd(
+        ["tkn", "task", "describe", task_name, "-n", namespace]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Task: {task_name}\n\n```\n{output}\n```"
@@ -182,7 +200,9 @@ async def _tkn_task_list_impl(namespace: str) -> str:
 
 async def _tkn_taskrun_describe_impl(run_name: str, namespace: str) -> str:
     """Implementation of tkn_taskrun_describe tool."""
-    success, output = await run_cmd(["tkn", "taskrun", "describe", run_name, "-n", namespace])
+    success, output = await run_cmd(
+        ["tkn", "taskrun", "describe", run_name, "-n", namespace]
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Task Run: {run_name}\n\n```\n{output}\n```"
@@ -190,7 +210,9 @@ async def _tkn_taskrun_describe_impl(run_name: str, namespace: str) -> str:
 
 async def _tkn_taskrun_logs_impl(run_name: str, namespace: str) -> str:
     """Implementation of tkn_taskrun_logs tool."""
-    success, output = await run_cmd(["tkn", "taskrun", "logs", run_name, "-n", namespace], timeout=120)
+    success, output = await run_cmd(
+        ["tkn", "taskrun", "logs", run_name, "-n", namespace], timeout=120
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Logs: {run_name}\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
@@ -208,7 +230,9 @@ async def _konflux_create_release_impl(
     """
     # Auto-detect release plan if not provided
     if not release_plan:
-        success, output = await run_cmd(["kubectl", "get", "releaseplan", "-n", namespace, "-o", "json"])
+        success, output = await run_cmd(
+            ["kubectl", "get", "releaseplan", "-n", namespace, "-o", "json"]
+        )
         if not success:
             return f"❌ Failed to list release plans: {output}"
         try:
@@ -271,7 +295,9 @@ async def _konflux_create_release_impl(
                 latest = items[-1]
                 name = latest["metadata"]["name"]
                 conditions = latest.get("status", {}).get("conditions", [])
-                status_str = conditions[-1].get("reason", "Pending") if conditions else "Pending"
+                status_str = (
+                    conditions[-1].get("reason", "Pending") if conditions else "Pending"
+                )
                 return (
                     f"✅ Release created successfully\n\n"
                     f"- **Name:** {name}\n"
@@ -293,13 +319,17 @@ def register_tools(server: "FastMCP") -> int:
     # ==================== TOOLS NOT USED IN SKILLS ====================
     @auto_heal_konflux()
     @registry.tool()
-    async def konflux_get_application(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def konflux_get_application(
+        name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Get detailed information about a Konflux application."""
         return await _konflux_get_application_impl(name, namespace)
 
     @auto_heal_konflux()
     @registry.tool()
-    async def konflux_get_pipeline(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def konflux_get_pipeline(
+        name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Get details of a specific pipeline run."""
         return await _konflux_get_pipeline_impl(name, namespace)
 
@@ -317,19 +347,25 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_describe_pipelinerun(name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def tkn_describe_pipelinerun(
+        name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Describe a Tekton pipeline run."""
         return await _tkn_describe_pipelinerun_impl(name, namespace)
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_logs(name: str, namespace: str = DEFAULT_NAMESPACE, task: str = "") -> str:
+    async def tkn_logs(
+        name: str, namespace: str = DEFAULT_NAMESPACE, task: str = ""
+    ) -> str:
         """Get logs from a Tekton pipeline run."""
         return await _tkn_logs_impl(name, namespace, task)
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_pipeline_describe(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def tkn_pipeline_describe(
+        pipeline_name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Describe a pipeline definition."""
         return await _tkn_pipeline_describe_impl(pipeline_name, namespace)
 
@@ -341,13 +377,17 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_pipeline_start(pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = "") -> str:
+    async def tkn_pipeline_start(
+        pipeline_name: str, namespace: str = DEFAULT_NAMESPACE, params: str = ""
+    ) -> str:
         """Start a pipeline run."""
         return await _tkn_pipeline_start_impl(pipeline_name, namespace, params)
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_task_describe(task_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def tkn_task_describe(
+        task_name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Describe a task definition."""
         return await _tkn_task_describe_impl(task_name, namespace)
 
@@ -359,13 +399,17 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_taskrun_describe(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def tkn_taskrun_describe(
+        run_name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Describe a task run in detail."""
         return await _tkn_taskrun_describe_impl(run_name, namespace)
 
     @auto_heal_konflux()
     @registry.tool()
-    async def tkn_taskrun_logs(run_name: str, namespace: str = DEFAULT_NAMESPACE) -> str:
+    async def tkn_taskrun_logs(
+        run_name: str, namespace: str = DEFAULT_NAMESPACE
+    ) -> str:
         """Get logs from a task run."""
         return await _tkn_taskrun_logs_impl(run_name, namespace)
 

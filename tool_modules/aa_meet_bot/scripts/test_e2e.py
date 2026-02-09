@@ -27,9 +27,16 @@ from tool_modules.aa_meet_bot.src.config import get_config  # noqa: E402
 from tool_modules.aa_meet_bot.src.jira_preloader import get_jira_preloader  # noqa: E402
 from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder  # noqa: E402
 from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine  # noqa: E402
-from tool_modules.aa_meet_bot.src.video_generator import get_video_generator  # noqa: E402
-from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager  # noqa: E402
-from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager  # noqa: E402
+from tool_modules.aa_meet_bot.src.video_generator import (  # noqa: E402
+    get_video_generator,
+)
+from tool_modules.aa_meet_bot.src.virtual_devices import (  # noqa: E402
+    VirtualDeviceManager,
+)
+from tool_modules.aa_meet_bot.src.wake_word import (  # noqa: E402
+    WakeWordEvent,
+    WakeWordManager,
+)
 
 
 def print_header(title: str):
@@ -63,9 +70,15 @@ async def test_virtual_devices():
     manager = VirtualDeviceManager()
     status = await manager.get_status()
 
-    print(f"Audio Sink: {'✅' if status.audio_sink_ready else '❌'} {status.audio_sink_id or 'Not ready'}")
-    print(f"Audio Source: {'✅' if status.audio_source_ready else '❌'} {status.audio_source_id or 'Not ready'}")
-    print(f"Virtual Camera: {'✅' if status.video_device_ready else '❌'} {status.video_device_path or 'Not ready'}")
+    print(
+        f"Audio Sink: {'✅' if status.audio_sink_ready else '❌'} {status.audio_sink_id or 'Not ready'}"
+    )
+    print(
+        f"Audio Source: {'✅' if status.audio_source_ready else '❌'} {status.audio_source_id or 'Not ready'}"
+    )
+    print(
+        f"Virtual Camera: {'✅' if status.video_device_ready else '❌'} {status.video_device_path or 'Not ready'}"
+    )
 
     if not status.all_ready:
         print("\n⚠️ Virtual devices not fully configured.")

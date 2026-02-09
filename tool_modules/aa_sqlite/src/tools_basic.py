@@ -154,7 +154,13 @@ async def _sqlite_describe_impl(database: str, table: str) -> str:
     if error := _validate_identifier(table, "table"):
         return error
 
-    cmd = ["sqlite3", str(db_path), "-header", "-column", f"PRAGMA table_info({table});"]
+    cmd = [
+        "sqlite3",
+        str(db_path),
+        "-header",
+        "-column",
+        f"PRAGMA table_info({table});",
+    ]
 
     success, output = await run_cmd(cmd, timeout=30)
     if success:

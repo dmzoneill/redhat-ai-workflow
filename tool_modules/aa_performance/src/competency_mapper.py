@@ -62,7 +62,9 @@ class CompetencyMapper:
 
         # Check each competency's detection rules
         for comp_id, comp_config in self.competencies.items():
-            comp_points = self._check_rules(comp_config, source, event_type, event, metadata)
+            comp_points = self._check_rules(
+                comp_config, source, event_type, event, metadata
+            )
             if comp_points > 0:
                 points[comp_id] = comp_points
                 continue
@@ -74,7 +76,14 @@ class CompetencyMapper:
 
         return points
 
-    def _check_rules(self, comp_config: dict, source: str, event_type: str, event: dict, metadata: dict) -> int:
+    def _check_rules(
+        self,
+        comp_config: dict,
+        source: str,
+        event_type: str,
+        event: dict,
+        metadata: dict,
+    ) -> int:
         """Check detection rules for a competency."""
         rules = comp_config.get("detection_rules", [])
         total_points = 0
@@ -109,13 +118,21 @@ class CompetencyMapper:
 
             if isinstance(expected, dict):
                 # Range conditions
-                if "lt" in expected and not (actual is not None and actual < expected["lt"]):
+                if "lt" in expected and not (
+                    actual is not None and actual < expected["lt"]
+                ):
                     return False
-                if "lte" in expected and not (actual is not None and actual <= expected["lte"]):
+                if "lte" in expected and not (
+                    actual is not None and actual <= expected["lte"]
+                ):
                     return False
-                if "gt" in expected and not (actual is not None and actual > expected["gt"]):
+                if "gt" in expected and not (
+                    actual is not None and actual > expected["gt"]
+                ):
                     return False
-                if "gte" in expected and not (actual is not None and actual >= expected["gte"]):
+                if "gte" in expected and not (
+                    actual is not None and actual >= expected["gte"]
+                ):
                     return False
                 if "not" in expected and actual == expected["not"]:
                     return False
@@ -151,7 +168,10 @@ class CompetencyMapper:
 
     def get_all_competencies(self) -> list[dict]:
         """Get all competency definitions."""
-        return [{"id": comp_id, **comp_config} for comp_id, comp_config in self.competencies.items()]
+        return [
+            {"id": comp_id, **comp_config}
+            for comp_id, comp_config in self.competencies.items()
+        ]
 
     def get_meta_category(self, comp_id: str) -> str | None:
         """Get the meta-category for a competency."""
@@ -222,7 +242,8 @@ async def _ai_classify(
     """Use AI to classify a work item."""
     competencies = mapper.get_all_competencies()
     comp_descriptions = "\n".join(
-        f"- {c['id']}: {c.get('name', '')} - {c.get('pse_goal', '')[:100]}" for c in competencies
+        f"- {c['id']}: {c.get('name', '')} - {c.get('pse_goal', '')[:100]}"
+        for c in competencies
     )
 
     prompt = f"""Classify this work item into PSE competencies.

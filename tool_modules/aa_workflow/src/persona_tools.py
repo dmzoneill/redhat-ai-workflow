@@ -52,7 +52,9 @@ def _list_personas_impl() -> list[TextContent]:
                         break
                 personas.append({"name": f.stem, "title": name, "role": role})
             except Exception as e:
-                personas.append({"name": f.stem, "title": f.stem, "role": f"Error: {e}"})
+                personas.append(
+                    {"name": f.stem, "title": f.stem, "role": f"Error: {e}"}
+                )
 
     if not personas:
         return [
@@ -113,7 +115,8 @@ async def _load_persona_impl(persona_name: str, ctx: Context) -> list[TextConten
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ {result['error']}\n\n" f"Available: {', '.join(result.get('available', []))}",
+                        text=f"❌ {result['error']}\n\n"
+                        f"Available: {', '.join(result.get('available', []))}",
                     )
                 ]
     except Exception as e:
@@ -125,7 +128,8 @@ async def _load_persona_impl(persona_name: str, ctx: Context) -> list[TextConten
         return [
             TextContent(
                 type="text",
-                text=f"❌ Persona not found: {persona_name}\n\n" "Use persona_list() to see available personas.",
+                text=f"❌ Persona not found: {persona_name}\n\n"
+                "Use persona_list() to see available personas.",
             )
         ]
 

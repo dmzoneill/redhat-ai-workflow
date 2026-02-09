@@ -19,7 +19,9 @@ def _generate_pattern_id(tool_name: str, category: str, error_snippet: str) -> s
     return f"{tool_name}_{category.lower()}_{hash_val}"
 
 
-def _extract_incorrect_param_pattern(tool_name: str, params: dict, error_message: str, evidence: dict) -> dict:
+def _extract_incorrect_param_pattern(
+    tool_name: str, params: dict, error_message: str, evidence: dict
+) -> dict:
     """Extract pattern for INCORRECT_PARAMETER errors."""
     pattern = {
         "error_regex": "",
@@ -30,7 +32,9 @@ def _extract_incorrect_param_pattern(tool_name: str, params: dict, error_message
     # Extract parameter from evidence
     if "incorrect_param" in evidence:
         pattern["parameter"] = evidence["incorrect_param"]
-        pattern["common_mistakes"].append(f"using incorrect value for {evidence['incorrect_param']}")
+        pattern["common_mistakes"].append(
+            f"using incorrect value for {evidence['incorrect_param']}"
+        )
 
     # Build error regex from evidence
     if "pattern" in evidence:
@@ -45,8 +49,12 @@ def _extract_incorrect_param_pattern(tool_name: str, params: dict, error_message
         pattern["error_regex"] = "|".join(phrases) if phrases else "error"
 
     # Tool-specific common mistakes
-    if tool_name == "bonfire_namespace_release" and "namespace" in str(params.get("namespace", "")):
-        pattern["common_mistakes"].append("using arbitrary namespace name instead of owned one")
+    if tool_name == "bonfire_namespace_release" and "namespace" in str(
+        params.get("namespace", "")
+    ):
+        pattern["common_mistakes"].append(
+            "using arbitrary namespace name instead of owned one"
+        )
         pattern["common_mistakes"].append("typo in namespace name")
 
     return pattern
@@ -90,12 +98,17 @@ def _extract_format_pattern(params: dict, error_message: str, evidence: dict) ->
     return pattern
 
 
-def _extract_prerequisite_pattern(tool_name: str, error_message: str, context: dict) -> dict:
+def _extract_prerequisite_pattern(
+    tool_name: str, error_message: str, context: dict
+) -> dict:
     """Extract pattern for MISSING_PREREQUISITE errors."""
     pattern = {"error_regex": "", "context": ""}
 
     # Determine what prerequisite is missing
-    if "no commits" in error_message.lower() or "nothing to push" in error_message.lower():
+    if (
+        "no commits" in error_message.lower()
+        or "nothing to push" in error_message.lower()
+    ):
         pattern["error_regex"] = "nothing to push|no commits|branch has no commits"
         pattern["context"] = "branch created but no commits made"
 
@@ -119,7 +132,9 @@ def _extract_prerequisite_pattern(tool_name: str, error_message: str, context: d
     return pattern
 
 
-def _extract_sequence_pattern(tool_name: str, error_message: str, context: dict, evidence: dict) -> dict:
+def _extract_sequence_pattern(
+    tool_name: str, error_message: str, context: dict, evidence: dict
+) -> dict:
     """Extract pattern for WORKFLOW_SEQUENCE errors."""
     pattern = {"error_regex": "", "missing_step": None, "correct_sequence": []}
 
@@ -187,7 +202,10 @@ def _generate_format_validation_steps(evidence: dict) -> list[dict]:
     """Generate prevention steps for format validation."""
     steps = []
 
-    if evidence.get("incorrect_param") == "image_tag" and evidence.get("expected_format") == "40-character SHA":
+    if (
+        evidence.get("incorrect_param") == "image_tag"
+        and evidence.get("expected_format") == "40-character SHA"
+    ):
         steps.append(
             {
                 "action": "validate_parameter",
@@ -291,7 +309,9 @@ def _generate_sequence_steps(evidence: dict) -> list[dict]:
     return steps
 
 
-def _generate_root_cause(tool_name: str, classification: dict, mistake_pattern: dict) -> str:
+def _generate_root_cause(
+    tool_name: str, classification: dict, mistake_pattern: dict
+) -> str:
     """Generate human-readable root cause description."""
     category = classification.get("error_category", "")
 
@@ -301,16 +321,22 @@ def _generate_root_cause(tool_name: str, classification: dict, mistake_pattern: 
 
     elif category == "PARAMETER_FORMAT":
         param = mistake_pattern.get("parameter", "parameter")
-        expected = mistake_pattern.get("validation", {}).get("expected", "correct format")
+        expected = mistake_pattern.get("validation", {}).get(
+            "expected", "correct format"
+        )
         return f"Claude used wrong format for '{param}' (expected: {expected})"
 
     elif category == "MISSING_PREREQUISITE":
-        return f"Claude called {tool_name} before completing required prerequisite steps"
+        return (
+            f"Claude called {tool_name} before completing required prerequisite steps"
+        )
 
     elif category == "WORKFLOW_SEQUENCE":
         prereqs = classification.get("evidence", {}).get("missing_prerequisite", [])
         if prereqs:
-            return f"Claude called {tool_name} without first calling {', '.join(prereqs)}"
+            return (
+                f"Claude called {tool_name} without first calling {', '.join(prereqs)}"
+            )
         return f"Claude called {tool_name} in wrong workflow order"
 
     else:
@@ -341,7 +367,9 @@ def extract_usage_pattern(
         context = {}
 
     pattern = {
-        "id": _generate_pattern_id(tool_name, classification.get("error_category", "unknown"), error_message),
+        "id": _generate_pattern_id(
+            tool_name, classification.get("error_category", "unknown"), error_message
+        ),
         "tool": tool_name,
         "error_category": classification.get("error_category"),
         "mistake_pattern": {},
@@ -360,22 +388,34 @@ def extract_usage_pattern(
     category = classification.get("error_category")
 
     if category == "INCORRECT_PARAMETER":
-        pattern["mistake_pattern"] = _extract_incorrect_param_pattern(tool_name, params, error_message, evidence)
-        pattern["prevention_steps"] = _generate_param_validation_steps(tool_name, evidence)
+        pattern["mistake_pattern"] = _extract_incorrect_param_pattern(
+            tool_name, params, error_message, evidence
+        )
+        pattern["prevention_steps"] = _generate_param_validation_steps(
+            tool_name, evidence
+        )
 
     elif category == "PARAMETER_FORMAT":
-        pattern["mistake_pattern"] = _extract_format_pattern(params, error_message, evidence)
+        pattern["mistake_pattern"] = _extract_format_pattern(
+            params, error_message, evidence
+        )
         pattern["prevention_steps"] = _generate_format_validation_steps(evidence)
 
     elif category == "MISSING_PREREQUISITE":
-        pattern["mistake_pattern"] = _extract_prerequisite_pattern(tool_name, error_message, context)
+        pattern["mistake_pattern"] = _extract_prerequisite_pattern(
+            tool_name, error_message, context
+        )
         pattern["prevention_steps"] = _generate_prerequisite_steps(tool_name, context)
 
     elif category == "WORKFLOW_SEQUENCE":
-        pattern["mistake_pattern"] = _extract_sequence_pattern(tool_name, error_message, context, evidence)
+        pattern["mistake_pattern"] = _extract_sequence_pattern(
+            tool_name, error_message, context, evidence
+        )
         pattern["prevention_steps"] = _generate_sequence_steps(evidence)
 
     # Generate root cause description
-    pattern["root_cause"] = _generate_root_cause(tool_name, classification, pattern["mistake_pattern"])
+    pattern["root_cause"] = _generate_root_cause(
+        tool_name, classification, pattern["mistake_pattern"]
+    )
 
     return pattern

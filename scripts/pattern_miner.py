@@ -55,7 +55,9 @@ def mine_patterns_from_failures():
         # Find similar errors
         matched = False
         for group in error_groups:
-            similarity = SequenceMatcher(None, error.lower(), group["representative"].lower()).ratio()
+            similarity = SequenceMatcher(
+                None, error.lower(), group["representative"].lower()
+            ).ratio()
             if similarity > 0.75:  # 75% similarity threshold
                 group["count"] += 1
                 group["errors"].append(error)
@@ -93,7 +95,9 @@ def mine_patterns_from_failures():
                         "examples": group["errors"][:3],
                         "tools": list(group["tools"])[:5],
                         "error_types": list(group["error_types"]),
-                        "recommended_category": _recommend_category(pattern_text, group["error_types"]),
+                        "recommended_category": _recommend_category(
+                            pattern_text, group["error_types"]
+                        ),
                     }
                 )
 
@@ -170,11 +174,15 @@ def _recommend_category(pattern_text: str, error_types: set) -> str:
     pattern_lower = pattern_text.lower()
 
     if "auth" in error_types or any(
-        word in pattern_lower for word in ["unauthorized", "forbidden", "token", "authentication", "login"]
+        word in pattern_lower
+        for word in ["unauthorized", "forbidden", "token", "authentication", "login"]
     ):
         return "auth_patterns"
 
-    if any(word in pattern_lower for word in ["bonfire", "namespace", "ephemeral", "reservation", "clowdapp"]):
+    if any(
+        word in pattern_lower
+        for word in ["bonfire", "namespace", "ephemeral", "reservation", "clowdapp"]
+    ):
         return "bonfire_patterns"
 
     if any(
@@ -191,7 +199,9 @@ def _recommend_category(pattern_text: str, error_types: set) -> str:
     ):
         return "pipeline_patterns"
 
-    if any(word in pattern_lower for word in ["jira", "issue", "jpat", "story", "epic"]):
+    if any(
+        word in pattern_lower for word in ["jira", "issue", "jpat", "story", "epic"]
+    ):
         return "jira_cli_patterns"
 
     return "error_patterns"

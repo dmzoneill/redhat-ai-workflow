@@ -54,7 +54,9 @@ class TestSkillFiles:
             data = yaml.safe_load(content)
             for i, step in enumerate(data.get("steps", [])):
                 has_identifier = "id" in step or "name" in step
-                assert has_identifier, f"{skill_file.name} step {i} missing 'id' or 'name'"
+                assert (
+                    has_identifier
+                ), f"{skill_file.name} step {i} missing 'id' or 'name'"
 
 
 class TestCoreSkills:

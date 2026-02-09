@@ -83,7 +83,9 @@ def _load_instances_from_config() -> dict[str, OllamaInstance]:
                     instances[name] = OllamaInstance(
                         name=name,
                         host=cfg.get("host", instances[name].host),
-                        default_model=cfg.get("default_model", instances[name].default_model),
+                        default_model=cfg.get(
+                            "default_model", instances[name].default_model
+                        ),
                         power_watts=cfg.get("power_watts", instances[name].power_watts),
                         best_for=cfg.get("best_for", instances[name].best_for),
                     )

@@ -73,7 +73,12 @@ Focus ONLY on memory issues. Ignore other code smells.""",
         "name": "ZOMBIE",
         "task": "dead_code",
         "category": "dead_code",  # Primary category
-        "allowed_categories": ["dead_code", "unused_imports", "unused_variables", "unreachable_code"],
+        "allowed_categories": [
+            "dead_code",
+            "unused_imports",
+            "unused_variables",
+            "unreachable_code",
+        ],
         "description": "Dead code, unused functions, stale imports",
         "fast_tools": ["vulture"],
         "max_iterations": 3,
@@ -336,7 +341,9 @@ class AnalysisLoop:
 
         # Category configuration
         self.primary_category = config.get("category", "unknown")
-        self.allowed_categories = config.get("allowed_categories", [self.primary_category])
+        self.allowed_categories = config.get(
+            "allowed_categories", [self.primary_category]
+        )
 
         self._db = db
         self._ai_router = ai_router
@@ -381,7 +388,9 @@ class AnalysisLoop:
         logger.info(f"Stop requested for loop {self.name}")
         self._stop_requested = True
 
-    async def run(self, files: Optional[list[str]] = None, codebase_path: Optional[str] = None) -> LoopResult:
+    async def run(
+        self, files: Optional[list[str]] = None, codebase_path: Optional[str] = None
+    ) -> LoopResult:
         """
         Run the analysis loop until done or max iterations.
 
@@ -417,9 +426,14 @@ class AnalysisLoop:
                 logger.info(f"Fast tools found {len(fast_hints)} hints for {self.name}")
 
             # 3. Ralph-style iteration
-            while self._current_iteration < self.max_iterations and not self._stop_requested:
+            while (
+                self._current_iteration < self.max_iterations
+                and not self._stop_requested
+            ):
                 self._current_iteration += 1
-                logger.info(f"Loop {self.name} iteration {self._current_iteration}/{self.max_iterations}")
+                logger.info(
+                    f"Loop {self.name} iteration {self._current_iteration}/{self.max_iterations}"
+                )
 
                 # Build focused prompt
                 prompt = self._build_prompt(files, fast_hints)
@@ -428,14 +442,18 @@ class AnalysisLoop:
                 response = await self._ai_router.analyze(prompt, task=self.task)
 
                 if not response.success:
-                    logger.error(f"LLM analysis failed for {self.name}: {response.error}")
+                    logger.error(
+                        f"LLM analysis failed for {self.name}: {response.error}"
+                    )
                     # Continue to next iteration, might recover
                     continue
 
                 # Process findings
                 new_findings = response.findings
                 if new_findings:
-                    logger.info(f"Loop {self.name} found {len(new_findings)} new issues")
+                    logger.info(
+                        f"Loop {self.name} found {len(new_findings)} new issues"
+                    )
                     for finding in new_findings:
                         finding["loop"] = self.name
                         # Validate and default category
@@ -451,7 +469,9 @@ class AnalysisLoop:
 
                 # Check if done
                 if response.done:
-                    logger.info(f"Loop {self.name} reports done after {self._current_iteration} iterations")
+                    logger.info(
+                        f"Loop {self.name} reports done after {self._current_iteration} iterations"
+                    )
                     break
 
             # 4. Store findings in database
@@ -465,14 +485,18 @@ class AnalysisLoop:
             self._status = "error"
 
         result = self._create_result()
-        logger.info(f"Loop {self.name} completed: {result.findings_count} findings in {result.duration_ms}ms")
+        logger.info(
+            f"Loop {self.name} completed: {result.findings_count} findings in {result.duration_ms}ms"
+        )
         return result
 
     def _create_result(self) -> LoopResult:
         """Create a LoopResult from current state."""
         duration_ms = 0
         if self._start_time:
-            duration_ms = int((datetime.now() - self._start_time).total_seconds() * 1000)
+            duration_ms = int(
+                (datetime.now() - self._start_time).total_seconds() * 1000
+            )
 
         return LoopResult(
             loop_name=self.name,
@@ -484,7 +508,9 @@ class AnalysisLoop:
             error=None if self._status != "error" else "Analysis error",
         )
 
-    async def _get_relevant_files(self, codebase_path: Optional[str] = None) -> list[str]:
+    async def _get_relevant_files(
+        self, codebase_path: Optional[str] = None
+    ) -> list[str]:
         """Get list of files to analyze."""
         if not codebase_path:
             codebase_path = "."
@@ -516,7 +542,9 @@ class AnalysisLoop:
 
         return files[:100]  # Limit to 100 files per loop
 
-    async def _run_fast_tools(self, files: list[str], codebase_path: Optional[str]) -> list[dict]:
+    async def _run_fast_tools(
+        self, files: list[str], codebase_path: Optional[str]
+    ) -> list[dict]:
         """Run fast tools for pre-filtering."""
         if not self._external_tools:
             return []
@@ -553,7 +581,10 @@ class AnalysisLoop:
         if self._findings:
             prev_findings_text = json.dumps(self._findings[-10:], indent=2)
             if len(self._findings) > 10:
-                prev_findings_text = f"... {len(self._findings) - 10} earlier findings ...\n" + prev_findings_text
+                prev_findings_text = (
+                    f"... {len(self._findings) - 10} earlier findings ...\n"
+                    + prev_findings_text
+                )
 
         # Format allowed categories
         allowed_cats = ", ".join(self.allowed_categories)

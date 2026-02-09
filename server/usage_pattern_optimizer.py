@@ -58,7 +58,9 @@ class UsagePatternOptimizer:
 
             # Parse last_seen date
             try:
-                last_seen = datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                last_seen = (
+                    datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                )
             except (ValueError, TypeError):
                 last_seen = None
 
@@ -69,7 +71,9 @@ class UsagePatternOptimizer:
             # Too old and low confidence
             if last_seen and last_seen < cutoff_date and confidence < min_confidence:
                 should_prune = True
-                reason.append(f"old (>{max_age_days} days) and low confidence (<{min_confidence:.0%})")
+                reason.append(
+                    f"old (>{max_age_days} days) and low confidence (<{min_confidence:.0%})"
+                )
 
             # Very low confidence regardless of age
             elif confidence < 0.50:
@@ -83,7 +87,9 @@ class UsagePatternOptimizer:
 
             if should_prune:
                 pruned_ids.append(pattern_id)
-                logger.info(f"Pruning pattern {pattern_id} ({pattern['tool']}): {', '.join(reason)}")
+                logger.info(
+                    f"Pruning pattern {pattern_id} ({pattern['tool']}): {', '.join(reason)}"
+                )
 
         result = {
             "pruned_count": len(pruned_ids),
@@ -137,7 +143,9 @@ class UsagePatternOptimizer:
 
             # Parse last_seen date
             try:
-                last_seen = datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                last_seen = (
+                    datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                )
             except (ValueError, TypeError):
                 last_seen = None
 
@@ -176,9 +184,15 @@ class UsagePatternOptimizer:
         }
 
         if not dry_run and decayed_ids:
-            logger.info(f"Applied decay to {len(decayed_ids)} patterns " f"(avg: {result['avg_decay']:.1%})")
+            logger.info(
+                f"Applied decay to {len(decayed_ids)} patterns "
+                f"(avg: {result['avg_decay']:.1%})"
+            )
         elif dry_run and decayed_ids:
-            logger.info(f"DRY RUN: Would decay {len(decayed_ids)} patterns " f"(avg: {result['avg_decay']:.1%})")
+            logger.info(
+                f"DRY RUN: Would decay {len(decayed_ids)} patterns "
+                f"(avg: {result['avg_decay']:.1%})"
+            )
 
         return result
 
@@ -232,7 +246,9 @@ class UsagePatternOptimizer:
                 dry_run=dry_run,
             )
 
-        result["total_optimized"] = result["pruned"].get("pruned_count", 0) + result["decayed"].get("decayed_count", 0)
+        result["total_optimized"] = result["pruned"].get("pruned_count", 0) + result[
+            "decayed"
+        ].get("decayed_count", 0)
 
         logger.info(
             f"Optimization complete: {result['total_optimized']} patterns optimized "
@@ -276,7 +292,9 @@ class UsagePatternOptimizer:
             last_seen_str = pattern.get("last_seen")
 
             try:
-                last_seen = datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                last_seen = (
+                    datetime.fromisoformat(last_seen_str) if last_seen_str else None
+                )
             except (ValueError, TypeError):
                 last_seen = None
 

@@ -193,13 +193,17 @@ class GPUTextRenderer:
             logger.debug(f"GLFW initialized, platform: {_glfw.get_platform()}")
 
             # Configure for offscreen rendering
-            _glfw.window_hint(_glfw.VISIBLE, _glfw.FALSE if self.headless else _glfw.TRUE)
+            _glfw.window_hint(
+                _glfw.VISIBLE, _glfw.FALSE if self.headless else _glfw.TRUE
+            )
             _glfw.window_hint(_glfw.CONTEXT_VERSION_MAJOR, 3)
             _glfw.window_hint(_glfw.CONTEXT_VERSION_MINOR, 3)
             _glfw.window_hint(_glfw.OPENGL_PROFILE, _glfw.OPENGL_CORE_PROFILE)
 
             # Create window (hidden for offscreen)
-            self._window = _glfw.create_window(self.width, self.height, "GPUText", None, None)
+            self._window = _glfw.create_window(
+                self.width, self.height, "GPUText", None, None
+            )
             if not self._window:
                 error = _glfw.get_error()
                 _glfw.terminate()
@@ -311,7 +315,9 @@ class GPUTextRenderer:
 
         # Reserve space for 6 vertices per character (2 triangles)
         # Each vertex: x, y, tex_x, tex_y (4 floats)
-        _gl.glBufferData(_gl.GL_ARRAY_BUFFER, 4 * 6 * 4 * 1000, None, _gl.GL_DYNAMIC_DRAW)
+        _gl.glBufferData(
+            _gl.GL_ARRAY_BUFFER, 4 * 6 * 4 * 1000, None, _gl.GL_DYNAMIC_DRAW
+        )
 
         _gl.glEnableVertexAttribArray(0)
         _gl.glVertexAttribPointer(0, 4, _gl.GL_FLOAT, _gl.GL_FALSE, 4 * 4, None)
@@ -347,16 +353,31 @@ class GPUTextRenderer:
         self._fbo_texture = _gl.glGenTextures(1)
         _gl.glBindTexture(_gl.GL_TEXTURE_2D, self._fbo_texture)
         _gl.glTexImage2D(
-            _gl.GL_TEXTURE_2D, 0, _gl.GL_RGBA, self.width, self.height, 0, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE, None
+            _gl.GL_TEXTURE_2D,
+            0,
+            _gl.GL_RGBA,
+            self.width,
+            self.height,
+            0,
+            _gl.GL_RGBA,
+            _gl.GL_UNSIGNED_BYTE,
+            None,
         )
         _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MIN_FILTER, _gl.GL_LINEAR)
         _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MAG_FILTER, _gl.GL_LINEAR)
 
         _gl.glFramebufferTexture2D(
-            _gl.GL_FRAMEBUFFER, _gl.GL_COLOR_ATTACHMENT0, _gl.GL_TEXTURE_2D, self._fbo_texture, 0
+            _gl.GL_FRAMEBUFFER,
+            _gl.GL_COLOR_ATTACHMENT0,
+            _gl.GL_TEXTURE_2D,
+            self._fbo_texture,
+            0,
         )
 
-        if _gl.glCheckFramebufferStatus(_gl.GL_FRAMEBUFFER) != _gl.GL_FRAMEBUFFER_COMPLETE:
+        if (
+            _gl.glCheckFramebufferStatus(_gl.GL_FRAMEBUFFER)
+            != _gl.GL_FRAMEBUFFER_COMPLETE
+        ):
             raise RuntimeError("Framebuffer is not complete")
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
@@ -367,7 +388,13 @@ class GPUTextRenderer:
 
         # Orthographic projection: (0,0) at top-left, (width, height) at bottom-right
         projection = np.array(
-            [[2.0 / self.width, 0, 0, -1], [0, -2.0 / self.height, 0, 1], [0, 0, -1, 0], [0, 0, 0, 1]], dtype=np.float32
+            [
+                [2.0 / self.width, 0, 0, -1],
+                [0, -2.0 / self.height, 0, 1],
+                [0, 0, -1, 0],
+                [0, 0, 0, 1],
+            ],
+            dtype=np.float32,
         )
 
         loc = _gl.glGetUniformLocation(self._shader_program, "projection")
@@ -378,7 +405,15 @@ class GPUTextRenderer:
         loc = _gl.glGetUniformLocation(self._shape_shader_program, "projection")
         _gl.glUniformMatrix4fv(loc, 1, _gl.GL_TRUE, projection)
 
-    def draw_rectangle(self, x: int, y: int, w: int, h: int, color: Tuple[int, int, int], thickness: int = 1):
+    def draw_rectangle(
+        self,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        color: Tuple[int, int, int],
+        thickness: int = 1,
+    ):
         """Draw a rectangle outline.
 
         Args:
@@ -431,7 +466,9 @@ class GPUTextRenderer:
         _gl.glBindBuffer(_gl.GL_ARRAY_BUFFER, 0)
         _gl.glBindVertexArray(0)
 
-    def draw_filled_rectangle(self, x: int, y: int, w: int, h: int, color: Tuple[int, int, int]):
+    def draw_filled_rectangle(
+        self, x: int, y: int, w: int, h: int, color: Tuple[int, int, int]
+    ):
         """Draw a filled rectangle.
 
         Args:
@@ -470,7 +507,15 @@ class GPUTextRenderer:
         _gl.glBindBuffer(_gl.GL_ARRAY_BUFFER, 0)
         _gl.glBindVertexArray(0)
 
-    def draw_line(self, x1: int, y1: int, x2: int, y2: int, color: Tuple[int, int, int], thickness: int = 1):
+    def draw_line(
+        self,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        color: Tuple[int, int, int],
+        thickness: int = 1,
+    ):
         """Draw a line.
 
         Args:
@@ -523,7 +568,14 @@ class GPUTextRenderer:
         _gl.glBindBuffer(_gl.GL_ARRAY_BUFFER, 0)
         _gl.glBindVertexArray(0)
 
-    def draw_circle(self, cx: int, cy: int, radius: int, color: Tuple[int, int, int], thickness: int = 1):
+    def draw_circle(
+        self,
+        cx: int,
+        cy: int,
+        radius: int,
+        color: Tuple[int, int, int],
+        thickness: int = 1,
+    ):
         """Draw a circle outline.
 
         Args:
@@ -649,7 +701,9 @@ class GPUTextRenderer:
 
                 # Copy bitmap to atlas
                 if bitmap.width > 0 and bitmap.rows > 0:
-                    bitmap_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(bitmap.rows, bitmap.width)
+                    bitmap_array = np.array(bitmap.buffer, dtype=np.uint8).reshape(
+                        bitmap.rows, bitmap.width
+                    )
                     atlas_data[y : y + bitmap.rows, x : x + bitmap.width] = bitmap_array
 
                 # Store glyph info
@@ -679,15 +733,25 @@ class GPUTextRenderer:
                 atlas_data,
             )
 
-            _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_WRAP_S, _gl.GL_CLAMP_TO_EDGE)
-            _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_WRAP_T, _gl.GL_CLAMP_TO_EDGE)
-            _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MIN_FILTER, _gl.GL_LINEAR)
-            _gl.glTexParameteri(_gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MAG_FILTER, _gl.GL_LINEAR)
+            _gl.glTexParameteri(
+                _gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_WRAP_S, _gl.GL_CLAMP_TO_EDGE
+            )
+            _gl.glTexParameteri(
+                _gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_WRAP_T, _gl.GL_CLAMP_TO_EDGE
+            )
+            _gl.glTexParameteri(
+                _gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MIN_FILTER, _gl.GL_LINEAR
+            )
+            _gl.glTexParameteri(
+                _gl.GL_TEXTURE_2D, _gl.GL_TEXTURE_MAG_FILTER, _gl.GL_LINEAR
+            )
 
             self._font_atlases[key] = atlas
             self._current_atlas = atlas
 
-            logger.info(f"Loaded font: {font_path} @ {size}px, atlas: {atlas_width}x{atlas_height}")
+            logger.info(
+                f"Loaded font: {font_path} @ {size}px, atlas: {atlas_width}x{atlas_height}"
+            )
             return True
 
         except Exception as e:
@@ -736,10 +800,14 @@ class GPUTextRenderer:
 
         # Read back pixels
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, self._fbo)
-        pixels = _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE)
+        pixels = _gl.glReadPixels(
+            0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE
+        )
 
         # Convert to numpy and flip vertically (OpenGL origin is bottom-left)
-        frame = np.frombuffer(pixels, dtype=np.uint8).reshape(self.height, self.width, 4)
+        frame = np.frombuffer(pixels, dtype=np.uint8).reshape(
+            self.height, self.width, 4
+        )
         frame = np.flipud(frame).copy()
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
@@ -825,7 +893,9 @@ class GPUTextRenderer:
         _gl.glBindVertexArray(0)
 
     def composite_text_onto_frame(
-        self, frame: np.ndarray, text_items: List[Tuple[str, int, int, Tuple[int, int, int]]]
+        self,
+        frame: np.ndarray,
+        text_items: List[Tuple[str, int, int, Tuple[int, int, int]]],
     ) -> np.ndarray:
         """Composite GPU-rendered text onto an existing BGR frame.
 
@@ -863,7 +933,9 @@ class GPUTextRenderer:
         return width
 
     def render_to_bgr(
-        self, text_items: List[Tuple[str, int, int, Tuple[int, int, int]]], background: Tuple[int, int, int] = (0, 0, 0)
+        self,
+        text_items: List[Tuple[str, int, int, Tuple[int, int, int]]],
+        background: Tuple[int, int, int] = (0, 0, 0),
     ) -> np.ndarray:
         """Render text directly to BGR numpy array (for OpenCV compatibility).
 
@@ -1015,7 +1087,9 @@ class VideoTextRenderer:
             return False
 
     def render_text_items(
-        self, items: List[Tuple[str, int, int, str, str]], background: Tuple[int, int, int] = (0, 0, 0)
+        self,
+        items: List[Tuple[str, int, int, str, str]],
+        background: Tuple[int, int, int] = (0, 0, 0),
     ) -> np.ndarray:
         """Render text items to BGR frame.
 
@@ -1051,7 +1125,9 @@ class VideoTextRenderer:
         _gl.glViewport(0, 0, self.width, self.height)
 
         # Clear with background
-        _gl.glClearColor(background[0] / 255.0, background[1] / 255.0, background[2] / 255.0, 1.0)
+        _gl.glClearColor(
+            background[0] / 255.0, background[1] / 255.0, background[2] / 255.0, 1.0
+        )
         _gl.glClear(_gl.GL_COLOR_BUFFER_BIT)
 
         _gl.glUseProgram(self._renderer._shader_program)
@@ -1063,21 +1139,37 @@ class VideoTextRenderer:
             self._renderer.load_font(self._font_path, size)
 
             _gl.glActiveTexture(_gl.GL_TEXTURE0)
-            _gl.glBindTexture(_gl.GL_TEXTURE_2D, self._renderer._current_atlas.texture_id)
+            _gl.glBindTexture(
+                _gl.GL_TEXTURE_2D, self._renderer._current_atlas.texture_id
+            )
 
             for text, x, y, color in size_items:
                 self._renderer._render_string(text, x, y, color)
 
         # Single readback at the end - use pre-allocated buffer
-        _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE, self._rgba_buffer)
+        _gl.glReadPixels(
+            0,
+            0,
+            self.width,
+            self.height,
+            _gl.GL_RGBA,
+            _gl.GL_UNSIGNED_BYTE,
+            self._rgba_buffer,
+        )
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
 
         # Convert RGBA to BGR in-place using pre-allocated buffer
         # Flip vertically (OpenGL origin is bottom-left) and swap R/B channels
-        np.copyto(self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2]))  # B
-        np.copyto(self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1]))  # G
-        np.copyto(self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0]))  # R
+        np.copyto(
+            self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2])
+        )  # B
+        np.copyto(
+            self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1])
+        )  # G
+        np.copyto(
+            self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0])
+        )  # R
 
         return self._output_buffer
 
@@ -1113,13 +1205,17 @@ class VideoTextRenderer:
         _gl.glViewport(0, 0, self.width, self.height)
 
         # Clear with background
-        _gl.glClearColor(background[0] / 255.0, background[1] / 255.0, background[2] / 255.0, 1.0)
+        _gl.glClearColor(
+            background[0] / 255.0, background[1] / 255.0, background[2] / 255.0, 1.0
+        )
         _gl.glClear(_gl.GL_COLOR_BUFFER_BIT)
 
         # Draw shapes first (behind text)
         for shape in shapes:
             shape_type = shape[0]
-            color_name = shape[-2] if shape_type in ("rect", "line", "circle") else shape[-1]
+            color_name = (
+                shape[-2] if shape_type in ("rect", "line", "circle") else shape[-1]
+            )
             color = self.COLORS.get(color_name, (0, 255, 0))
 
             if shape_type == "rect":
@@ -1155,24 +1251,42 @@ class VideoTextRenderer:
             self._renderer.load_font(self._font_path, size)
 
             _gl.glActiveTexture(_gl.GL_TEXTURE0)
-            _gl.glBindTexture(_gl.GL_TEXTURE_2D, self._renderer._current_atlas.texture_id)
+            _gl.glBindTexture(
+                _gl.GL_TEXTURE_2D, self._renderer._current_atlas.texture_id
+            )
 
             for text, x, y, color in size_items:
                 self._renderer._render_string(text, x, y, color)
 
         # Single readback at the end - use pre-allocated buffer
-        _gl.glReadPixels(0, 0, self.width, self.height, _gl.GL_RGBA, _gl.GL_UNSIGNED_BYTE, self._rgba_buffer)
+        _gl.glReadPixels(
+            0,
+            0,
+            self.width,
+            self.height,
+            _gl.GL_RGBA,
+            _gl.GL_UNSIGNED_BYTE,
+            self._rgba_buffer,
+        )
 
         _gl.glBindFramebuffer(_gl.GL_FRAMEBUFFER, 0)
 
         # Convert RGBA to BGR in-place using pre-allocated buffer
-        np.copyto(self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2]))  # B
-        np.copyto(self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1]))  # G
-        np.copyto(self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0]))  # R
+        np.copyto(
+            self._output_buffer[:, :, 0], np.flipud(self._rgba_buffer[:, :, 2])
+        )  # B
+        np.copyto(
+            self._output_buffer[:, :, 1], np.flipud(self._rgba_buffer[:, :, 1])
+        )  # G
+        np.copyto(
+            self._output_buffer[:, :, 2], np.flipud(self._rgba_buffer[:, :, 0])
+        )  # R
 
         return self._output_buffer
 
-    def composite_onto_frame(self, frame: np.ndarray, items: List[Tuple[str, int, int, str, str]]) -> np.ndarray:
+    def composite_onto_frame(
+        self, frame: np.ndarray, items: List[Tuple[str, int, int, str, str]]
+    ) -> np.ndarray:
         """Composite text onto existing BGR frame.
 
         Args:

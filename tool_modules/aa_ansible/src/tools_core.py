@@ -70,7 +70,9 @@ def register_tools(server: FastMCP) -> int:
         limit: str = "",
     ) -> str:
         """Run an Ansible playbook."""
-        return await _ansible_playbook_run_impl(playbook, inventory, extra_vars, tags, limit)
+        return await _ansible_playbook_run_impl(
+            playbook, inventory, extra_vars, tags, limit
+        )
 
     @auto_heal()
     @registry.tool()
@@ -92,7 +94,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def ansible_setup(hosts: str = "all", inventory: str = "", filter: str = "") -> str:
+    async def ansible_setup(
+        hosts: str = "all", inventory: str = "", filter: str = ""
+    ) -> str:
         """Gather facts from hosts."""
         return await _ansible_setup_impl(hosts, inventory, filter)
 

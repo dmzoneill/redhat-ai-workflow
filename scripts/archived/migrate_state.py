@@ -52,7 +52,9 @@ def extract_state(config: dict) -> dict:
     state["services"]["sprint_bot"] = {"enabled": sprint.get("enabled", False)}
 
     google_calendar = config.get("google_calendar", {})
-    state["services"]["google_calendar"] = {"enabled": google_calendar.get("enabled", False)}
+    state["services"]["google_calendar"] = {
+        "enabled": google_calendar.get("enabled", False)
+    }
 
     gmail = config.get("gmail", {})
     state["services"]["gmail"] = {"enabled": gmail.get("enabled", False)}
@@ -68,9 +70,17 @@ def extract_state(config: dict) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Migrate state from config.json to state.json")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be extracted without writing")
-    parser.add_argument("--force", action="store_true", help="Overwrite existing state.json")
+    parser = argparse.ArgumentParser(
+        description="Migrate state from config.json to state.json"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be extracted without writing",
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Overwrite existing state.json"
+    )
     args = parser.parse_args()
 
     # Check if state.json already exists

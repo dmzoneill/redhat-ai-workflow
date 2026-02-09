@@ -193,7 +193,9 @@ class ResultMerger:
         - source_priority: Sort by source priority, then relevance
         """
         if strategy == "recency":
-            return sorted(items, key=lambda x: (x.timestamp or 0, x.relevance), reverse=True)
+            return sorted(
+                items, key=lambda x: (x.timestamp or 0, x.relevance), reverse=True
+            )
 
         elif strategy == "source_priority":
             # Boost items from sources suggested by intent

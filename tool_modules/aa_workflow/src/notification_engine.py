@@ -154,7 +154,9 @@ class DesktopNotificationBackend(NotificationBackend):
         escaped_title = title.replace('"', '\\"')
         escaped_message = message.replace('"', '\\"')
 
-        script = f'display notification "{escaped_message}" with title "{escaped_title}"'
+        script = (
+            f'display notification "{escaped_message}" with title "{escaped_title}"'
+        )
 
         proc = await asyncio.create_subprocess_exec(
             "osascript",

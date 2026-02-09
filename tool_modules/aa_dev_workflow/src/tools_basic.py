@@ -45,7 +45,11 @@ run_cmd = run_cmd_full
 REPOS_CONFIG = load_config()
 repos_data = REPOS_CONFIG.get("repositories", {})
 if isinstance(repos_data, dict):
-    REPO_PATHS = {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
+    REPO_PATHS = {
+        name: info.get("path", "")
+        for name, info in repos_data.items()
+        if info.get("path")
+    }
 else:
     REPO_PATHS = {}
 
@@ -131,12 +135,16 @@ async def _workflow_create_branch_impl(
     lines = [f"## Creating Branch for `{issue_key}`", ""]
 
     # 1. Fetch latest
-    success, stdout, stderr = await run_cmd(["git", "fetch", "--all", "--prune"], cwd=path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "fetch", "--all", "--prune"], cwd=path
+    )
     lines.append("### 1. Fetch latest")
     lines.append("✅ Fetched" if success else f"⚠️ {truncate_output(stderr, 50)}")
 
     # 2. Check for existing branch
-    success, stdout, stderr = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
+    )
     if stdout.strip():
         lines.append("\n### Existing branch found:")
         lines.append(f"```\n{stdout.strip()}\n```")
@@ -148,7 +156,9 @@ async def _workflow_create_branch_impl(
     await run_cmd(["git", "pull", "--rebase"], cwd=path)
 
     # 4. Create branch
-    success, stdout, stderr = await run_cmd(["git", "checkout", "-b", branch_name], cwd=path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "checkout", "-b", branch_name], cwd=path
+    )
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to create branch: {stderr}")]
 
@@ -216,7 +226,9 @@ async def _workflow_handle_review_impl(
     lines = [f"## Handling Review: `{issue_key}`", ""]
 
     # Find and switch to branch
-    success, stdout, _ = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
+    success, stdout, _ = await run_cmd(
+        ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
+    )
     if stdout.strip():
         branch = stdout.strip().split("\n")[0].strip().replace("* ", "")
         lines.append(f"**Branch:** `{branch}`")
@@ -251,7 +263,9 @@ async def _workflow_monitor_pipelines_impl(
 
     # Get current branch
     if not branch:
-        success, stdout, _ = await run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+        success, stdout, _ = await run_cmd(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path
+        )
         branch = stdout.strip() if success else "unknown"
     lines.append(f"**Branch:** `{branch}`")
 
@@ -284,7 +298,9 @@ async def _workflow_prepare_mr_impl(
     lines = [f"## Preparing MR for `{issue_key}`", ""]
 
     # 1. Get current branch
-    success, stdout, stderr = await run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=path
+    )
     if not success:
         return [TextContent(type="text", text="❌ Failed to get branch")]
     current_branch = stdout.strip()
@@ -292,7 +308,9 @@ async def _workflow_prepare_mr_impl(
 
     # 2. Push branch
     lines.append("\n### 1. Pushing branch...")
-    success, stdout, stderr = await run_cmd(["git", "push", "-u", "origin", current_branch], cwd=path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "push", "-u", "origin", current_branch], cwd=path
+    )
     if success:
         lines.append("✅ Pushed")
     else:
@@ -305,7 +323,9 @@ async def _workflow_prepare_mr_impl(
     lines.append("\n### 2. Create MR with glab:")
     draft_flag = "--draft" if draft else ""
     lines.append("```bash")
-    lines.append(f'glab mr create --title "{issue_key}: Description" {draft_flag} --yes')
+    lines.append(
+        f'glab mr create --title "{issue_key}: Description" {draft_flag} --yes'
+    )
     lines.append("```")
 
     lines.append("\n### Or use the gitlab_mr_create tool")
@@ -392,7 +412,9 @@ async def _workflow_run_local_checks_impl(
                 all_passed = False
                 output = stderr or stdout
                 if output:
-                    lines.append(f"```\n{truncate_output(output, max_length=1000)}\n```")
+                    lines.append(
+                        f"```\n{truncate_output(output, max_length=1000)}\n```"
+                    )
 
     if (Path(path) / "package.json").exists():
         # Node project
@@ -566,12 +588,16 @@ quay_list_aa_tags()
         lines = [f"## Creating Branch for `{issue_key}`", ""]
 
         # 1. Fetch latest
-        success, stdout, stderr = await run_cmd(["git", "fetch", "--all", "--prune"], cwd=path)
+        success, stdout, stderr = await run_cmd(
+            ["git", "fetch", "--all", "--prune"], cwd=path
+        )
         lines.append("### 1. Fetch latest")
         lines.append("✅ Fetched" if success else f"⚠️ {truncate_output(stderr, 50)}")
 
         # 2. Check for existing branch
-        success, stdout, stderr = await run_cmd(["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path)
+        success, stdout, stderr = await run_cmd(
+            ["git", "branch", "-a", "--list", f"*{issue_key}*"], cwd=path
+        )
         if stdout.strip():
             lines.append("\n### Existing branch found:")
             lines.append(f"```\n{stdout.strip()}\n```")
@@ -583,9 +609,13 @@ quay_list_aa_tags()
         await run_cmd(["git", "pull", "--rebase"], cwd=path)
 
         # 4. Create branch
-        success, stdout, stderr = await run_cmd(["git", "checkout", "-b", branch_name], cwd=path)
+        success, stdout, stderr = await run_cmd(
+            ["git", "checkout", "-b", branch_name], cwd=path
+        )
         if not success:
-            return [TextContent(type="text", text=f"❌ Failed to create branch: {stderr}")]
+            return [
+                TextContent(type="text", text=f"❌ Failed to create branch: {stderr}")
+            ]
 
         lines.append(f"\n### 2. Created branch: `{branch_name}`")
         lines.append(f"\n**Ready to start work on {issue_key}!**")

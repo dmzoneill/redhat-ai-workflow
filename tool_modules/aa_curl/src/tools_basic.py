@@ -112,7 +112,9 @@ async def _curl_post_impl(
     insecure: bool = False,
 ) -> str:
     """HTTP POST request."""
-    cmd = _build_curl_cmd(url, "POST", headers, data, json_data, auth, timeout_secs, insecure)
+    cmd = _build_curl_cmd(
+        url, "POST", headers, data, json_data, auth, timeout_secs, insecure
+    )
 
     success, output = await run_cmd(cmd, timeout=timeout_secs + 10)
     if success:
@@ -136,7 +138,9 @@ async def _curl_put_impl(
     insecure: bool = False,
 ) -> str:
     """HTTP PUT request."""
-    cmd = _build_curl_cmd(url, "PUT", headers, data, json_data, auth, timeout_secs, insecure)
+    cmd = _build_curl_cmd(
+        url, "PUT", headers, data, json_data, auth, timeout_secs, insecure
+    )
 
     success, output = await run_cmd(cmd, timeout=timeout_secs + 10)
     if success:
@@ -177,7 +181,9 @@ async def _curl_patch_impl(
     insecure: bool = False,
 ) -> str:
     """HTTP PATCH request."""
-    cmd = _build_curl_cmd(url, "PATCH", headers, data, json_data, auth, timeout_secs, insecure)
+    cmd = _build_curl_cmd(
+        url, "PATCH", headers, data, json_data, auth, timeout_secs, insecure
+    )
 
     success, output = await run_cmd(cmd, timeout=timeout_secs + 10)
     if success:

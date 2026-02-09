@@ -126,7 +126,9 @@ class AttendeeDataService:
         self._poll_task: Optional[asyncio.Task] = None
         self._poll_interval: float = 30.0  # seconds between polls
         self._poll_duration: float = 600.0  # 10 minutes total polling duration
-        self._poll_callback: Optional[Callable[[], Any]] = None  # Async callback to get participants
+        self._poll_callback: Optional[Callable[[], Any]] = (
+            None  # Async callback to get participants
+        )
         self._poll_start_time: float = 0.0
 
         # Callbacks for external integration
@@ -152,7 +154,9 @@ class AttendeeDataService:
                 SOCKET_PATH.unlink()
 
             # Create Unix socket server
-            self._server = await asyncio.start_unix_server(self._handle_client, path=str(SOCKET_PATH))
+            self._server = await asyncio.start_unix_server(
+                self._handle_client, path=str(SOCKET_PATH)
+            )
 
             # Set socket permissions (readable/writable by user only)
             SOCKET_PATH.chmod(0o600)
@@ -206,7 +210,9 @@ class AttendeeDataService:
 
         logger.info("AttendeeDataService stopped")
 
-    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
         """Handle a connected client."""
         peer = writer.get_extra_info("peername") or "unknown"
         logger.info(f"Client connected: {peer}")
@@ -235,7 +241,9 @@ class AttendeeDataService:
             # Read client messages
             while self._running:
                 try:
-                    line = await asyncio.wait_for(reader.readline(), timeout=30.0)  # Keepalive timeout
+                    line = await asyncio.wait_for(
+                        reader.readline(), timeout=30.0
+                    )  # Keepalive timeout
 
                     if not line:
                         break  # Client disconnected
@@ -371,7 +379,9 @@ class AttendeeDataService:
         if self._on_state_change:
             self._on_state_change(self._state)
 
-    async def update_participants(self, participants: list[dict], enrich: bool = True) -> None:
+    async def update_participants(
+        self, participants: list[dict], enrich: bool = True
+    ) -> None:
         """
         Update the participant list from Google Meet.
 
@@ -479,7 +489,9 @@ class AttendeeDataService:
         self._poll_start_time = time.time()
 
         self._poll_task = asyncio.create_task(self._polling_loop())
-        logger.info(f"Started periodic attendee polling: every {interval}s for {duration}s")
+        logger.info(
+            f"Started periodic attendee polling: every {interval}s for {duration}s"
+        )
 
     async def stop_periodic_polling(self) -> None:
         """Stop periodic polling if running."""
@@ -519,10 +531,16 @@ class AttendeeDataService:
                         if participants:
                             # Check for new participants
                             existing_names = {a.name for a in self._state.attendees}
-                            new_count = sum(1 for p in participants if p.get("name") not in existing_names)
+                            new_count = sum(
+                                1
+                                for p in participants
+                                if p.get("name") not in existing_names
+                            )
 
                             if new_count > 0:
-                                logger.info(f"Polling detected {new_count} new participant(s)")
+                                logger.info(
+                                    f"Polling detected {new_count} new participant(s)"
+                                )
 
                             # Update participants (will broadcast changes)
                             await self.update_participants(participants)
@@ -564,7 +582,9 @@ class AttendeeDataService:
         """Get current meeting state (for local access)."""
         return self._state
 
-    def set_state_change_callback(self, callback: Callable[[MeetingState], None]) -> None:
+    def set_state_change_callback(
+        self, callback: Callable[[MeetingState], None]
+    ) -> None:
         """Set callback for state changes."""
         self._on_state_change = callback
 
@@ -585,9 +605,13 @@ class AttendeeDataClient:
         self._receive_task: Optional[asyncio.Task] = None
 
         # Callbacks
-        self._on_attendees_update: Optional[Callable[[list[EnrichedAttendee]], None]] = None
+        self._on_attendees_update: Optional[
+            Callable[[list[EnrichedAttendee]], None]
+        ] = None
         self._on_status_change: Optional[Callable[[str], None]] = None
-        self._on_attendee_enriched: Optional[Callable[[int, EnrichedAttendee], None]] = None
+        self._on_attendee_enriched: Optional[
+            Callable[[int, EnrichedAttendee], None]
+        ] = None
 
     async def connect(self, timeout: float = 5.0) -> bool:
         """
@@ -717,7 +741,9 @@ class AttendeeDataClient:
                     self._state.status = state_data.get("status", "scanning")
                     self._state.current_index = state_data.get("current_index", 0)
                     self._state.meeting_title = state_data.get("meeting_title", "")
-                    self._state.attendees = [EnrichedAttendee(**a) for a in state_data.get("attendees", [])]
+                    self._state.attendees = [
+                        EnrichedAttendee(**a) for a in state_data.get("attendees", [])
+                    ]
                     self._state.video_device = state_data.get("video_device")
                     self._state.audio_source = state_data.get("audio_source")
 
@@ -759,7 +785,9 @@ class AttendeeDataClient:
 
     def get_current_attendee(self) -> Optional[EnrichedAttendee]:
         """Get the currently displayed attendee."""
-        if self._state.attendees and 0 <= self._state.current_index < len(self._state.attendees):
+        if self._state.attendees and 0 <= self._state.current_index < len(
+            self._state.attendees
+        ):
             return self._state.attendees[self._state.current_index]
         return None
 
@@ -776,7 +804,9 @@ class AttendeeDataClient:
         return self._connected
 
     # Callback setters
-    def on_attendees_update(self, callback: Callable[[list[EnrichedAttendee]], None]) -> None:
+    def on_attendees_update(
+        self, callback: Callable[[list[EnrichedAttendee]], None]
+    ) -> None:
         """Set callback for attendee list updates."""
         self._on_attendees_update = callback
 
@@ -784,7 +814,9 @@ class AttendeeDataClient:
         """Set callback for meeting status changes."""
         self._on_status_change = callback
 
-    def on_attendee_enriched(self, callback: Callable[[int, EnrichedAttendee], None]) -> None:
+    def on_attendee_enriched(
+        self, callback: Callable[[int, EnrichedAttendee], None]
+    ) -> None:
         """Set callback for individual attendee enrichment."""
         self._on_attendee_enriched = callback
 

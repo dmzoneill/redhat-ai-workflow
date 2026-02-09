@@ -139,7 +139,9 @@ def extract_commands_from_text(text, source_info=""):
                 cmd_line = re.sub(r"^```\w*\s*", "", cmd_line)
                 cmd_line = cmd_line.rstrip("`")
 
-                if len(cmd_line) > 10 and len(cmd_line) < 1000:  # Reasonable command length
+                if (
+                    len(cmd_line) > 10 and len(cmd_line) < 1000
+                ):  # Reasonable command length
                     commands.append(
                         {
                             "command": cmd_line,
@@ -184,31 +186,41 @@ def process_cursor_chats():
                                     role = msg.get("role", "")
                                     if isinstance(content, str):
                                         cmds = extract_commands_from_text(
-                                            content, f"cursor:{db_file}:blob:{blob_id[:12]}:role:{role}"
+                                            content,
+                                            f"cursor:{db_file}:blob:{blob_id[:12]}:role:{role}",
                                         )
                                         commands.extend(cmds)
                                     elif isinstance(content, list):
                                         for part in content:
                                             if isinstance(part, dict):
-                                                t = part.get("text", "") or part.get("content", "")
+                                                t = part.get("text", "") or part.get(
+                                                    "content", ""
+                                                )
                                                 if t:
                                                     cmds = extract_commands_from_text(
-                                                        t, f"cursor:{db_file}:blob:{blob_id[:12]}:role:{role}"
+                                                        t,
+                                                        f"cursor:{db_file}:blob:{blob_id[:12]}:role:{role}",
                                                     )
                                                     commands.extend(cmds)
                         elif isinstance(json_data, dict):
                             # Might be a single message or config
                             content = json_data.get("content", "")
                             if isinstance(content, str):
-                                cmds = extract_commands_from_text(content, f"cursor:{db_file}:blob:{blob_id[:12]}")
+                                cmds = extract_commands_from_text(
+                                    content, f"cursor:{db_file}:blob:{blob_id[:12]}"
+                                )
                                 commands.extend(cmds)
                     except json.JSONDecodeError:
                         # Not JSON, treat as raw text
-                        cmds = extract_commands_from_text(text, f"cursor:{db_file}:blob:{blob_id[:12]}")
+                        cmds = extract_commands_from_text(
+                            text, f"cursor:{db_file}:blob:{blob_id[:12]}"
+                        )
                         commands.extend(cmds)
 
                 except Exception as e:
-                    print(f"  Error processing blob {blob_id[:12]}: {e}", file=sys.stderr)
+                    print(
+                        f"  Error processing blob {blob_id[:12]}: {e}", file=sys.stderr
+                    )
 
             conn.close()
         except Exception as e:
@@ -259,7 +271,9 @@ def process_claude_sessions():
                                                     "execute_command",
                                                     "run_terminal_command",
                                                 ):
-                                                    cmd = tool_input.get("command", "") or tool_input.get("cmd", "")
+                                                    cmd = tool_input.get(
+                                                        "command", ""
+                                                    ) or tool_input.get("cmd", "")
                                                     if cmd:
                                                         cmds = extract_commands_from_text(
                                                             cmd,
@@ -269,7 +283,8 @@ def process_claude_sessions():
                                             elif block.get("type") == "text":
                                                 text = block.get("text", "")
                                                 cmds = extract_commands_from_text(
-                                                    text, f"claude:{project_name}:{os.path.basename(session_file)}"
+                                                    text,
+                                                    f"claude:{project_name}:{os.path.basename(session_file)}",
                                                 )
                                                 commands.extend(cmds)
 
@@ -278,12 +293,16 @@ def process_claude_sessions():
                                 content = message.get("content", [])
                                 if isinstance(content, str):
                                     cmds = extract_commands_from_text(
-                                        content, f"claude:{project_name}:{os.path.basename(session_file)}:user"
+                                        content,
+                                        f"claude:{project_name}:{os.path.basename(session_file)}:user",
                                     )
                                     commands.extend(cmds)
                                 elif isinstance(content, list):
                                     for block in content:
-                                        if isinstance(block, dict) and block.get("type") == "text":
+                                        if (
+                                            isinstance(block, dict)
+                                            and block.get("type") == "text"
+                                        ):
                                             cmds = extract_commands_from_text(
                                                 block.get("text", ""),
                                                 f"claude:{project_name}:{os.path.basename(session_file)}:user",
@@ -295,7 +314,8 @@ def process_claude_sessions():
                                 content = entry.get("content", "")
                                 if isinstance(content, str):
                                     cmds = extract_commands_from_text(
-                                        content, f"claude:{project_name}:{os.path.basename(session_file)}:result"
+                                        content,
+                                        f"claude:{project_name}:{os.path.basename(session_file)}:result",
                                     )
                                     commands.extend(cmds)
 
@@ -305,7 +325,10 @@ def process_claude_sessions():
             except Exception as e:
                 print(f"  Error with {session_file}: {e}", file=sys.stderr)
 
-    print(f"  Processed {session_count} sessions, found {len(commands)} commands", file=sys.stderr)
+    print(
+        f"  Processed {session_count} sessions, found {len(commands)} commands",
+        file=sys.stderr,
+    )
     return commands
 
 
@@ -330,16 +353,23 @@ def process_gemini_sessions():
                 for tc in tool_calls:
                     tc_name = tc.get("id", "").split("-")[0] if tc.get("id") else ""
                     tc_args = tc.get("args", {})
-                    if "shell" in tc_name.lower() or "command" in tc_name.lower() or "bash" in tc_name.lower():
+                    if (
+                        "shell" in tc_name.lower()
+                        or "command" in tc_name.lower()
+                        or "bash" in tc_name.lower()
+                    ):
                         cmd = tc_args.get("command", "") or tc_args.get("cmd", "")
                         if cmd:
-                            cmds = extract_commands_from_text(cmd, f"gemini:{os.path.basename(session_file)}")
+                            cmds = extract_commands_from_text(
+                                cmd, f"gemini:{os.path.basename(session_file)}"
+                            )
                             commands.extend(cmds)
 
                 # Also check raw content for commands
                 if isinstance(content, str) and content:
                     cmds = extract_commands_from_text(
-                        content, f"gemini:{os.path.basename(session_file)}:type:{msg_type}"
+                        content,
+                        f"gemini:{os.path.basename(session_file)}:type:{msg_type}",
                     )
                     commands.extend(cmds)
 
@@ -349,14 +379,18 @@ def process_gemini_sessions():
                     result_text = tr.get("result", "")
                     if isinstance(result_text, str):
                         cmds = extract_commands_from_text(
-                            result_text, f"gemini:{os.path.basename(session_file)}:result"
+                            result_text,
+                            f"gemini:{os.path.basename(session_file)}:result",
                         )
                         commands.extend(cmds)
 
         except Exception as e:
             print(f"  Error with {session_file}: {e}", file=sys.stderr)
 
-    print(f"  Found {len(commands)} commands in {len(session_files)} Gemini sessions", file=sys.stderr)
+    print(
+        f"  Found {len(commands)} commands in {len(session_files)} Gemini sessions",
+        file=sys.stderr,
+    )
     return commands
 
 
@@ -364,7 +398,9 @@ def process_codex_sessions():
     """Process Codex session JSONL files."""
     print("=== Processing Codex Sessions ===", file=sys.stderr)
     commands = []
-    session_files = glob(os.path.expanduser("~/.codex/sessions/**/*.jsonl"), recursive=True)
+    session_files = glob(
+        os.path.expanduser("~/.codex/sessions/**/*.jsonl"), recursive=True
+    )
     # Also check history
     history_file = os.path.expanduser("~/.codex/history.jsonl")
     if os.path.exists(history_file):
@@ -382,7 +418,9 @@ def process_codex_sessions():
                         # Codex format: check for shell commands in various fields
                         text = entry.get("text", "")
                         if text:
-                            cmds = extract_commands_from_text(text, f"codex:{os.path.basename(session_file)}")
+                            cmds = extract_commands_from_text(
+                                text, f"codex:{os.path.basename(session_file)}"
+                            )
                             commands.extend(cmds)
 
                         # Check for tool calls
@@ -391,10 +429,13 @@ def process_codex_sessions():
                             if isinstance(calls, list):
                                 for call in calls:
                                     if isinstance(call, dict):
-                                        cmd = call.get("command", "") or call.get("input", "")
+                                        cmd = call.get("command", "") or call.get(
+                                            "input", ""
+                                        )
                                         if cmd:
                                             cmds = extract_commands_from_text(
-                                                cmd, f"codex:{os.path.basename(session_file)}"
+                                                cmd,
+                                                f"codex:{os.path.basename(session_file)}",
                                             )
                                             commands.extend(cmds)
 
@@ -404,19 +445,26 @@ def process_codex_sessions():
         except Exception as e:
             print(f"  Error with {session_file}: {e}", file=sys.stderr)
 
-    print(f"  Found {len(commands)} commands in {len(session_files)} Codex sessions", file=sys.stderr)
+    print(
+        f"  Found {len(commands)} commands in {len(session_files)} Codex sessions",
+        file=sys.stderr,
+    )
     return commands
 
 
 def deduplicate_commands(commands):
     """Deduplicate commands, keeping count and all sources."""
-    deduped = defaultdict(lambda: {"count": 0, "sources": set(), "category": "", "tool": ""})
+    deduped = defaultdict(
+        lambda: {"count": 0, "sources": set(), "category": "", "tool": ""}
+    )
 
     for cmd in commands:
         # Normalize command for dedup (strip variable parts like specific file paths)
         key = cmd["command"].strip()
         deduped[key]["count"] += 1
-        deduped[key]["sources"].add(cmd["source"].split(":")[0])  # Just keep source type
+        deduped[key]["sources"].add(
+            cmd["source"].split(":")[0]
+        )  # Just keep source type
         deduped[key]["category"] = cmd["category"]
         deduped[key]["tool"] = cmd["tool"]
 

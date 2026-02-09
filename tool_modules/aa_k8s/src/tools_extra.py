@@ -52,7 +52,11 @@ def register_tools(server: "FastMCP") -> int:
             kubeconfig=kubeconfig,
             namespace=namespace,
         )
-        return f"## Deployments in {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+        return (
+            f"## Deployments in {namespace}\n\n```\n{output}\n```"
+            if success
+            else f"❌ Failed: {output}"
+        )
 
     @auto_heal()
     @registry.tool()
@@ -64,7 +68,9 @@ def register_tools(server: "FastMCP") -> int:
             List of active ephemeral namespaces.
         """
         kubeconfig = get_kubeconfig("ephemeral")
-        success, output = await run_kubectl(["get", "namespaces", "-o", "name"], kubeconfig=kubeconfig)
+        success, output = await run_kubectl(
+            ["get", "namespaces", "-o", "name"], kubeconfig=kubeconfig
+        )
         if not success:
             return f"❌ Failed: {output}\n\nRun: `kube e` to authenticate"
 
@@ -72,7 +78,11 @@ def register_tools(server: "FastMCP") -> int:
         namespaces = [ln.replace("namespace/", "") for ln in lines if ln.strip()]
 
         # Filter for ephemeral-like namespaces (often have specific patterns)
-        ephemeral_ns = [ns for ns in namespaces if any(x in ns for x in ["ephemeral", "pr-", "test-", "temp-"])]
+        ephemeral_ns = [
+            ns
+            for ns in namespaces
+            if any(x in ns for x in ["ephemeral", "pr-", "test-", "temp-"])
+        ]
 
         if not ephemeral_ns:
             return "No ephemeral namespaces found"
@@ -100,35 +110,59 @@ def register_tools(server: "FastMCP") -> int:
             List of pods with status.
         """
         kubeconfig = get_kubeconfig(environment, namespace)
-        success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
-        return f"## Pods in {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+        success, output = await run_kubectl(
+            ["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+        )
+        return (
+            f"## Pods in {namespace}\n\n```\n{output}\n```"
+            if success
+            else f"❌ Failed: {output}"
+        )
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_delete_pod(pod_name: str, namespace: str, environment: str = "stage", force: bool = False) -> str:
+    async def kubectl_delete_pod(
+        pod_name: str, namespace: str, environment: str = "stage", force: bool = False
+    ) -> str:
         """Delete a pod (force restart)."""
         kubeconfig = get_kubeconfig(environment, namespace)
         args = ["delete", "pod", pod_name]
         if force:
             args.extend(["--force", "--grace-period=0"])
-        success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace)
+        success, output = await run_kubectl(
+            args, kubeconfig=kubeconfig, namespace=namespace
+        )
         return f"✅ Pod deleted: {pod_name}" if success else f"❌ Failed: {output}"
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_saas_logs(pod_name: str, namespace: str, container: str = "", tail: int = 100) -> str:
+    async def kubectl_saas_logs(
+        pod_name: str, namespace: str, container: str = "", tail: int = 100
+    ) -> str:
         """Get logs from a pod on the SaaS/App-SRE cluster."""
         kubeconfig = get_kubeconfig("appsre-pipelines")
         args = ["logs", pod_name, f"--tail={tail}"]
         if container:
             args.extend(["-c", container])
-        success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=120)
-        return f"## Logs: {pod_name}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+        success, output = await run_kubectl(
+            args, kubeconfig=kubeconfig, namespace=namespace, timeout=120
+        )
+        return (
+            f"## Logs: {pod_name}\n\n```\n{output}\n```"
+            if success
+            else f"❌ Failed: {output}"
+        )
 
     @auto_heal()
     @registry.tool()
     async def kubectl_saas_pods(namespace: str) -> str:
         """List pods on the SaaS/App-SRE cluster."""
         kubeconfig = get_kubeconfig("appsre-pipelines")
-        success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
-        return f"## SaaS Pods: {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+        success, output = await run_kubectl(
+            ["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+        )
+        return (
+            f"## SaaS Pods: {namespace}\n\n```\n{output}\n```"
+            if success
+            else f"❌ Failed: {output}"
+        )

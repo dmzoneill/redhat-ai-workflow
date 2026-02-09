@@ -128,7 +128,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Created MR details.
         """
-        return await _gitlab_mr_create_impl(project, source_branch, target_branch, title, description)
+        return await _gitlab_mr_create_impl(
+            project, source_branch, target_branch, title, description
+        )
 
     @auto_heal()
     @registry.tool()

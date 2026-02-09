@@ -70,7 +70,9 @@ def file_lock(file_path: Path) -> Generator[bool, None, None]:
                         # Lock is stale, remove it
                         try:
                             lock_path.unlink()
-                            logger.debug(f"Removed stale lock file (age: {lock_age:.1f}s)")
+                            logger.debug(
+                                f"Removed stale lock file (age: {lock_age:.1f}s)"
+                            )
                         except OSError:
                             # Another process may have removed it
                             pass
@@ -131,7 +133,8 @@ def _load_all_executions_unlocked() -> dict:
                 # Convert old format to new format
                 old_exec = data
                 exec_id = _generate_execution_id(
-                    old_exec.get("workspaceUri", "default"), old_exec.get("skillName", "unknown")
+                    old_exec.get("workspaceUri", "default"),
+                    old_exec.get("skillName", "unknown"),
                 )
                 return {
                     "executions": {exec_id: old_exec},
@@ -151,7 +154,11 @@ def _load_all_executions() -> dict:
     with file_lock(EXECUTION_FILE) as acquired:
         if not acquired:
             logger.warning("Failed to acquire lock for loading executions")
-            return {"executions": {}, "lastUpdated": datetime.now().isoformat(), "version": 2}
+            return {
+                "executions": {},
+                "lastUpdated": datetime.now().isoformat(),
+                "version": 2,
+            }
         return _load_all_executions_unlocked()
 
 
@@ -250,7 +257,9 @@ class SkillExecutionEmitter:
             "skillName": self.skill_name,
             "workspaceUri": self.workspace_uri,
             "executionId": self.execution_id,
-            "stepIndex": (self.current_step_index if self.current_step_index >= 0 else None),
+            "stepIndex": (
+                self.current_step_index if self.current_step_index >= 0 else None
+            ),
             "stepName": (
                 self.steps[self.current_step_index].get("name")
                 if 0 <= self.current_step_index < len(self.steps)
@@ -269,7 +278,9 @@ class SkillExecutionEmitter:
         """
         with file_lock(EXECUTION_FILE) as acquired:
             if not acquired:
-                logger.warning("Failed to acquire lock for writing skill state, skipping")
+                logger.warning(
+                    "Failed to acquire lock for writing skill state, skipping"
+                )
                 return
 
             try:
@@ -331,7 +342,9 @@ class SkillExecutionEmitter:
         self.current_step_index = step_index
         self._emit("step_start")
 
-    def step_complete(self, step_index: int, duration_ms: int, result: str | None = None) -> None:
+    def step_complete(
+        self, step_index: int, duration_ms: int, result: str | None = None
+    ) -> None:
         """Emit step complete event."""
         self.current_step_index = step_index
         self._emit(
@@ -409,7 +422,9 @@ _current_execution_id: str | None = None
 _MAX_EMITTERS = 50  # Prevent unbounded memory growth
 
 
-def get_emitter(workspace_uri: str | None = None, execution_id: str | None = None) -> SkillExecutionEmitter | None:
+def get_emitter(
+    workspace_uri: str | None = None, execution_id: str | None = None
+) -> SkillExecutionEmitter | None:
     """Get the skill execution emitter.
 
     Args:
@@ -430,7 +445,9 @@ def get_emitter(workspace_uri: str | None = None, execution_id: str | None = Non
     return None
 
 
-def set_emitter(emitter: SkillExecutionEmitter | None, workspace_uri: str = "default") -> None:
+def set_emitter(
+    emitter: SkillExecutionEmitter | None, workspace_uri: str = "default"
+) -> None:
     """Set the skill execution emitter.
 
     Args:
@@ -442,7 +459,11 @@ def set_emitter(emitter: SkillExecutionEmitter | None, workspace_uri: str = "def
 
     if emitter is None:
         # Clear by workspace_uri (legacy) - remove all emitters for this workspace
-        to_remove = [exec_id for exec_id, e in _workspace_emitters.items() if e.workspace_uri == workspace_uri]
+        to_remove = [
+            exec_id
+            for exec_id, e in _workspace_emitters.items()
+            if e.workspace_uri == workspace_uri
+        ]
         for exec_id in to_remove:
             _workspace_emitters.pop(exec_id, None)
         _current_execution_id = None
@@ -450,10 +471,16 @@ def set_emitter(emitter: SkillExecutionEmitter | None, workspace_uri: str = "def
         # Cleanup: remove completed/failed emitters if we're over the limit
         if len(_workspace_emitters) >= _MAX_EMITTERS:
             # Remove non-running emitters first (oldest first)
-            non_running = [(exec_id, e) for exec_id, e in _workspace_emitters.items() if e.status != "running"]
+            non_running = [
+                (exec_id, e)
+                for exec_id, e in _workspace_emitters.items()
+                if e.status != "running"
+            ]
             # Sort by start_time (oldest first) and remove
             non_running.sort(key=lambda x: x[1].start_time or "")
-            for exec_id, _ in non_running[: len(_workspace_emitters) - _MAX_EMITTERS + 1]:
+            for exec_id, _ in non_running[
+                : len(_workspace_emitters) - _MAX_EMITTERS + 1
+            ]:
                 _workspace_emitters.pop(exec_id, None)
 
         # Register by execution_id
@@ -461,7 +488,11 @@ def set_emitter(emitter: SkillExecutionEmitter | None, workspace_uri: str = "def
         _current_execution_id = emitter.execution_id
 
 
-def emit_event(event_type: str, data: dict[str, Any] | None = None, workspace_uri: str | None = None) -> None:
+def emit_event(
+    event_type: str,
+    data: dict[str, Any] | None = None,
+    workspace_uri: str | None = None,
+) -> None:
     """
     Emit an event if there's an active emitter.
 
@@ -483,7 +514,11 @@ def clear_workspace_emitter(workspace_uri: str) -> None:
     Args:
         workspace_uri: Workspace URI to clear.
     """
-    to_remove = [exec_id for exec_id, e in _workspace_emitters.items() if e.workspace_uri == workspace_uri]
+    to_remove = [
+        exec_id
+        for exec_id, e in _workspace_emitters.items()
+        if e.workspace_uri == workspace_uri
+    ]
     for exec_id in to_remove:
         _workspace_emitters.pop(exec_id, None)
 

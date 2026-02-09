@@ -116,7 +116,9 @@ async def run_glab(
             cmd.extend(["--repo", repo])
 
     # Use unified run_cmd with GITLAB_HOST env var
-    return await run_cmd(cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout)
+    return await run_cmd(
+        cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout
+    )
 
 
 # ==================== MERGE REQUESTS ====================
@@ -152,7 +154,9 @@ async def _gitlab_ci_run_impl(project: str, branch: str, variables: str) -> str:
     return f"✅ Pipeline Started\n\n{output}" if success else f"❌ Failed: {output}"
 
 
-async def _gitlab_issue_create_impl(project: str, title: str, description: str, labels: str, assignee: str) -> str:
+async def _gitlab_issue_create_impl(
+    project: str, title: str, description: str, labels: str, assignee: str
+) -> str:
     """Implementation of gitlab_issue_create tool."""
     args = ["issue", "create", "--title", title, "--yes"]
     if description:
@@ -165,7 +169,9 @@ async def _gitlab_issue_create_impl(project: str, title: str, description: str, 
     return f"✅ Issue Created\n\n{output}" if success else f"❌ Failed: {output}"
 
 
-async def _gitlab_issue_list_impl(project: str, state: str, label: str, assignee: str) -> str:
+async def _gitlab_issue_list_impl(
+    project: str, state: str, label: str, assignee: str
+) -> str:
     """Implementation of gitlab_issue_list tool."""
     args = ["issue", "list"]
     if state == "closed":
@@ -185,7 +191,9 @@ async def _gitlab_issue_list_impl(project: str, state: str, label: str, assignee
 
 async def _gitlab_issue_view_impl(project: str, issue_id: int) -> str:
     """Implementation of gitlab_issue_view tool."""
-    success, output = await run_glab(["issue", "view", str(issue_id), "--web=false"], repo=project)
+    success, output = await run_glab(
+        ["issue", "view", str(issue_id), "--web=false"], repo=project
+    )
     return output if success else f"❌ Failed: {output}"
 
 
@@ -300,11 +308,15 @@ def register_tools(server: "FastMCP") -> int:
         assignee: str = "",
     ) -> str:
         """Create a new GitLab issue."""
-        return await _gitlab_issue_create_impl(project, title, description, labels, assignee)
+        return await _gitlab_issue_create_impl(
+            project, title, description, labels, assignee
+        )
 
     @auto_heal()
     @registry.tool()
-    async def gitlab_issue_list(project: str, state: str = "opened", label: str = "", assignee: str = "") -> str:
+    async def gitlab_issue_list(
+        project: str, state: str = "opened", label: str = "", assignee: str = ""
+    ) -> str:
         """List GitLab issues for a project.
 
         Args:
@@ -337,7 +349,9 @@ def register_tools(server: "FastMCP") -> int:
         when_pipeline_succeeds: bool = True,
     ) -> str:
         """Merge a merge request."""
-        return await _gitlab_mr_merge_impl(project, mr_id, squash, remove_source_branch, when_pipeline_succeeds)
+        return await _gitlab_mr_merge_impl(
+            project, mr_id, squash, remove_source_branch, when_pipeline_succeeds
+        )
 
     @auto_heal()
     @registry.tool()

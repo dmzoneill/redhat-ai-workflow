@@ -125,11 +125,15 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Pod logs.
         """
-        return await _kubectl_logs_impl(pod_name, namespace, environment, container, tail, previous)
+        return await _kubectl_logs_impl(
+            pod_name, namespace, environment, container, tail, previous
+        )
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_describe_pod(pod_name: str, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_describe_pod(
+        pod_name: str, namespace: str, environment: str = "stage"
+    ) -> str:
         """
         Get detailed pod information.
 
@@ -145,7 +149,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_get_deployments(namespace: str, environment: str = "stage") -> str:
+    async def kubectl_get_deployments(
+        namespace: str, environment: str = "stage"
+    ) -> str:
         """
         List deployments in a namespace.
 
@@ -160,7 +166,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_get_events(namespace: str, environment: str = "stage", field_selector: str = "") -> str:
+    async def kubectl_get_events(
+        namespace: str, environment: str = "stage", field_selector: str = ""
+    ) -> str:
         """
         View cluster events.
 
@@ -226,7 +234,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Command output.
         """
-        return await _kubectl_exec_impl(pod_name, namespace, command, environment, container)
+        return await _kubectl_exec_impl(
+            pod_name, namespace, command, environment, container
+        )
 
     logger.info(f"Registered {registry.count} core Kubernetes tools")
     return registry.count

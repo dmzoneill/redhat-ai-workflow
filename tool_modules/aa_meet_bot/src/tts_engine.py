@@ -86,16 +86,22 @@ class PiperTTS:
             # Check for piper CLI
             self._piper_cli = shutil.which("piper")
             if not self._piper_cli:
-                logger.error("piper CLI not found. Install from: https://github.com/rhasspy/piper/releases")
+                logger.error(
+                    "piper CLI not found. Install from: https://github.com/rhasspy/piper/releases"
+                )
                 return False
 
             # Find or download model
             model_path = await self._get_model_path()
             if not model_path:
-                logger.warning(f"Model {self.voice} not found, will try to download on first use")
+                logger.warning(
+                    f"Model {self.voice} not found, will try to download on first use"
+                )
 
             self._initialized = True
-            logger.info(f"Piper TTS ready (CLI: {self._piper_cli}, voice: {self.voice})")
+            logger.info(
+                f"Piper TTS ready (CLI: {self._piper_cli}, voice: {self.voice})"
+            )
             return True
 
         except Exception as e:
@@ -122,7 +128,14 @@ class PiperTTS:
             import subprocess
 
             subprocess.run(
-                ["piper", "--download-dir", str(PIPER_MODELS_DIR), "--model", self.voice, "--update-voices"],
+                [
+                    "piper",
+                    "--download-dir",
+                    str(PIPER_MODELS_DIR),
+                    "--model",
+                    self.voice,
+                    "--update-voices",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -192,7 +205,9 @@ class PiperTTS:
             logger.debug(f"Running piper: {' '.join(cmd)}")
 
             # Run piper with text on stdin
-            result = subprocess.run(cmd, input=text.encode(), capture_output=True, timeout=30)
+            result = subprocess.run(
+                cmd, input=text.encode(), capture_output=True, timeout=30
+            )
 
             if result.returncode != 0:
                 logger.error(f"Piper CLI error: {result.stderr.decode()}")
@@ -203,7 +218,9 @@ class PiperTTS:
             audio_data = audio_data.astype(np.float32) / 32768.0
 
             sample_rate = 22050  # Piper default
-            logger.info(f"Piper synthesized {len(audio_data)} samples ({len(audio_data)/sample_rate:.1f}s)")
+            logger.info(
+                f"Piper synthesized {len(audio_data)} samples ({len(audio_data)/sample_rate:.1f}s)"
+            )
 
             return audio_data, sample_rate
 
@@ -285,7 +302,12 @@ class PiperTTS:
         except Exception as e:
             logger.error(f"Piper TTS synthesis failed: {e}")
             return TTSResult(
-                audio_path=Path(""), duration_seconds=0, sample_rate=0, text=text, success=False, error=str(e)
+                audio_path=Path(""),
+                duration_seconds=0,
+                sample_rate=0,
+                text=text,
+                success=False,
+                error=str(e),
             )
 
 
@@ -302,7 +324,9 @@ class GPTSoVITSEngine:
 
         # Model paths
         self.gpt_model = GPT_SOVITS_ROOT / "GPT_weights_v2Pro" / "dave-e50.ckpt"
-        self.sovits_model = GPT_SOVITS_ROOT / "SoVITS_weights_v2Pro" / "dave_e12_s240.pth"
+        self.sovits_model = (
+            GPT_SOVITS_ROOT / "SoVITS_weights_v2Pro" / "dave_e12_s240.pth"
+        )
 
         # Reference audio for voice cloning
         self.ref_audio = VOICE_SAMPLES_DIR / "ref_clip.wav"
@@ -494,7 +518,12 @@ if __name__ == "__main__":
             # Run synthesis via subprocess
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
-                None, self._synthesize_subprocess, text, str(ref_audio), ref_text, str(output_path)
+                None,
+                self._synthesize_subprocess,
+                text,
+                str(ref_audio),
+                ref_text,
+                str(output_path),
             )
 
             if result.get("success"):
@@ -518,10 +547,17 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"TTS synthesis failed: {e}")
             return TTSResult(
-                audio_path=Path(""), duration_seconds=0, sample_rate=0, text=text, success=False, error=str(e)
+                audio_path=Path(""),
+                duration_seconds=0,
+                sample_rate=0,
+                text=text,
+                success=False,
+                error=str(e),
             )
 
-    def _synthesize_subprocess(self, text: str, ref_audio_path: str, ref_text: str, output_path: str) -> dict:
+    def _synthesize_subprocess(
+        self, text: str, ref_audio_path: str, ref_text: str, output_path: str
+    ) -> dict:
         """Run synthesis via subprocess in GPT-SoVITS venv."""
         try:
             cmd = [
@@ -690,7 +726,9 @@ class TTSEngine:
             # 1. Normalize audio to consistent level (prevents clipping and ensures audibility)
             max_val = np.max(np.abs(audio_data))
             if max_val > 0:
-                audio_data = audio_data / max_val * 0.85  # Normalize to 85% to leave headroom
+                audio_data = (
+                    audio_data / max_val * 0.85
+                )  # Normalize to 85% to leave headroom
 
             # 2. Apply fade-in and fade-out to prevent clicks/pops
             fade_in_samples = int(sample_rate * 0.05)  # 50ms fade-in
@@ -710,7 +748,9 @@ class TTSEngine:
 
             # Lead-in: 100ms (reduced from 500ms - virtual pipe is always ready)
             lead_in_samples = int(sample_rate * 0.1)
-            silence_start = np.random.randn(lead_in_samples).astype(np.float32) * noise_level
+            silence_start = (
+                np.random.randn(lead_in_samples).astype(np.float32) * noise_level
+            )
 
             # Tail: 200ms (reduced from 800ms - just enough for audio to finish)
             tail_samples = int(sample_rate * 0.2)
@@ -721,7 +761,9 @@ class TTSEngine:
             wake_samples = int(sample_rate * 0.02)  # 20ms
             t = np.linspace(0, 0.02, wake_samples)
             wake_tone = np.sin(2 * np.pi * 440 * t) * 0.01  # Very quiet
-            wake_tone *= (1 - np.cos(np.linspace(0, np.pi, wake_samples))) / 2  # Fade envelope
+            wake_tone *= (
+                1 - np.cos(np.linspace(0, np.pi, wake_samples))
+            ) / 2  # Fade envelope
             silence_start[:wake_samples] += wake_tone.astype(np.float32)
 
             audio_data = np.concatenate([silence_start, audio_data, silence_end])
@@ -735,13 +777,18 @@ class TTSEngine:
             audio_int16 = (audio_data * 32767).astype(np.int16)
 
             duration = len(audio_int16) / sample_rate
-            logger.info(f"Writing {len(audio_int16)} samples ({duration:.1f}s) to pipe: {pipe_path}")
+            logger.info(
+                f"Writing {len(audio_int16)} samples ({duration:.1f}s) to pipe: {pipe_path}"
+            )
 
             # Write to pipe using blocking I/O for reliability
             # Run in executor to not block the event loop
             loop = asyncio.get_event_loop()
             success = await loop.run_in_executor(
-                None, self._write_to_pipe_blocking, str(pipe_path), audio_int16.tobytes()
+                None,
+                self._write_to_pipe_blocking,
+                str(pipe_path),
+                audio_int16.tobytes(),
             )
 
             if success:

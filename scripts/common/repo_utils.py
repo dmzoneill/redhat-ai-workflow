@@ -46,7 +46,9 @@ def _resolve_by_name(repo_name: str, repos: dict) -> tuple[Optional[str], str, d
     return None, "", {}
 
 
-def _resolve_by_issue_key(issue_key: str, repos: dict) -> tuple[Optional[str], str, dict]:
+def _resolve_by_issue_key(
+    issue_key: str, repos: dict
+) -> tuple[Optional[str], str, dict]:
     """Resolve repo by Jira issue key prefix."""
     project_prefix = issue_key.split("-")[0].upper()
     matches = []
@@ -62,7 +64,9 @@ def _resolve_by_issue_key(issue_key: str, repos: dict) -> tuple[Optional[str], s
         )
     if len(matches) > 1:
         names = ", ".join(m["name"] for m in matches)
-        raise ValueError(f"Multiple repos match {project_prefix}: {names}. Specify repo_name.")
+        raise ValueError(
+            f"Multiple repos match {project_prefix}: {names}. Specify repo_name."
+        )
     return None, "", {}
 
 

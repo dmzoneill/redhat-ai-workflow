@@ -12,7 +12,12 @@ import json
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -79,7 +84,10 @@ class InScopeAdapter:
         """
         try:
             # Import the existing inscope implementation
-            from tool_modules.aa_inscope.src.tools_basic import _inscope_ask_impl, _inscope_query_impl
+            from tool_modules.aa_inscope.src.tools_basic import (
+                _inscope_ask_impl,
+                _inscope_query_impl,
+            )
 
             # Get assistant from filter if specified
             assistant = None
@@ -112,7 +120,9 @@ class InScopeAdapter:
                 if "auth" in error_msg.lower() or "token" in error_msg.lower():
                     logger.info("Auth error detected, attempting auto-login...")
                     try:
-                        from tool_modules.aa_inscope.src.tools_basic import _inscope_auto_login_impl
+                        from tool_modules.aa_inscope.src.tools_basic import (
+                            _inscope_auto_login_impl,
+                        )
 
                         login_result = await _inscope_auto_login_impl(headless=True)
                         login_data = json.loads(login_result)
@@ -195,7 +205,9 @@ class InScopeAdapter:
     async def health_check(self) -> HealthStatus:
         """Check if InScope is available."""
         try:
-            from tool_modules.aa_inscope.src.tools_basic import _inscope_auth_status_impl
+            from tool_modules.aa_inscope.src.tools_basic import (
+                _inscope_auth_status_impl,
+            )
 
             status_json = await _inscope_auth_status_impl()
             status = json.loads(status_json)

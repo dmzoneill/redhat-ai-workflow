@@ -96,7 +96,9 @@ async def _systemctl_restart_impl(unit: str, user: bool = False) -> str:
 
 
 @auto_heal()
-async def _systemctl_enable_impl(unit: str, now: bool = False, user: bool = False) -> str:
+async def _systemctl_enable_impl(
+    unit: str, now: bool = False, user: bool = False
+) -> str:
     """Enable service at boot."""
     cmd = ["systemctl"]
     if user:
@@ -112,7 +114,9 @@ async def _systemctl_enable_impl(unit: str, now: bool = False, user: bool = Fals
 
 
 @auto_heal()
-async def _systemctl_disable_impl(unit: str, now: bool = False, user: bool = False) -> str:
+async def _systemctl_disable_impl(
+    unit: str, now: bool = False, user: bool = False
+) -> str:
     """Disable service at boot."""
     cmd = ["systemctl"]
     if user:
@@ -352,7 +356,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def systemctl_disable(unit: str, now: bool = False, user: bool = False) -> str:
+    async def systemctl_disable(
+        unit: str, now: bool = False, user: bool = False
+    ) -> str:
         """Disable service at boot.
 
         Args:

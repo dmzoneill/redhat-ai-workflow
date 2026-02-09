@@ -39,7 +39,11 @@ def _get_repo_paths() -> dict:
     config = load_config()
     repos_data = config.get("repositories", {})
     if isinstance(repos_data, dict):
-        return {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
+        return {
+            name: info.get("path", "")
+            for name, info in repos_data.items()
+            if info.get("path")
+        }
     return {}
 
 
@@ -98,7 +102,9 @@ async def _run_isort(path: str, fix: bool, lines: list[str]) -> bool:
 async def _run_flake8(path: str, lines: list[str]) -> bool:
     """Run Flake8 and append results to lines."""
     lines.append("### Flake8 (style)")
-    success, stdout, stderr = await run_cmd_full(["flake8", ".", "--max-line-length=120"], cwd=path)
+    success, stdout, stderr = await run_cmd_full(
+        ["flake8", ".", "--max-line-length=120"], cwd=path
+    )
     if success:
         lines.append("✅ Passed")
     else:
@@ -127,7 +133,9 @@ async def _run_mypy(path: str, lines: list[str]) -> None:
                 lines.append(f"```\n{truncate_output(stdout, max_length=1500)}\n```")
 
 
-async def _lint_python_impl(repo: str, repo_paths: dict, fix: bool = False) -> list[TextContent]:
+async def _lint_python_impl(
+    repo: str, repo_paths: dict, fix: bool = False
+) -> list[TextContent]:
     """Implementation of Python linting."""
     try:
         path = _resolve_repo_path_local(repo, repo_paths)
@@ -165,7 +173,11 @@ def register_tools(server: "FastMCP") -> int:
     config = load_config()
     repos_data = config.get("repositories", {})
     if isinstance(repos_data, dict):
-        repo_paths = {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
+        repo_paths = {
+            name: info.get("path", "")
+            for name, info in repos_data.items()
+            if info.get("path")
+        }
     else:
         repo_paths = {}
 

@@ -120,13 +120,33 @@ class HybridToolFilter:
     # Order matters: first match wins
     PERSONA_PATTERNS = [
         # Incident persona - alerts, outages, production issues
-        (re.compile(r"\balert|firing|outage|incident|pagerduty|on-?call|production\s+issue", re.I), "incident"),
+        (
+            re.compile(
+                r"\balert|firing|outage|incident|pagerduty|on-?call|production\s+issue",
+                re.I,
+            ),
+            "incident",
+        ),
         # DevOps persona - deployments, k8s, ephemeral, infrastructure
-        (re.compile(r"\bdeploy|ephemeral|bonfire|namespace|pods?|k8s|kubernetes|cluster|stage|prod\b", re.I), "devops"),
+        (
+            re.compile(
+                r"\bdeploy|ephemeral|bonfire|namespace|pods?|k8s|kubernetes|cluster|stage|prod\b",
+                re.I,
+            ),
+            "devops",
+        ),
         # Release persona - shipping, releases, konflux, quay
-        (re.compile(r"\brelease|ship|konflux|quay|image\s+tag|promote|rollout", re.I), "release"),
+        (
+            re.compile(
+                r"\brelease|ship|konflux|quay|image\s+tag|promote|rollout", re.I
+            ),
+            "release",
+        ),
         # Developer persona - default, code, PRs, reviews
-        (re.compile(r"\bcode|review|pr\b|merge\s+request|lint|test|refactor", re.I), "developer"),
+        (
+            re.compile(r"\bcode|review|pr\b|merge\s+request|lint|test|refactor", re.I),
+            "developer",
+        ),
     ]
 
     def __init__(self, config_path: Optional[Path] = None):
@@ -156,7 +176,9 @@ class HybridToolFilter:
         self._init_inference_client()
 
         # Fallback strategy
-        self.fallback_strategy = self.config.get("tool_filtering", {}).get("fallback_strategy", "keyword_match")
+        self.fallback_strategy = self.config.get("tool_filtering", {}).get(
+            "fallback_strategy", "keyword_match"
+        )
 
     def _load_config(self, path: Path) -> dict:
         """Load config.json."""
@@ -202,12 +224,18 @@ class HybridToolFilter:
         """
         modules = _get_persona_tool_modules(persona)
         if modules:
-            logger.debug(f"Loaded {len(modules)} tool modules for persona '{persona}': {modules}")
+            logger.debug(
+                f"Loaded {len(modules)} tool modules for persona '{persona}': {modules}"
+            )
         else:
-            logger.warning(f"No tool modules found for persona '{persona}', using empty baseline")
+            logger.warning(
+                f"No tool modules found for persona '{persona}', using empty baseline"
+            )
         return modules
 
-    def _detect_persona(self, message: str, default_persona: str = "developer") -> tuple[str, str]:
+    def _detect_persona(
+        self, message: str, default_persona: str = "developer"
+    ) -> tuple[str, str]:
         """Auto-detect persona from message keywords.
 
         Args:
@@ -284,7 +312,9 @@ class HybridToolFilter:
             return []
 
         # Build prompt excluding already-included categories
-        available_categories = [cat for cat in TOOL_CATEGORIES.keys() if cat not in already_included]
+        available_categories = [
+            cat for cat in TOOL_CATEGORIES.keys() if cat not in already_included
+        ]
 
         npu_config = self.config.get("tool_filtering", {}).get("npu", {})
         max_categories = npu_config.get("max_categories", 3)
@@ -321,7 +351,10 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             categories = []
             result_lower = result.lower()
             for cat in available_categories:
-                if cat.lower() in result_lower or cat.lower().replace("_", " ") in result_lower:
+                if (
+                    cat.lower() in result_lower
+                    or cat.lower().replace("_", " ") in result_lower
+                ):
                     categories.append(cat)
                     if len(categories) >= max_categories:
                         break
@@ -415,13 +448,17 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         if auto_detect_persona:
             detected_persona, detection_reason = self._detect_persona(message, persona)
             if detected_persona != persona:
-                logger.info(f"Auto-detected persona: {detected_persona} (was {persona}) - {detection_reason}")
+                logger.info(
+                    f"Auto-detected persona: {detected_persona} (was {persona}) - {detection_reason}"
+                )
                 persona = detected_persona
                 persona_auto_detected = True
                 persona_detection_reason = detection_reason
             elif detection_reason != "default":
                 # Same persona but detected via keyword
-                persona_auto_detected = True  # Mark as auto-detected even if same as default
+                persona_auto_detected = (
+                    True  # Mark as auto-detected even if same as default
+                )
                 persona_detection_reason = detection_reason
 
         # Check cache first (after persona detection) - workspace-aware
@@ -461,24 +498,38 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                 "categories": [],
                 "tools": [],
             },
-            "skill": {"name": None, "description": None, "tools": [], "inputs": [], "memory_ops": []},
+            "skill": {
+                "name": None,
+                "description": None,
+                "tools": [],
+                "inputs": [],
+                "memory_ops": [],
+            },
             "fast_match": {"patterns": [], "categories": []},
             "npu": {"method": None, "categories": [], "tools": []},
         }
 
         # === LAYER 1: Core Tools (always) ===
-        core_cats = self.config.get("tool_filtering", {}).get("core_tools", {}).get("categories", CORE_CATEGORIES)
+        core_cats = (
+            self.config.get("tool_filtering", {})
+            .get("core_tools", {})
+            .get("categories", CORE_CATEGORIES)
+        )
         categories.update(core_cats)
         methods_used.append("layer1_core")
         context_details["core"]["categories"] = list(core_cats)
-        context_details["core"]["tools"] = self.registry.get_tools_for_categories(list(core_cats))
+        context_details["core"]["tools"] = self.registry.get_tools_for_categories(
+            list(core_cats)
+        )
 
         # === LAYER 2: Persona Baseline (from config.json) ===
         baseline = self._get_baseline_categories(persona)
         categories.update(baseline)
         methods_used.append("layer2_persona")
         context_details["persona"]["categories"] = baseline
-        context_details["persona"]["tools"] = self.registry.get_tools_for_categories(baseline)
+        context_details["persona"]["tools"] = self.registry.get_tools_for_categories(
+            baseline
+        )
 
         # === LAYER 3: Skill Tool Discovery (dynamic from YAML) ===
         if not detected_skill:
@@ -498,7 +549,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             context_details["skill"]["description"] = skill_meta.get("description", "")
             context_details["skill"]["tools"] = list(skill_tools)
             context_details["skill"]["inputs"] = skill_meta.get("inputs", [])
-            context_details["skill"]["memory_ops"] = skill_meta.get("memory_ops", {"reads": [], "writes": []})
+            context_details["skill"]["memory_ops"] = skill_meta.get(
+                "memory_ops", {"reads": [], "writes": []}
+            )
 
         # === Fast Path: Regex matching ===
         fast_matches = self._fast_match(message)
@@ -506,18 +559,24 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             categories.update(fast_matches)
             methods_used.append("fast_path")
             context_details["fast_match"]["categories"] = fast_matches
-            context_details["fast_match"]["tools"] = self.registry.get_tools_for_categories(fast_matches)
+            context_details["fast_match"]["tools"] = (
+                self.registry.get_tools_for_categories(fast_matches)
+            )
 
         # === LAYER 4: NPU Classification (with fallback) ===
         # Only use NPU if no skill detected AND message is ambiguous
         # This saves ~8 seconds when a skill is detected
         if not detected_skill and self._is_ambiguous(message, fast_matches):
-            npu_categories, npu_method = self._classify_with_fallback(message, categories, persona)
+            npu_categories, npu_method = self._classify_with_fallback(
+                message, categories, persona
+            )
             categories.update(npu_categories)
             methods_used.append(f"layer4_{npu_method}")
             context_details["npu"]["method"] = npu_method
             context_details["npu"]["categories"] = npu_categories
-            context_details["npu"]["tools"] = self.registry.get_tools_for_categories(npu_categories)
+            context_details["npu"]["tools"] = self.registry.get_tools_for_categories(
+                npu_categories
+            )
 
         # === Combine all tools ===
         category_tools = self.registry.get_tools_for_categories(list(categories))
@@ -594,7 +653,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             "filter": self.stats.to_dict(),
             "cache": self.cache.get_stats(),
             "inference_available": self.inference_client is not None,
-            "inference_instance": self.inference_client.name if self.inference_client else None,
+            "inference_instance": (
+                self.inference_client.name if self.inference_client else None
+            ),
             "fallback_strategy": self.fallback_strategy,
         }
 
@@ -648,7 +709,9 @@ def filter_tools_detailed(
     Returns:
         Full filter result dict
     """
-    result = get_filter().filter(message, persona, detected_skill, workspace_uri=workspace_uri)
+    result = get_filter().filter(
+        message, persona, detected_skill, workspace_uri=workspace_uri
+    )
 
     # Update session's dynamic tool count
     _update_session_dynamic_count(
@@ -660,7 +723,9 @@ def filter_tools_detailed(
     return result
 
 
-def _update_session_dynamic_count(workspace_uri: str, tool_count: int, message: str) -> None:
+def _update_session_dynamic_count(
+    workspace_uri: str, tool_count: int, message: str
+) -> None:
     """Update the active session's dynamic tool count.
 
     Called after each NPU filter to record the context-aware tool count.
@@ -686,7 +751,9 @@ def _update_session_dynamic_count(workspace_uri: str, tool_count: int, message: 
 
                 # Persist change (debounced by save_to_disk)
                 WorkspaceRegistry.save_to_disk()
-                logger.debug(f"Updated dynamic_tool_count={tool_count} for session {session.session_id[:8]}")
+                logger.debug(
+                    f"Updated dynamic_tool_count={tool_count} for session {session.session_id[:8]}"
+                )
     except Exception as e:
         # Don't fail the filter if we can't update the session
         logger.debug(f"Failed to update dynamic tool count: {e}")

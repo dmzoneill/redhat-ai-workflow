@@ -14,7 +14,10 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.common.config_loader import get_flake8_ignore_codes, get_flake8_max_line_length  # noqa: E402
+from scripts.common.config_loader import (  # noqa: E402
+    get_flake8_ignore_codes,
+    get_flake8_max_line_length,
+)
 from server.utils import run_cmd_sync  # noqa: E402
 
 

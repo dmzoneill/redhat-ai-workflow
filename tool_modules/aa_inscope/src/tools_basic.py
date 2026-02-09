@@ -53,31 +53,73 @@ DEFAULT_TOTAL_TIMEOUT = 180  # Total request timeout
 # Known InScope assistants (ID -> name mapping)
 # Updated 2026-02-03 from InScope API /api/proxy/tangerine/api/assistants
 KNOWN_ASSISTANTS = {
-    1: {"name": "Clowder", "description": "Answers questions based on Clowder documentation"},
-    3: {"name": "Consoledot Pages", "description": "Answers questions based on ConsoleDot documentation"},
+    1: {
+        "name": "Clowder",
+        "description": "Answers questions based on Clowder documentation",
+    },
+    3: {
+        "name": "Consoledot Pages",
+        "description": "Answers questions based on ConsoleDot documentation",
+    },
     4: {"name": "Firelink", "description": "Answers questions related to Firelink"},
     5: {"name": "Hccm", "description": "Answers questions related to HCCM App"},
-    6: {"name": "Notifications", "description": "Answers questions related to Notifications App"},
+    6: {
+        "name": "Notifications",
+        "description": "Answers questions related to Notifications App",
+    },
     7: {"name": "Yuptoo", "description": "Answers questions related to Yuptoo App"},
-    8: {"name": "Inscope All Docs Agent", "description": "Agent that has all documents in its knowledgebase"},
-    10: {"name": "Inscope Onboarding Guide", "description": "Answers questions based on inScope Onboarding Guide"},
+    8: {
+        "name": "Inscope All Docs Agent",
+        "description": "Agent that has all documents in its knowledgebase",
+    },
+    10: {
+        "name": "Inscope Onboarding Guide",
+        "description": "Answers questions based on inScope Onboarding Guide",
+    },
     11: {
         "name": "Frontend Experience",
         "description": "Answers questions related to frontend-experience documentation",
     },
-    12: {"name": "Incident Management", "description": "Answers questions related to Incident Management"},
-    13: {"name": "Roms Onboarding Guide", "description": "Answers questions related to ROMS Onboarding Guide"},
-    15: {"name": "Managed Openshift", "description": "Answers questions related to Managed OpenShift documentation"},
-    16: {"name": "Openshift Ci", "description": "Answers questions related to OpenShift CI documentation"},
-    17: {"name": "App Sre App Interface", "description": "Answers questions related to app-interface"},
-    18: {"name": "App Sre Dev Guidelines", "description": "Answers questions related to AppSRE Dev Guidelines"},
-    19: {"name": "App Sre Contract", "description": "Answers questions related to AppSRE Contract"},
-    21: {"name": "Konflux", "description": "Answers questions related to Konflux documentation"},
+    12: {
+        "name": "Incident Management",
+        "description": "Answers questions related to Incident Management",
+    },
+    13: {
+        "name": "Roms Onboarding Guide",
+        "description": "Answers questions related to ROMS Onboarding Guide",
+    },
+    15: {
+        "name": "Managed Openshift",
+        "description": "Answers questions related to Managed OpenShift documentation",
+    },
+    16: {
+        "name": "Openshift Ci",
+        "description": "Answers questions related to OpenShift CI documentation",
+    },
+    17: {
+        "name": "App Sre App Interface",
+        "description": "Answers questions related to app-interface",
+    },
+    18: {
+        "name": "App Sre Dev Guidelines",
+        "description": "Answers questions related to AppSRE Dev Guidelines",
+    },
+    19: {
+        "name": "App Sre Contract",
+        "description": "Answers questions related to AppSRE Contract",
+    },
+    21: {
+        "name": "Konflux",
+        "description": "Answers questions related to Konflux documentation",
+    },
     22: {
         "name": "Ocm Clusters Service",
         "description": "Answers questions related to OCM Clusters Service documentation",
     },
-    23: {"name": "HCM Architecture Documents", "description": "Answers questions related to HCM architecture"},
+    23: {
+        "name": "HCM Architecture Documents",
+        "description": "Answers questions related to HCM architecture",
+    },
     24: {
         "name": "Forum Openshift Monitoring",
         "description": "Answers questions related to forum openshift monitoring documentation",
@@ -243,7 +285,9 @@ def _auto_select_assistant(query: str) -> int:
     assistant_scores: dict[int, int] = {}
     for keyword, (assistant_id, weight) in KEYWORD_ASSISTANT_MAP_WEIGHTED.items():
         if keyword in query_lower:
-            assistant_scores[assistant_id] = assistant_scores.get(assistant_id, 0) + weight
+            assistant_scores[assistant_id] = (
+                assistant_scores.get(assistant_id, 0) + weight
+            )
 
     if assistant_scores:
         # Return assistant with highest weighted score
@@ -303,7 +347,9 @@ async def _get_auth_token(auto_refresh: bool = True) -> str | None:
             if time_remaining > 300:  # More than 5 minutes remaining
                 return token
             elif time_remaining > 0:
-                logger.info(f"InScope token expiring in {time_remaining/60:.0f} minutes, will refresh")
+                logger.info(
+                    f"InScope token expiring in {time_remaining/60:.0f} minutes, will refresh"
+                )
                 needs_refresh = True
             else:
                 logger.warning("InScope token expired")
@@ -627,7 +673,9 @@ async def _inscope_ask_impl(
     assistant_id = _auto_select_assistant(query)
     assistant_info = KNOWN_ASSISTANTS.get(assistant_id, {})
 
-    logger.info(f"Auto-selected assistant: {assistant_info.get('name', assistant_id)} for query: {query[:50]}...")
+    logger.info(
+        f"Auto-selected assistant: {assistant_info.get('name', assistant_id)} for query: {query[:50]}..."
+    )
 
     # Delegate to inscope_query
     return await _inscope_query_impl(query, assistant_id, timeout_secs, include_sources)
@@ -672,7 +720,13 @@ async def _inscope_save_token_impl(token: str, cookie: str = "") -> str:
             "success": True,
             "token_saved": str(token_path),
             "cookie_saved": (
-                str(Path(config.get("cookie_file", "~/.cache/inscope/cookies")).expanduser()) if cookie else None
+                str(
+                    Path(
+                        config.get("cookie_file", "~/.cache/inscope/cookies")
+                    ).expanduser()
+                )
+                if cookie
+                else None
             ),
             "expires_at": expires_at,
         },
@@ -745,7 +799,9 @@ def register_tools(server: FastMCP) -> int:
             inscope_query("What is the Konflux release process?", "konflux")
             inscope_query("How do I set up monitoring alerts?", "all")
         """
-        return await _inscope_query_impl(query, assistant, timeout_secs, include_sources)
+        return await _inscope_query_impl(
+            query, assistant, timeout_secs, include_sources
+        )
 
     @auto_heal()
     @registry.tool()
@@ -841,10 +897,14 @@ async def _inscope_auto_login_impl(headless: bool = True) -> str:
             }
 
             if result.jwt_token:
-                response["token_saved"] = str(Path.home() / ".cache" / "inscope" / "token")
+                response["token_saved"] = str(
+                    Path.home() / ".cache" / "inscope" / "token"
+                )
                 if result.jwt_expires_at:
                     response["expires_at"] = result.jwt_expires_at
-                    response["expires_in_seconds"] = max(0, result.jwt_expires_at - int(time.time()))
+                    response["expires_in_seconds"] = max(
+                        0, result.jwt_expires_at - int(time.time())
+                    )
 
             if result.cookies:
                 response["cookies"] = list(result.cookies.keys())

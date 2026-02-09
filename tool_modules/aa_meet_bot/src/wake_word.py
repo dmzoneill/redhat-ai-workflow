@@ -48,7 +48,9 @@ class TextWakeWordDetector:
         self.pattern = re.compile(rf"\b{re.escape(self.wake_word)}\b", re.IGNORECASE)
 
         # Context buffer for recent captions
-        self.context_buffer: list[tuple[str, str, datetime]] = []  # (speaker, text, time)
+        self.context_buffer: list[tuple[str, str, datetime]] = (
+            []
+        )  # (speaker, text, time)
         self.max_context_entries = 10
 
         # State tracking
@@ -58,7 +60,9 @@ class TextWakeWordDetector:
         self.command_buffer: list[str] = []
 
         # Timing
-        self.pause_threshold = timedelta(seconds=1.0)  # Reduced from 2s for faster response
+        self.pause_threshold = timedelta(
+            seconds=1.0
+        )  # Reduced from 2s for faster response
         self.command_timeout = timedelta(seconds=8)  # Max time to wait for command
 
         # Track last processed text to avoid re-triggering on updates
@@ -107,7 +111,9 @@ class TextWakeWordDetector:
                     if match:
                         command_text = text[match.end() :].strip()
                         self.command_buffer = [command_text] if command_text else []
-                        logger.debug(f"Command buffer updated: {command_text[:30] if command_text else 'empty'}...")
+                        logger.debug(
+                            f"Command buffer updated: {command_text[:30] if command_text else 'empty'}..."
+                        )
 
                 self._last_processed_text = text
             return None  # Don't re-trigger, just update buffer
@@ -148,7 +154,9 @@ class TextWakeWordDetector:
             # Check if we already have a complete command (ends with ? ! .)
             # This handles cases like "David, how are you?" in a single transcription
             if command_start and command_start.rstrip()[-1:] in ".?!":
-                logger.info(f"🎯 Complete command detected immediately: {command_start}")
+                logger.info(
+                    f"🎯 Complete command detected immediately: {command_start}"
+                )
                 self.command_buffer = [command_start]
                 self.command_speaker = speaker
                 self.command_start_time = now
@@ -206,7 +214,10 @@ class TextWakeWordDetector:
     def _create_event(self, speaker: str) -> WakeWordEvent:
         """Create a wake word event from current state."""
         # Get context before wake word
-        context = [f"{s}: {t}" for s, t, _ in self.context_buffer[: -len(self.command_buffer) - 1]]
+        context = [
+            f"{s}: {t}"
+            for s, t, _ in self.context_buffer[: -len(self.command_buffer) - 1]
+        ]
 
         event = WakeWordEvent(
             timestamp=self.command_start_time or datetime.now(),
@@ -276,7 +287,9 @@ class AudioWakeWordDetector:
             return True
 
         except ImportError:
-            logger.warning("openwakeword not installed - audio wake word detection disabled")
+            logger.warning(
+                "openwakeword not installed - audio wake word detection disabled"
+            )
             return False
         except Exception as e:
             logger.error(f"Failed to initialize audio wake word detector: {e}")
@@ -311,7 +324,9 @@ class AudioWakeWordDetector:
             # Check if any wake word detected
             for wakeword, score in prediction.items():
                 if score > 0.5:  # Confidence threshold
-                    logger.info(f"Audio wake word detected: {wakeword} (score: {score})")
+                    logger.info(
+                        f"Audio wake word detected: {wakeword} (score: {score})"
+                    )
 
                     event = WakeWordEvent(
                         timestamp=datetime.now(),
@@ -357,7 +372,9 @@ class WakeWordManager:
         if enable_audio_fallback:
             self.use_audio_fallback = await self.audio_detector.initialize()
 
-        logger.info(f"Wake word manager initialized (audio fallback: {self.use_audio_fallback})")
+        logger.info(
+            f"Wake word manager initialized (audio fallback: {self.use_audio_fallback})"
+        )
         return True
 
     def set_callback(self, callback: Callable[[WakeWordEvent], None]) -> None:
@@ -371,7 +388,9 @@ class WakeWordManager:
         """Process a caption for wake word detection."""
         return self.text_detector.process_caption(speaker, text)
 
-    def process_stt_result(self, text: str, speaker: str = "Meeting") -> Optional[WakeWordEvent]:
+    def process_stt_result(
+        self, text: str, speaker: str = "Meeting"
+    ) -> Optional[WakeWordEvent]:
         """
         Process an STT transcription result for wake word detection.
 

@@ -80,7 +80,9 @@ async def _docker_compose_status_impl(
         return f"❌ Docker not running or not available: {output}"
 
     if not output.strip():
-        return "No containers running" + (f" matching '{filter_name}'" if filter_name else "")
+        return "No containers running" + (
+            f" matching '{filter_name}'" if filter_name else ""
+        )
 
     lines = ["## Docker Containers", ""]
     for line in output.strip().split("\n"):
@@ -304,7 +306,12 @@ async def _docker_ps_impl(
     Returns:
         Container list.
     """
-    cmd = ["docker", "ps", "--format", "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"]
+    cmd = [
+        "docker",
+        "ps",
+        "--format",
+        "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}",
+    ]
     if all_containers:
         cmd.append("-a")
     if filter_name:
@@ -317,8 +324,13 @@ async def _docker_ps_impl(
     if not success:
         return f"❌ Failed to list containers: {output}"
 
-    if not output.strip() or output.strip() == "CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS":
-        return "No containers found" + (" matching filters" if filter_name or filter_status else "")
+    if (
+        not output.strip()
+        or output.strip() == "CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS"
+    ):
+        return "No containers found" + (
+            " matching filters" if filter_name or filter_status else ""
+        )
 
     return f"## Docker Containers\n\n```\n{output}\n```"
 
@@ -371,7 +383,13 @@ async def _docker_volume_list_impl(
     Returns:
         Volume list.
     """
-    cmd = ["docker", "volume", "ls", "--format", "table {{.Name}}\t{{.Driver}}\t{{.Scope}}"]
+    cmd = [
+        "docker",
+        "volume",
+        "ls",
+        "--format",
+        "table {{.Name}}\t{{.Driver}}\t{{.Scope}}",
+    ]
     if filter_name:
         cmd.extend(["--filter", f"name={filter_name}"])
     if filter_dangling:
@@ -451,7 +469,13 @@ async def _docker_network_list_impl(
     Returns:
         Network list.
     """
-    cmd = ["docker", "network", "ls", "--format", "table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}"]
+    cmd = [
+        "docker",
+        "network",
+        "ls",
+        "--format",
+        "table {{.ID}}\t{{.Name}}\t{{.Driver}}\t{{.Scope}}",
+    ]
     if filter_name:
         cmd.extend(["--filter", f"name={filter_name}"])
     if filter_driver:
@@ -670,7 +694,12 @@ async def _docker_images_impl(
     Returns:
         Image list.
     """
-    cmd = ["docker", "images", "--format", "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedSince}}"]
+    cmd = [
+        "docker",
+        "images",
+        "--format",
+        "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedSince}}",
+    ]
     if all_images:
         cmd.append("-a")
     if filter_name:

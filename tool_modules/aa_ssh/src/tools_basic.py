@@ -195,7 +195,9 @@ async def _ssh_config_list_impl() -> str:
     success, output = await run_cmd(cmd, timeout=10)
 
     if success:
-        hosts = [line.replace("Host ", "").strip() for line in output.strip().split("\n")]
+        hosts = [
+            line.replace("Host ", "").strip() for line in output.strip().split("\n")
+        ]
         hosts = [h for h in hosts if h and not h.startswith("*")]
         host_list = "\n".join(f"- {h}" for h in hosts)
         return f"## SSH Config Hosts\n\n{host_list}"
@@ -221,7 +223,9 @@ async def _ssh_known_hosts_list_impl() -> str:
                 host = line.split()[0] if line.split() else ""
                 if host:
                     hosts.append(host)
-        return f"## Known Hosts ({len(hosts)})\n\n```\n" + "\n".join(hosts[:50]) + "\n```"
+        return (
+            f"## Known Hosts ({len(hosts)})\n\n```\n" + "\n".join(hosts[:50]) + "\n```"
+        )
     return f"❌ Failed to read known_hosts: {output}"
 
 

@@ -102,7 +102,9 @@ class TestHybridToolFilter:
         from tool_modules.aa_ollama.src.tool_filter import HybridToolFilter
 
         filter_instance = HybridToolFilter()
-        result = filter_instance.filter("deploy MR 1459 to ephemeral", persona="developer")
+        result = filter_instance.filter(
+            "deploy MR 1459 to ephemeral", persona="developer"
+        )
 
         # Should detect test_mr_ephemeral skill
         assert result["skill_detected"] == "test_mr_ephemeral"

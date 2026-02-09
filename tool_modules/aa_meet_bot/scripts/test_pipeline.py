@@ -16,7 +16,9 @@ sys.path.insert(0, str(project_root))
 
 from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder  # noqa: E402
 from tool_modules.aa_meet_bot.src.tts_engine import get_tts_engine  # noqa: E402
-from tool_modules.aa_meet_bot.src.video_generator import get_video_generator  # noqa: E402
+from tool_modules.aa_meet_bot.src.video_generator import (  # noqa: E402
+    get_video_generator,
+)
 
 
 async def test_llm():

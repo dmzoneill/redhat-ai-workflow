@@ -145,7 +145,9 @@ class AppInterfaceScanner:
 
             # Extract user info
             user_data = {
-                "name": user.get("name") or user.get("displayName") or user.get("full_name"),
+                "name": user.get("name")
+                or user.get("displayName")
+                or user.get("full_name"),
                 "email": user.get("email") or user.get("redhat_email"),
                 "github_username": user.get("github_username") or user.get("github"),
                 "slack_id": user.get("slack_id") or user.get("slack"),

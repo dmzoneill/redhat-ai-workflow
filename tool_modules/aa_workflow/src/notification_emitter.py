@@ -89,7 +89,9 @@ def _file_lock(file_path: Path) -> Generator[bool, None, None]:
                     if lock_age > LOCK_STALE_SECONDS:
                         try:
                             lock_path.unlink()
-                            logger.debug(f"Removed stale notification lock (age: {lock_age:.1f}s)")
+                            logger.debug(
+                                f"Removed stale notification lock (age: {lock_age:.1f}s)"
+                            )
                         except OSError:
                             pass
                 except OSError:
@@ -236,7 +238,9 @@ def emit_notification(
             all_data["notifications"].append(notification)
             _save_notifications_unlocked(all_data)
 
-            logger.debug(f"Emitted notification: [{level}] {category}/{event_type}: {title}")
+            logger.debug(
+                f"Emitted notification: [{level}] {category}/{event_type}: {title}"
+            )
         except Exception as e:
             logger.warning(f"Failed to emit notification: {e}")
 
@@ -343,7 +347,9 @@ def notify_session_updated(session_id: str, change_description: str) -> None:
     )
 
 
-def notify_auto_heal_triggered(step_name: str, error_type: str, fix_action: str) -> None:
+def notify_auto_heal_triggered(
+    step_name: str, error_type: str, fix_action: str
+) -> None:
     """Notify that auto-heal was triggered."""
     emit_notification(
         category="auto_heal",
@@ -351,7 +357,11 @@ def notify_auto_heal_triggered(step_name: str, error_type: str, fix_action: str)
         title="Auto-Heal Triggered",
         message=f"Healing {error_type} in {step_name}: {fix_action}",
         level="warning",
-        data={"step_name": step_name, "error_type": error_type, "fix_action": fix_action},
+        data={
+            "step_name": step_name,
+            "error_type": error_type,
+            "fix_action": fix_action,
+        },
     )
 
 
@@ -406,7 +416,9 @@ def notify_cron_job_started(job_name: str, skill: str) -> None:
     )
 
 
-def notify_cron_job_completed(job_name: str, skill: str, duration_seconds: float) -> None:
+def notify_cron_job_completed(
+    job_name: str, skill: str, duration_seconds: float
+) -> None:
     """Notify that a cron job completed."""
     emit_notification(
         category="cron",
@@ -460,7 +472,9 @@ def notify_meeting_joined(title: str, mode: str) -> None:
     )
 
 
-def notify_meeting_left(title: str, duration_minutes: float, transcript_count: int) -> None:
+def notify_meeting_left(
+    title: str, duration_minutes: float, transcript_count: int
+) -> None:
     """Notify that a meeting was left."""
     emit_notification(
         category="meet",

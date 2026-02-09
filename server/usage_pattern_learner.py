@@ -124,7 +124,8 @@ class UsagePatternLearner:
         if similar:
             # Merge with existing
             logger.debug(
-                f"Merging pattern (similarity: {max_similarity:.0%}): " f"{similar['id']} + {new_pattern['id']}"
+                f"Merging pattern (similarity: {max_similarity:.0%}): "
+                f"{similar['id']} + {new_pattern['id']}"
             )
             merged = await self._merge_patterns(similar, new_pattern)
             self.storage.save(data)
@@ -251,7 +252,9 @@ class UsagePatternLearner:
                 patterns1 = set(regex1.split("|"))
                 patterns2 = set(regex2.split("|"))
                 if patterns1 and patterns2:
-                    overlap = len(patterns1 & patterns2) / max(len(patterns1), len(patterns2))
+                    overlap = len(patterns1 & patterns2) / max(
+                        len(patterns1), len(patterns2)
+                    )
                     score += weights["error_regex"] * overlap
 
         # Compare parameter
@@ -314,11 +317,16 @@ class UsagePatternLearner:
         success = self.storage.update_pattern(pattern_id, updates)
 
         if success:
-            logger.info(f"Recorded prevention success for {pattern_id} " f"(new conf: {updates['confidence']:.0%})")
+            logger.info(
+                f"Recorded prevention success for {pattern_id} "
+                f"(new conf: {updates['confidence']:.0%})"
+            )
 
         return success
 
-    async def record_prevention_failure(self, pattern_id: str, reason: str = "") -> bool:
+    async def record_prevention_failure(
+        self, pattern_id: str, reason: str = ""
+    ) -> bool:
         """Record that a prevention failed (false positive).
 
         This should be called when a pattern warning was shown but was
@@ -368,7 +376,11 @@ class UsagePatternLearner:
         total_obs = sum(p.get("observations", 0) for p in patterns)
         total_success = sum(p.get("success_after_prevention", 0) for p in patterns)
 
-        avg_confidence = sum(p.get("confidence", 0.0) for p in patterns) / len(patterns) if patterns else 0.0
+        avg_confidence = (
+            sum(p.get("confidence", 0.0) for p in patterns) / len(patterns)
+            if patterns
+            else 0.0
+        )
 
         return {
             "total_patterns": len(patterns),

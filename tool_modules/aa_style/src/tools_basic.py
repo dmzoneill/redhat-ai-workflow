@@ -179,7 +179,10 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
 
         if not profile_file.exists():
-            return f"❌ Style profile not found: {profile_name}\n\n" "Run `style_analyze` first to create a profile."
+            return (
+                f"❌ Style profile not found: {profile_name}\n\n"
+                "Run `style_analyze` first to create a profile."
+            )
 
         with open(profile_file) as f:
             profile = yaml.safe_load(f)
@@ -213,7 +216,10 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         # Load style profile
         profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
         if not profile_file.exists():
-            return f"❌ Style profile not found: {profile_name}\n\n" "Run `style_analyze` first to create a profile."
+            return (
+                f"❌ Style profile not found: {profile_name}\n\n"
+                "Run `style_analyze` first to create a profile."
+            )
 
         with open(profile_file) as f:
             profile = yaml.safe_load(f)
@@ -329,7 +335,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         results.append(f"- Formality: {tone.get('formality', 0):.0%}\n")
         results.append(f"- Directness: {tone.get('directness', 0):.0%}\n")
         results.append(f"- Emoji usage: {emoji_data.get('frequency', 0):.0%}\n")
-        results.append(f"- Top phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n\n")
+        results.append(
+            f"- Top phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n\n"
+        )
 
         # Show real examples
         results.append("### Real Message Examples\n")
@@ -344,8 +352,12 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         results.append("\n### Evaluation Criteria\n")
         results.append("When testing, check if responses match:\n")
         results.append("- [ ] Uses similar vocabulary/phrases\n")
-        results.append(f"- [ ] Matches formality level ({tone.get('formality', 0):.0%})\n")
-        results.append(f"- [ ] Emoji usage matches ({emoji_data.get('frequency', 0):.0%})\n")
+        results.append(
+            f"- [ ] Matches formality level ({tone.get('formality', 0):.0%})\n"
+        )
+        results.append(
+            f"- [ ] Emoji usage matches ({emoji_data.get('frequency', 0):.0%})\n"
+        )
         results.append("- [ ] Sentence length is similar\n")
         results.append("- [ ] Greetings/signoffs match style\n")
 
@@ -599,7 +611,9 @@ These are real examples of {name}'s messages to use as few-shot examples:
 
         if is_reply and ex.get("reply_to"):
             reply_to = ex.get("reply_to", {})
-            reply_context = f"\n   > Replying to: \"{reply_to.get('text', '')[:100]}...\""
+            reply_context = (
+                f"\n   > Replying to: \"{reply_to.get('text', '')[:100]}...\""
+            )
 
         md += f"""
 ### Example {i} ({channel_type}{', thread reply' if is_reply else ''})

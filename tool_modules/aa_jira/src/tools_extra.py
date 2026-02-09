@@ -118,7 +118,9 @@ async def _jira_ai_helper_impl(issue_key: str, action: str) -> str:
             value = match.group(2).strip()
             issue[key] = value
 
-    desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
+    desc_match = re.search(
+        r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL
+    )
     if desc_match:
         issue["description"] = desc_match.group(1).strip()
 
@@ -428,7 +430,10 @@ async def _jira_get_transitions_impl(issue_key: str) -> str:
         resp = await client.get(url, headers=headers)
 
     if resp.status_code == 401:
-        return "❌ Jira authentication failed (401 Unauthorized).\n\n" "Check that your JIRA_JPAT token is valid."
+        return (
+            "❌ Jira authentication failed (401 Unauthorized).\n\n"
+            "Check that your JIRA_JPAT token is valid."
+        )
     if resp.status_code == 404:
         return f"❌ Issue {issue_key} not found."
     if resp.status_code != 200:
@@ -507,7 +512,10 @@ async def _jira_update_issue_impl(
         resp = await client.put(url, headers=headers, json=payload)
 
     if resp.status_code == 401:
-        return "❌ Jira authentication failed (401 Unauthorized).\n\n" "Check that your JIRA_JPAT token is valid."
+        return (
+            "❌ Jira authentication failed (401 Unauthorized).\n\n"
+            "Check that your JIRA_JPAT token is valid."
+        )
     if resp.status_code == 404:
         return f"❌ Issue {issue_key} not found."
     if resp.status_code == 400:
@@ -521,7 +529,9 @@ async def _jira_update_issue_impl(
                 details.append(f"  - {field_name}: {msg}")
             for msg in messages:
                 details.append(f"  - {msg}")
-            return f"❌ Failed to update {issue_key} (invalid fields):\n" + "\n".join(details)
+            return f"❌ Failed to update {issue_key} (invalid fields):\n" + "\n".join(
+                details
+            )
         except Exception:
             return f"❌ Failed to update {issue_key} (HTTP 400): {resp.text}"
     if resp.status_code not in (200, 204):
@@ -750,6 +760,8 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the update.
         """
-        return await _jira_update_issue_impl(issue_key, fields, summary, description, labels, components)
+        return await _jira_update_issue_impl(
+            issue_key, fields, summary, description, labels, components
+        )
 
     return registry.count

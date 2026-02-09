@@ -57,7 +57,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def gh_repo_list(owner: str = "", limit: int = 30, visibility: str = "") -> str:
+    async def gh_repo_list(
+        owner: str = "", limit: int = 30, visibility: str = ""
+    ) -> str:
         """List repositories."""
         return await _gh_repo_list_impl(owner, limit, visibility)
 

@@ -203,7 +203,9 @@ class TestNormalizeJiraInput:
 
     def test_skip_markdown_conversion(self):
         """Markdown conversion can be disabled."""
-        result = normalize_jira_input({"description": "**bold**"}, convert_markdown=False)
+        result = normalize_jira_input(
+            {"description": "**bold**"}, convert_markdown=False
+        )
         assert "**bold**" in result["Description"]
 
     def test_non_text_fields_preserved(self):
@@ -266,7 +268,9 @@ class TestBuildJiraYaml:
 
     def test_skip_markdown_conversion(self):
         """Markdown conversion can be disabled."""
-        result = build_jira_yaml(summary="Test", description="**bold**", convert_markdown=False)
+        result = build_jira_yaml(
+            summary="Test", description="**bold**", convert_markdown=False
+        )
         assert "**bold**" in result
 
     def test_supporting_documentation(self):

@@ -60,7 +60,9 @@ async def run_export(months: int = 1):
     # Calculate time range
     now = datetime.now()
     oldest_date = now - timedelta(days=months * 30)
-    print(f"📅 Date range: {oldest_date.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}")
+    print(
+        f"📅 Date range: {oldest_date.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}"
+    )
 
     # Get conversations - try multiple methods for enterprise restrictions
     print("\n📂 Fetching conversations...")
@@ -91,18 +93,30 @@ async def run_export(months: int = 1):
                 for mpim in counts.get("mpims", []):
                     conversations.append(
                         {
-                            "id": mpim.get("id", mpim) if isinstance(mpim, dict) else mpim,
+                            "id": (
+                                mpim.get("id", mpim) if isinstance(mpim, dict) else mpim
+                            ),
                             "is_mpim": True,
-                            "name": mpim.get("id", mpim) if isinstance(mpim, dict) else mpim,
+                            "name": (
+                                mpim.get("id", mpim) if isinstance(mpim, dict) else mpim
+                            ),
                         }
                     )
                 for channel in counts.get("channels", []):
                     conversations.append(
                         {
-                            "id": channel.get("id", channel) if isinstance(channel, dict) else channel,
+                            "id": (
+                                channel.get("id", channel)
+                                if isinstance(channel, dict)
+                                else channel
+                            ),
                             "is_im": False,
                             "is_mpim": False,
-                            "name": channel.get("id", channel) if isinstance(channel, dict) else channel,
+                            "name": (
+                                channel.get("id", channel)
+                                if isinstance(channel, dict)
+                                else channel
+                            ),
                         }
                     )
                 print(f"✅ Found {len(conversations)} conversations via client.counts")
@@ -202,7 +216,9 @@ async def run_export(months: int = 1):
                             "is_thread_reply": bool(thread_ts and thread_ts != msg_ts),
                             "reply_to": None,
                             "reactions": msg.get("reactions", []),
-                            "has_attachments": bool(msg.get("files") or msg.get("attachments")),
+                            "has_attachments": bool(
+                                msg.get("files") or msg.get("attachments")
+                            ),
                         }
                         f_out.write(json.dumps(record) + "\n")
 

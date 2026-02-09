@@ -508,7 +508,11 @@ async def _virsh_domstate_impl(
 
     if success:
         state = output.strip()
-        icon = "🟢" if "running" in state.lower() else "🔴" if "shut" in state.lower() else "🟡"
+        icon = (
+            "🟢"
+            if "running" in state.lower()
+            else "🔴" if "shut" in state.lower() else "🟡"
+        )
         return f"{icon} **{domain}**: {state}"
     return f"❌ Failed to get VM state: {output}"
 
@@ -1289,7 +1293,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Undefine result.
         """
-        return await _virsh_undefine_impl(domain, remove_all_storage, nvram, snapshots_metadata)
+        return await _virsh_undefine_impl(
+            domain, remove_all_storage, nvram, snapshots_metadata
+        )
 
     # VM Creation tools
     @auto_heal()
@@ -1498,7 +1504,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Memory parameters.
         """
-        return await _virsh_memtune_impl(domain, hard_limit, soft_limit, swap_hard_limit)
+        return await _virsh_memtune_impl(
+            domain, hard_limit, soft_limit, swap_hard_limit
+        )
 
     # Snapshot tools
     @auto_heal()
@@ -1523,7 +1531,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Snapshot creation result.
         """
-        return await _virsh_snapshot_create_impl(domain, name, description, disk_only, quiesce)
+        return await _virsh_snapshot_create_impl(
+            domain, name, description, disk_only, quiesce
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1651,7 +1661,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Volume creation result.
         """
-        return await _virsh_vol_create_impl(pool, name, capacity, format_type, allocation)
+        return await _virsh_vol_create_impl(
+            pool, name, capacity, format_type, allocation
+        )
 
     @auto_heal()
     @registry.tool()

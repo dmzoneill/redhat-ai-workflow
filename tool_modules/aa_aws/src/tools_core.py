@@ -57,19 +57,25 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def aws_s3_ls(path: str = "", recursive: bool = False, profile: str = "") -> str:
+    async def aws_s3_ls(
+        path: str = "", recursive: bool = False, profile: str = ""
+    ) -> str:
         """List S3 buckets or objects."""
         return await _aws_s3_ls_impl(path, recursive, profile)
 
     @auto_heal()
     @registry.tool()
-    async def aws_s3_cp(source: str, destination: str, recursive: bool = False, profile: str = "") -> str:
+    async def aws_s3_cp(
+        source: str, destination: str, recursive: bool = False, profile: str = ""
+    ) -> str:
         """Copy files to/from S3."""
         return await _aws_s3_cp_impl(source, destination, recursive, profile)
 
     @auto_heal()
     @registry.tool()
-    async def aws_ec2_describe_instances(instance_ids: str = "", filters: str = "", profile: str = "") -> str:
+    async def aws_ec2_describe_instances(
+        instance_ids: str = "", filters: str = "", profile: str = ""
+    ) -> str:
         """Describe EC2 instances."""
         return await _aws_ec2_describe_instances_impl(instance_ids, filters, profile)
 

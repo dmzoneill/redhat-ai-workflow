@@ -51,11 +51,17 @@ class ClaudeSession:
 
     def get_user_messages(self) -> list[str]:
         """Get all user messages."""
-        return [msg.get("content", "") for msg in self.messages if msg.get("role") == "user"]
+        return [
+            msg.get("content", "") for msg in self.messages if msg.get("role") == "user"
+        ]
 
     def get_assistant_messages(self) -> list[str]:
         """Get all assistant messages."""
-        return [msg.get("content", "") for msg in self.messages if msg.get("role") == "assistant"]
+        return [
+            msg.get("content", "")
+            for msg in self.messages
+            if msg.get("role") == "assistant"
+        ]
 
     def get_tool_calls(self) -> list[dict]:
         """Extract tool calls from the session."""

@@ -87,7 +87,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def systemctl_disable(unit: str, now: bool = False, user: bool = False) -> str:
+    async def systemctl_disable(
+        unit: str, now: bool = False, user: bool = False
+    ) -> str:
         """Disable a systemd unit."""
         return await _systemctl_disable_impl(unit, now, user)
 

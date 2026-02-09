@@ -72,7 +72,10 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     # Fallback to environment variables
     url = os.getenv(f"KIBANA_{env_key.upper()}_URL", "")
     if not url:
-        raise ValueError(f"Kibana URL not configured. " f"Set KIBANA_{env_key.upper()}_URL or configure in config.json")
+        raise ValueError(
+            f"Kibana URL not configured. "
+            f"Set KIBANA_{env_key.upper()}_URL or configure in config.json"
+        )
 
     return KibanaEnvironment(
         url=url,
@@ -183,7 +186,9 @@ def build_kibana_url(
 # ==================== SEARCH TOOLS ====================
 
 
-async def _kibana_get_link_impl(environment: str, query: str, namespace: str, time_range: str) -> list[TextContent]:
+async def _kibana_get_link_impl(
+    environment: str, query: str, namespace: str, time_range: str
+) -> list[TextContent]:
     """Implementation of kibana_get_link tool."""
     env_config = get_cached_kibana_config(environment)
     if not env_config:
@@ -215,7 +220,9 @@ async def _kibana_index_patterns_impl(environment: str) -> list[TextContent]:
     )
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to list index patterns: {result}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to list index patterns: {result}")
+        ]
 
     patterns = result.get("saved_objects", [])
 
@@ -234,7 +241,9 @@ async def _kibana_index_patterns_impl(environment: str) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _kibana_list_dashboards_impl(environment: str, search: str) -> list[TextContent]:
+async def _kibana_list_dashboards_impl(
+    environment: str, search: str
+) -> list[TextContent]:
     """Implementation of kibana_list_dashboards tool."""
     endpoint = "/api/saved_objects/_find?type=dashboard&per_page=50"
     if search:
@@ -243,7 +252,9 @@ async def _kibana_list_dashboards_impl(environment: str, search: str) -> list[Te
     success, result = await kibana_request(environment, endpoint)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to list dashboards: {result}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to list dashboards: {result}")
+        ]
 
     dashboards = result.get("saved_objects", [])
     env_config = get_cached_kibana_config(environment)
@@ -418,7 +429,9 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_stage()
     @registry.tool()
-    async def kibana_list_dashboards(environment: str, search: str = "") -> list[TextContent]:
+    async def kibana_list_dashboards(
+        environment: str, search: str = ""
+    ) -> list[TextContent]:
         """
         List saved dashboards in Kibana.
 

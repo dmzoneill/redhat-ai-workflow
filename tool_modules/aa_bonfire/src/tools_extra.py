@@ -17,7 +17,13 @@ from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
-from server.utils import ensure_cluster_auth, get_kubeconfig, get_section_config, run_cmd, truncate_output
+from server.utils import (
+    ensure_cluster_auth,
+    get_kubeconfig,
+    get_section_config,
+    run_cmd,
+    truncate_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +87,8 @@ def get_app_config(app_name: str = "", billing: bool = False) -> dict:
         "component": component,
         "image_base": app_config.get(
             "image_base",
-            "quay.io/redhat-user-workloads/aap-aa-tenant/" "aap-aa-main/automation-analytics-backend-main",
+            "quay.io/redhat-user-workloads/aap-aa-tenant/"
+            "aap-aa-main/automation-analytics-backend-main",
         ),
         "ref_env": config.get("ref_env", "insights-production"),
     }
@@ -198,7 +205,10 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
 
         for comp in components:
             container_image = comp.get("containerImage", "")
-            if "automation-analytics" in container_image or "your-app-backend" in container_image:
+            if (
+                "automation-analytics" in container_image
+                or "your-app-backend" in container_image
+            ):
                 if "@sha256:" in container_image:
                     # Extract the 64-char sha256 digest
                     image_digest = container_image.split("@sha256:")[-1]
@@ -245,7 +255,9 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
     except OSError as e:
         return [TextContent(type="text", text=f"❌ Failed to read snapshot file: {e}")]
     except (KeyError, TypeError) as e:
-        return [TextContent(type="text", text=f"❌ Failed to parse snapshot structure: {e}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to parse snapshot structure: {e}")
+        ]
 
     # Deploy using exact ITS pattern
     app_cfg = get_app_config(billing=billing)
@@ -291,7 +303,9 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
     success, output = await run_bonfire(deploy_args, timeout=timeout + 60)
 
     if not success:
-        lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
+        lines.append(
+            f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```"
+        )
     else:
         lines.append(f"✅ Deployed `{component}` from snapshot!")
         lines.append(f"\n**Namespace:** `{namespace}`")
@@ -413,7 +427,9 @@ async def _bonfire_deploy_env_impl(
     success, output = await run_bonfire(args, timeout=timeout + 60)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to deploy ClowdEnv:\n\n{output}")
+        ]
 
     return [
         TextContent(
@@ -461,7 +477,9 @@ async def _bonfire_deploy_iqe_cji_impl(
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to deploy IQE CJI:\n\n{output}")
+        ]
 
     return [
         TextContent(
@@ -576,7 +594,9 @@ async def _bonfire_full_test_workflow_impl(
                 break
 
     if not namespace:
-        lines.append(f"⚠️ Namespace reserved but couldn't parse name:\n```\n{output}\n```")
+        lines.append(
+            f"⚠️ Namespace reserved but couldn't parse name:\n```\n{output}\n```"
+        )
         return [TextContent(type="text", text="\n".join(lines))]
 
     lines.append(f"✅ Reserved: `{namespace}`")
@@ -613,7 +633,9 @@ async def _bonfire_full_test_workflow_impl(
     success, output = await run_bonfire(deploy_args, timeout=960)
 
     if not success:
-        lines.append(f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```")
+        lines.append(
+            f"❌ Deployment failed:\n```\n{truncate_output(output, 2000, mode='tail')}\n```"
+        )
         lines.append(
             f"\n⚠️ Namespace `{namespace}` still reserved. "
             f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
@@ -641,7 +663,9 @@ async def _bonfire_full_test_workflow_impl(
 
         if not success:
             truncated = truncate_output(output, 1000, mode="tail")
-            lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
+            lines.append(
+                f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```"
+            )
         else:
             lines.append("✅ IQE CJI deployed")
 
@@ -652,9 +676,16 @@ async def _bonfire_full_test_workflow_impl(
     lines.append(f"**Duration:** {duration}")
     lines.append("")
     lines.append("**Useful commands:**")
-    lines.append(f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`")
-    lines.append(f"- Get logs: `kubectl_logs(pod_name='...', " f"namespace='{namespace}', environment='ephemeral')`")
-    lines.append(f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`")
+    lines.append(
+        f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`"
+    )
+    lines.append(
+        f"- Get logs: `kubectl_logs(pod_name='...', "
+        f"namespace='{namespace}', environment='ephemeral')`"
+    )
+    lines.append(
+        f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`"
+    )
     lines.append(f"- Release: `bonfire_namespace_release(namespace='{namespace}')`")
 
     return [TextContent(type="text", text="\n".join(lines))]
@@ -703,10 +734,18 @@ async def _bonfire_process_impl(
     success, output = await run_bonfire(args)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to process template:\n\n{output}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to process template:\n\n{output}")
+        ]
 
-    output = truncate_output(output, max_length=15000, suffix="\n\n... (truncated, output too large)")
-    return [TextContent(type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```")]
+    output = truncate_output(
+        output, max_length=15000, suffix="\n\n... (truncated, output too large)"
+    )
+    return [
+        TextContent(
+            type="text", text=f"## ClowdApp Template: `{app}`\n\n```yaml\n{output}\n```"
+        )
+    ]
 
 
 @auto_heal_ephemeral()
@@ -725,7 +764,9 @@ async def _bonfire_process_env_impl(namespace: str) -> list[TextContent]:
     success, output = await run_bonfire(args)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to process ClowdEnv:\n\n{output}")
+        ]
 
     output = truncate_output(output, max_length=10000)
     return [
@@ -763,10 +804,14 @@ async def _bonfire_process_iqe_cji_impl(
     success, output = await run_bonfire(args)
 
     if not success:
-        return [TextContent(type="text", text=f"❌ Failed to process IQE CJI:\n\n{output}")]
+        return [
+            TextContent(type="text", text=f"❌ Failed to process IQE CJI:\n\n{output}")
+        ]
 
     output = truncate_output(output, max_length=8000)
-    return [TextContent(type="text", text=f"## IQE CJI Template\n\n```yaml\n{output}\n```")]
+    return [
+        TextContent(type="text", text=f"## IQE CJI Template\n\n```yaml\n{output}\n```")
+    ]
 
 
 def register_tools(server: "FastMCP") -> int:
@@ -813,7 +858,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Deployment status.
         """
-        return await _bonfire_deploy_aa_from_snapshot_impl(namespace, snapshot_json, billing, timeout)
+        return await _bonfire_deploy_aa_from_snapshot_impl(
+            namespace, snapshot_json, billing, timeout
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -880,7 +927,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             CJI deployment status.
         """
-        return await _bonfire_deploy_iqe_cji_impl(namespace, cji_name, marker, filter_expr, env, timeout)
+        return await _bonfire_deploy_iqe_cji_impl(
+            namespace, cji_name, marker, filter_expr, env, timeout
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -904,7 +953,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Namespace and deployment status.
         """
-        return await _bonfire_deploy_with_reserve_impl(app, duration, pool, requester, timeout)
+        return await _bonfire_deploy_with_reserve_impl(
+            app, duration, pool, requester, timeout
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -926,7 +977,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Workflow status with namespace info.
         """
-        return await _bonfire_full_test_workflow_impl(duration, billing, run_iqe, iqe_marker)
+        return await _bonfire_full_test_workflow_impl(
+            duration, billing, run_iqe, iqe_marker
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()

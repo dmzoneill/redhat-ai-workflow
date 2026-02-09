@@ -14,7 +14,12 @@ from typing import Any
 
 import yaml
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 from tool_modules.common import PROJECT_ROOT
 
@@ -62,7 +67,14 @@ class YamlMemoryAdapter:
     # Memory sections and their search keywords
     SECTIONS = {
         "state/current_work": {
-            "keywords": ["working on", "current", "active", "my issues", "branch", "mr"],
+            "keywords": [
+                "working on",
+                "current",
+                "active",
+                "my issues",
+                "branch",
+                "mr",
+            ],
             "type": "state",
         },
         "state/environments": {
@@ -246,7 +258,9 @@ class YamlMemoryAdapter:
                 metadata={
                     "key": key,
                     "path": str(path),
-                    "modified": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+                    "modified": datetime.fromtimestamp(
+                        path.stat().st_mtime
+                    ).isoformat(),
                 },
             )
 
@@ -317,7 +331,9 @@ class YamlMemoryAdapter:
                 key = issue.get("key", "unknown")
                 status = issue.get("status", "unknown")
                 branch = issue.get("branch", "")
-                lines.append(f"- {key}: {status}" + (f" (branch: {branch})" if branch else ""))
+                lines.append(
+                    f"- {key}: {status}" + (f" (branch: {branch})" if branch else "")
+                )
 
         # Current branch
         branch = data.get("current_branch")

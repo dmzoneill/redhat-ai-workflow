@@ -135,17 +135,33 @@ class FilterStats:
             Dict with min, max, mean, median tool counts
         """
         if persona not in self.by_persona:
-            return {"requests": 0, "tools_min": 0, "tools_max": 0, "tools_mean": 0, "tools_median": 0}
+            return {
+                "requests": 0,
+                "tools_min": 0,
+                "tools_max": 0,
+                "tools_mean": 0,
+                "tools_median": 0,
+            }
 
         stats = self.by_persona[persona]
         tools = stats["tools"]
 
         if not tools:
-            return {"requests": stats["requests"], "tools_min": 0, "tools_max": 0, "tools_mean": 0, "tools_median": 0}
+            return {
+                "requests": stats["requests"],
+                "tools_min": 0,
+                "tools_max": 0,
+                "tools_mean": 0,
+                "tools_median": 0,
+            }
 
         sorted_tools = sorted(tools)
         n = len(sorted_tools)
-        median = sorted_tools[n // 2] if n % 2 == 1 else (sorted_tools[n // 2 - 1] + sorted_tools[n // 2]) / 2
+        median = (
+            sorted_tools[n // 2]
+            if n % 2 == 1
+            else (sorted_tools[n // 2 - 1] + sorted_tools[n // 2]) / 2
+        )
 
         return {
             "requests": stats["requests"],
@@ -166,7 +182,9 @@ class FilterStats:
         """
         return {
             "total_requests": self.total_requests,
-            "by_persona": {name: self.get_persona_stats(name) for name in self.by_persona},
+            "by_persona": {
+                name: self.get_persona_stats(name) for name in self.by_persona
+            },
             "latency": self.latency_histogram,
             "cache": {
                 "hits": self.cache_hits,
@@ -247,7 +265,12 @@ class FilterStats:
         """Reset all statistics."""
         self.total_requests = 0
         self.by_persona = {}
-        self.latency_histogram = {"<10ms": 0, "10-100ms": 0, "100-500ms": 0, ">500ms": 0}
+        self.latency_histogram = {
+            "<10ms": 0,
+            "10-100ms": 0,
+            "100-500ms": 0,
+            ">500ms": 0,
+        }
         self.cache_hits = 0
         self.cache_misses = 0
         self.npu_calls = 0

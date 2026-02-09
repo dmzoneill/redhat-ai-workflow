@@ -148,7 +148,9 @@ async def _code_lint_impl(
         suffix=f"\n\n... truncated ({issue_count} total issues)",
     )
 
-    return f"⚠️ Linting issues found ({tool}): {issue_count} issues\n\n```\n{output}\n```"
+    return (
+        f"⚠️ Linting issues found ({tool}): {issue_count} issues\n\n```\n{output}\n```"
+    )
 
 
 @auto_heal()
@@ -180,7 +182,9 @@ async def _docker_compose_status_impl(
         return f"❌ Docker not running or not available: {output}"
 
     if not output.strip():
-        return "No containers running" + (f" matching '{filter_name}'" if filter_name else "")
+        return "No containers running" + (
+            f" matching '{filter_name}'" if filter_name else ""
+        )
 
     lines = ["## Docker Containers", ""]
     for line in output.strip().split("\n"):
@@ -309,7 +313,9 @@ async def _git_add_impl(repo: str, files: str = ".") -> str:
 
 
 @auto_heal()
-async def _git_branch_create_impl(repo: str, branch_name: str, base: str = "", checkout: bool = True) -> str:
+async def _git_branch_create_impl(
+    repo: str, branch_name: str, base: str = "", checkout: bool = True
+) -> str:
     """Create a new branch."""
     path = resolve_repo_path(repo)
 
@@ -443,7 +449,10 @@ async def _git_checkout_impl(
 def _load_commit_config():
     """Load commit configuration from config.json."""
     try:
-        from scripts.common.config_loader import format_commit_message, get_commit_format
+        from scripts.common.config_loader import (
+            format_commit_message,
+            get_commit_format,
+        )
 
         commit_cfg = get_commit_format()
         valid_types = commit_cfg["types"]
@@ -466,7 +475,9 @@ async def _detect_issue_key(path: str) -> str:
     """Auto-detect issue key from branch name."""
     import re
 
-    success, branch_name = await run_git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=path)
+    success, branch_name = await run_git(
+        ["rev-parse", "--abbrev-ref", "HEAD"], cwd=path
+    )
     if success and branch_name:
         # Match any project pattern: PROJ-12345 (3-6 digits)
         match = re.match(r"([A-Z]{2,10}-\d{3,6})", branch_name.strip().upper())
@@ -585,7 +596,9 @@ async def _git_commit_impl(
         )
 
     # Format commit message using config pattern
-    formatted_message = _format_commit_msg(message, issue_key, commit_type, scope, formatter_func, use_config)
+    formatted_message = _format_commit_msg(
+        message, issue_key, commit_type, scope, formatter_func, use_config
+    )
 
     args = ["commit", "-m", formatted_message]
     if all_changes:
@@ -1072,7 +1085,12 @@ async def _handle_rebase_conflicts(path: str) -> str:
     if status_ok:
         for line in status_output.split("\n"):
             # UU = both modified, AA = both added, DU = deleted by us
-            if line.startswith("UU") or line.startswith("AA") or line.startswith("DU") or line.startswith("UD"):
+            if (
+                line.startswith("UU")
+                or line.startswith("AA")
+                or line.startswith("DU")
+                or line.startswith("UD")
+            ):
                 conflict_files.append(line[3:].strip())
 
     if not conflict_files:
@@ -1156,7 +1174,9 @@ async def _git_rebase_impl(
     success, output = await run_git(args, cwd=path)
 
     if success:
-        return f"✅ Successfully rebased onto `{onto}`\n\n{output or 'Rebase complete.'}"
+        return (
+            f"✅ Successfully rebased onto `{onto}`\n\n{output or 'Rebase complete.'}"
+        )
 
     # Check for conflicts using helper
     conflict_msg = await _handle_rebase_conflicts(path)
@@ -1405,7 +1425,9 @@ async def _git_status_impl(repo: str) -> str:
         # Format sections using helper
         lines.extend(_format_status_sections(staged, modified, untracked))
 
-    success, output = await run_git(["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=path)
+    success, output = await run_git(
+        ["rev-list", "--left-right", "--count", "@{u}...HEAD"], cwd=path
+    )
     if success and output.strip():
         parts = output.strip().split()
         if len(parts) == 2:
@@ -1492,7 +1514,9 @@ def _register_code_quality_tools(registry: ToolRegistry) -> None:
         Returns:
             Linting results with issues found.
         """
-        return await _code_lint_impl(repo, tool, paths, max_line_length, ignore, exclude)
+        return await _code_lint_impl(
+            repo, tool, paths, max_line_length, ignore, exclude
+        )
 
 
 def _register_docker_tools(registry: ToolRegistry) -> None:
@@ -1717,7 +1741,9 @@ def _register_git_branching_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def git_branch_create(repo: str, branch_name: str, base: str = "", checkout: bool = True) -> str:
+    async def git_branch_create(
+        repo: str, branch_name: str, base: str = "", checkout: bool = True
+    ) -> str:
         """Create a new branch."""
         return await _git_branch_create_impl(repo, branch_name, base, checkout)
 
@@ -1822,7 +1848,9 @@ def _register_git_commits_tools(registry: ToolRegistry) -> None:
 
         Valid types are loaded from config.json commit_format.types.
         """
-        return await _git_commit_impl(repo, message, all_changes, issue_key, commit_type, scope, run_lint)
+        return await _git_commit_impl(
+            repo, message, all_changes, issue_key, commit_type, scope, run_lint
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1909,7 +1937,9 @@ def _register_git_remote_tools(registry: ToolRegistry) -> None:
         Returns:
             Push result or lint error.
         """
-        return await _git_push_impl(repo, branch, set_upstream, force, dry_run, run_lint)
+        return await _git_push_impl(
+            repo, branch, set_upstream, force, dry_run, run_lint
+        )
 
 
 def _register_git_advanced_tools(registry: ToolRegistry) -> None:
@@ -1977,7 +2007,9 @@ def _register_git_advanced_tools(registry: ToolRegistry) -> None:
         Returns:
             Rebase status with conflict information if any.
         """
-        return await _git_rebase_impl(repo, onto, abort, continue_rebase, skip, interactive)
+        return await _git_rebase_impl(
+            repo, onto, abort, continue_rebase, skip, interactive
+        )
 
     @auto_heal()
     @registry.tool()

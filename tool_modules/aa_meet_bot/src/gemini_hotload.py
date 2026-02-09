@@ -96,7 +96,9 @@ class GeminiHotload:
         # Warm up with a simple call if system prompt provided
         if self.system_prompt:
             logger.info("Warming up Gemini with system prompt...")
-            response = await self._call_gemini(f"System: {self.system_prompt}\n\nAcknowledge with 'Ready.'")
+            response = await self._call_gemini(
+                f"System: {self.system_prompt}\n\nAcknowledge with 'Ready.'"
+            )
             if response:
                 logger.info(f"Gemini ready: {response[:50]}...")
             else:
@@ -129,7 +131,9 @@ class GeminiHotload:
         """
         if not self._running:
             if not await self.start():
-                return GeminiResponse(text="", latency_ms=0, error="Failed to start Gemini")
+                return GeminiResponse(
+                    text="", latency_ms=0, error="Failed to start Gemini"
+                )
 
         async with self._lock:
             start = time.time()
@@ -146,7 +150,9 @@ class GeminiHotload:
                 if response_text:
                     # Add to history
                     self._history.append({"role": "user", "content": message})
-                    self._history.append({"role": "assistant", "content": response_text})
+                    self._history.append(
+                        {"role": "assistant", "content": response_text}
+                    )
 
                     # Trim history
                     if len(self._history) > self.max_history * 2:
@@ -160,12 +166,20 @@ class GeminiHotload:
                         latency_ms=latency,
                     )
                 else:
-                    return GeminiResponse(text="", latency_ms=latency, error="No response from Gemini")
+                    return GeminiResponse(
+                        text="", latency_ms=latency, error="No response from Gemini"
+                    )
 
             except asyncio.TimeoutError:
-                return GeminiResponse(text="", latency_ms=(time.time() - start) * 1000, error="Response timeout")
+                return GeminiResponse(
+                    text="",
+                    latency_ms=(time.time() - start) * 1000,
+                    error="Response timeout",
+                )
             except Exception as e:
-                return GeminiResponse(text="", latency_ms=(time.time() - start) * 1000, error=str(e))
+                return GeminiResponse(
+                    text="", latency_ms=(time.time() - start) * 1000, error=str(e)
+                )
 
     def _build_prompt(self, message: str) -> str:
         """Build prompt with conversation history."""
@@ -208,7 +222,9 @@ class GeminiHotload:
                 env=env,
             )
 
-            stdout, stderr = await asyncio.wait_for(proc.communicate(input=prompt.encode()), timeout=self.timeout)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=prompt.encode()), timeout=self.timeout
+            )
 
             if proc.returncode == 0:
                 return stdout.decode().strip()

@@ -22,7 +22,12 @@ from mcp.types import TextContent
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import alertmanager_client, grafana_client
 from server.tool_registry import ToolRegistry
-from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+from server.utils import (
+    get_bearer_token,
+    get_env_config,
+    get_kubeconfig,
+    get_service_url,
+)
 
 # Setup project path for server imports
 
@@ -88,7 +93,12 @@ async def get_grafana_config(environment: str) -> tuple[str, str | None]:
         if config_path.exists():
             with open(config_path) as f:
                 config = json.load(f)
-            grafana_url = config.get("grafana", {}).get("environments", {}).get(env_key, {}).get("url", "")
+            grafana_url = (
+                config.get("grafana", {})
+                .get("environments", {})
+                .get(env_key, {})
+                .get("url", "")
+            )
     except Exception:
         pass
 
@@ -166,7 +176,9 @@ async def _alertmanager_receivers_impl(environment: str) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _alertmanager_silences_impl(environment: str, state: str) -> list[TextContent]:
+async def _alertmanager_silences_impl(
+    environment: str, state: str
+) -> list[TextContent]:
     """Implementation of alertmanager_silences tool."""
     url, token = await get_alertmanager_config(environment)
     success, result = await alertmanager_request(url, "/silences", token=token)
@@ -175,7 +187,9 @@ async def _alertmanager_silences_impl(environment: str, state: str) -> list[Text
         return [TextContent(type="text", text=f"❌ Failed to get silences: {result}")]
 
     if not isinstance(result, list):
-        return [TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")]
+        return [
+            TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")
+        ]
 
     silences = result
     if state:
@@ -251,7 +265,9 @@ async def _alertmanager_status_impl(environment: str) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _grafana_dashboard_list_impl(environment: str, search: str, folder: str) -> list[TextContent]:
+async def _grafana_dashboard_list_impl(
+    environment: str, search: str, folder: str
+) -> list[TextContent]:
     """Implementation of grafana_dashboard_list tool."""
     try:
         url, token = await get_grafana_config(environment)
@@ -264,13 +280,17 @@ async def _grafana_dashboard_list_impl(environment: str, search: str, folder: st
     if folder:
         params["folderIds"] = folder
 
-    success, result = await grafana_request(url, "/api/search", params=params, token=token)
+    success, result = await grafana_request(
+        url, "/api/search", params=params, token=token
+    )
 
     if not success:
         return [TextContent(type="text", text=f"Failed to list dashboards: {result}")]
 
     if not isinstance(result, list):
-        return [TextContent(type="text", text=f"Unexpected response: {str(result)[:500]}")]
+        return [
+            TextContent(type="text", text=f"Unexpected response: {str(result)[:500]}")
+        ]
 
     if not result:
         msg = f"No dashboards found in {environment}"
@@ -289,7 +309,9 @@ async def _grafana_dashboard_list_impl(environment: str, search: str, folder: st
         lines.append(f"- **{title}**")
         lines.append(f"  UID: `{uid}` | Folder: {folder_title}")
         if dash_url:
-            full_url = f"{url.rstrip('/')}{dash_url}" if dash_url.startswith("/") else dash_url
+            full_url = (
+                f"{url.rstrip('/')}{dash_url}" if dash_url.startswith("/") else dash_url
+            )
             lines.append(f"  [Open]({full_url})")
         lines.append("")
 
@@ -303,13 +325,19 @@ async def _grafana_dashboard_get_impl(uid: str, environment: str) -> list[TextCo
     except ValueError as e:
         return [TextContent(type="text", text=f"Failed to get Grafana config: {e}")]
 
-    success, result = await grafana_request(url, f"/api/dashboards/uid/{uid}", token=token)
+    success, result = await grafana_request(
+        url, f"/api/dashboards/uid/{uid}", token=token
+    )
 
     if not success:
-        return [TextContent(type="text", text=f"Failed to get dashboard '{uid}': {result}")]
+        return [
+            TextContent(type="text", text=f"Failed to get dashboard '{uid}': {result}")
+        ]
 
     if not isinstance(result, dict):
-        return [TextContent(type="text", text=f"Unexpected response: {str(result)[:500]}")]
+        return [
+            TextContent(type="text", text=f"Unexpected response: {str(result)[:500]}")
+        ]
 
     meta = result.get("meta", {})
     dashboard = result.get("dashboard", {})
@@ -335,7 +363,9 @@ async def _grafana_dashboard_get_impl(uid: str, environment: str) -> list[TextCo
         lines.append(f"**Description:** {description}")
 
     if dash_url:
-        full_url = f"{url.rstrip('/')}{dash_url}" if dash_url.startswith("/") else dash_url
+        full_url = (
+            f"{url.rstrip('/')}{dash_url}" if dash_url.startswith("/") else dash_url
+        )
         lines.append(f"**URL:** [Open Dashboard]({full_url})")
 
     if panels:
@@ -372,19 +402,29 @@ async def _grafana_annotation_create_impl(
 
     if dashboard_uid:
         # Resolve dashboard ID from UID (annotations API needs the numeric ID)
-        success, dash_result = await grafana_request(url, f"/api/dashboards/uid/{dashboard_uid}", token=token)
+        success, dash_result = await grafana_request(
+            url, f"/api/dashboards/uid/{dashboard_uid}", token=token
+        )
         if success and isinstance(dash_result, dict):
             dash_id = dash_result.get("dashboard", {}).get("id")
             if dash_id:
                 data["dashboardId"] = dash_id
 
-    success, result = await grafana_request(url, "/api/annotations", method="POST", data=data, token=token)
+    success, result = await grafana_request(
+        url, "/api/annotations", method="POST", data=data, token=token
+    )
 
     if not success:
         return [TextContent(type="text", text=f"Failed to create annotation: {result}")]
 
-    annotation_id = result.get("id", "unknown") if isinstance(result, dict) else str(result)
-    message = result.get("message", "Annotation created") if isinstance(result, dict) else "Annotation created"
+    annotation_id = (
+        result.get("id", "unknown") if isinstance(result, dict) else str(result)
+    )
+    message = (
+        result.get("message", "Annotation created")
+        if isinstance(result, dict)
+        else "Annotation created"
+    )
 
     lines = [
         "## Annotation Created",
@@ -422,7 +462,9 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_stage()
     @registry.tool()
-    async def alertmanager_silences(environment: str = "stage", state: str = "") -> list[TextContent]:
+    async def alertmanager_silences(
+        environment: str = "stage", state: str = ""
+    ) -> list[TextContent]:
         """
         List active silences in Alertmanager.
 
@@ -508,6 +550,8 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of annotation creation.
         """
-        return await _grafana_annotation_create_impl(text, tags, dashboard_uid, environment)
+        return await _grafana_annotation_create_impl(
+            text, tags, dashboard_uid, environment
+        )
 
     return registry.count

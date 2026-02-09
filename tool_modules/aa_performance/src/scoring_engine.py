@@ -247,12 +247,15 @@ class ScoringEngine:
 
         # Calculate percentages
         cumulative_percentage = {
-            comp_id: min(100, int(pts / self.quarter_target * 100)) for comp_id, pts in cumulative_points.items()
+            comp_id: min(100, int(pts / self.quarter_target * 100))
+            for comp_id, pts in cumulative_points.items()
         }
 
         # Overall percentage (average of all competencies)
         if cumulative_percentage:
-            overall_percentage = sum(cumulative_percentage.values()) // len(cumulative_percentage)
+            overall_percentage = sum(cumulative_percentage.values()) // len(
+                cumulative_percentage
+            )
         else:
             overall_percentage = 0
 
@@ -299,7 +302,7 @@ class ScoringEngine:
 
         scored_events.sort(reverse=True, key=lambda x: x[0])
 
-        for score, event in scored_events[:limit]:
+        for _score, event in scored_events[:limit]:
             title = event.get("title", "")
             source = event.get("source", "")
             if title:
@@ -330,7 +333,11 @@ class ScoringEngine:
             current = (
                 date(current.year, current.month, current.day + 1)
                 if current.day < 28
-                else date(current.year, current.month + 1, 1) if current.month < 12 else date(current.year + 1, 1, 1)
+                else (
+                    date(current.year, current.month + 1, 1)
+                    if current.month < 12
+                    else date(current.year + 1, 1, 1)
+                )
             )
             # Simpler increment
             from datetime import timedelta

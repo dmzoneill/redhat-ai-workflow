@@ -10,7 +10,12 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -67,7 +72,9 @@ class GoogleCalendarAdapter:
             AdapterResult with matching events
         """
         try:
-            from tool_modules.aa_google_calendar.src.tools_basic import get_calendar_service
+            from tool_modules.aa_google_calendar.src.tools_basic import (
+                get_calendar_service,
+            )
         except ImportError:
             try:
                 from .tools_basic import get_calendar_service
@@ -242,7 +249,9 @@ class GoogleCalendarAdapter:
     async def health_check(self) -> HealthStatus:
         """Check if Google Calendar is accessible."""
         try:
-            from tool_modules.aa_google_calendar.src.tools_basic import get_calendar_service
+            from tool_modules.aa_google_calendar.src.tools_basic import (
+                get_calendar_service,
+            )
         except ImportError:
             try:
                 from .tools_basic import get_calendar_service

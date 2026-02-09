@@ -92,7 +92,9 @@ class SleepWakeMonitor:
         self._last_active_time = time.monotonic()
 
         # Method 1: Monitor time gaps (always works)
-        self._time_gap_task = asyncio.create_task(self._monitor_time_gaps(), name="sleep_wake_time_gap_monitor")
+        self._time_gap_task = asyncio.create_task(
+            self._monitor_time_gaps(), name="sleep_wake_time_gap_monitor"
+        )
 
         # Method 2: Try to subscribe to logind PrepareForSleep signal
         try:
@@ -168,9 +170,13 @@ class SleepWakeMonitor:
         self._bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
 
         # Subscribe to PrepareForSleep signal from logind
-        introspection = await self._bus.introspect("org.freedesktop.login1", "/org/freedesktop/login1")
+        introspection = await self._bus.introspect(
+            "org.freedesktop.login1", "/org/freedesktop/login1"
+        )
 
-        proxy = self._bus.get_proxy_object("org.freedesktop.login1", "/org/freedesktop/login1", introspection)
+        proxy = self._bus.get_proxy_object(
+            "org.freedesktop.login1", "/org/freedesktop/login1", introspection
+        )
 
         manager = proxy.get_interface("org.freedesktop.login1.Manager")
 
@@ -180,7 +186,9 @@ class SleepWakeMonitor:
         logger.debug("Subscribed to systemd-logind sleep/wake signals")
 
         # Keep the connection alive
-        self._logind_task = asyncio.create_task(self._keep_logind_alive(), name="sleep_wake_logind_monitor")
+        self._logind_task = asyncio.create_task(
+            self._keep_logind_alive(), name="sleep_wake_logind_monitor"
+        )
 
     async def _keep_logind_alive(self):
         """Keep the logind D-Bus connection alive."""
@@ -233,7 +241,8 @@ class SleepWakeAwareDaemon(ABC):
                 # Refresh your data here
                 await self.refresh_calendars()
 
-            async def on_system_sleep(self):
+            @abstractmethod
+    async def on_system_sleep(self):
                 # Optional: save state before sleep
                 pass
     """
@@ -249,6 +258,7 @@ class SleepWakeAwareDaemon(ABC):
         """
         pass
 
+    @abstractmethod
     async def on_system_sleep(self):
         """
         Called before system goes to sleep.
@@ -385,7 +395,9 @@ class RobustTimer:
         Args:
             delay: Seconds until next fire. If None, uses the interval.
         """
-        self._next_fire_time = time.time() + (delay if delay is not None else self._interval)
+        self._next_fire_time = time.time() + (
+            delay if delay is not None else self._interval
+        )
 
 
 class RobustPeriodicTask:
@@ -437,7 +449,9 @@ class RobustPeriodicTask:
             return
 
         self._is_running = True
-        self._task = asyncio.create_task(self._run(), name=f"robust_periodic_{self._name}")
+        self._task = asyncio.create_task(
+            self._run(), name=f"robust_periodic_{self._name}"
+        )
 
     async def stop(self):
         """Stop the periodic task."""

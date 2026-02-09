@@ -54,7 +54,11 @@ def _get_resolve_path():
     config = load_config()
     repos_data = config.get("repositories", {})
     if isinstance(repos_data, dict):
-        repo_paths = {name: info.get("path", "") for name, info in repos_data.items() if info.get("path")}
+        repo_paths = {
+            name: info.get("path", "")
+            for name, info in repos_data.items()
+            if info.get("path")
+        }
     else:
         repo_paths = {}
 
@@ -133,7 +137,9 @@ async def _lint_yaml_impl(
 
     target = os.path.join(repo_path, path_filter)
 
-    success, stdout, stderr = await run_cmd_full(["yamllint", "-f", "parsable", target], cwd=repo_path)
+    success, stdout, stderr = await run_cmd_full(
+        ["yamllint", "-f", "parsable", target], cwd=repo_path
+    )
 
     lines = [f"## YAML Linting: `{repo}`", ""]
 
@@ -225,9 +231,13 @@ async def _security_scan_impl(repo: str) -> list[TextContent]:
 
     lines = [f"## Security Scan: `{repo}`", ""]
 
-    if (Path(repo_path) / "pyproject.toml").exists() or (Path(repo_path) / "requirements.txt").exists():
+    if (Path(repo_path) / "pyproject.toml").exists() or (
+        Path(repo_path) / "requirements.txt"
+    ).exists():
         lines.append("### Bandit (Python)")
-        success, stdout, stderr = await run_cmd_full(["bandit", "-r", ".", "-f", "txt", "-ll"], cwd=repo_path)
+        success, stdout, stderr = await run_cmd_full(
+            ["bandit", "-r", ".", "-f", "txt", "-ll"], cwd=repo_path
+        )
 
         if success:
             lines.append("✅ No issues found")
@@ -237,7 +247,9 @@ async def _security_scan_impl(repo: str) -> list[TextContent]:
 
     if (Path(repo_path) / "package.json").exists():
         lines.append("\n### npm audit")
-        success, stdout, stderr = await run_cmd_full(["npm", "audit", "--json"], cwd=repo_path)
+        success, stdout, stderr = await run_cmd_full(
+            ["npm", "audit", "--json"], cwd=repo_path
+        )
 
         try:
             audit = json.loads(stdout)
@@ -334,7 +346,9 @@ async def _test_run_impl(
 
     lines = [f"## Running Tests: `{repo}`", ""]
 
-    if (Path(repo_path) / "pyproject.toml").exists() or (Path(repo_path) / "pytest.ini").exists():
+    if (Path(repo_path) / "pyproject.toml").exists() or (
+        Path(repo_path) / "pytest.ini"
+    ).exists():
         cmd = ["pytest"]
         if test_path:
             cmd.append(test_path)
@@ -355,7 +369,9 @@ async def _test_run_impl(
         lines.append("**Framework:** npm test")
         lines.append("")
     else:
-        return [TextContent(type="text", text="⚠️ No test framework detected (pytest/npm)")]
+        return [
+            TextContent(type="text", text="⚠️ No test framework detected (pytest/npm)")
+        ]
 
     success, stdout, stderr = await run_cmd_full(cmd, cwd=repo_path, timeout=600)
 

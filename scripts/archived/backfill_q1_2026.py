@@ -127,15 +127,39 @@ def map_competencies(title: str, source: str, event_type: str) -> dict[str, int]
         points["collaboration"] = 2
 
     # Mentorship
-    if any(k in title_lower for k in ["mentor", "onboard", "training", "newcomer", "doc"]):
+    if any(
+        k in title_lower for k in ["mentor", "onboard", "training", "newcomer", "doc"]
+    ):
         points["mentorship"] = 3
 
     # Continuous Improvement
-    if any(k in title_lower for k in ["ci/cd", "pipeline", "automation", "tooling", "refactor", "fix", "improve"]):
+    if any(
+        k in title_lower
+        for k in [
+            "ci/cd",
+            "pipeline",
+            "automation",
+            "tooling",
+            "refactor",
+            "fix",
+            "improve",
+        ]
+    ):
         points["continuous_improvement"] = 3
 
     # Creativity & Innovation
-    if any(k in title_lower for k in ["poc", "prototype", "innovation", "experiment", "ai", "new", "feature"]):
+    if any(
+        k in title_lower
+        for k in [
+            "poc",
+            "prototype",
+            "innovation",
+            "experiment",
+            "ai",
+            "new",
+            "feature",
+        ]
+    ):
         points["creativity_innovation"] = 4
 
     # Leadership
@@ -147,7 +171,10 @@ def map_competencies(title: str, source: str, event_type: str) -> dict[str, int]
         points["portfolio_impact"] = 4
 
     # End-to-End Delivery
-    if any(k in title_lower for k in ["release", "deploy", "customer", "production", "prod"]):
+    if any(
+        k in title_lower
+        for k in ["release", "deploy", "customer", "production", "prod"]
+    ):
         points["end_to_end_delivery"] = 3
 
     # Opportunity Recognition (upstream)
@@ -248,8 +275,14 @@ def update_summary():
 
     # Calculate percentages (max 100 pts per competency per quarter)
     max_per_quarter = 100
-    percentages = {k: min(100, round(v / max_per_quarter * 100)) for k, v in cumulative.items()}
-    overall = round(sum(percentages.values()) / max(len(percentages), 1)) if percentages else 0
+    percentages = {
+        k: min(100, round(v / max_per_quarter * 100)) for k, v in cumulative.items()
+    }
+    overall = (
+        round(sum(percentages.values()) / max(len(percentages), 1))
+        if percentages
+        else 0
+    )
 
     # Find gaps (below 50%)
     gaps = [k for k, v in percentages.items() if v < 50]
@@ -304,7 +337,10 @@ def update_workspace_state(summary: dict):
         "day_of_quarter": summary.get("day_of_quarter", 24),
         "overall_percentage": summary.get("overall_percentage", 0),
         "competencies": {
-            comp_id: {"points": cumulative.get(comp_id, 0), "percentage": percentages.get(comp_id, 0)}
+            comp_id: {
+                "points": cumulative.get(comp_id, 0),
+                "percentage": percentages.get(comp_id, 0),
+            }
             for comp_id in cumulative
         },
         "highlights": summary.get("highlights", [])[:5],

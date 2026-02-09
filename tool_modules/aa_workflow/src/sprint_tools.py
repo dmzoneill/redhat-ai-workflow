@@ -24,7 +24,13 @@ try:
         refresh_sprint_state,
         skip_issue,
     )
-    from .sprint_history import SprintIssue, TimelineEvent, load_sprint_history, load_sprint_state, save_sprint_state
+    from .sprint_history import (
+        SprintIssue,
+        TimelineEvent,
+        load_sprint_history,
+        load_sprint_state,
+        save_sprint_state,
+    )
 except ImportError:
     from sprint_bot import (
         SprintBotConfig,
@@ -37,7 +43,13 @@ except ImportError:
         refresh_sprint_state,
         skip_issue,
     )
-    from sprint_history import SprintIssue, TimelineEvent, load_sprint_history, load_sprint_state, save_sprint_state
+    from sprint_history import (
+        SprintIssue,
+        TimelineEvent,
+        load_sprint_history,
+        load_sprint_state,
+        save_sprint_state,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +126,19 @@ def sprint_load(
 
             for issue in actionable_issues:
                 pts = f"[{issue.story_points}pts]" if issue.story_points else "[?pts]"
-                status_icon = {"pending": "⏳", "approved": "✅", "in_progress": "🔄", "blocked": "🔴"}.get(
-                    issue.approval_status, "•"
+                status_icon = {
+                    "pending": "⏳",
+                    "approved": "✅",
+                    "in_progress": "🔄",
+                    "blocked": "🔴",
+                }.get(issue.approval_status, "•")
+                lines.append(
+                    f"- {status_icon} **{issue.key}** {pts} ({issue.jira_status}) {issue.summary[:50]}..."
                 )
-                lines.append(f"- {status_icon} **{issue.key}** {pts} ({issue.jira_status}) {issue.summary[:50]}...")
                 if issue.priority_reasoning:
-                    lines.append(f"  - Reasoning: {', '.join(issue.priority_reasoning[:2])}")
+                    lines.append(
+                        f"  - Reasoning: {', '.join(issue.priority_reasoning[:2])}"
+                    )
 
             lines.append("")
 
@@ -131,7 +150,9 @@ def sprint_load(
 
             for issue in not_actionable_issues:
                 pts = f"[{issue.story_points}pts]" if issue.story_points else "[?pts]"
-                lines.append(f"- ~~**{issue.key}**~~ {pts} ({issue.jira_status}) {issue.summary[:50]}...")
+                lines.append(
+                    f"- ~~**{issue.key}**~~ {pts} ({issue.jira_status}) {issue.summary[:50]}..."
+                )
 
             lines.append("")
 
@@ -160,7 +181,9 @@ def sprint_enable() -> str:
     if result["success"]:
         return "✅ Sprint bot enabled! It will process approved issues during working hours."
     else:
-        return f"❌ Failed to enable sprint bot: {result.get('message', 'Unknown error')}"
+        return (
+            f"❌ Failed to enable sprint bot: {result.get('message', 'Unknown error')}"
+        )
 
 
 def sprint_disable() -> str:
@@ -178,7 +201,9 @@ def sprint_disable() -> str:
     if result["success"]:
         return "🛑 Sprint bot disabled. No more issues will be automatically processed."
     else:
-        return f"❌ Failed to disable sprint bot: {result.get('message', 'Unknown error')}"
+        return (
+            f"❌ Failed to disable sprint bot: {result.get('message', 'Unknown error')}"
+        )
 
 
 def sprint_approve(issue_key: str) -> str:
@@ -330,11 +355,19 @@ def sprint_history(limit: int = 5) -> str:
     lines = ["## Sprint History", ""]
 
     for sprint in history:
-        completion_pct = (sprint.completed_points / sprint.total_points * 100) if sprint.total_points > 0 else 0
+        completion_pct = (
+            (sprint.completed_points / sprint.total_points * 100)
+            if sprint.total_points > 0
+            else 0
+        )
 
         lines.append(f"### {sprint.name}")
-        lines.append(f"- **Period:** {sprint.start_date[:10]} to {sprint.end_date[:10]}")
-        lines.append(f"- **Points:** {sprint.completed_points}/{sprint.total_points} ({completion_pct:.0f}%)")
+        lines.append(
+            f"- **Period:** {sprint.start_date[:10]} to {sprint.end_date[:10]}"
+        )
+        lines.append(
+            f"- **Points:** {sprint.completed_points}/{sprint.total_points} ({completion_pct:.0f}%)"
+        )
         lines.append(f"- **Issues:** {len(sprint.issues)}")
         lines.append("")
 
@@ -421,9 +454,13 @@ def sprint_approve_all() -> str:
         state.last_updated = datetime.now().isoformat()
         save_sprint_state(state)
 
-        msg = f"✅ Approved {approved_count} actionable issues for sprint bot processing."
+        msg = (
+            f"✅ Approved {approved_count} actionable issues for sprint bot processing."
+        )
         if skipped_count > 0:
-            msg += f"\n🚫 Skipped {skipped_count} non-actionable issues (in Review/Done)."
+            msg += (
+                f"\n🚫 Skipped {skipped_count} non-actionable issues (in Review/Done)."
+            )
         return msg
     else:
         return "No pending issues to approve."

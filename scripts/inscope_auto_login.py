@@ -23,7 +23,9 @@ import time
 from pathlib import Path
 
 # Setup logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 # Add project root to path
@@ -60,7 +62,9 @@ def check_existing_token() -> bool:
 
         remaining = expires_at - time.time()
         if remaining > 0:
-            logger.info(f"Token is valid, expires in {int(remaining)} seconds ({int(remaining/60)} minutes)")
+            logger.info(
+                f"Token is valid, expires in {int(remaining)} seconds ({int(remaining/60)} minutes)"
+            )
             return True
         else:
             logger.warning(f"Token has expired ({int(-remaining)} seconds ago)")
@@ -98,7 +102,9 @@ async def login_to_inscope(headless: bool = True) -> bool:
 
                     exp_time = datetime.datetime.fromtimestamp(result.jwt_expires_at)
                     remaining = result.jwt_expires_at - time.time()
-                    logger.info(f"Token expires at: {exp_time} ({int(remaining/60)} minutes)")
+                    logger.info(
+                        f"Token expires at: {exp_time} ({int(remaining/60)} minutes)"
+                    )
 
             if result.cookies:
                 logger.info(f"Cookies extracted: {list(result.cookies.keys())}")
@@ -112,7 +118,9 @@ async def login_to_inscope(headless: bool = True) -> bool:
 
     except ImportError as e:
         logger.error(f"Failed to import aa_sso module: {e}")
-        logger.error("Make sure playwright is installed: pip install playwright && playwright install chromium")
+        logger.error(
+            "Make sure playwright is installed: pip install playwright && playwright install chromium"
+        )
         return False
     except Exception as e:
         logger.exception(f"Authentication failed: {e}")
@@ -120,9 +128,17 @@ async def login_to_inscope(headless: bool = True) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Auto-login to InScope and extract authentication credentials")
-    parser.add_argument("--headless", "-hl", action="store_true", help="Run browser in headless mode")
-    parser.add_argument("--check", action="store_true", help="Only check current auth status, don't login")
+    parser = argparse.ArgumentParser(
+        description="Auto-login to InScope and extract authentication credentials"
+    )
+    parser.add_argument(
+        "--headless", "-hl", action="store_true", help="Run browser in headless mode"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check current auth status, don't login",
+    )
     args = parser.parse_args()
 
     if args.check:

@@ -59,7 +59,9 @@ def load_concur_config() -> dict:
 # ==================== Credential Helpers ====================
 
 
-def _get_bitwarden_password(item_name: str, username: str | None = None) -> tuple[str, str]:
+def _get_bitwarden_password(
+    item_name: str, username: str | None = None
+) -> tuple[str, str]:
     """Get credentials from Bitwarden CLI.
 
     Returns:
@@ -67,7 +69,9 @@ def _get_bitwarden_password(item_name: str, username: str | None = None) -> tupl
     """
     bw_session = os.environ.get("BW_SESSION")
     if not bw_session:
-        raise RuntimeError("BW_SESSION not set. Run: export BW_SESSION=$(bw unlock --raw)")
+        raise RuntimeError(
+            "BW_SESSION not set. Run: export BW_SESSION=$(bw unlock --raw)"
+        )
 
     try:
         result = subprocess.run(
@@ -131,7 +135,8 @@ def _get_redhatter_token() -> str:
     """Read the redhatter authentication token."""
     if not TOKEN_CACHE_PATH.exists():
         raise RuntimeError(
-            f"Auth token not found at {TOKEN_CACHE_PATH}. " "Start the redhatter service to generate it."
+            f"Auth token not found at {TOKEN_CACHE_PATH}. "
+            "Start the redhatter service to generate it."
         )
 
     token = TOKEN_CACHE_PATH.read_text(encoding="utf-8").strip()
@@ -147,7 +152,9 @@ def _fetch_concur_credentials(token: str, headless: bool = True) -> tuple[str, s
     import urllib.parse
     import urllib.request
 
-    params = urllib.parse.urlencode({"context": "associate", "headless": str(headless).lower()})
+    params = urllib.parse.urlencode(
+        {"context": "associate", "headless": str(headless).lower()}
+    )
     url = f"http://localhost:8009/get_creds?{params}"
 
     request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
@@ -177,7 +184,11 @@ def _extract_amount_from_text(text: str) -> str | None:
     Looks for patterns like "bill for this month € XX.XX"
     """
     # Try "bill for this month" pattern first
-    match = re.search(r"bill\s+for\s+this\s+month\s*€\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)", text, re.IGNORECASE)
+    match = re.search(
+        r"bill\s+for\s+this\s+month\s*€\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)",
+        text,
+        re.IGNORECASE,
+    )
     if match:
         return match.group(1).replace(",", "")
 
@@ -418,11 +429,18 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"✅ Bill details extracted\n\n" f"**Amount:** €{amount}\n" f"**First Page:** `{first_page}`",
+                    text=f"✅ Bill details extracted\n\n"
+                    f"**Amount:** €{amount}\n"
+                    f"**First Page:** `{first_page}`",
                 )
             ]
         except Exception as e:
-            return [TextContent(type="text", text=f"❌ Failed to extract bill details\n\n" f"**Error:** {e}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Failed to extract bill details\n\n" f"**Error:** {e}",
+                )
+            ]
 
     @registry.tool()
     async def concur_check_receipt_status(
@@ -544,7 +562,14 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             # Remove VIRTUAL_ENV to avoid pipenv confusion
             env.pop("VIRTUAL_ENV", None)
 
-            cmd = ["pipenv", "run", "python", str(GOMO_SCRIPT), "--download-dir", str(DOWNLOADS_DIR)]
+            cmd = [
+                "pipenv",
+                "run",
+                "python",
+                str(GOMO_SCRIPT),
+                "--download-dir",
+                str(DOWNLOADS_DIR),
+            ]
             if skip_concur:
                 cmd.append("--skip-concur")
             if not headless:
@@ -637,7 +662,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             Automation result.
         """
         if not GOMO_SCRIPT.exists():
-            return [TextContent(type="text", text=f"❌ Script not found at `{GOMO_SCRIPT}`")]
+            return [
+                TextContent(type="text", text=f"❌ Script not found at `{GOMO_SCRIPT}`")
+            ]
 
         logger.info("Running full GOMO + Concur automation")
 
@@ -647,7 +674,14 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             env["PIPENV_IGNORE_VIRTUALENVS"] = "1"
             env.pop("VIRTUAL_ENV", None)
 
-            cmd = ["pipenv", "run", "python", str(GOMO_SCRIPT), "--download-dir", str(DOWNLOADS_DIR)]
+            cmd = [
+                "pipenv",
+                "run",
+                "python",
+                str(GOMO_SCRIPT),
+                "--download-dir",
+                str(DOWNLOADS_DIR),
+            ]
 
             if not headless:
                 cmd.append("--headed")
@@ -682,7 +716,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 ]
 
         except subprocess.TimeoutExpired:
-            return [TextContent(type="text", text="❌ Automation timed out after 10 minutes")]
+            return [
+                TextContent(
+                    type="text", text="❌ Automation timed out after 10 minutes"
+                )
+            ]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Automation error: {e}")]
 
@@ -703,7 +741,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             Cleanup result with number of reports deleted.
         """
         if not GOMO_SCRIPT.exists():
-            return [TextContent(type="text", text=f"❌ Script not found at `{GOMO_SCRIPT}`")]
+            return [
+                TextContent(type="text", text=f"❌ Script not found at `{GOMO_SCRIPT}`")
+            ]
 
         logger.info("Running Concur cleanup - deleting unsubmitted expense reports")
 
@@ -755,7 +795,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
                 ]
 
         except subprocess.TimeoutExpired:
-            return [TextContent(type="text", text="❌ Cleanup timed out after 5 minutes")]
+            return [
+                TextContent(type="text", text="❌ Cleanup timed out after 5 minutes")
+            ]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Cleanup error: {e}")]
 

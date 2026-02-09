@@ -105,7 +105,9 @@ class IntelStreamingPipeline:
 
     def __init__(self, config: StreamConfig):
         if not _GST_AVAILABLE:
-            raise RuntimeError("GStreamer not available. Install: dnf install gstreamer1-plugins-bad-free")
+            raise RuntimeError(
+                "GStreamer not available. Install: dnf install gstreamer1-plugins-bad-free"
+            )
 
         self.config = config
         self.pipeline: Optional[Gst.Pipeline] = None
@@ -145,7 +147,9 @@ class IntelStreamingPipeline:
 
         element = encoders.get((codec, encoder))
         if not element:
-            logger.warning(f"Unknown encoder combo {codec}/{encoder}, falling back to vah264enc")
+            logger.warning(
+                f"Unknown encoder combo {codec}/{encoder}, falling back to vah264enc"
+            )
             element = "vah264enc"
 
         return element
@@ -203,7 +207,9 @@ class IntelStreamingPipeline:
         # Color conversion to NV12 (required by most HW encoders)
         # Use VA postproc if available for zero-copy conversion
         if self.config.encoder == "va":
-            pipeline_parts.append("vapostproc ! video/x-raw(memory:VAMemory),format=NV12")
+            pipeline_parts.append(
+                "vapostproc ! video/x-raw(memory:VAMemory),format=NV12"
+            )
         else:
             pipeline_parts.append("videoconvert ! video/x-raw,format=NV12")
 
@@ -211,11 +217,14 @@ class IntelStreamingPipeline:
         if encoder.startswith("va"):
             # VA-API encoder settings
             pipeline_parts.append(
-                f"{encoder} rate-control=cbr bitrate={bitrate} " f"target-percentage=95 cpb-size={bitrate * 2}"
+                f"{encoder} rate-control=cbr bitrate={bitrate} "
+                f"target-percentage=95 cpb-size={bitrate * 2}"
             )
         else:
             # QSV encoder settings
-            pipeline_parts.append(f"{encoder} bitrate={bitrate} rate-control=cbr " f"low-latency=true")
+            pipeline_parts.append(
+                f"{encoder} bitrate={bitrate} rate-control=cbr " f"low-latency=true"
+            )
 
         # Add profile constraint for WebRTC compatibility
         if self.config.codec == "h264":
@@ -235,7 +244,8 @@ class IntelStreamingPipeline:
                 )
             else:
                 pipeline_parts.append(
-                    f"{payloader} config-interval=1 pt=96 ! " f"webrtcbin name=webrtc bundle-policy=max-bundle"
+                    f"{payloader} config-interval=1 pt=96 ! "
+                    f"webrtcbin name=webrtc bundle-policy=max-bundle"
                 )
 
         # RTP output (for testing/debugging)
@@ -296,7 +306,9 @@ class IntelStreamingPipeline:
             self.appsrc.set_property("is-live", True)
             self.appsrc.set_property("block", False)
             # Limit buffer queue to prevent memory leak (3 frames worth at 1080p YUYV = ~12MB)
-            frame_size = self.config.width * self.config.height * 2  # YUYV = 2 bytes/pixel
+            frame_size = (
+                self.config.width * self.config.height * 2
+            )  # YUYV = 2 bytes/pixel
             self.appsrc.set_property("max-bytes", frame_size * 3)
             self.appsrc.set_property("max-buffers", 3)  # Also limit buffer count
             # Drop old buffers when queue is full (live streaming - latency matters)
@@ -350,7 +362,9 @@ class IntelStreamingPipeline:
     def _on_negotiation_needed(self, webrtcbin):
         """Handle WebRTC negotiation."""
         logger.debug("Negotiation needed")
-        promise = Gst.Promise.new_with_change_func(self._on_offer_created, webrtcbin, None)
+        promise = Gst.Promise.new_with_change_func(
+            self._on_offer_created, webrtcbin, None
+        )
         webrtcbin.emit("create-offer", None, promise)
 
     def _on_offer_created(self, promise, webrtcbin, _):
@@ -380,7 +394,9 @@ class IntelStreamingPipeline:
         logger.debug(f"ICE candidate: {candidate}")
         # Will be sent via signaling
         if hasattr(self, "_ice_candidates"):
-            self._ice_candidates.append({"candidate": candidate, "sdpMLineIndex": mline_index})
+            self._ice_candidates.append(
+                {"candidate": candidate, "sdpMLineIndex": mline_index}
+            )
 
     def _on_pad_added(self, webrtcbin, pad):
         """Handle new pad."""
@@ -455,7 +471,9 @@ class IntelStreamingPipeline:
         frame_bgra[:, :, 3] = 255
         return self.push_frame(frame_bgra)
 
-    def push_frame_yuyv(self, frame_yuyv: np.ndarray, timestamp_ns: Optional[int] = None):
+    def push_frame_yuyv(
+        self, frame_yuyv: np.ndarray, timestamp_ns: Optional[int] = None
+    ):
         """
         Push a YUYV frame directly to the pipeline.
 
@@ -523,7 +541,11 @@ class IntelStreamingPipeline:
 
     def get_stats(self) -> dict:
         """Get streaming statistics."""
-        elapsed = (GLib.get_monotonic_time() - self._start_time) / 1_000_000 if self._start_time else 0
+        elapsed = (
+            (GLib.get_monotonic_time() - self._start_time) / 1_000_000
+            if self._start_time
+            else 0
+        )
         fps = self._frame_count / elapsed if elapsed > 0 else 0
 
         return {
@@ -557,16 +579,26 @@ class IntelStreamingPipeline:
 
                     if msg_type == "request_offer":
                         # Client wants to connect, send our offer
-                        logger.info(f"Client {client_id} requested offer, have SDP: {hasattr(self, '_local_sdp')}")
+                        logger.info(
+                            f"Client {client_id} requested offer, have SDP: {hasattr(self, '_local_sdp')}"
+                        )
                         if hasattr(self, "_local_sdp") and self._local_sdp:
                             logger.info(f"Sending offer to client {client_id}")
-                            await websocket.send(json.dumps({"type": "offer", "sdp": self._local_sdp}))
+                            await websocket.send(
+                                json.dumps({"type": "offer", "sdp": self._local_sdp})
+                            )
                             # Send ICE candidates
-                            logger.info(f"Sending {len(self._ice_candidates)} ICE candidates")
+                            logger.info(
+                                f"Sending {len(self._ice_candidates)} ICE candidates"
+                            )
                             for candidate in self._ice_candidates:
-                                await websocket.send(json.dumps({"type": "ice-candidate", **candidate}))
+                                await websocket.send(
+                                    json.dumps({"type": "ice-candidate", **candidate})
+                                )
                         else:
-                            logger.warning(f"No SDP offer available yet for client {client_id}")
+                            logger.warning(
+                                f"No SDP offer available yet for client {client_id}"
+                            )
 
                     elif msg_type == "answer":
                         # Client sent answer
@@ -574,9 +606,13 @@ class IntelStreamingPipeline:
                         if sdp and self.webrtcbin:
                             res, sdpmsg = GstSdp.SDPMessage.new()
                             GstSdp.sdp_message_parse_buffer(bytes(sdp, "utf-8"), sdpmsg)
-                            answer = GstWebRTC.WebRTCSessionDescription.new(GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg)
+                            answer = GstWebRTC.WebRTCSessionDescription.new(
+                                GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg
+                            )
                             promise = Gst.Promise.new()
-                            self.webrtcbin.emit("set-remote-description", answer, promise)
+                            self.webrtcbin.emit(
+                                "set-remote-description", answer, promise
+                            )
                             promise.interrupt()
                             logger.info("Set remote description from answer")
 
@@ -585,7 +621,9 @@ class IntelStreamingPipeline:
                         candidate = data.get("candidate")
                         sdp_mline_index = data.get("sdpMLineIndex", 0)
                         if candidate and self.webrtcbin:
-                            self.webrtcbin.emit("add-ice-candidate", sdp_mline_index, candidate)
+                            self.webrtcbin.emit(
+                                "add-ice-candidate", sdp_mline_index, candidate
+                            )
 
             except Exception as e:
                 logger.error(f"Signaling error: {e}")
@@ -593,8 +631,12 @@ class IntelStreamingPipeline:
                 logger.info(f"WebRTC client disconnected: {client_id}")
 
         try:
-            self._signaling_server = await ws_serve(handle_client, "0.0.0.0", self.config.signaling_port)
-            logger.info(f"WebRTC signaling server started on port {self.config.signaling_port}")
+            self._signaling_server = await ws_serve(
+                handle_client, "0.0.0.0", self.config.signaling_port
+            )
+            logger.info(
+                f"WebRTC signaling server started on port {self.config.signaling_port}"
+            )
             await self._signaling_server.wait_closed()
         except Exception as e:
             logger.error(f"Signaling server error: {e}")
@@ -649,7 +691,10 @@ class MJPEGStreamServer:
                 frame_data = self._frame
 
             if frame_data:
-                await response.write(b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + frame_data + b"\r\n")
+                await response.write(
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + frame_data + b"\r\n"
+                )
 
             await asyncio.sleep(1 / 30)  # 30 FPS max
 

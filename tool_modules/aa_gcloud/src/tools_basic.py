@@ -435,6 +435,8 @@ def register_tools(server: FastMCP) -> int:
             region: Cluster region (for regional clusters)
             project: GCP project ID
         """
-        return await _gcloud_container_clusters_get_credentials_impl(cluster, zone, region, project)
+        return await _gcloud_container_clusters_get_credentials_impl(
+            cluster, zone, region, project
+        )
 
     return registry.count

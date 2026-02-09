@@ -78,7 +78,9 @@ def _resolve_memory_path(key: str) -> Path:
     # Check if this is a project-specific key
     if key_normalized in PROJECT_SPECIFIC_KEYS:
         try:
-            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            from tool_modules.aa_workflow.src.chat_context import (
+                get_project_work_state_path,
+            )
 
             return get_project_work_state_path()
         except ImportError:
@@ -127,7 +129,9 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 
         # Fall back to sync version
         try:
-            from tool_modules.aa_workflow.src.chat_context import get_project_work_state_path
+            from tool_modules.aa_workflow.src.chat_context import (
+                get_project_work_state_path,
+            )
 
             return get_project_work_state_path()
         except ImportError:
@@ -147,7 +151,9 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 # ==================== TOOL IMPLEMENTATIONS ====================
 
 
-def _check_pattern_matches(patterns: list, pattern_key: str, error_lower: str, tool_lower: str = "") -> list:
+def _check_pattern_matches(
+    patterns: list, pattern_key: str, error_lower: str, tool_lower: str = ""
+) -> list:
     """Check a list of patterns for matches and return formatted results."""
     matches = []
     for pattern in patterns:
@@ -350,7 +356,9 @@ def _format_memory_stats(stats: dict) -> list[str]:
 
     # Top 10 largest files
     lines.append("### 📁 Largest Files")
-    sorted_files = sorted(stats["files"].items(), key=lambda x: x[1]["size_kb"], reverse=True)[:10]
+    sorted_files = sorted(
+        stats["files"].items(), key=lambda x: x[1]["size_kb"], reverse=True
+    )[:10]
     for file_path, info in sorted_files:
         lines.append(f"- {file_path}: {info['size_kb']} KB")
     lines.append("")
@@ -366,7 +374,9 @@ def _format_memory_stats(stats: dict) -> list[str]:
 
     # Check auto-heal rate
     if stats.get("auto_heal") and stats["auto_heal"]["success_rate"] < 0.7:
-        warnings.append(f"⚠️ Auto-heal success rate low: {stats['auto_heal']['success_rate']:.0%}")
+        warnings.append(
+            f"⚠️ Auto-heal success rate low: {stats['auto_heal']['success_rate']:.0%}"
+        )
 
     # Check total storage
     if stats["storage"]["total_kb"] > 1024:
@@ -419,7 +429,9 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
                     if projects_dir.exists():
                         for project_dir in projects_dir.iterdir():
                             if project_dir.is_dir():
-                                lines.append(f"  - {subdir}/projects/{project_dir.name}/")
+                                lines.append(
+                                    f"  - {subdir}/projects/{project_dir.name}/"
+                                )
                                 for f in project_dir.glob("*.yaml"):
                                     lines.append(f"    - {f.stem}")
         return [TextContent(type="text", text="\n".join(lines))]
@@ -442,19 +454,26 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
         return [
             TextContent(
                 type="text",
-                text=f"❌ Memory not found: {key}\n\n" "Use memory_read() without args to see available memory.",
+                text=f"❌ Memory not found: {key}\n\n"
+                "Use memory_read() without args to see available memory.",
             )
         ]
 
     try:
         content = memory_file.read_text()
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [TextContent(type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```")]
+        return [
+            TextContent(
+                type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```"
+            )
+        ]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error reading memory: {e}")]
 
 
-async def _memory_write_impl(key: str, content: str, ctx: Any = None) -> list[TextContent]:
+async def _memory_write_impl(
+    key: str, content: str, ctx: Any = None
+) -> list[TextContent]:
     """
     Write to persistent memory.
 
@@ -497,7 +516,9 @@ async def _memory_write_impl(key: str, content: str, ctx: Any = None) -> list[Te
         return [TextContent(type="text", text=f"❌ Error writing memory: {e}")]
 
 
-async def _memory_update_impl(key: str, path: str, value: str, ctx: Any = None) -> list[TextContent]:
+async def _memory_update_impl(
+    key: str, path: str, value: str, ctx: Any = None
+) -> list[TextContent]:
     """
     Update a specific field in memory.
 
@@ -552,12 +573,16 @@ async def _memory_update_impl(key: str, path: str, value: str, ctx: Any = None) 
             yaml.dump(data, f, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")]
+        return [
+            TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")
+        ]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error updating memory: {e}")]
 
 
-async def _memory_append_impl(key: str, list_path: str, item: str, ctx: Any = None) -> list[TextContent]:
+async def _memory_append_impl(
+    key: str, list_path: str, item: str, ctx: Any = None
+) -> list[TextContent]:
     """
     Append an item to a list in memory.
 
@@ -619,12 +644,16 @@ async def _memory_append_impl(key: str, list_path: str, item: str, ctx: Any = No
             yaml.dump(data, f, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")]
+        return [
+            TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")
+        ]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
 
 
-async def _memory_query_impl(key: str, query: str, ctx: Any = None) -> list[TextContent]:
+async def _memory_query_impl(
+    key: str, query: str, ctx: Any = None
+) -> list[TextContent]:
     """
     Query memory using JSONPath expressions.
 
@@ -768,7 +797,9 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
         return [TextContent(type="text", text=f"❌ Error logging: {e}")]
 
 
-async def _check_known_issues_impl(tool_name: str = "", error_text: str = "") -> list[TextContent]:
+async def _check_known_issues_impl(
+    tool_name: str = "", error_text: str = ""
+) -> list[TextContent]:
     """
     Check memory for known fixes before or after an error.
 
@@ -798,7 +829,9 @@ async def _check_known_issues_impl(tool_name: str = "", error_text: str = "") ->
         "jira_cli_patterns",
     ]
     for pattern_type in pattern_types:
-        pattern_matches = _check_pattern_matches(patterns.get(pattern_type, []), pattern_type, error_lower, tool_lower)
+        pattern_matches = _check_pattern_matches(
+            patterns.get(pattern_type, []), pattern_type, error_lower, tool_lower
+        )
         matches.extend(pattern_matches)
 
     # Load and check tool fixes
@@ -891,7 +924,10 @@ async def _learn_tool_fix_impl(
 
         # Check for duplicates
         for existing in data["tool_fixes"]:
-            if existing.get("tool_name") == tool_name and existing.get("error_pattern") == error_pattern:
+            if (
+                existing.get("tool_name") == tool_name
+                and existing.get("error_pattern") == error_pattern
+            ):
                 # Update existing instead of adding duplicate
                 existing["root_cause"] = root_cause
                 existing["fix_applied"] = fix_description
@@ -1043,7 +1079,9 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_update(ctx: Context, key: str, path: str, value: str) -> list[TextContent]:
+    async def memory_update(
+        ctx: Context, key: str, path: str, value: str
+    ) -> list[TextContent]:
         """
         Update a specific field in memory.
 
@@ -1061,7 +1099,9 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_append(ctx: Context, key: str, list_path: str, item: str) -> list[TextContent]:
+    async def memory_append(
+        ctx: Context, key: str, list_path: str, item: str
+    ) -> list[TextContent]:
         """
         Append an item to a list in memory.
 
@@ -1103,7 +1143,9 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_session_log(ctx: Context, action: str, details: str = "") -> list[TextContent]:
+    async def memory_session_log(
+        ctx: Context, action: str, details: str = ""
+    ) -> list[TextContent]:
         """
         Log an action to today's session log.
 
@@ -1120,7 +1162,9 @@ def register_memory_tools(server: "FastMCP") -> int:
         return await _memory_session_log_impl(action, details)
 
     @registry.tool()
-    async def check_known_issues(ctx: Context, tool_name: str = "", error_text: str = "") -> list[TextContent]:
+    async def check_known_issues(
+        ctx: Context, tool_name: str = "", error_text: str = ""
+    ) -> list[TextContent]:
         """
         Check memory for known fixes before or after an error.
 
@@ -1160,7 +1204,9 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the saved fix.
         """
-        return await _learn_tool_fix_impl(tool_name, error_pattern, root_cause, fix_description)
+        return await _learn_tool_fix_impl(
+            tool_name, error_pattern, root_cause, fix_description
+        )
 
     @registry.tool()
     async def memory_stats(ctx: Context) -> list[TextContent]:

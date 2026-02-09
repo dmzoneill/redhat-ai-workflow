@@ -108,7 +108,9 @@ class ConversationContext:
                     "low": "Low",
                     "critical": "Highest",
                 }
-                inputs["priority"] = priority_map.get(self.inferred_priority.lower(), "Medium")
+                inputs["priority"] = priority_map.get(
+                    self.inferred_priority.lower(), "Medium"
+                )
 
             if self.jira_issues:
                 inputs["link_to"] = self.jira_issues[0]
@@ -142,7 +144,9 @@ class ConversationContext:
             parts.append("## Related Issues\n\n" + ", ".join(self.jira_issues))
 
         if self.urls:
-            parts.append("## References\n\n" + "\n".join(f"- {url}" for url in self.urls[:5]))
+            parts.append(
+                "## References\n\n" + "\n".join(f"- {url}" for url in self.urls[:5])
+            )
 
         parts.append(f"\n---\n_Created from Slack conversation in {self.channel_id}_")
 
@@ -159,7 +163,9 @@ class ContextExtractor:
 
     # Regex patterns for entity extraction
     JIRA_PATTERN = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
-    GITLAB_MR_PATTERN = re.compile(r"https?://[^/]+/([^/]+/[^/]+)/-/merge_requests/(\d+)")
+    GITLAB_MR_PATTERN = re.compile(
+        r"https?://[^/]+/([^/]+/[^/]+)/-/merge_requests/(\d+)"
+    )
     GITLAB_ISSUE_PATTERN = re.compile(r"https?://[^/]+/([^/]+/[^/]+)/-/issues/(\d+)")
     URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
     SLACK_USER_PATTERN = re.compile(r"<@([A-Z0-9]+)>")
@@ -250,7 +256,9 @@ class ContextExtractor:
 
         return context
 
-    async def _fetch_messages(self, channel_id: str, thread_ts: str | None) -> list[dict[str, Any]]:
+    async def _fetch_messages(
+        self, channel_id: str, thread_ts: str | None
+    ) -> list[dict[str, Any]]:
         """Fetch messages from Slack."""
         if not self._slack_client:
             logger.warning("No Slack client available for context extraction")
@@ -293,7 +301,9 @@ class ContextExtractor:
 
         # Extract Jira issues
         jira_matches = self.JIRA_PATTERN.findall(text)
-        context.jira_issues = list(dict.fromkeys(jira_matches))  # Dedupe, preserve order
+        context.jira_issues = list(
+            dict.fromkeys(jira_matches)
+        )  # Dedupe, preserve order
 
         # Extract GitLab MRs
         for match in self.GITLAB_MR_PATTERN.finditer(text):

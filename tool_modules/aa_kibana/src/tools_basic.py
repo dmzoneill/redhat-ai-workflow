@@ -74,7 +74,10 @@ def get_kibana_environment(environment: str) -> "KibanaEnvironment":
     # Fallback to environment variables
     url = os.getenv(f"KIBANA_{env_key.upper()}_URL", "")
     if not url:
-        raise ValueError(f"Kibana URL not configured. " f"Set KIBANA_{env_key.upper()}_URL or configure in config.json")
+        raise ValueError(
+            f"Kibana URL not configured. "
+            f"Set KIBANA_{env_key.upper()}_URL or configure in config.json"
+        )
 
     return KibanaEnvironment(
         url=url,
@@ -214,7 +217,9 @@ def register_tools(server: "FastMCP") -> int:
         """
         env_config = get_cached_kibana_config(environment)
         if not env_config:
-            return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
+            return [
+                TextContent(type="text", text=f"❌ Unknown environment: {environment}")
+            ]
 
         ns = namespace or env_config.namespace
 
@@ -254,7 +259,9 @@ def register_tools(server: "FastMCP") -> int:
         }
 
         if ns:
-            es_query["query"]["bool"]["must"].append({"match": {"kubernetes.namespace_name": ns}})
+            es_query["query"]["bool"]["must"].append(
+                {"match": {"kubernetes.namespace_name": ns}}
+            )
 
         success, result = await kibana_request(
             environment,

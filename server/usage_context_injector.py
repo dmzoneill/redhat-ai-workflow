@@ -44,7 +44,9 @@ class UsageContextInjector:
         patterns = data.get("usage_patterns", [])
 
         # Filter by confidence
-        high_conf_patterns = [p for p in patterns if p.get("confidence", 0) >= min_confidence]
+        high_conf_patterns = [
+            p for p in patterns if p.get("confidence", 0) >= min_confidence
+        ]
 
         # Sort by confidence (descending), then observations (descending)
         high_conf_patterns.sort(
@@ -149,7 +151,10 @@ class UsageContextInjector:
         lines = []
         lines.append("=== LAYER 5: LEARNED USAGE PATTERNS ===")
         lines.append("")
-        lines.append(f"The system has learned {len(patterns)} high-confidence patterns " "from past mistakes.")
+        lines.append(
+            f"The system has learned {len(patterns)} high-confidence patterns "
+            "from past mistakes."
+        )
         lines.append("")
 
         for i, pattern in enumerate(patterns, 1):
@@ -234,7 +239,9 @@ class UsageContextInjector:
         summary_lines = []
 
         if tool_name:
-            summary_lines.append(f"Prevention patterns for `{tool_name}`: {total} total")
+            summary_lines.append(
+                f"Prevention patterns for `{tool_name}`: {total} total"
+            )
         else:
             summary_lines.append(f"Prevention patterns: {total} total")
 

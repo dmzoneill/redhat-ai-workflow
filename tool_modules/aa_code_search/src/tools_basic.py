@@ -104,7 +104,9 @@ def _import_watcher():
 class EmbeddingCache:
     """Thread-safe LRU cache with TTL for query embeddings."""
 
-    def __init__(self, max_size: int = CACHE_MAX_SIZE, ttl_seconds: int = CACHE_TTL_SECONDS):
+    def __init__(
+        self, max_size: int = CACHE_MAX_SIZE, ttl_seconds: int = CACHE_TTL_SECONDS
+    ):
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self._cache: OrderedDict[str, tuple[list[float], float]] = OrderedDict()
@@ -246,7 +248,9 @@ def _get_embedding_model():
             _sentence_transformer = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
             logger.info("Using sentence-transformers embedding backend")
         except ImportError:
-            raise ImportError("sentence-transformers not installed. Run: uv add sentence-transformers")
+            raise ImportError(
+                "sentence-transformers not installed. Run: uv add sentence-transformers"
+            )
     return _sentence_transformer
 
 
@@ -263,7 +267,11 @@ def _load_openvino_model():
         from transformers import AutoTokenizer
 
         vs_config = _get_vector_search_config()
-        ov_config = vs_config.get("embedding", {}).get("backend_options", {}).get("openvino", {})
+        ov_config = (
+            vs_config.get("embedding", {})
+            .get("backend_options", {})
+            .get("openvino", {})
+        )
         device = ov_config.get("device", "NPU")
 
         # For NPU, we need fixed shapes - use static compilation
@@ -292,7 +300,13 @@ def _load_openvino_model():
                 if isinstance(texts, str):
                     texts = [texts]
 
-                inputs = self.tokenizer(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
+                inputs = self.tokenizer(
+                    texts,
+                    padding=True,
+                    truncation=True,
+                    max_length=512,
+                    return_tensors="pt",
+                )
 
                 outputs = self.model(**inputs)
                 # Mean pooling
@@ -325,7 +339,11 @@ def _load_openvino_npu_static():
         from transformers import AutoTokenizer
 
         vs_config = _get_vector_search_config()
-        ov_config = vs_config.get("embedding", {}).get("backend_options", {}).get("openvino", {})
+        ov_config = (
+            vs_config.get("embedding", {})
+            .get("backend_options", {})
+            .get("openvino", {})
+        )
 
         # Fixed sequence length for NPU (shorter = faster, but truncates long queries)
         FIXED_SEQ_LEN = ov_config.get("fixed_seq_len", 128)
@@ -340,7 +358,9 @@ def _load_openvino_npu_static():
 
         # Export with static shapes if not cached
         if not ir_path.exists():
-            logger.info(f"Exporting model with fixed shape (seq_len={FIXED_SEQ_LEN}) for NPU...")
+            logger.info(
+                f"Exporting model with fixed shape (seq_len={FIXED_SEQ_LEN}) for NPU..."
+            )
 
             # Use optimum-intel to export with static shapes
             # Export to CPU first, then we'll reshape and compile for NPU
@@ -402,7 +422,9 @@ def _load_openvino_npu_static():
                     {
                         "input_ids": inputs["input_ids"],
                         "attention_mask": inputs["attention_mask"],
-                        "token_type_ids": inputs.get("token_type_ids", np.zeros_like(inputs["input_ids"])),
+                        "token_type_ids": inputs.get(
+                            "token_type_ids", np.zeros_like(inputs["input_ids"])
+                        ),
                     }
                 )
 
@@ -413,7 +435,9 @@ def _load_openvino_npu_static():
                 attention_mask = inputs["attention_mask"]
                 mask_expanded = np.expand_dims(attention_mask, -1)
                 sum_embeddings = np.sum(last_hidden_state * mask_expanded, axis=1)
-                sum_mask = np.clip(np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None)
+                sum_mask = np.clip(
+                    np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None
+                )
                 embeddings = sum_embeddings / sum_mask
 
                 return embeddings
@@ -448,7 +472,11 @@ def _load_onnx_model():
         )
 
         # SentenceTransformers can use ONNX backend
-        model = SentenceTransformer(DEFAULT_EMBEDDING_MODEL, backend="onnx", model_kwargs={"providers": providers})
+        model = SentenceTransformer(
+            DEFAULT_EMBEDDING_MODEL,
+            backend="onnx",
+            model_kwargs={"providers": providers},
+        )
 
         return model
 
@@ -643,7 +671,9 @@ def _chunk_by_size(
 
             # Start new chunk with overlap
             overlap_lines = int(CHUNK_OVERLAP / 50)  # Approximate lines for overlap
-            current_chunk_lines = current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
+            current_chunk_lines = (
+                current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
+            )
             current_start = current_start + len(current_chunk_lines) - overlap_lines
             current_size = sum(len(line_text) + 1 for line_text in current_chunk_lines)
 
@@ -878,7 +908,9 @@ def _index_project(project: str, force: bool = False) -> dict:
             if changed_files:
                 # LanceDB doesn't have easy delete, so we recreate
                 existing_data = table.to_pandas().to_dict("records")
-                filtered_data = [d for d in existing_data if d.get("file_path") not in changed_files]
+                filtered_data = [
+                    d for d in existing_data if d.get("file_path") not in changed_files
+                ]
                 all_data = filtered_data + all_data
                 table = db.create_table(table_name, data=all_data, mode="overwrite")
                 index_created = True
@@ -909,7 +941,10 @@ def _index_project(project: str, force: bool = False) -> dict:
                     stats["num_partitions"] = num_partitions
 
                 elif index_type == "IVF_FLAT":
-                    num_partitions = min(vs_config.get("num_partitions", NUM_PARTITIONS), len(all_data) // 10)
+                    num_partitions = min(
+                        vs_config.get("num_partitions", NUM_PARTITIONS),
+                        len(all_data) // 10,
+                    )
                     table.create_index(
                         metric="cosine",
                         num_partitions=num_partitions,
@@ -923,10 +958,14 @@ def _index_project(project: str, force: bool = False) -> dict:
                     stats["index_type"] = "FLAT"
 
                 stats["index_time_ms"] = (time.time() - index_start) * 1000
-                logger.info(f"Created {stats.get('index_type', 'FLAT')} index in {stats['index_time_ms']:.0f}ms")
+                logger.info(
+                    f"Created {stats.get('index_type', 'FLAT')} index in {stats['index_time_ms']:.0f}ms"
+                )
 
             except Exception as e:
-                logger.warning(f"Failed to create index (falling back to brute force): {e}")
+                logger.warning(
+                    f"Failed to create index (falling back to brute force): {e}"
+                )
                 stats["index_type"] = "FLAT"
                 stats["index_error"] = str(e)
         elif len(all_data) < 256:
@@ -1000,7 +1039,9 @@ def _search_code(
     if auto_update:
         update_stats = _auto_update_if_stale(project)
         if update_stats and "error" not in update_stats:
-            logger.info(f"Auto-updated index: {update_stats.get('files_indexed', 0)} files")
+            logger.info(
+                f"Auto-updated index: {update_stats.get('files_indexed', 0)} files"
+            )
 
     # Get LanceDB connection
     db = _get_lance_db(project)
@@ -1038,7 +1079,11 @@ def _search_code(
         results = search_query.to_pandas()
     except Exception as e:
         logger.error(f"LanceDB search failed for project '{project}': {e}")
-        return [{"error": f"Search failed: {e}. Try re-indexing with code_index(project='{project}', force=True)"}]
+        return [
+            {
+                "error": f"Search failed: {e}. Try re-indexing with code_index(project='{project}', force=True)"
+            }
+        ]
 
     search_time_ms = (time.time() - search_start) * 1000
 
@@ -1047,16 +1092,32 @@ def _search_code(
         return []
 
     # Validate required columns exist
-    required_cols = {"file_path", "type", "content", "start_line", "end_line", "name", "language"}
+    required_cols = {
+        "file_path",
+        "type",
+        "content",
+        "start_line",
+        "end_line",
+        "name",
+        "language",
+    }
     missing_cols = required_cols - set(results.columns)
     if missing_cols:
-        logger.error(f"Index schema mismatch for '{project}': missing columns {missing_cols}")
-        return [{"error": f"Index schema mismatch. Re-index with code_index(project='{project}', force=True)"}]
+        logger.error(
+            f"Index schema mismatch for '{project}': missing columns {missing_cols}"
+        )
+        return [
+            {
+                "error": f"Index schema mismatch. Re-index with code_index(project='{project}', force=True)"
+            }
+        ]
 
     # Apply filters
     try:
         if file_filter:
-            results = results[results["file_path"].str.contains(file_filter, case=False)]
+            results = results[
+                results["file_path"].str.contains(file_filter, case=False)
+            ]
         if type_filter:
             results = results[results["type"] == type_filter]
     except Exception as e:
@@ -1198,7 +1259,9 @@ def _get_index_stats(project: str) -> dict:
     }
 
 
-def _update_search_stats(project: str, search_time_ms: float, details: dict | None = None) -> None:
+def _update_search_stats(
+    project: str, search_time_ms: float, details: dict | None = None
+) -> None:
     """Update search statistics in metadata."""
     metadata_path = VECTOR_DB_PATH / project / "metadata.json"
 
@@ -1241,12 +1304,16 @@ def _update_search_stats(project: str, search_time_ms: float, details: dict | No
             embed_time = details.get("embed_time_ms", 0)
             prev_avg_embed = search_stats.get("avg_embed_time_ms", 0)
             n = search_stats["total_searches"]
-            search_stats["avg_embed_time_ms"] = round((prev_avg_embed * (n - 1) + embed_time) / n, 2)
+            search_stats["avg_embed_time_ms"] = round(
+                (prev_avg_embed * (n - 1) + embed_time) / n, 2
+            )
 
             # Running average for vector search time
             vector_time = details.get("search_time_ms", 0)
             prev_avg_vector = search_stats.get("avg_vector_search_time_ms", 0)
-            search_stats["avg_vector_search_time_ms"] = round((prev_avg_vector * (n - 1) + vector_time) / n, 2)
+            search_stats["avg_vector_search_time_ms"] = round(
+                (prev_avg_vector * (n - 1) + vector_time) / n, 2
+            )
 
         metadata["search_stats"] = search_stats
 
@@ -1292,8 +1359,12 @@ def get_all_vector_stats() -> dict:
             "index_type": vs_config.get("index_type", INDEX_TYPE),
             "nprobes": vs_config.get("search", {}).get("nprobes", DEFAULT_NPROBES),
             "cache_enabled": vs_config.get("cache", {}).get("enabled", CACHE_ENABLED),
-            "embedding_model": vs_config.get("embedding", {}).get("model", DEFAULT_EMBEDDING_MODEL),
-            "embedding_backend": vs_config.get("embedding", {}).get("backend", "sentence-transformers"),
+            "embedding_model": vs_config.get("embedding", {}).get(
+                "model", DEFAULT_EMBEDDING_MODEL
+            ),
+            "embedding_backend": vs_config.get("embedding", {}).get(
+                "backend", "sentence-transformers"
+            ),
         },
     }
 
@@ -1356,9 +1427,13 @@ def get_all_vector_stats() -> dict:
         result["totals"]["total_size"] = f"{total_bytes} B"
 
     # Calculate overall cache hit rate
-    total_cache = result["totals"]["total_cache_hits"] + result["totals"]["total_cache_misses"]
+    total_cache = (
+        result["totals"]["total_cache_hits"] + result["totals"]["total_cache_misses"]
+    )
     if total_cache > 0:
-        result["totals"]["cache_hit_rate"] = f"{result['totals']['total_cache_hits'] / total_cache * 100:.1f}%"
+        result["totals"][
+            "cache_hit_rate"
+        ] = f"{result['totals']['total_cache_hits'] / total_cache * 100:.1f}%"
     else:
         result["totals"]["cache_hit_rate"] = "N/A"
 
@@ -1387,9 +1462,13 @@ def get_vector_health() -> dict:
     }
 
     # Calculate average search time across all projects
-    search_times = [p.get("avg_search_ms", 0) for p in stats["projects"] if p.get("indexed")]
+    search_times = [
+        p.get("avg_search_ms", 0) for p in stats["projects"] if p.get("indexed")
+    ]
     if search_times:
-        health["metrics"]["avg_search_time_ms"] = round(sum(search_times) / len(search_times), 1)
+        health["metrics"]["avg_search_time_ms"] = round(
+            sum(search_times) / len(search_times), 1
+        )
 
     # Check for issues
     for proj in stats["projects"]:
@@ -1398,7 +1477,9 @@ def get_vector_health() -> dict:
             continue
 
         if proj.get("is_stale"):
-            health["issues"].append(f"Project '{proj['project']}' index is stale ({proj.get('index_age', 'unknown')})")
+            health["issues"].append(
+                f"Project '{proj['project']}' index is stale ({proj.get('index_age', 'unknown')})"
+            )
 
         if proj.get("index_type") == "FLAT" and proj.get("chunks", 0) > 1000:
             health["recommendations"].append(
@@ -1407,7 +1488,9 @@ def get_vector_health() -> dict:
             )
 
         if proj.get("avg_search_ms", 0) > 500:
-            health["issues"].append(f"Project '{proj['project']}' search is slow ({proj['avg_search_ms']:.0f}ms avg)")
+            health["issues"].append(
+                f"Project '{proj['project']}' search is slow ({proj['avg_search_ms']:.0f}ms avg)"
+            )
 
     # Check cache effectiveness
     cache_stats = stats.get("cache", {})
@@ -1460,7 +1543,12 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             if len(projects) == 1:
                 project = projects[0]
             else:
-                return [TextContent(type="text", text=f"❌ Please specify a project. Available: {', '.join(projects)}")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                    )
+                ]
 
         try:
             stats = _index_project(project, force=force)
@@ -1544,7 +1632,12 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             if len(projects) == 1:
                 project = projects[0]
             else:
-                return [TextContent(type="text", text=f"❌ Please specify a project. Available: {', '.join(projects)}")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                    )
+                ]
 
         try:
             results = _search_code(
@@ -1622,7 +1715,11 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             projects = [project] if project in projects else []
 
         if not projects:
-            return [TextContent(type="text", text=f"❌ Project '{project}' not found in config.json")]
+            return [
+                TextContent(
+                    type="text", text=f"❌ Project '{project}' not found in config.json"
+                )
+            ]
 
         output = "## 📊 Code Index Statistics\n\n"
 
@@ -1651,12 +1748,18 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                 output += f"| **Files** | {stats.get('files_total', 0)} indexed |\n"
                 output += f"| **Chunks** | {stats.get('chunks_count', 0):,} |\n"
                 output += f"| **Disk Size** | {stats.get('disk_size', '0 B')} |\n"
-                output += f"| **Last Indexed** | {stats.get('index_age', 'Unknown')} |\n"
-                output += f"| **Model** | `{stats.get('embedding_model', 'unknown')}` |\n"
+                output += (
+                    f"| **Last Indexed** | {stats.get('index_age', 'Unknown')} |\n"
+                )
+                output += (
+                    f"| **Model** | `{stats.get('embedding_model', 'unknown')}` |\n"
+                )
 
                 # Search stats
                 if stats.get("search_count", 0) > 0:
-                    output += f"| **Searches** | {stats.get('search_count', 0):,} total |\n"
+                    output += (
+                        f"| **Searches** | {stats.get('search_count', 0):,} total |\n"
+                    )
                     output += f"| **Avg Search Time** | {stats.get('avg_search_time_ms', 0):.0f}ms |\n"
 
                 # Watcher status
@@ -1713,7 +1816,12 @@ def register_tools(registry: Any) -> None:  # noqa: C901
 
         if project:
             if project not in projects:
-                return [TextContent(type="text", text=f"❌ Project '{project}' not found in config.json")]
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"❌ Project '{project}' not found in config.json",
+                    )
+                ]
             projects = [project]
 
         results = []
@@ -1751,9 +1859,13 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                         saved_str = f"{saved / 1024:.1f} KB"
                     else:
                         saved_str = f"{saved} B"
-                    results.append(f"✅ **{proj}**: {files_before} → {files_after} files, saved {saved_str}")
+                    results.append(
+                        f"✅ **{proj}**: {files_before} → {files_after} files, saved {saved_str}"
+                    )
                 else:
-                    results.append(f"✅ **{proj}**: Already optimized ({files_after} files)")
+                    results.append(
+                        f"✅ **{proj}**: Already optimized ({files_after} files)"
+                    )
 
             except Exception as e:
                 results.append(f"❌ **{proj}**: {e}")
@@ -1929,11 +2041,18 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
         if not project:
             config = _load_config()
             projects = list(config.get("repositories", {}).keys())
-            return [TextContent(type="text", text=f"❌ Please specify a project. Available: {', '.join(projects)}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                )
+            ]
 
         project_path = _get_project_path(project)
         if not project_path or not project_path.exists():
-            return [TextContent(type="text", text=f"❌ Project path not found: {project}")]
+            return [
+                TextContent(type="text", text=f"❌ Project path not found: {project}")
+            ]
 
         if action == "start":
             try:
@@ -1977,17 +2096,26 @@ Use `code_watch('{project}', 'stop')` to stop watching.
                     )
                 ]
             except Exception as e:
-                return [TextContent(type="text", text=f"❌ Failed to start watcher: {e}")]
+                return [
+                    TextContent(type="text", text=f"❌ Failed to start watcher: {e}")
+                ]
 
         elif action == "stop":
             stopped = await stop_watcher(project)
             if stopped:
                 return [TextContent(type="text", text=f"✅ Stopped watching {project}")]
             else:
-                return [TextContent(type="text", text=f"⚠️ No active watcher for {project}")]
+                return [
+                    TextContent(type="text", text=f"⚠️ No active watcher for {project}")
+                ]
 
         else:
-            return [TextContent(type="text", text=f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'.")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'.",
+                )
+            ]
 
     @registry.tool()
     async def code_watch_all(
@@ -2046,7 +2174,12 @@ Use `code_watch('{project}', 'stop')` to stop watching.
             return [TextContent(type="text", text=f"✅ Stopped {count} watcher(s)")]
 
         else:
-            return [TextContent(type="text", text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.",
+                )
+            ]
 
     @registry.tool()
     async def code_health() -> list[TextContent]:

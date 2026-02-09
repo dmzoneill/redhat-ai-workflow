@@ -101,7 +101,9 @@ def main():
         print("📊 Current State:")
         print(f"  Total patterns: {stats_before['total_patterns']}")
         print(f"  Old patterns (>{args.max_age} days): {stats_before['old_patterns']}")
-        print(f"  Low confidence (<{args.min_conf:.0%}): {stats_before['low_confidence']}")
+        print(
+            f"  Low confidence (<{args.min_conf:.0%}): {stats_before['low_confidence']}"
+        )
         print(f"  Inactive (>30 days): {stats_before['inactive_patterns']}")
         print()
         print(f"  Candidates for pruning: {stats_before['candidates_for_pruning']}")

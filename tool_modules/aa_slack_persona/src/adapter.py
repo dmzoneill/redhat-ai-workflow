@@ -11,7 +11,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -74,7 +79,9 @@ class SlackMemoryAdapter:
             except ImportError:
                 try:
                     # Fall back to absolute import (when loaded dynamically)
-                    from tool_modules.aa_slack_persona.src.vector_store import SlackVectorStore
+                    from tool_modules.aa_slack_persona.src.vector_store import (
+                        SlackVectorStore,
+                    )
 
                     self._store = SlackVectorStore(self.db_path)
                 except ImportError as e:

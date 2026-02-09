@@ -84,7 +84,12 @@ class ExternalTools:
             "cmd": ["slop-detector", "--json", "--project"],
             "check_cmd": ["slop-detector", "--version"],
             "install": "pip install ai-slop-detector",
-            "detects": ["placeholder_code", "buzzword_inflation", "docstring_inflation", "hallucinated_deps"],
+            "detects": [
+                "placeholder_code",
+                "buzzword_inflation",
+                "docstring_inflation",
+                "hallucinated_deps",
+            ],
             "tier": 1,
             "languages": ["python"],
             "timeout": 300,
@@ -282,7 +287,11 @@ class ExternalTools:
         Returns:
             List of tool names that detect this category
         """
-        return [name for name, config in self.TOOLS.items() if category in config.get("detects", [])]
+        return [
+            name
+            for name, config in self.TOOLS.items()
+            if category in config.get("detects", [])
+        ]
 
     async def run_tool(self, tool: str, path: str) -> list[Finding]:
         """
@@ -510,7 +519,11 @@ class ExternalTools:
                         file=issue.get("filename", ""),
                         line=location.get("row", 0),
                         description=f"[{code}] {issue.get('message', '')}",
-                        suggestion=issue.get("fix", {}).get("message", "") if issue.get("fix") else "",
+                        suggestion=(
+                            issue.get("fix", {}).get("message", "")
+                            if issue.get("fix")
+                            else ""
+                        ),
                         tool="ruff",
                         raw_output=issue,
                     )

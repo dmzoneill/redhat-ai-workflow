@@ -331,7 +331,9 @@ def register_tools(server: FastMCP) -> int:
             user: MySQL user
             password: MySQL password
         """
-        return await _mysql_show_create_table_impl(table, database, host, 3306, user, password)
+        return await _mysql_show_create_table_impl(
+            table, database, host, 3306, user, password
+        )
 
     @auto_heal()
     @registry.tool()
@@ -385,6 +387,8 @@ def register_tools(server: FastMCP) -> int:
             password: MySQL password
             no_data: Dump schema only (no data)
         """
-        return await _mysql_dump_impl(database, tables, host, 3306, user, password, no_data)
+        return await _mysql_dump_impl(
+            database, tables, host, 3306, user, password, no_data
+        )
 
     return registry.count

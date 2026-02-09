@@ -36,8 +36,12 @@ def _get_quay_config() -> dict:
 
 
 _quay_cfg = _get_quay_config()
-QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv("QUAY_API_URL", "https://quay.io/api/v1")
-QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv("QUAY_NAMESPACE", "redhat-user-workloads")
+QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv(
+    "QUAY_API_URL", "https://quay.io/api/v1"
+)
+QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv(
+    "QUAY_NAMESPACE", "redhat-user-workloads"
+)
 QUAY_REGISTRY = "quay.io"
 
 
@@ -179,7 +183,9 @@ def register_tools(server: "FastMCP") -> int:
         # Fallback to API
         success, data = await quay_api_request(f"/repository/{full_path}")
         if not success:
-            return [TextContent(type="text", text=f"❌ Failed to get repository: {data}")]
+            return [
+                TextContent(type="text", text=f"❌ Failed to get repository: {data}")
+            ]
 
         lines = [
             f"## Repository: `{full_path}`",
@@ -241,7 +247,9 @@ def register_tools(server: "FastMCP") -> int:
         lines = [
             f"## Tags for `{full_path}`",
             "",
-            f"Found {len(tags)} tags" + (f" matching '{filter_tag}'" if filter_tag else "") + ":",
+            f"Found {len(tags)} tags"
+            + (f" matching '{filter_tag}'" if filter_tag else "")
+            + ":",
             "",
         ]
 

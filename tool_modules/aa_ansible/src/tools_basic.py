@@ -126,12 +126,12 @@ async def _ansible_playbook_run_impl(
     if verbose > 0:
         cmd.append("-" + "v" * min(verbose, 4))
 
-    success, output = await run_cmd(cmd, cwd=work_dir, timeout=timeout, env=_get_ansible_env())
+    success, output = await run_cmd(
+        cmd, cwd=work_dir, timeout=timeout, env=_get_ansible_env()
+    )
 
     if success:
-        return (
-            f"✅ Playbook completed successfully\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
-        )
+        return f"✅ Playbook completed successfully\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
     return f"❌ Playbook failed:\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
 
 
@@ -183,10 +183,14 @@ async def _ansible_playbook_check_impl(
     if diff:
         cmd.append("--diff")
 
-    success, output = await run_cmd(cmd, cwd=work_dir, timeout=timeout, env=_get_ansible_env())
+    success, output = await run_cmd(
+        cmd, cwd=work_dir, timeout=timeout, env=_get_ansible_env()
+    )
 
     status = "✅ Check passed" if success else "⚠️ Check completed with issues"
-    return f"{status}\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
+    return (
+        f"{status}\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
+    )
 
 
 @auto_heal()
@@ -218,7 +222,9 @@ async def _ansible_playbook_list_tasks_impl(
 
     cmd = ["ansible-playbook", str(playbook_path), "--list-tasks"]
 
-    success, output = await run_cmd(cmd, cwd=work_dir, timeout=60, env=_get_ansible_env())
+    success, output = await run_cmd(
+        cmd, cwd=work_dir, timeout=60, env=_get_ansible_env()
+    )
 
     if success:
         return f"## Tasks in {playbook_path.name}\n\n```\n{output}\n```"
@@ -254,7 +260,9 @@ async def _ansible_playbook_list_tags_impl(
 
     cmd = ["ansible-playbook", str(playbook_path), "--list-tags"]
 
-    success, output = await run_cmd(cmd, cwd=work_dir, timeout=60, env=_get_ansible_env())
+    success, output = await run_cmd(
+        cmd, cwd=work_dir, timeout=60, env=_get_ansible_env()
+    )
 
     if success:
         return f"## Tags in {playbook_path.name}\n\n```\n{output}\n```"
@@ -884,7 +892,15 @@ def register_tools(server: FastMCP) -> int:
             Playbook execution output.
         """
         return await _ansible_playbook_run_impl(
-            playbook, inventory, limit, tags, skip_tags, extra_vars, verbose, timeout, cwd
+            playbook,
+            inventory,
+            limit,
+            tags,
+            skip_tags,
+            extra_vars,
+            verbose,
+            timeout,
+            cwd,
         )
 
     @auto_heal()
@@ -913,7 +929,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Check mode output showing what would change.
         """
-        return await _ansible_playbook_check_impl(playbook, inventory, limit, extra_vars, diff, timeout, cwd)
+        return await _ansible_playbook_check_impl(
+            playbook, inventory, limit, extra_vars, diff, timeout, cwd
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1101,7 +1119,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Copy result.
         """
-        return await _ansible_copy_impl(hosts, src, dest, inventory, become, mode, timeout)
+        return await _ansible_copy_impl(
+            hosts, src, dest, inventory, become, mode, timeout
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1249,7 +1269,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Encryption result.
         """
-        return await _ansible_vault_encrypt_impl(file_path, vault_password_file, vault_id)
+        return await _ansible_vault_encrypt_impl(
+            file_path, vault_password_file, vault_id
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1305,7 +1327,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Encrypted string in YAML format.
         """
-        return await _ansible_vault_encrypt_string_impl(plaintext, name, vault_password_file)
+        return await _ansible_vault_encrypt_string_impl(
+            plaintext, name, vault_password_file
+        )
 
     # Config tools
     @auto_heal()

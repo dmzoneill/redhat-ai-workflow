@@ -246,13 +246,17 @@ class SlackPersonaSync:
         with open(self.channel_state_file, "w") as f:
             json.dump(state, f, indent=2)
 
-    def _is_day_synced(self, channel_state: dict, channel_id: str, date_str: str) -> bool:
+    def _is_day_synced(
+        self, channel_state: dict, channel_id: str, date_str: str
+    ) -> bool:
         """Check if a day has been synced for a channel."""
         channel_data = channel_state.get(channel_id, {})
         synced_days = channel_data.get("synced_days", [])
         return date_str in synced_days
 
-    def _mark_day_synced(self, channel_state: dict, channel_id: str, date_str: str) -> None:
+    def _mark_day_synced(
+        self, channel_state: dict, channel_id: str, date_str: str
+    ) -> None:
         """Mark a day as synced for a channel."""
         if channel_id not in channel_state:
             channel_state[channel_id] = {"synced_days": [], "last_sync": None}
@@ -449,7 +453,9 @@ class SlackPersonaSync:
                         try:
                             thread_count += 1
                             await asyncio.sleep(request_delay)
-                            replies = await session.get_thread_replies(channel_id, thread_ts)
+                            replies = await session.get_thread_replies(
+                                channel_id, thread_ts
+                            )
 
                             for reply in replies:
                                 reply_ts = reply.get("ts", "")
@@ -467,7 +473,9 @@ class SlackPersonaSync:
 
                                 try:
                                     reply_dt = datetime.fromtimestamp(float(reply_ts))
-                                    reply_datetime_str = reply_dt.strftime("%Y-%m-%d %H:%M:%S")
+                                    reply_datetime_str = reply_dt.strftime(
+                                        "%Y-%m-%d %H:%M:%S"
+                                    )
                                 except Exception:
                                     reply_datetime_str = ""
 

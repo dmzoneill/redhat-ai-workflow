@@ -30,7 +30,9 @@ logger = logging.getLogger(__name__)
 # Ollama configuration - use iGPU for low power inference (~1s, 8-15W)
 OLLAMA_HOST = "http://localhost:11435"  # iGPU port (low power, ~1s latency)
 OLLAMA_MODEL = "qwen2.5:0.5b"  # Fast 0.5B model for real-time responses
-OLLAMA_STREAMING = False  # Set to True for streaming responses (speak as sentences arrive)
+OLLAMA_STREAMING = (
+    False  # Set to True for streaming responses (speak as sentences arrive)
+)
 
 # Gemini CLI configuration (primary)
 GEMINI_MODEL = "gemini-2.5-pro"  # Confirmed working via Vertex AI
@@ -106,7 +108,9 @@ class LLMResponder:
     - "ollama": Local Ollama inference
     """
 
-    def __init__(self, backend: str = "ollama", meeting_id: str = "", use_hotload: bool = True):
+    def __init__(
+        self, backend: str = "ollama", meeting_id: str = "", use_hotload: bool = True
+    ):
         """
         Initialize LLM responder.
 
@@ -120,7 +124,9 @@ class LLMResponder:
         self.conversation_history: List[dict] = []
         self.max_history = 20  # Keep more history for meeting context
         self.backend = backend
-        self.meeting_id = meeting_id or f"meeting-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        self.meeting_id = (
+            meeting_id or f"meeting-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        )
         self.meeting_title = ""
         self.meeting_start = datetime.now()
 
@@ -128,7 +134,9 @@ class LLMResponder:
         self._gemini_hotload = None
         self._use_hotload = use_hotload and backend == "gemini"
 
-        logger.info(f"LLM Responder initialized for meeting: {self.meeting_id} (hotload={self._use_hotload})")
+        logger.info(
+            f"LLM Responder initialized for meeting: {self.meeting_id} (hotload={self._use_hotload})"
+        )
 
         # System prompt for meeting assistant - persona is David
         self.system_prompt = """You are David, a 43-year-old software engineer at Red Hat based in Ireland.
@@ -189,7 +197,9 @@ The user message contains a QUESTION. Answer it."""
             )
 
             if await self._gemini_hotload.start():
-                logger.info("Gemini hotload initialized - conversation context will be maintained")
+                logger.info(
+                    "Gemini hotload initialized - conversation context will be maintained"
+                )
                 return True
             else:
                 logger.warning("Gemini hotload failed, falling back to standard CLI")
@@ -236,18 +246,25 @@ The user message contains a QUESTION. Answer it."""
         """Check if Ollama is available."""
         try:
             result = subprocess.run(
-                ["curl", "-s", f"{OLLAMA_HOST}/api/tags"], capture_output=True, text=True, timeout=5
+                ["curl", "-s", f"{OLLAMA_HOST}/api/tags"],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
 
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 models = [m["name"] for m in data.get("models", [])]
 
-                if OLLAMA_MODEL in models or any(OLLAMA_MODEL.split(":")[0] in m for m in models):
+                if OLLAMA_MODEL in models or any(
+                    OLLAMA_MODEL.split(":")[0] in m for m in models
+                ):
                     logger.info(f"Ollama ready with model {OLLAMA_MODEL}")
                     return True
                 else:
-                    logger.warning(f"Model {OLLAMA_MODEL} not found. Available: {models}")
+                    logger.warning(
+                        f"Model {OLLAMA_MODEL} not found. Available: {models}"
+                    )
                     logger.info(f"Run: ollama pull {OLLAMA_MODEL}")
                     return False
             else:
@@ -291,7 +308,9 @@ The user message contains a QUESTION. Answer it."""
         self.jira_context.my_issues = my_issues or []
         self.jira_context.last_updated = datetime.now()
 
-    def _build_messages(self, command: str, speaker: str, context_before: List[str] = None) -> List[dict]:
+    def _build_messages(
+        self, command: str, speaker: str, context_before: List[str] = None
+    ) -> List[dict]:
         """Build messages list for Ollama chat API.
 
         Includes system prompt, conversation history, and current command.
@@ -306,7 +325,10 @@ The user message contains a QUESTION. Answer it."""
         if context_before:
             context_text = "\n".join(context_before[-5:])  # Last 5 lines
             messages.append(
-                {"role": "user", "content": f"[Meeting context]\n{context_text}\n\n{speaker} asked: {command}"}
+                {
+                    "role": "user",
+                    "content": f"[Meeting context]\n{context_text}\n\n{speaker} asked: {command}",
+                }
             )
         else:
             messages.append({"role": "user", "content": f"{speaker} asked: {command}"})
@@ -339,7 +361,9 @@ The user message contains a QUESTION. Answer it."""
 
             # Add meeting context
             if self.meeting_title:
-                meeting_duration = (datetime.now() - self.meeting_start).total_seconds() / 60
+                meeting_duration = (
+                    datetime.now() - self.meeting_start
+                ).total_seconds() / 60
                 prompt_parts.append(f"\n## Current Meeting: {self.meeting_title}")
                 prompt_parts.append(f"Duration: {meeting_duration:.0f} minutes")
 
@@ -394,12 +418,18 @@ The user message contains a QUESTION. Answer it."""
 
             if response_text:
                 # Add to history
-                self.conversation_history.append({"role": "user", "content": f"{speaker}: {command}"})
-                self.conversation_history.append({"role": "assistant", "content": response_text})
+                self.conversation_history.append(
+                    {"role": "user", "content": f"{speaker}: {command}"}
+                )
+                self.conversation_history.append(
+                    {"role": "assistant", "content": response_text}
+                )
 
                 # Trim history
                 if len(self.conversation_history) > self.max_history * 2:
-                    self.conversation_history = self.conversation_history[-self.max_history * 2 :]
+                    self.conversation_history = self.conversation_history[
+                        -self.max_history * 2 :
+                    ]
 
                 return LLMResponse(text=response_text, success=True)
             else:
@@ -451,11 +481,15 @@ The user message contains a QUESTION. Answer it."""
                     "HOME": home,
                     # Also try to pass these directly if they're in our env
                     "GOOGLE_CLOUD_PROJECT": os.environ.get("GOOGLE_CLOUD_PROJECT", ""),
-                    "GOOGLE_CLOUD_LOCATION": os.environ.get("GOOGLE_CLOUD_LOCATION", ""),
+                    "GOOGLE_CLOUD_LOCATION": os.environ.get(
+                        "GOOGLE_CLOUD_LOCATION", ""
+                    ),
                 },
             )
 
-            stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode()), timeout=30)  # 30 second timeout
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(prompt.encode()), timeout=30
+            )  # 30 second timeout
 
             if proc.returncode == 0:
                 response = stdout.decode().strip()
@@ -549,7 +583,9 @@ The user message contains a QUESTION. Answer it."""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{OLLAMA_HOST}/api/chat", json=payload, timeout=aiohttp.ClientTimeout(total=30)
+                    f"{OLLAMA_HOST}/api/chat",
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as resp:
                     async for line in resp.content:
                         if line:
@@ -619,7 +655,9 @@ def get_llm_responder(backend: str = "gemini") -> LLMResponder:
     return _llm_responder
 
 
-async def generate_meeting_response(command: str, speaker: str = "Someone", context: List[str] = None) -> LLMResponse:
+async def generate_meeting_response(
+    command: str, speaker: str = "Someone", context: List[str] = None
+) -> LLMResponse:
     """
     Convenience function to generate a meeting response.
 

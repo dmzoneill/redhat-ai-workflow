@@ -90,7 +90,9 @@ def generate_sunburst_svg(
             sweep_angle = 360 / len(inner_categories)
             color = get_color_for_percentage(cat_value)
 
-            path = _arc_path(cx, cy, inner_radius, middle_radius, start_angle, sweep_angle)
+            path = _arc_path(
+                cx, cy, inner_radius, middle_radius, start_angle, sweep_angle
+            )
             paths.append(
                 f"""
                 <path d="{path}" fill="{color}" opacity="0.6" stroke="var(--bg-primary, #1a1a2e)" stroke-width="2">
@@ -109,7 +111,14 @@ def generate_sunburst_svg(
                     child_value = child.get("value", 0)
                     child_color = get_color_for_percentage(child_value)
 
-                    child_path = _arc_path(cx, cy, middle_radius, outer_radius, child_start, child_sweep - 1)
+                    child_path = _arc_path(
+                        cx,
+                        cy,
+                        middle_radius,
+                        outer_radius,
+                        child_start,
+                        child_sweep - 1,
+                    )
                     paths.append(
                         f"""
                         <path d="{child_path}" fill="{child_color}" opacity="0.8"
@@ -248,7 +257,10 @@ def generate_trend_chart_svg(
     path_d = "M " + " L ".join(points)
 
     # Area fill
-    area_points = points + [f"{padding + chart_width},{height - padding}", f"{padding},{height - padding}"]
+    area_points = points + [
+        f"{padding + chart_width},{height - padding}",
+        f"{padding},{height - padding}",
+    ]
     area_d = "M " + " L ".join(area_points) + " Z"
 
     svg = f"""<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}"

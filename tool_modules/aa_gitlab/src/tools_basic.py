@@ -115,7 +115,9 @@ async def run_glab(
             cmd.extend(["--repo", repo])
 
     # Use unified run_cmd with GITLAB_HOST env var
-    return await run_cmd(cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout)
+    return await run_cmd(
+        cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout
+    )
 
 
 # ==================== MERGE REQUESTS ====================
@@ -127,7 +129,9 @@ async def run_glab(
 async def _gitlab_ci_lint_impl(project: str) -> str:
     """Implementation of gitlab_ci_lint tool."""
     success, output = await run_glab(["ci", "lint"], repo=project)
-    return f"✅ CI Config Valid\n\n{output}" if success else f"❌ Lint failed:\n\n{output}"
+    return (
+        f"✅ CI Config Valid\n\n{output}" if success else f"❌ Lint failed:\n\n{output}"
+    )
 
 
 async def _gitlab_ci_list_impl(project: str, status: str = "", page: int = 1) -> str:
@@ -150,7 +154,9 @@ async def _gitlab_ci_status_impl(project: str, branch: str = "") -> str:
 
 async def _gitlab_ci_trace_impl(project: str, job_id: int) -> str:
     """Implementation of gitlab_ci_trace tool."""
-    success, output = await run_glab(["ci", "trace", str(job_id)], repo=project, timeout=120)
+    success, output = await run_glab(
+        ["ci", "trace", str(job_id)], repo=project, timeout=120
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Job {job_id} Log\n\n```\n{truncate_output(output, max_length=15000, mode='tail')}\n```"
@@ -210,17 +216,23 @@ async def _gitlab_mr_close_impl(project: str, mr_id: int) -> str:
 
 async def _gitlab_mr_comment_impl(project: str, mr_id: int, message: str) -> str:
     """Implementation of gitlab_mr_comment tool."""
-    success, output = await run_glab(["mr", "note", str(mr_id), "--message", message], repo=project)
+    success, output = await run_glab(
+        ["mr", "note", str(mr_id), "--message", message], repo=project
+    )
     return f"✅ Comment added to !{mr_id}" if success else f"❌ Failed: {output}"
 
 
 async def _gitlab_mr_comments_impl(project: str, mr_id: int) -> str:
     """Implementation of gitlab_mr_comments tool."""
     # glab doesn't have a direct comments command, so we use mr view which includes discussions
-    success, output = await run_glab(["mr", "view", str(mr_id), "--comments"], repo=project)
+    success, output = await run_glab(
+        ["mr", "view", str(mr_id), "--comments"], repo=project
+    )
     if not success:
         # Fallback to basic view
-        success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+        success, output = await run_glab(
+            ["mr", "view", str(mr_id), "--web=false"], repo=project
+        )
     return f"## Comments on !{mr_id}\n\n{output}" if success else f"❌ Failed: {output}"
 
 
@@ -260,7 +272,9 @@ async def _gitlab_mr_create_impl(
 
 async def _gitlab_mr_diff_impl(project: str, mr_id: int) -> str:
     """Implementation of gitlab_mr_diff tool."""
-    success, output = await run_glab(["mr", "diff", str(mr_id)], repo=project, timeout=120)
+    success, output = await run_glab(
+        ["mr", "diff", str(mr_id)], repo=project, timeout=120
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## Diff for !{mr_id}\n\n```diff\n{truncate_output(output, max_length=10000)}\n```"
@@ -332,11 +346,15 @@ async def _gitlab_mr_update_impl(
 
 async def _gitlab_mr_view_impl(project: str, mr_id: int) -> str:
     """Implementation of gitlab_mr_view tool."""
-    success, output = await run_glab(["mr", "view", str(mr_id), "--web=false"], repo=project)
+    success, output = await run_glab(
+        ["mr", "view", str(mr_id), "--web=false"], repo=project
+    )
     return output if success else f"❌ Failed: {output}"
 
 
-async def _gitlab_commit_list_impl(project: str, mr_id: int = 0, ref: str = "", limit: int = 20) -> str:
+async def _gitlab_commit_list_impl(
+    project: str, mr_id: int = 0, ref: str = "", limit: int = 20
+) -> str:
     """Implementation of gitlab_commit_list tool - list commits for MR or branch."""
     import json
 
@@ -366,7 +384,11 @@ async def _gitlab_commit_list_impl(project: str, mr_id: int = 0, ref: str = "", 
             author = commit.get("author_name", "")
             lines.append(f"- `{sha}` {title} ({author})")
 
-        header = f"## Commits for MR !{mr_id}" if mr_id else f"## Commits on {ref or 'default branch'}"
+        header = (
+            f"## Commits for MR !{mr_id}"
+            if mr_id
+            else f"## Commits on {ref or 'default branch'}"
+        )
         return f"{header}\n\n" + "\n".join(lines)
     except json.JSONDecodeError:
         return f"❌ Failed to parse commits: {output[:200]}"
@@ -562,7 +584,9 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
             reviewer: Filter by reviewer username
             label: Filter by label name
         """
-        return await _gitlab_mr_list_impl(project, state, author, assignee, reviewer, label)
+        return await _gitlab_mr_list_impl(
+            project, state, author, assignee, reviewer, label
+        )
 
     @auto_heal()
     @registry.tool()
@@ -614,7 +638,9 @@ def _register_mr_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def gitlab_commit_list(project: str, mr_id: int = 0, ref: str = "", limit: int = 20) -> str:
+    async def gitlab_commit_list(
+        project: str, mr_id: int = 0, ref: str = "", limit: int = 20
+    ) -> str:
         """List commits for a merge request or branch.
 
         Args:

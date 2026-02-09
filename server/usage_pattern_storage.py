@@ -116,7 +116,9 @@ class UsagePatternStorage:
             # Check if pattern ID already exists
             existing_ids = {p["id"] for p in data.get("usage_patterns", [])}
             if pattern["id"] in existing_ids:
-                logger.warning(f"Pattern ID {pattern['id']} already exists, skipping add")
+                logger.warning(
+                    f"Pattern ID {pattern['id']} already exists, skipping add"
+                )
                 return False
 
             # Add pattern
@@ -188,7 +190,9 @@ class UsagePatternStorage:
 
         return None
 
-    def get_patterns_for_tool(self, tool_name: str, min_confidence: float = 0.0) -> list[dict]:
+    def get_patterns_for_tool(
+        self, tool_name: str, min_confidence: float = 0.0
+    ) -> list[dict]:
         """Get all patterns for a specific tool.
 
         Args:
@@ -201,7 +205,11 @@ class UsagePatternStorage:
         data = self.load()
         patterns = data.get("usage_patterns", [])
 
-        return [p for p in patterns if p.get("tool") == tool_name and p.get("confidence", 0.0) >= min_confidence]
+        return [
+            p
+            for p in patterns
+            if p.get("tool") == tool_name and p.get("confidence", 0.0) >= min_confidence
+        ]
 
     def get_high_confidence_patterns(self, min_confidence: float = 0.85) -> list[dict]:
         """Get all high-confidence patterns.
@@ -258,7 +266,9 @@ class UsagePatternStorage:
 
         # By confidence level
         high_conf = sum(1 for p in patterns if p.get("confidence", 0.0) >= 0.85)
-        medium_conf = sum(1 for p in patterns if 0.70 <= p.get("confidence", 0.0) < 0.85)
+        medium_conf = sum(
+            1 for p in patterns if 0.70 <= p.get("confidence", 0.0) < 0.85
+        )
         low_conf = sum(1 for p in patterns if p.get("confidence", 0.0) < 0.70)
 
         data["stats"]["high_confidence"] = high_conf
@@ -286,13 +296,17 @@ class UsagePatternStorage:
         total_success = sum(p.get("success_after_prevention", 0) for p in patterns)
 
         if total_obs > 0:
-            data["stats"]["prevention_success_rate"] = round(total_success / total_obs, 3)
+            data["stats"]["prevention_success_rate"] = round(
+                total_success / total_obs, 3
+            )
         else:
             data["stats"]["prevention_success_rate"] = 0.0
 
         return data
 
-    def prune_old_patterns(self, max_age_days: int = 90, min_confidence: float = 0.70) -> int:
+    def prune_old_patterns(
+        self, max_age_days: int = 90, min_confidence: float = 0.70
+    ) -> int:
         """Remove old low-confidence patterns.
 
         Args:
@@ -317,7 +331,9 @@ class UsagePatternStorage:
                     continue
 
                 # Check age
-                last_seen = datetime.fromisoformat(pattern.get("last_seen", now.isoformat()))
+                last_seen = datetime.fromisoformat(
+                    pattern.get("last_seen", now.isoformat())
+                )
                 age_days = (now - last_seen).days
 
                 if age_days < max_age_days:

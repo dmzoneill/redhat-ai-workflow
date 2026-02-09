@@ -117,15 +117,21 @@ class NPUWhisperSTT:
 
             if not self.model_dir.exists():
                 logger.error(f"Whisper model not found at {self.model_dir}")
-                logger.info("Download with: huggingface-cli download OpenVINO/whisper-base-fp16-ov")
+                logger.info(
+                    "Download with: huggingface-cli download OpenVINO/whisper-base-fp16-ov"
+                )
                 return False
 
             # Try NPU first, fall back to CPU
-            for device in [self.device, "CPU"] if self.device == "NPU" else [self.device]:
+            for device in (
+                [self.device, "CPU"] if self.device == "NPU" else [self.device]
+            ):
                 try:
                     logger.info(f"Loading Whisper on {device}...")
                     start = time.time()
-                    self._pipeline = ov_genai.WhisperPipeline(str(self.model_dir), device)
+                    self._pipeline = ov_genai.WhisperPipeline(
+                        str(self.model_dir), device
+                    )
                     load_time = time.time() - start
                     self._actual_device = device
                     self._initialized = True
@@ -147,7 +153,9 @@ class NPUWhisperSTT:
 
         return False
 
-    async def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> TranscriptionResult:
+    async def transcribe(
+        self, audio: np.ndarray, sample_rate: int = 16000
+    ) -> TranscriptionResult:
         """
         Transcribe audio to text.
 
@@ -189,7 +197,9 @@ class NPUWhisperSTT:
             self.stats.last_rtf = rtf
             self.stats.samples_processed += len(audio)
             if self.stats.total_audio_duration > 0:
-                self.stats.avg_rtf = self.stats.total_inference_time / self.stats.total_audio_duration
+                self.stats.avg_rtf = (
+                    self.stats.total_inference_time / self.stats.total_audio_duration
+                )
 
             # Extract text from WhisperDecodedResults
             # The result has a 'texts' attribute which is a list
@@ -204,7 +214,11 @@ class NPUWhisperSTT:
             )
 
             return TranscriptionResult(
-                text=text, is_partial=False, confidence=1.0, end_time=duration, processing_time=processing_time
+                text=text,
+                is_partial=False,
+                confidence=1.0,
+                end_time=duration,
+                processing_time=processing_time,
             )
 
         except Exception as e:
@@ -435,7 +449,9 @@ class RealtimeSTT:
                 stderr=asyncio.subprocess.DEVNULL,
             )
 
-            chunk_size = int(config.sample_rate * config.chunk_duration * 4)  # 4 bytes per float32
+            chunk_size = int(
+                config.sample_rate * config.chunk_duration * 4
+            )  # 4 bytes per float32
 
             while self._running:
                 data = await proc.stdout.read(chunk_size)

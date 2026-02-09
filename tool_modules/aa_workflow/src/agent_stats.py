@@ -454,13 +454,20 @@ class AgentStats:
                 "lifetime": {
                     "tool_calls": lifetime["tool_calls"],
                     "tool_success_rate": (
-                        round(lifetime["tool_successes"] / lifetime["tool_calls"] * 100, 1)
+                        round(
+                            lifetime["tool_successes"] / lifetime["tool_calls"] * 100, 1
+                        )
                         if lifetime["tool_calls"] > 0
                         else 0
                     ),
                     "skill_executions": lifetime["skill_executions"],
                     "skill_success_rate": (
-                        round(lifetime["skill_successes"] / lifetime["skill_executions"] * 100, 1)
+                        round(
+                            lifetime["skill_successes"]
+                            / lifetime["skill_executions"]
+                            * 100,
+                            1,
+                        )
                         if lifetime["skill_executions"] > 0
                         else 0
                     ),
@@ -471,7 +478,8 @@ class AgentStats:
                 "today": {
                     "tool_calls": today_stats["tool_calls"],
                     "skill_executions": today_stats["skill_executions"],
-                    "memory_ops": today_stats["memory_reads"] + today_stats["memory_writes"],
+                    "memory_ops": today_stats["memory_reads"]
+                    + today_stats["memory_writes"],
                     "lines_written": today_stats["lines_written"],
                 },
                 "session": {
@@ -498,7 +506,12 @@ def get_agent_stats() -> AgentStats:
 
 
 # Convenience functions
-def record_tool_call(tool_name: str, success: bool, duration_ms: int = 0, workspace_uri: str | None = None) -> None:
+def record_tool_call(
+    tool_name: str,
+    success: bool,
+    duration_ms: int = 0,
+    workspace_uri: str | None = None,
+) -> None:
     """Record a tool call."""
     get_agent_stats().record_tool_call(tool_name, success, duration_ms, workspace_uri)
 
@@ -512,7 +525,9 @@ def record_skill_execution(
     workspace_uri: str | None = None,
 ) -> None:
     """Record a skill execution."""
-    get_agent_stats().record_skill_execution(skill_name, success, duration_ms, steps_completed, total_steps)
+    get_agent_stats().record_skill_execution(
+        skill_name, success, duration_ms, steps_completed, total_steps
+    )
 
 
 def record_memory_read(key: str = "", workspace_uri: str | None = None) -> None:

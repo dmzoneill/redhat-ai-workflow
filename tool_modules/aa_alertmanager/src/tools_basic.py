@@ -21,7 +21,12 @@ from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import alertmanager_client
 from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
-from server.utils import get_bearer_token, get_env_config, get_kubeconfig, get_service_url
+from server.utils import (
+    get_bearer_token,
+    get_env_config,
+    get_kubeconfig,
+    get_service_url,
+)
 
 # Setup project path for server imports
 
@@ -96,7 +101,9 @@ async def _alertmanager_alerts_impl(
         return [TextContent(type="text", text=f"❌ Failed to get alerts: {result}")]
 
     if not isinstance(result, list):
-        return [TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")]
+        return [
+            TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")
+        ]
 
     alerts = result
 
@@ -127,7 +134,8 @@ async def _alertmanager_alerts_impl(
         return [
             TextContent(
                 type="text",
-                text=f"✅ No active alerts in {environment}" + (f" matching '{filter_name}'" if filter_name else ""),
+                text=f"✅ No active alerts in {environment}"
+                + (f" matching '{filter_name}'" if filter_name else ""),
             )
         ]
 
@@ -141,7 +149,9 @@ async def _alertmanager_alerts_impl(
         severity = labels.get("severity", "unknown")
         namespace = labels.get("namespace", "")
 
-        severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(severity, "⚪")
+        severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(
+            severity, "⚪"
+        )
 
         summary = annotations.get("summary", "")[:80]
 
@@ -216,12 +226,16 @@ async def _alertmanager_create_silence_impl(
         "comment": comment,
     }
 
-    success, result = await alertmanager_request(url, "/silences", method="POST", data=data, token=token)
+    success, result = await alertmanager_request(
+        url, "/silences", method="POST", data=data, token=token
+    )
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to create silence: {result}")]
 
-    silence_id = result.get("silenceID", "unknown") if isinstance(result, dict) else str(result)
+    silence_id = (
+        result.get("silenceID", "unknown") if isinstance(result, dict) else str(result)
+    )
 
     lines = [
         "## ✅ Silence Created",
@@ -235,11 +249,15 @@ async def _alertmanager_create_silence_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _alertmanager_delete_silence_impl(silence_id: str, environment: str) -> list[TextContent]:
+async def _alertmanager_delete_silence_impl(
+    silence_id: str, environment: str
+) -> list[TextContent]:
     """Implementation of alertmanager_delete_silence tool."""
     url, token = await get_alertmanager_config(environment)
 
-    success, result = await alertmanager_request(url, f"/silence/{silence_id}", method="DELETE", token=token)
+    success, result = await alertmanager_request(
+        url, f"/silence/{silence_id}", method="DELETE", token=token
+    )
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to delete silence: {result}")]
@@ -247,7 +265,9 @@ async def _alertmanager_delete_silence_impl(silence_id: str, environment: str) -
     return [TextContent(type="text", text=f"✅ Silence `{silence_id}` deleted")]
 
 
-async def _prometheus_grafana_link_impl(dashboard: str, namespace: str, environment: str) -> list[TextContent]:
+async def _prometheus_grafana_link_impl(
+    dashboard: str, namespace: str, environment: str
+) -> list[TextContent]:
     """Implementation of prometheus_grafana_link tool."""
     # Get Prometheus URL from config.json or env
     prom_url = ""
@@ -258,14 +278,25 @@ async def _prometheus_grafana_link_impl(dashboard: str, namespace: str, environm
 
             with open(config_path) as f:
                 config = json.load(f)
-            env_key = "production" if environment.lower() == "prod" else environment.lower()
-            prom_url = config.get("prometheus", {}).get("environments", {}).get(env_key, {}).get("url", "")
+            env_key = (
+                "production" if environment.lower() == "prod" else environment.lower()
+            )
+            prom_url = (
+                config.get("prometheus", {})
+                .get("environments", {})
+                .get(env_key, {})
+                .get("url", "")
+            )
     except Exception:
         pass
     if not prom_url:
         prom_url = os.getenv(f"PROMETHEUS_{environment.upper()}_URL", "")
     if not prom_url:
-        return [TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")]
+        return [
+            TextContent(
+                type="text", text=f"❌ Prometheus URL not configured for {environment}"
+            )
+        ]
     grafana_url = prom_url.replace("prometheus", "grafana")
 
     params = []
@@ -309,7 +340,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of active alerts with their details.
         """
-        return await _alertmanager_alerts_impl(environment, filter_name, silenced, inhibited)
+        return await _alertmanager_alerts_impl(
+            environment, filter_name, silenced, inhibited
+        )
 
     @auto_heal_stage()
     @registry.tool()
@@ -331,7 +364,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Created silence ID.
         """
-        return await _alertmanager_create_silence_impl(matchers, duration, comment, environment)
+        return await _alertmanager_create_silence_impl(
+            matchers, duration, comment, environment
+        )
 
     @auto_heal_stage()
     @registry.tool()

@@ -75,7 +75,9 @@ def _ensure_export_dir() -> None:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def export_workspace_state(cleanup_stale: bool = False, max_stale_hours: int = 24) -> dict:
+def export_workspace_state(
+    cleanup_stale: bool = False, max_stale_hours: int = 24
+) -> dict:
     """Export workspace states to JSON file (legacy v2 format).
 
     For full unified export with all UI data, use export_workspace_state_with_data().
@@ -203,7 +205,9 @@ def export_workspace_state_with_data(
         # Session data
         "workspace_count": len(all_states),
         "session_count": (
-            len(all_sessions) if all_sessions else sum(len(ws.get("sessions", {})) for ws in all_states.values())
+            len(all_sessions)
+            if all_sessions
+            else sum(len(ws.get("sessions", {})) for ws in all_states.values())
         ),
         "workspaces": all_states,
         "sessions": all_sessions,
@@ -241,7 +245,9 @@ def export_workspace_state_with_data(
         import tempfile
 
         # Write to temp file in same directory (ensures same filesystem for atomic rename)
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="workspace_states_", dir=EXPORT_DIR)
+        temp_fd, temp_path = tempfile.mkstemp(
+            suffix=".tmp", prefix="workspace_states_", dir=EXPORT_DIR
+        )
         try:
             with os.fdopen(temp_fd, "w") as f:
                 json.dump(export_data, f, indent=2, default=str)
@@ -290,11 +296,15 @@ async def export_workspace_state_async(ctx: "Context" = None) -> dict:
     # Ensure current workspace is registered if ctx provided
     if ctx:
         state = await WorkspaceRegistry.get_for_ctx(ctx)
-        logger.info(f"Registered workspace: {state.workspace_uri}, project={state.project}")
+        logger.info(
+            f"Registered workspace: {state.workspace_uri}, project={state.project}"
+        )
 
     # Log current registry state before export
     all_workspaces = WorkspaceRegistry.get_all_as_dict()
-    logger.info(f"WorkspaceRegistry has {len(all_workspaces)} workspace(s) before export")
+    logger.info(
+        f"WorkspaceRegistry has {len(all_workspaces)} workspace(s) before export"
+    )
 
     result = export_workspace_state()
     logger.info(f"Export result: {result}")

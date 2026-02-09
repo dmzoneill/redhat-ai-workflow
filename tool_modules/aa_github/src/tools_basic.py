@@ -209,7 +209,9 @@ async def _gh_repo_clone_impl(
     if directory:
         cmd.append(directory)
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Cloned {repo}\n\n{output}"
@@ -385,7 +387,9 @@ async def _gh_pr_list_impl(
     if search:
         cmd.extend(["--search", search])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Pull Requests ({state})\n\n```\n{output}\n```"
@@ -420,7 +424,9 @@ async def _gh_pr_view_impl(
     if comments:
         cmd.append("--comments")
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Pull Request\n\n{output}"
@@ -481,7 +487,9 @@ async def _gh_pr_create_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Pull request created\n\n{output}"
@@ -514,7 +522,9 @@ async def _gh_pr_checkout_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Checked out PR #{pr}\n\n{output}"
@@ -558,7 +568,9 @@ async def _gh_pr_merge_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Pull request merged\n\n{output}"
@@ -591,7 +603,9 @@ async def _gh_pr_close_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ PR #{pr} closed\n\n{output}"
@@ -620,7 +634,9 @@ async def _gh_pr_reopen_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ PR #{pr} reopened\n\n{output}"
@@ -655,7 +671,9 @@ async def _gh_pr_review_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Review submitted for PR #{pr}\n\n{output}"
@@ -686,7 +704,9 @@ async def _gh_pr_diff_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## PR Diff\n\n```diff\n{truncate_output(output, max_length=5000, mode='head')}\n```"
@@ -717,7 +737,9 @@ async def _gh_pr_checks_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## PR Checks\n\n```\n{output}\n```"
@@ -776,7 +798,9 @@ async def _gh_issue_list_impl(
     if search:
         cmd.extend(["--search", search])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Issues ({state})\n\n```\n{output}\n```"
@@ -809,7 +833,9 @@ async def _gh_issue_view_impl(
     if comments:
         cmd.append("--comments")
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Issue #{issue}\n\n{output}"
@@ -854,7 +880,9 @@ async def _gh_issue_create_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Issue created\n\n{output}"
@@ -891,7 +919,9 @@ async def _gh_issue_close_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Issue #{issue} closed\n\n{output}"
@@ -920,7 +950,9 @@ async def _gh_issue_reopen_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Issue #{issue} reopened\n\n{output}"
@@ -951,7 +983,9 @@ async def _gh_issue_comment_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Comment added to issue #{issue}\n\n{output}"
@@ -1008,7 +1042,9 @@ async def _gh_issue_edit_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Issue #{issue} updated\n\n{output}"
@@ -1042,7 +1078,9 @@ async def _gh_workflow_list_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Workflows\n\n```\n{output}\n```"
@@ -1071,7 +1109,9 @@ async def _gh_workflow_view_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Workflow: {workflow}\n\n{output}"
@@ -1116,7 +1156,9 @@ async def _gh_run_list_impl(
     if status:
         cmd.extend(["--status", status])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Workflow Runs\n\n```\n{output}\n```"
@@ -1149,7 +1191,9 @@ async def _gh_run_view_impl(
     if log:
         cmd.append("--log")
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env()
+    )
 
     if success:
         truncated = truncate_output(output, max_length=5000, mode="tail")
@@ -1185,7 +1229,9 @@ async def _gh_run_watch_impl(
     if exit_status:
         cmd.append("--exit-status")
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=timeout, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=timeout, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Run {run_id} completed successfully\n\n{output}"
@@ -1218,7 +1264,9 @@ async def _gh_run_rerun_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Run {run_id} re-triggered\n\n{output}"
@@ -1247,7 +1295,9 @@ async def _gh_run_cancel_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Run {run_id} cancelled\n\n{output}"
@@ -1284,7 +1334,9 @@ async def _gh_run_download_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Artifacts downloaded\n\n{output}"
@@ -1318,7 +1370,9 @@ async def _gh_release_list_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Releases\n\n```\n{output}\n```"
@@ -1349,7 +1403,9 @@ async def _gh_release_view_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"## Release\n\n{output}"
@@ -1406,7 +1462,9 @@ async def _gh_release_create_impl(
     if files:
         cmd.extend(files.split())
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=120, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Release {tag} created\n\n{output}"
@@ -1439,7 +1497,9 @@ async def _gh_release_delete_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=60, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Release {tag} deleted"
@@ -1478,7 +1538,9 @@ async def _gh_release_download_impl(
     if repo:
         cmd.extend(["--repo", repo])
 
-    success, output = await run_cmd(cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env())
+    success, output = await run_cmd(
+        cmd, cwd=cwd if cwd else None, timeout=300, env=_get_gh_env()
+    )
 
     if success:
         return f"✅ Release assets downloaded\n\n{output}"
@@ -1773,7 +1835,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             List of repositories.
         """
-        return await _gh_repo_list_impl(owner, limit, visibility, None, None, language, topic, None)
+        return await _gh_repo_list_impl(
+            owner, limit, visibility, None, None, language, topic, None
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1830,7 +1894,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Creation result.
         """
-        return await _gh_repo_create_impl(name, description, visibility, clone, template, add_readme, "", "")
+        return await _gh_repo_create_impl(
+            name, description, visibility, clone, template, add_readme, "", ""
+        )
 
     @auto_heal()
     @registry.tool()
@@ -1875,11 +1941,15 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             List of pull requests.
         """
-        return await _gh_pr_list_impl(repo, state, limit, author, "", label, base, "", "", cwd)
+        return await _gh_pr_list_impl(
+            repo, state, limit, author, "", label, base, "", "", cwd
+        )
 
     @auto_heal()
     @registry.tool()
-    async def gh_pr_view(pr: str = "", repo: str = "", comments: bool = False, cwd: str = "") -> str:
+    async def gh_pr_view(
+        pr: str = "", repo: str = "", comments: bool = False, cwd: str = ""
+    ) -> str:
         """
         View pull request details.
 
@@ -1922,11 +1992,15 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Created PR details.
         """
-        return await _gh_pr_create_impl(title, body, base, "", draft, "", reviewer, label, "", repo, cwd)
+        return await _gh_pr_create_impl(
+            title, body, base, "", draft, "", reviewer, label, "", repo, cwd
+        )
 
     @auto_heal()
     @registry.tool()
-    async def gh_pr_checkout(pr: str, branch: str = "", repo: str = "", cwd: str = "") -> str:
+    async def gh_pr_checkout(
+        pr: str, branch: str = "", repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Checkout a pull request locally.
 
@@ -1969,7 +2043,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_pr_close(pr: str, comment: str = "", repo: str = "", cwd: str = "") -> str:
+    async def gh_pr_close(
+        pr: str, comment: str = "", repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Close a pull request.
 
@@ -2067,11 +2143,15 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             List of issues.
         """
-        return await _gh_issue_list_impl(repo, state, limit, author, assignee, label, "", "", cwd)
+        return await _gh_issue_list_impl(
+            repo, state, limit, author, assignee, label, "", "", cwd
+        )
 
     @auto_heal()
     @registry.tool()
-    async def gh_issue_view(issue: str, repo: str = "", comments: bool = False, cwd: str = "") -> str:
+    async def gh_issue_view(
+        issue: str, repo: str = "", comments: bool = False, cwd: str = ""
+    ) -> str:
         """
         View issue details.
 
@@ -2114,7 +2194,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_issue_close(issue: str, reason: str = "", comment: str = "", repo: str = "", cwd: str = "") -> str:
+    async def gh_issue_close(
+        issue: str, reason: str = "", comment: str = "", repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Close an issue.
 
@@ -2132,7 +2214,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_issue_comment(issue: str, body: str, repo: str = "", cwd: str = "") -> str:
+    async def gh_issue_comment(
+        issue: str, body: str, repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Add a comment to an issue.
 
@@ -2192,7 +2276,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_run_view(run_id: str, repo: str = "", log: bool = False, cwd: str = "") -> str:
+    async def gh_run_view(
+        run_id: str, repo: str = "", log: bool = False, cwd: str = ""
+    ) -> str:
         """
         View workflow run details.
 
@@ -2209,7 +2295,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_run_rerun(run_id: str, failed: bool = False, repo: str = "", cwd: str = "") -> str:
+    async def gh_run_rerun(
+        run_id: str, failed: bool = False, repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Re-run a workflow.
 
@@ -2309,7 +2397,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_release_delete(tag: str, cleanup_tag: bool = False, repo: str = "", cwd: str = "") -> str:
+    async def gh_release_delete(
+        tag: str, cleanup_tag: bool = False, repo: str = "", cwd: str = ""
+    ) -> str:
         """
         Delete a release.
 
@@ -2430,7 +2520,9 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def gh_gist_create(files: str, description: str = "", public: bool = False) -> str:
+    async def gh_gist_create(
+        files: str, description: str = "", public: bool = False
+    ) -> str:
         """
         Create a gist.
 

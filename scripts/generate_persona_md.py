@@ -74,7 +74,18 @@ questions = []  # Contains ?
 technical = []  # Has tech terms
 acknowledgments = []  # Short acks like "k", "got it", etc
 
-ack_patterns = ["got it", "makes sense", "sounds good", "ok", "k", "ack", "copy", "noted", "thanks", "cheers"]
+ack_patterns = [
+    "got it",
+    "makes sense",
+    "sounds good",
+    "ok",
+    "k",
+    "ack",
+    "copy",
+    "noted",
+    "thanks",
+    "cheers",
+]
 
 for msg in messages:
     text = msg.get("text", "")
@@ -145,8 +156,12 @@ lines.append(f"| Formality | {tone.get('formality', 0.5):.0%} |")
 lines.append(f"| Directness | {tone.get('directness', 0.5):.0%} |")
 lines.append(f"| Avg sentence length | {sentence.get('avg_length', 12):.0f} words |")
 lines.append(f"| Emoji usage | {emoji_data.get('frequency', 0):.0%} |")
-lines.append(f"| Exclamation rate | {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%} |")
-lines.append(f"| Question rate | {sentence.get('punctuation', {}).get('question_rate', 0):.0%} |")
+lines.append(
+    f"| Exclamation rate | {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%} |"
+)
+lines.append(
+    f"| Question rate | {sentence.get('punctuation', {}).get('question_rate', 0):.0%} |"
+)
 lines.append(f"| Capitalization | {sentence.get('capitalization', 'mixed')} |")
 lines.append("")
 lines.append("## Key Style Points")
@@ -154,7 +169,9 @@ lines.append("")
 lines.append("- **Casual and direct** - Low formality (35%), high directness (77%)")
 lines.append("- **Lowercase preferred** - Rarely capitalizes")
 lines.append('- **Concise acknowledgments** - Uses "k", "ack", "got it"')
-lines.append("- **Technical vocabulary** - Frequently uses dev terms (debug, test, merge, pod, api)")
+lines.append(
+    "- **Technical vocabulary** - Frequently uses dev terms (debug, test, merge, pod, api)"
+)
 lines.append("")
 lines.append("## Response Patterns")
 lines.append("")

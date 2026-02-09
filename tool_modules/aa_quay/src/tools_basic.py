@@ -36,8 +36,12 @@ def _get_quay_config() -> dict:
 
 
 _quay_cfg = _get_quay_config()
-QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv("QUAY_API_URL", "https://quay.io/api/v1")
-QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv("QUAY_NAMESPACE", "redhat-user-workloads")
+QUAY_API_URL = _quay_cfg.get("api_url") or os.getenv(
+    "QUAY_API_URL", "https://quay.io/api/v1"
+)
+QUAY_DEFAULT_NAMESPACE = _quay_cfg.get("default_namespace") or os.getenv(
+    "QUAY_NAMESPACE", "redhat-user-workloads"
+)
 QUAY_REGISTRY = "quay.io"
 
 
@@ -164,7 +168,9 @@ The Konflux build may still be in progress, or the tag doesn't exist.
         return [TextContent(type="text", text=f"❌ Error checking image: {data}")]
 
     digest = data.get("Digest", "N/A")
-    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    digest_hash = (
+        digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    )
 
     lines = [
         "## ✅ Image Exists",
@@ -240,7 +246,11 @@ async def _quay_get_tag_impl(
 
     if not success:
         if "manifest unknown" in str(data).lower():
-            return [TextContent(type="text", text=f"❌ Tag `{tag}` not found in `{full_path}`")]
+            return [
+                TextContent(
+                    type="text", text=f"❌ Tag `{tag}` not found in `{full_path}`"
+                )
+            ]
         return [
             TextContent(
                 type="text",
@@ -258,7 +268,9 @@ async def _quay_get_tag_impl(
     os_name = data.get("Os", "N/A")
 
     # Extract just the sha256 hash (without sha256: prefix) for bonfire
-    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    digest_hash = (
+        digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    )
 
     lines = [
         f"## Tag: `{tag}`",
@@ -293,7 +305,9 @@ async def _quay_get_vulnerabilities_impl(
     if not digest.startswith("sha256:"):
         digest = f"sha256:{digest}"
 
-    success, data = await quay_api_request(f"/repository/{full_path}/manifest/{digest}/security")
+    success, data = await quay_api_request(
+        f"/repository/{full_path}/manifest/{digest}/security"
+    )
 
     if not success:
         return [
@@ -309,11 +323,19 @@ async def _quay_get_vulnerabilities_impl(
     status = data.get("status", "unknown")
 
     if status == "queued":
-        return [TextContent(type="text", text="⏳ Security scan is queued, check back later")]
+        return [
+            TextContent(
+                type="text", text="⏳ Security scan is queued, check back later"
+            )
+        ]
     elif status == "scanning":
         return [TextContent(type="text", text="🔍 Security scan in progress...")]
     elif status == "unsupported":
-        return [TextContent(type="text", text="⚠️ Security scanning not supported for this image")]
+        return [
+            TextContent(
+                type="text", text="⚠️ Security scanning not supported for this image"
+            )
+        ]
 
     vulns = data.get("data", {}).get("Layer", {}).get("Features", [])
 
@@ -354,7 +376,9 @@ async def _quay_get_vulnerabilities_impl(
     if critical_vulns:
         lines.extend(["", "### 🔴 Critical Vulnerabilities", ""])
         for v in critical_vulns[:5]:
-            lines.append(f"- **{v['name']}** in `{v['package']}` (fix: {v['fixed_by']})")
+            lines.append(
+                f"- **{v['name']}** in `{v['package']}` (fix: {v['fixed_by']})"
+            )
 
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -393,7 +417,9 @@ The Konflux build may still be in progress. Check:
         return [TextContent(type="text", text="❌ No digest found in image metadata")]
 
     # Extract just the hash (without sha256: prefix) for bonfire
-    digest_hash = digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    digest_hash = (
+        digest.replace("sha256:", "") if digest.startswith("sha256:") else digest
+    )
 
     return [
         TextContent(

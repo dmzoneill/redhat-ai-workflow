@@ -30,12 +30,18 @@ except ImportError:
     # Fallback for standalone usage
     from pathlib import Path
 
-    MEETBOT_SCREENSHOTS_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+    MEETBOT_SCREENSHOTS_DIR = (
+        Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+    )
 
 from server.state_manager import state as state_manager
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, init_notes_bot
-from tool_modules.aa_meet_bot.src.notes_database import MeetingNotesDB, MonitoredCalendar, init_notes_db
+from tool_modules.aa_meet_bot.src.notes_database import (
+    MeetingNotesDB,
+    MonitoredCalendar,
+    init_notes_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,12 +126,16 @@ class MeetingScheduler:
             now = datetime.now().timestamp()
             cutoff = now - (24 * 60 * 60)  # 24 hours ago
             self._status_overrides = {
-                k: v for k, v in data.items() if isinstance(v, dict) and v.get("timestamp", 0) > cutoff
+                k: v
+                for k, v in data.items()
+                if isinstance(v, dict) and v.get("timestamp", 0) > cutoff
             }
             # Save cleaned data back if we removed any
             if len(self._status_overrides) != len(data):
                 self._save_status_overrides()
-            logger.info(f"Loaded {len(self._status_overrides)} status overrides from state.json")
+            logger.info(
+                f"Loaded {len(self._status_overrides)} status overrides from state.json"
+            )
         except Exception as e:
             logger.warning(f"Failed to load status overrides: {e}")
             self._status_overrides = {}
@@ -133,7 +143,9 @@ class MeetingScheduler:
     def _save_status_overrides(self) -> None:
         """Save status overrides to StateManager."""
         try:
-            state_manager.set("meetings", "overrides", self._status_overrides, flush=True)
+            state_manager.set(
+                "meetings", "overrides", self._status_overrides, flush=True
+            )
         except Exception as e:
             logger.warning(f"Failed to save status overrides: {e}")
 
@@ -148,7 +160,10 @@ class MeetingScheduler:
             logger.warning(f"Cannot persist status - invalid meet URL: {meet_url}")
             return
 
-        self._status_overrides[key] = {"status": status, "timestamp": datetime.now().timestamp()}
+        self._status_overrides[key] = {
+            "status": status,
+            "timestamp": datetime.now().timestamp(),
+        }
         self._save_status_overrides()
         logger.info(f"Persisted status override: {key} -> {status}")
 
@@ -330,7 +345,8 @@ class MeetingScheduler:
                         (
                             m
                             for m in self.state.upcoming_meetings
-                            if m.event_id == event["event_id"] and m.calendar_id == calendar.calendar_id
+                            if m.event_id == event["event_id"]
+                            and m.calendar_id == calendar.calendar_id
                         ),
                         None,
                     )
@@ -341,7 +357,9 @@ class MeetingScheduler:
                         persisted_status = self._get_status_override(event["meet_url"])
                         if persisted_status:
                             initial_status = persisted_status
-                            logger.info(f"Using persisted status '{persisted_status}' for: {event['title']}")
+                            logger.info(
+                                f"Using persisted status '{persisted_status}' for: {event['title']}"
+                            )
                         elif calendar.auto_join:
                             # If calendar has auto_join=True, pre-approve the meeting
                             initial_status = "approved"
@@ -364,7 +382,9 @@ class MeetingScheduler:
                         )
                         new_meetings.append(meeting)
                         if initial_status == "approved" and not persisted_status:
-                            logger.info(f"Auto-approved meeting: {event['title']} (calendar: {calendar.name})")
+                            logger.info(
+                                f"Auto-approved meeting: {event['title']} (calendar: {calendar.name})"
+                            )
 
             except Exception as e:
                 logger.error(f"Failed to poll calendar {calendar.calendar_id}: {e}")
@@ -379,7 +399,9 @@ class MeetingScheduler:
         # Clean up past meetings (ended more than 30 minutes ago)
         cutoff = now - timedelta(minutes=30)
         self.state.upcoming_meetings = [
-            m for m in self.state.upcoming_meetings if m.end_time > cutoff or m.status == "active"
+            m
+            for m in self.state.upcoming_meetings
+            if m.end_time > cutoff or m.status == "active"
         ]
 
         self.state.last_poll = now
@@ -397,7 +419,9 @@ class MeetingScheduler:
         """
         try:
             # Import here to avoid circular imports
-            from tool_modules.aa_google_calendar.src.tools_basic import get_calendar_service
+            from tool_modules.aa_google_calendar.src.tools_basic import (
+                get_calendar_service,
+            )
 
             service, error = get_calendar_service()
             if error or not service:
@@ -439,8 +463,12 @@ class MeetingScheduler:
 
                 try:
                     if "T" in start:
-                        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
-                        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")).astimezone(tz)
+                        start_dt = datetime.fromisoformat(
+                            start.replace("Z", "+00:00")
+                        ).astimezone(tz)
+                        end_dt = datetime.fromisoformat(
+                            end.replace("Z", "+00:00")
+                        ).astimezone(tz)
                     else:
                         # All-day event, skip
                         continue
@@ -455,7 +483,9 @@ class MeetingScheduler:
                         "start": start_dt,
                         "end": end_dt,
                         "organizer": event.get("organizer", {}).get("email", ""),
-                        "attendees": [a.get("email", "") for a in event.get("attendees", [])],
+                        "attendees": [
+                            a.get("email", "") for a in event.get("attendees", [])
+                        ],
                         "description": event.get("description", ""),
                     }
                 )
@@ -497,7 +527,9 @@ class MeetingScheduler:
 
                 # Calculate join window: from (start - buffer) to (start + late_join_window)
                 # Allow joining meetings up to 10 minutes after they've started
-                join_time = meeting.start_time - timedelta(minutes=self.join_buffer_minutes)
+                join_time = meeting.start_time - timedelta(
+                    minutes=self.join_buffer_minutes
+                )
                 late_join_cutoff = meeting.start_time + timedelta(minutes=10)
 
                 # Join if we're in the window (2 min before to 10 min after start)
@@ -637,7 +669,9 @@ class MeetingScheduler:
                     logger.info(f"Un-approved meeting (now skipped): {meeting.title}")
                     return True
                 else:
-                    logger.warning(f"Meeting found but status is '{meeting.status}', not 'approved'. Cannot unapprove.")
+                    logger.warning(
+                        f"Meeting found but status is '{meeting.status}', not 'approved'. Cannot unapprove."
+                    )
                     return False
         logger.warning(f"No meeting found with event_id={event_id}")
         return False
@@ -663,15 +697,21 @@ class MeetingScheduler:
                     meeting.bot_mode = mode
                     # Persist using meet_url as key (stable across calendar syncs)
                     self._set_status_override(meeting.meet_url, "approved")
-                    logger.info(f"Pre-approved meeting: {meeting.title} (mode: {mode}, was: {meeting.status})")
+                    logger.info(
+                        f"Pre-approved meeting: {meeting.title} (mode: {mode}, was: {meeting.status})"
+                    )
                     return True
                 elif meeting.status == "approved":
                     # Already approved, just update mode if different
                     meeting.bot_mode = mode
-                    logger.info(f"Meeting already approved, updated mode: {meeting.title} (mode: {mode})")
+                    logger.info(
+                        f"Meeting already approved, updated mode: {meeting.title} (mode: {mode})"
+                    )
                     return True
                 else:
-                    logger.warning(f"Meeting found but status is '{meeting.status}', cannot approve.")
+                    logger.warning(
+                        f"Meeting found but status is '{meeting.status}', cannot approve."
+                    )
                     return False
 
         logger.warning(f"No meeting found with event_id={event_id}")
@@ -763,7 +803,9 @@ class MeetingScheduler:
         # Add to upcoming meetings for tracking
         self.state.upcoming_meetings.append(meeting)
 
-        logger.info(f"Quick join: {title} at {meet_url} (mode={mode}, video_enabled={video_enabled})")
+        logger.info(
+            f"Quick join: {title} at {meet_url} (mode={mode}, video_enabled={video_enabled})"
+        )
 
         success = await self.notes_bot.join_meeting(
             meet_url=meet_url,
@@ -797,7 +839,11 @@ class MeetingScheduler:
         # - Future meetings: start_time > now (not started yet)
         # Include skipped meetings so users can re-approve them
         # Exclude only completed meetings
-        future_meetings = [m for m in self.state.upcoming_meetings if m.end_time > now and m.status != "completed"]
+        future_meetings = [
+            m
+            for m in self.state.upcoming_meetings
+            if m.end_time > now and m.status != "completed"
+        ]
 
         # Get current meeting info with screenshot
         current_meeting_info = None
@@ -807,7 +853,9 @@ class MeetingScheduler:
             # Get screenshot path using the URL-based meeting ID (e.g., qvb-dhaj-osf)
             # The browser controller saves screenshots with this ID, not the event_id
             url_meeting_id = self._extract_meeting_id_from_url(meeting.meet_url)
-            screenshot_path = self._get_screenshot_path(url_meeting_id or meeting.event_id)
+            screenshot_path = self._get_screenshot_path(
+                url_meeting_id or meeting.event_id
+            )
             meeting_info = {
                 "event_id": meeting.event_id,
                 "title": meeting.title,
@@ -819,7 +867,9 @@ class MeetingScheduler:
                 "organizer": meeting.organizer,
                 "screenshot_path": str(screenshot_path) if screenshot_path else None,
                 "screenshot_updated": (
-                    screenshot_path.stat().st_mtime if screenshot_path and screenshot_path.exists() else None
+                    screenshot_path.stat().st_mtime
+                    if screenshot_path and screenshot_path.exists()
+                    else None
                 ),
             }
             current_meeting_info = meeting.title
@@ -829,9 +879,13 @@ class MeetingScheduler:
             "running": self.state.running,
             "current_meeting": current_meeting_info,
             "current_meetings": current_meetings,
-            "upcoming_count": len([m for m in future_meetings if m.status in ("scheduled", "approved")]),
+            "upcoming_count": len(
+                [m for m in future_meetings if m.status in ("scheduled", "approved")]
+            ),
             "completed_today": self.state.completed_today,
-            "last_poll": self.state.last_poll.isoformat() if self.state.last_poll else None,
+            "last_poll": (
+                self.state.last_poll.isoformat() if self.state.last_poll else None
+            ),
             "upcoming_meetings": [
                 {
                     "event_id": m.event_id,

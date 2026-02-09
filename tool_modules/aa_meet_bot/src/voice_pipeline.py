@@ -202,7 +202,9 @@ class VoicePipeline:
         logger.info(f'[VOICE] 🔑 Wake word: "{self.config.wake_word}"')
         logger.info(f"[VOICE] 🎤 Listening on sink: {self.sink_name}")
         logger.info(f"[VOICE] 🔊 Output pipe: {self.pipe_path}")
-        logger.info(f"[VOICE] 🧠 STT: {self.config.stt_model} on {self.config.stt_device}")
+        logger.info(
+            f"[VOICE] 🧠 STT: {self.config.stt_model} on {self.config.stt_device}"
+        )
         logger.info(f"[VOICE] 💬 LLM: {self.config.llm_backend}")
         logger.info(f"[VOICE] 🔈 TTS: {self.config.tts_backend}")
         logger.info("[VOICE] ========================================")
@@ -278,7 +280,9 @@ class VoicePipeline:
         self.stats.total_utterances += 1
         audio_duration_ms = len(audio) / self.config.sample_rate * 1000
 
-        logger.info(f"[VOICE] 🎤 Processing utterance #{self.stats.total_utterances} ({audio_duration_ms:.0f}ms audio)")
+        logger.info(
+            f"[VOICE] 🎤 Processing utterance #{self.stats.total_utterances} ({audio_duration_ms:.0f}ms audio)"
+        )
 
         # Transcribe via NPU/STT
         stt_start = time.time()
@@ -320,7 +324,9 @@ class VoicePipeline:
     async def _respond_to_command(self, event: WakeWordEvent) -> None:
         """Generate and speak a response to a wake word command."""
         if self._processing_response:
-            logger.warning("[VOICE] ⚠️ Already processing a response, ignoring new wake word")
+            logger.warning(
+                "[VOICE] ⚠️ Already processing a response, ignoring new wake word"
+            )
             return
 
         self._processing_response = True
@@ -350,12 +356,16 @@ class VoicePipeline:
             llm_time_ms = (time.time() - llm_start) * 1000
 
             if not llm_response.success or not llm_response.text:
-                logger.error(f"[VOICE] ❌ LLM failed ({llm_time_ms:.0f}ms): {llm_response.error}")
+                logger.error(
+                    f"[VOICE] ❌ LLM failed ({llm_time_ms:.0f}ms): {llm_response.error}"
+                )
                 self.stats.errors += 1
                 return
 
             response_text = llm_response.text
-            logger.info(f'[VOICE] 💬 Gemini response ({llm_time_ms:.0f}ms): "{response_text}"')
+            logger.info(
+                f'[VOICE] 💬 Gemini response ({llm_time_ms:.0f}ms): "{response_text}"'
+            )
 
             # Callback
             if self.config.on_response:
@@ -368,14 +378,20 @@ class VoicePipeline:
             tts_time_ms = (time.time() - tts_start) * 1000
 
             if not tts_result.success:
-                logger.error(f"[VOICE] ❌ TTS failed ({tts_time_ms:.0f}ms): {tts_result.error}")
+                logger.error(
+                    f"[VOICE] ❌ TTS failed ({tts_time_ms:.0f}ms): {tts_result.error}"
+                )
                 self.stats.errors += 1
                 return
 
             audio_duration_ms = (
-                len(tts_result.audio_data) / tts_result.sample_rate * 1000 if tts_result.audio_data is not None else 0
+                len(tts_result.audio_data) / tts_result.sample_rate * 1000
+                if tts_result.audio_data is not None
+                else 0
             )
-            logger.info(f"[VOICE] 🔊 TTS complete ({tts_time_ms:.0f}ms, {audio_duration_ms:.0f}ms audio)")
+            logger.info(
+                f"[VOICE] 🔊 TTS complete ({tts_time_ms:.0f}ms, {audio_duration_ms:.0f}ms audio)"
+            )
 
             # Unmute microphone before speaking
             if self._controller:
@@ -399,7 +415,9 @@ class VoicePipeline:
             self.stats.min_latency_ms = min(self.stats.min_latency_ms, latency)
             self.stats.max_latency_ms = max(self.stats.max_latency_ms, latency)
 
-            logger.info(f"[VOICE] ✅ Response complete! Total latency: {latency:.0f}ms (STT→LLM→TTS→Play)")
+            logger.info(
+                f"[VOICE] ✅ Response complete! Total latency: {latency:.0f}ms (STT→LLM→TTS→Play)"
+            )
 
         except Exception as e:
             logger.error(f"[VOICE] ❌ Response generation failed: {e}")
@@ -476,7 +494,11 @@ class VoicePipeline:
             "wake_word_triggers": self.stats.wake_word_triggers,
             "responses_generated": self.stats.responses_generated,
             "avg_latency_ms": self.stats.avg_latency_ms,
-            "min_latency_ms": self.stats.min_latency_ms if self.stats.min_latency_ms != float("in") else 0,
+            "min_latency_ms": (
+                self.stats.min_latency_ms
+                if self.stats.min_latency_ms != float("in")
+                else 0
+            ),
             "max_latency_ms": self.stats.max_latency_ms,
             "errors": self.stats.errors,
             "running": self._running,
@@ -530,7 +552,10 @@ class VoicePipelineManager:
 
     def get_all_stats(self) -> dict:
         """Get stats for all pipelines."""
-        return {instance_id: pipeline.get_stats() for instance_id, pipeline in self._pipelines.items()}
+        return {
+            instance_id: pipeline.get_stats()
+            for instance_id, pipeline in self._pipelines.items()
+        }
 
 
 # Global manager

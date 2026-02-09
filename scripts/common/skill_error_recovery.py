@@ -76,7 +76,9 @@ class SkillErrorRecovery:
                 # Log but continue with defaults
                 import logging
 
-                logging.getLogger(__name__).debug(f"Could not load learned patterns: {e}")
+                logging.getLogger(__name__).debug(
+                    f"Could not load learned patterns: {e}"
+                )
 
         return default_patterns
 
@@ -108,7 +110,9 @@ class SkillErrorRecovery:
                 matched_pattern = pattern_id
                 # Extract captured groups (e.g., attribute name, variable name)
                 if match.groups():
-                    extracted_data = {f"group{i}": g for i, g in enumerate(match.groups())}
+                    extracted_data = {
+                        f"group{i}": g for i, g in enumerate(match.groups())
+                    }
                 break
 
         # Check memory for this specific error
@@ -117,7 +121,9 @@ class SkillErrorRecovery:
         result = {
             "pattern_id": matched_pattern,
             "description": (
-                self.patterns[matched_pattern]["description"] if matched_pattern else "Unknown error pattern"
+                self.patterns[matched_pattern]["description"]
+                if matched_pattern
+                else "Unknown error pattern"
             ),
             "error_msg": error_msg[:200],
             "step_name": step_name,
@@ -204,7 +210,9 @@ class SkillErrorRecovery:
             # Find similar errors (same step or same error message)
             similar = []
             for fix in history["fixes"]:
-                if fix.get("step_name") == step_name or error_msg[:50] in fix.get("error_msg", ""):
+                if fix.get("step_name") == step_name or error_msg[:50] in fix.get(
+                    "error_msg", ""
+                ):
                     similar.append(
                         {
                             "timestamp": fix.get("timestamp"),
@@ -222,7 +230,9 @@ class SkillErrorRecovery:
             logging.getLogger(__name__).debug(f"Could not get similar fixes: {e}")
             return []
 
-    async def prompt_user_for_action(self, error_info: dict, ask_question_fn=None) -> dict:
+    async def prompt_user_for_action(
+        self, error_info: dict, ask_question_fn=None
+    ) -> dict:
         """
         Prompt user for recovery action (via AskUserQuestion or CLI fallback).
 
@@ -253,7 +263,9 @@ class SkillErrorRecovery:
             context_lines.append("\n**Previous fixes for similar errors:**")
             for fix in previous_fixes:
                 status = "✅" if fix.get("success") else "❌"
-                context_lines.append(f"  {status} {fix.get('action')} - {fix.get('description', 'N/A')[:50]}")
+                context_lines.append(
+                    f"  {status} {fix.get('action')} - {fix.get('description', 'N/A')[:50]}"
+                )
 
         context_msg = "\n".join(context_lines)
 
@@ -297,7 +309,8 @@ class SkillErrorRecovery:
                         "questions": [
                             {
                                 "question": (
-                                    f"Skill error in step '{step_name}'. " f"How should I proceed?\n\n{context_msg}"
+                                    f"Skill error in step '{step_name}'. "
+                                    f"How should I proceed?\n\n{context_msg}"
                                 ),
                                 "header": "Skill Error",
                                 "options": options,
@@ -308,8 +321,12 @@ class SkillErrorRecovery:
                 )
 
                 # Parse response
-                answers = response.get("answers", {}) if isinstance(response, dict) else {}
-                selected = list(answers.values())[0] if answers else "Create GitHub issue"
+                answers = (
+                    response.get("answers", {}) if isinstance(response, dict) else {}
+                )
+                selected = (
+                    list(answers.values())[0] if answers else "Create GitHub issue"
+                )
 
                 # Map user selection to action
                 action_map = {
@@ -378,7 +395,9 @@ class SkillErrorRecovery:
             "error_info": error_info,
         }
 
-    def log_fix_attempt(self, error_info: dict, action: str, success: bool, details: str = "") -> None:
+    def log_fix_attempt(
+        self, error_info: dict, action: str, success: bool, details: str = ""
+    ) -> None:
         """
         Log a fix attempt to memory for future learning.
 
@@ -408,9 +427,13 @@ class SkillErrorRecovery:
 
             # Update success stats
             if success:
-                self.memory.increment("learned/skill_error_fixes", f"stats.{action}_success")
+                self.memory.increment(
+                    "learned/skill_error_fixes", f"stats.{action}_success"
+                )
             else:
-                self.memory.increment("learned/skill_error_fixes", f"stats.{action}_failed")
+                self.memory.increment(
+                    "learned/skill_error_fixes", f"stats.{action}_failed"
+                )
 
         except Exception as e:
             # Best-effort logging - don't fail the main operation

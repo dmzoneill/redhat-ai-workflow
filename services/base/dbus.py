@@ -158,7 +158,9 @@ class DaemonDBusBase(ABC):
         checks = {
             "running": self.is_running,
             # Note: uptime_ok is informational only, not required for health
-            "uptime_ok": (time.time() - self.start_time) > 10 if self.start_time else False,
+            "uptime_ok": (
+                (time.time() - self.start_time) > 10 if self.start_time else False
+            ),
         }
 
         # Only "running" is required for health - uptime_ok is informational
@@ -451,7 +453,9 @@ class DaemonClient:
 
         try:
             self._bus = await MessageBus().connect()
-            introspection = await self._bus.introspect(self.service_name, self.object_path)
+            introspection = await self._bus.introspect(
+                self.service_name, self.object_path
+            )
             self._proxy = self._bus.get_proxy_object(
                 self.service_name,
                 self.object_path,

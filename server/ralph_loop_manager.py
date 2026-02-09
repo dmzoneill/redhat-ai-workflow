@@ -116,7 +116,9 @@ def get_loop_status(session_id: str) -> Optional[dict]:
             if todo_path.exists():
                 content = todo_path.read_text()
                 config["incomplete_tasks"] = content.count("- [ ]")
-                config["complete_tasks"] = content.count("- [x]") + content.count("- [X]")
+                config["complete_tasks"] = content.count("- [x]") + content.count(
+                    "- [X]"
+                )
                 config["has_hard_stop"] = "**HARD STOP**" in content
 
         return config
@@ -144,7 +146,9 @@ def list_active_loops() -> list[dict]:
                 if todo_path.exists():
                     content = todo_path.read_text()
                     config["incomplete_tasks"] = content.count("- [ ]")
-                    config["complete_tasks"] = content.count("- [x]") + content.count("- [X]")
+                    config["complete_tasks"] = content.count("- [x]") + content.count(
+                        "- [X]"
+                    )
 
             loops.append(config)
         except (json.JSONDecodeError, IOError):
@@ -240,7 +244,9 @@ def remove_hard_stop(session_id: str) -> bool:
     return True
 
 
-def generate_todo_from_goals(goals: str, session_id: str, workspace_path: Optional[str] = None) -> str:
+def generate_todo_from_goals(
+    goals: str, session_id: str, workspace_path: Optional[str] = None
+) -> str:
     """
     Generate a TODO.md file from user goals.
 

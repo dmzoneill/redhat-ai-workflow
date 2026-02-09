@@ -11,4 +11,6 @@ sys.path.insert(0, PROJECT_ROOT)  # For server.utils import
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tool_modules", "aa_git"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tool_modules", "aa_gitlab"))
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "tool_modules", "aa_jira"))
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "tool_modules", "aa_slack"))  # Must be first
+sys.path.insert(
+    0, os.path.join(PROJECT_ROOT, "tool_modules", "aa_slack")
+)  # Must be first

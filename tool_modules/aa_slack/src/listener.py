@@ -69,11 +69,21 @@ class ListenerConfig:
         return cls(
             poll_interval_min=float(os.getenv("SLACK_POLL_INTERVAL_MIN", "5")),
             poll_interval_max=float(os.getenv("SLACK_POLL_INTERVAL_MAX", "15")),
-            watched_channels=[c.strip() for c in os.getenv("SLACK_WATCHED_CHANNELS", "").split(",") if c.strip()],
-            watched_keywords=[
-                k.strip().lower() for k in os.getenv("SLACK_WATCHED_KEYWORDS", "").split(",") if k.strip()
+            watched_channels=[
+                c.strip()
+                for c in os.getenv("SLACK_WATCHED_CHANNELS", "").split(",")
+                if c.strip()
             ],
-            watched_users=[u.strip() for u in os.getenv("SLACK_WATCHED_USERS", "").split(",") if u.strip()],
+            watched_keywords=[
+                k.strip().lower()
+                for k in os.getenv("SLACK_WATCHED_KEYWORDS", "").split(",")
+                if k.strip()
+            ],
+            watched_users=[
+                u.strip()
+                for u in os.getenv("SLACK_WATCHED_USERS", "").split(",")
+                if u.strip()
+            ],
             self_user_id=os.getenv("SLACK_SELF_USER_ID", ""),
             self_dm_channel=os.getenv("SLACK_SELF_DM_CHANNEL", ""),
             debug=os.getenv("SLACK_DEBUG", "").lower() in ("true", "1", "yes"),
@@ -189,7 +199,11 @@ class SlackListener:
         """Get listener statistics."""
         return {
             **self._stats,
-            "uptime": (time.time() - self._stats["started_at"] if self._stats["started_at"] else 0),
+            "uptime": (
+                time.time() - self._stats["started_at"]
+                if self._stats["started_at"]
+                else 0
+            ),
             "running": self._running,
         }
 
@@ -202,18 +216,24 @@ class SlackListener:
                 if cached and cached.name:
                     self._channel_names[channel_id] = cached.name
             if self._channel_names:
-                logger.info(f"Loaded {len(self._channel_names)} channel names from cache")
+                logger.info(
+                    f"Loaded {len(self._channel_names)} channel names from cache"
+                )
         except Exception as e:
             logger.debug(f"Could not load channel names from cache: {e}")
 
         # Fall back to API for any missing channels (may fail on enterprise)
-        missing = [c for c in self.config.watched_channels if c not in self._channel_names]
+        missing = [
+            c for c in self.config.watched_channels if c not in self._channel_names
+        ]
         if missing:
             try:
                 channels = await self.session.get_conversations_list()
                 for channel in channels:
                     if channel["id"] in missing:
-                        self._channel_names[channel["id"]] = channel.get("name", channel["id"])
+                        self._channel_names[channel["id"]] = channel.get(
+                            "name", channel["id"]
+                        )
             except Exception as e:
                 logger.warning(f"Could not load channel names from API: {e}")
 
@@ -278,7 +298,9 @@ class SlackListener:
                 logger.debug(f"Poll loop error: {error_type}: {e}")
 
             # Wait for next poll interval (randomized for natural feel)
-            interval = random.uniform(self.config.poll_interval_min, self.config.poll_interval_max)
+            interval = random.uniform(
+                self.config.poll_interval_min, self.config.poll_interval_max
+            )
             await asyncio.sleep(interval)
         logger.info("Poll loop exiting")
 
@@ -293,7 +315,9 @@ class SlackListener:
             # Yield to allow other coroutines (like D-Bus handlers) to run
             await asyncio.sleep(0)
             try:
-                logger.debug(f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}")
+                logger.debug(
+                    f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}"
+                )
                 await self._poll_channel(channel_id)
                 logger.debug(f"Done polling {channel_id}")
             except Exception as e:
@@ -315,7 +339,9 @@ class SlackListener:
 
         # First run: just get the latest message to set our baseline
         if last_ts is None:
-            logger.info(f"First poll of {channel_id} - setting baseline (not processing historical)")
+            logger.info(
+                f"First poll of {channel_id} - setting baseline (not processing historical)"
+            )
             messages = await self.session.get_channel_history(
                 channel_id=channel_id,
                 limit=1,  # Just get the latest to set timestamp
@@ -360,7 +386,9 @@ class SlackListener:
         # Update last processed timestamp
         if newest_ts and newest_ts != last_ts:
             channel_name = await self._resolve_channel_name(channel_id)
-            await self.state_db.set_last_processed_ts(channel_id, newest_ts, channel_name)
+            await self.state_db.set_last_processed_ts(
+                channel_id, newest_ts, channel_name
+            )
             if self.config.debug:
                 logger.debug(f"Updated {channel_id} last_ts to {newest_ts}")
 
@@ -427,11 +455,18 @@ class SlackListener:
         # Ignore our own messages (UNLESS in self-DM testing channel)
         if user_id == self.config.self_user_id:
             # Allow self messages in the designated self-DM channel for testing
-            if self.config.self_dm_channel and channel_id == self.config.self_dm_channel:
-                logger.debug(f"Self-DM testing: processing message from self in {channel_id}")
+            if (
+                self.config.self_dm_channel
+                and channel_id == self.config.self_dm_channel
+            ):
+                logger.debug(
+                    f"Self-DM testing: processing message from self in {channel_id}"
+                )
                 return True  # Process ALL messages from self in self-DM channel
             else:
-                logger.debug(f"Ignoring self message in {channel_id} (not self-DM channel)")
+                logger.debug(
+                    f"Ignoring self message in {channel_id} (not self-DM channel)"
+                )
                 return False
 
         # Ignore message subtypes (join, leave, etc.) unless it's a bot_message from watched user
@@ -462,7 +497,9 @@ class SlackListener:
 
         # Check for ! or / commands in self-DM channel only
         if self.config.self_dm_channel and channel_id == self.config.self_dm_channel:
-            if text.startswith("!") or (text.startswith("/") and not text.startswith("//")):
+            if text.startswith("!") or (
+                text.startswith("/") and not text.startswith("//")
+            ):
                 logger.debug(f"Self-DM command detected: {text[:50]}")
                 return True
 
@@ -518,7 +555,9 @@ class SlackListener:
             user_name = bot_user_name
 
         # Check if it's a mention
-        is_mention = bool(self.config.self_user_id and f"<@{self.config.self_user_id}>" in text)
+        is_mention = bool(
+            self.config.self_user_id and f"<@{self.config.self_user_id}>" in text
+        )
 
         # Check if DM
         is_dm = channel_id.startswith("D")
@@ -548,7 +587,8 @@ class SlackListener:
         self._stats["messages_queued"] += 1
 
         logger.info(
-            f"Queued message from {user_name} in #{channel_name}: " f"{text[:50]}{'...' if len(text) > 50 else ''}"
+            f"Queued message from {user_name} in #{channel_name}: "
+            f"{text[:50]}{'...' if len(text) > 50 else ''}"
         )
 
         # Trigger callbacks

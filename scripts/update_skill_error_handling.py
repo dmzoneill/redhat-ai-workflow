@@ -206,7 +206,9 @@ def main():
     total_converted = 0
     total_kept = 0
 
-    print(f"{'DRY RUN - ' if not args.apply else ''}Processing {len(files)} skill files...\n")
+    print(
+        f"{'DRY RUN - ' if not args.apply else ''}Processing {len(files)} skill files...\n"
+    )
 
     for filepath in files:
         if filepath.name.startswith("_"):

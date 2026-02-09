@@ -166,8 +166,12 @@ def generate_report(analysis: Dict, all_tools: Dict[str, List[str]]) -> str:
         report.append(f"- **Total Tools:** {len(available_tools)}")
         report.append(f"- **Used in Skills:** {len(used_tools)}")
         report.append(f"- **Unused:** {len(unused_tools)}")
-        report.append(f"- **Used Tools:** {', '.join(sorted(used_tools)) if used_tools else '(none)'}")
-        report.append(f"- **Unused Tools:** {', '.join(sorted(unused_tools)) if unused_tools else '(none)'}")
+        report.append(
+            f"- **Used Tools:** {', '.join(sorted(used_tools)) if used_tools else '(none)'}"
+        )
+        report.append(
+            f"- **Unused Tools:** {', '.join(sorted(unused_tools)) if unused_tools else '(none)'}"
+        )
         report.append("")
 
     # Summary statistics

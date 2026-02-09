@@ -114,12 +114,30 @@ def extract_explicit_links(skill: dict) -> dict:
     """Extract explicit skill relationships from links: metadata."""
     links = skill.get("links", {})
     return {
-        "depends_on": links.get("depends_on", []) if isinstance(links.get("depends_on"), list) else [],
-        "validates": links.get("validates", []) if isinstance(links.get("validates"), list) else [],
-        "validated_by": links.get("validated_by", []) if isinstance(links.get("validated_by"), list) else [],
-        "chains_to": links.get("chains_to", []) if isinstance(links.get("chains_to"), list) else [],
+        "depends_on": (
+            links.get("depends_on", [])
+            if isinstance(links.get("depends_on"), list)
+            else []
+        ),
+        "validates": (
+            links.get("validates", [])
+            if isinstance(links.get("validates"), list)
+            else []
+        ),
+        "validated_by": (
+            links.get("validated_by", [])
+            if isinstance(links.get("validated_by"), list)
+            else []
+        ),
+        "chains_to": (
+            links.get("chains_to", [])
+            if isinstance(links.get("chains_to"), list)
+            else []
+        ),
         "provides_context_for": (
-            links.get("provides_context_for", []) if isinstance(links.get("provides_context_for"), list) else []
+            links.get("provides_context_for", [])
+            if isinstance(links.get("provides_context_for"), list)
+            else []
         ),
     }
 
@@ -267,7 +285,10 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
             for target in skill["explicit_links"].get(link_type, []):
                 if target in skills:
                     # Avoid duplicate links (already captured by nested_skills/calls)
-                    existing = any(lnk["source"] == skill_id and lnk["target"] == target for lnk in links)
+                    existing = any(
+                        lnk["source"] == skill_id and lnk["target"] == target
+                        for lnk in links
+                    )
                     if not existing:
                         links.append(
                             {
@@ -356,7 +377,11 @@ def generate_graph_data(skills_dir: Path, personas_dir: Path) -> dict:
         lt = link["type"]
         link_type_counts[lt] = link_type_counts.get(lt, 0) + 1
 
-    skills_with_links = sum(1 for s in skills.values() if any(s["explicit_links"].get(lt) for lt in link_type_config))
+    skills_with_links = sum(
+        1
+        for s in skills.values()
+        if any(s["explicit_links"].get(lt) for lt in link_type_config)
+    )
 
     # Build persona data for the visualization
     persona_data = {}

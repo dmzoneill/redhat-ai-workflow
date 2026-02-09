@@ -31,7 +31,9 @@ def _get_jira_url() -> str:
 logger = logging.getLogger(__name__)
 
 
-async def run_rh_issue(args: list[str], timeout: int = 30, env: dict[str, str] | None = None) -> tuple[bool, str]:
+async def run_rh_issue(
+    args: list[str], timeout: int = 30, env: dict[str, str] | None = None
+) -> tuple[bool, str]:
     """Run rh-issue command through user's shell environment.
 
     Uses unified run_cmd which sources ~/.bashrc for:
@@ -106,13 +108,23 @@ def _build_story_yaml_fields(
 ) -> dict:
     """Build YAML fields specific to story issues with defaults."""
     return {
-        "User Story": (convert_fn(user_story) if user_story else f"As a user, I want {summary.lower()}."),
-        "Acceptance Criteria": (
-            convert_fn(acceptance_criteria) if acceptance_criteria else "* Functionality works as described"
+        "User Story": (
+            convert_fn(user_story)
+            if user_story
+            else f"As a user, I want {summary.lower()}."
         ),
-        "Supporting Documentation": (convert_fn(supporting_documentation) if supporting_documentation else "N/A"),
+        "Acceptance Criteria": (
+            convert_fn(acceptance_criteria)
+            if acceptance_criteria
+            else "* Functionality works as described"
+        ),
+        "Supporting Documentation": (
+            convert_fn(supporting_documentation) if supporting_documentation else "N/A"
+        ),
         "Definition of Done": (
-            convert_fn(definition_of_done) if definition_of_done else "* Code reviewed and merged\n* Tests pass"
+            convert_fn(definition_of_done)
+            if definition_of_done
+            else "* Code reviewed and merged\n* Tests pass"
         ),
     }
 
@@ -258,7 +270,9 @@ async def _jira_get_active_sprint_impl(project: str = "AAP") -> dict:
     return sprint_info
 
 
-async def _jira_get_sprint_issues_impl(sprint_id: int, max_results: int = 100) -> list[dict]:
+async def _jira_get_sprint_issues_impl(
+    sprint_id: int, max_results: int = 100
+) -> list[dict]:
     """
     Get all issues in a sprint.
 
@@ -272,7 +286,9 @@ async def _jira_get_sprint_issues_impl(sprint_id: int, max_results: int = 100) -
     import re
 
     jql = f"sprint = {sprint_id}"
-    success, output = await run_rh_issue(["search", jql, "--max-results", str(max_results)], timeout=60)
+    success, output = await run_rh_issue(
+        ["search", jql, "--max-results", str(max_results)], timeout=60
+    )
 
     if not success:
         logger.error(f"Failed to get sprint issues: {output}")
@@ -284,7 +300,11 @@ async def _jira_get_sprint_issues_impl(sprint_id: int, max_results: int = 100) -
     lines = output.strip().split("\n")
 
     # Skip header and separator lines
-    data_lines = [line for line in lines if line.strip() and not line.startswith("-") and "|" in line]
+    data_lines = [
+        line
+        for line in lines
+        if line.strip() and not line.startswith("-") and "|" in line
+    ]
 
     for line in data_lines[1:]:  # Skip header row
         parts = [p.strip() for p in line.split("|")]
@@ -341,7 +361,9 @@ async def _jira_add_comment_impl(issue_key: str, comment: str) -> str:
         Confirmation of the comment.
     """
     # rh-issue add-comment requires -t flag for comment text and --no-ai to skip AI improvement
-    success, output = await run_rh_issue(["add-comment", issue_key, "-t", comment, "--no-ai"])
+    success, output = await run_rh_issue(
+        ["add-comment", issue_key, "-t", comment, "--no-ai"]
+    )
 
     if not success:
         return f"❌ Failed to add comment: {output}"
@@ -513,7 +535,9 @@ async def _jira_create_issue_impl(
     )
 
     # Write YAML to temp file
-    yaml_content = yaml.dump(yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    yaml_content = yaml.dump(
+        yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
@@ -579,7 +603,9 @@ async def _jira_create_issue_impl(
                     output += f"\n\n⚠️ Issue created but failed to set priority: {priority_output}"
         else:
             valid_options = "blocker, critical, major, normal, minor (or: highest, high, medium, low, lowest)"
-            output += f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
+            output += (
+                f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
+            )
 
     return _parse_create_issue_result(success, output)
 
@@ -848,7 +874,9 @@ async def _jira_view_issue_json_impl(issue_key: str) -> str:
             data[key] = value
 
     # Extract description section if present
-    desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
+    desc_match = re.search(
+        r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL
+    )
     if desc_match:
         data["description"] = desc_match.group(1).strip()
 

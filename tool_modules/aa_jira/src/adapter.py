@@ -13,7 +13,12 @@ import logging
 import re
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -164,7 +169,9 @@ class JiraAdapter:
             from tool_modules.aa_jira.src.tools_basic import run_rh_issue
 
             # Quick test - list config profiles (fast, doesn't hit API)
-            success, output = await run_rh_issue(["config", "list-profiles"], timeout=10)
+            success, output = await run_rh_issue(
+                ["config", "list-profiles"], timeout=10
+            )
 
             return HealthStatus(
                 healthy=success,
@@ -186,7 +193,9 @@ class JiraAdapter:
         summary = fields.get("summary", "No summary")
         status = fields.get("status", {}).get("name", "Unknown")
         assignee = fields.get("assignee", {})
-        assignee_name = assignee.get("displayName", "Unassigned") if assignee else "Unassigned"
+        assignee_name = (
+            assignee.get("displayName", "Unassigned") if assignee else "Unassigned"
+        )
 
         # Build content
         content_parts = [

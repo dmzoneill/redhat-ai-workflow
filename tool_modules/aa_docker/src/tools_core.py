@@ -74,7 +74,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def docker_exec(container: str, command: str, interactive: bool = False) -> str:
+    async def docker_exec(
+        container: str, command: str, interactive: bool = False
+    ) -> str:
         """Execute command in a container."""
         return await _docker_exec_impl(container, command, interactive)
 
@@ -104,7 +106,9 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def docker_compose_up(project_dir: str = ".", detach: bool = True, build: bool = False) -> str:
+    async def docker_compose_up(
+        project_dir: str = ".", detach: bool = True, build: bool = False
+    ) -> str:
         """Start docker-compose services."""
         return await _docker_compose_up_impl(project_dir, detach, build)
 

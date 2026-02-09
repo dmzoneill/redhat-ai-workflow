@@ -55,7 +55,9 @@ def _get_slack_config() -> dict:
     return cast(dict, config.get("slack", {}))
 
 
-async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dict | None:
+async def _send_via_dbus(
+    channel_id: str, text: str, thread_ts: str = ""
+) -> dict | None:
     """
     Try to send a message via the D-Bus daemon.
 
@@ -105,7 +107,9 @@ async def get_manager():
                 curr_dir = Path(__file__).parent.absolute()
                 listener_file = curr_dir / "listener.py"
 
-                spec = importlib.util.spec_from_file_location("slack_listener_dynamic", listener_file)
+                spec = importlib.util.spec_from_file_location(
+                    "slack_listener_dynamic", listener_file
+                )
                 mod = importlib.util.module_from_spec(spec)
                 # Add to sys.modules to handle internal relative imports in listener.py if any
                 sys.modules["slack_listener_dynamic"] = mod
@@ -284,7 +288,11 @@ async def _slack_post_team_impl(text: str, thread_ts: str) -> str:
                 {
                     "success": True,
                     "channel": team_channel,
-                    "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
+                    "channel_name": (
+                        team_info.get("name", "team")
+                        if isinstance(team_info, dict)
+                        else "team"
+                    ),
                     "timestamp": dbus_result.get("ts", ""),
                     "message": "Message posted to team channel (via D-Bus)",
                     "method": "dbus",
@@ -306,7 +314,11 @@ async def _slack_post_team_impl(text: str, thread_ts: str) -> str:
             {
                 "success": True,
                 "channel": team_channel,
-                "channel_name": (team_info.get("name", "team") if isinstance(team_info, dict) else "team"),
+                "channel_name": (
+                    team_info.get("name", "team")
+                    if isinstance(team_info, dict)
+                    else "team"
+                ),
                 "timestamp": result.get("ts", ""),
                 "message": "Message posted to team channel (direct API)",
                 "method": "direct",
@@ -517,7 +529,11 @@ async def _query_knowledge_cache(method_name: str, *args) -> dict:
     elif method_name == "resolve_target":
         return await _resolve_target_from_config(args[0] if args else "")
 
-    return {"success": False, "error": "Knowledge cache not available (Slack daemon not running)", "source": "none"}
+    return {
+        "success": False,
+        "error": "Knowledge cache not available (Slack daemon not running)",
+        "source": "none",
+    }
 
 
 async def _find_channel_from_config(query: str) -> dict:
@@ -538,7 +554,11 @@ async def _find_channel_from_config(query: str) -> dict:
             channel_id = info
             purpose = ""
 
-        if query_lower in name.lower() or query_lower in purpose.lower() or query_lower in key.lower():
+        if (
+            query_lower in name.lower()
+            or query_lower in purpose.lower()
+            or query_lower in key.lower()
+        ):
             matches.append(
                 {
                     "channel_id": channel_id,
@@ -930,7 +950,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Confirmation with message timestamp or error if user not found.
         """
-        return await _slack_dm_gitlab_user_impl(gitlab_username, text, notification_type)
+        return await _slack_dm_gitlab_user_impl(
+            gitlab_username, text, notification_type
+        )
 
     @auto_heal()
     @registry.tool()

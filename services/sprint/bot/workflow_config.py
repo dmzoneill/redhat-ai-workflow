@@ -67,7 +67,9 @@ class WorkflowConfig:
     def _build_status_mapping(self) -> None:
         """Build a reverse mapping from Jira status to workflow stage."""
         self._status_to_stage = {}
-        for stage, config in self._config.get("status_mappings", {}).items():  # noqa: B007
+        for stage, config in self._config.get(  # noqa: B007
+            "status_mappings", {}
+        ).items():  # noqa: B007
             for jira_status in config.get("jira_statuses", []):
                 self._status_to_stage[jira_status.lower()] = stage
 
@@ -186,7 +188,9 @@ class WorkflowConfig:
     def get_actionable_statuses(self) -> list[str]:
         """Get list of Jira statuses where bot can work."""
         statuses = []
-        for stage, config in self._config.get("status_mappings", {}).items():  # noqa: B007
+        for stage, config in self._config.get(  # noqa: B007
+            "status_mappings", {}
+        ).items():  # noqa: B007
             if config.get("bot_can_work", False):
                 statuses.extend(config.get("jira_statuses", []))
         return statuses
@@ -298,7 +302,11 @@ class WorkflowConfig:
         # Build searchable text
         summary = (issue.get("summary") or "").lower()
         description = (issue.get("description") or "").lower()
-        comments = " ".join((c.get("body") or "").lower() for c in issue.get("comments", []) if isinstance(c, dict))
+        comments = " ".join(
+            (c.get("body") or "").lower()
+            for c in issue.get("comments", [])
+            if isinstance(c, dict)
+        )
         text = f"{summary} {description} {comments}"
 
         # Check each project's keywords

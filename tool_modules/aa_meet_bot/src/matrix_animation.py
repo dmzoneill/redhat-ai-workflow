@@ -51,7 +51,9 @@ class MatrixColumn:
         """Regenerate characters for the column."""
         self.chars = [random.choice(MATRIX_CHARS) for _ in range(self.length)]
         # Brightness gradient - brightest at the head
-        self.brightness = [max(0.2, 1.0 - (i / self.length) * 0.8) for i in range(self.length)]
+        self.brightness = [
+            max(0.2, 1.0 - (i / self.length) * 0.8) for i in range(self.length)
+        ]
 
 
 class MatrixAnimation:
@@ -148,7 +150,16 @@ class MatrixAnimation:
                         color = (180, 255, 180)
 
                     # Draw character
-                    cv2.putText(frame, char, (col.x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+                    cv2.putText(
+                        frame,
+                        char,
+                        (col.x, y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        1,
+                        cv2.LINE_AA,
+                    )
 
         # Draw center text with glow effect
         center_y = self.height // 2
@@ -158,7 +169,9 @@ class MatrixAnimation:
         main_text = f"INITIALIZING{dots}"
 
         # Get text size for centering
-        (text_w, text_h), _ = cv2.getTextSize(main_text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 2)
+        (text_w, text_h), _ = cv2.getTextSize(
+            main_text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 2
+        )
         text_x = (self.width - text_w) // 2
 
         # Draw glow (multiple passes with decreasing alpha)
@@ -187,7 +200,9 @@ class MatrixAnimation:
         )
 
         # Draw subtext
-        (sub_w, sub_h), _ = cv2.getTextSize(self.center_subtext, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+        (sub_w, sub_h), _ = cv2.getTextSize(
+            self.center_subtext, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1
+        )
         sub_x = (self.width - sub_w) // 2
 
         cv2.putText(
@@ -207,13 +222,17 @@ class MatrixAnimation:
         bar_x = (self.width - bar_width) // 2
 
         # Background bar
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + 10), (0, 50, 0), -1)
+        cv2.rectangle(
+            frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + 10), (0, 50, 0), -1
+        )
 
         # Animated progress
         progress = (self.time % 3.0) / 3.0  # 3 second cycle
         progress_width = int(bar_width * progress)
 
-        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + 10), (0, 200, 0), -1)
+        cv2.rectangle(
+            frame, (bar_x, bar_y), (bar_x + progress_width, bar_y + 10), (0, 200, 0), -1
+        )
 
         return frame
 

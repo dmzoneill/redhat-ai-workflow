@@ -77,7 +77,9 @@ class AudioPipeWriter:
             return True
         except OSError as e:
             if e.errno == 6:  # ENXIO - no reader
-                logger.warning(f"No reader on pipe (Chrome not listening?): {self.pipe_path}")
+                logger.warning(
+                    f"No reader on pipe (Chrome not listening?): {self.pipe_path}"
+                )
             else:
                 logger.error(f"Failed to open pipe: {e}")
             return False

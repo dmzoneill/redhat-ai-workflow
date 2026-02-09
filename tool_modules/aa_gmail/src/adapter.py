@@ -8,7 +8,12 @@ allowing the memory abstraction layer to query email history.
 import logging
 from typing import Any
 
-from services.memory_abstraction.models import AdapterResult, HealthStatus, MemoryItem, SourceFilter
+from services.memory_abstraction.models import (
+    AdapterResult,
+    HealthStatus,
+    MemoryItem,
+    SourceFilter,
+)
 from services.memory_abstraction.registry import memory_adapter
 
 logger = logging.getLogger(__name__)
@@ -62,10 +67,18 @@ class GmailAdapter:
             AdapterResult with matching emails
         """
         try:
-            from tool_modules.aa_gmail.src.tools_basic import _format_email_date, _get_header, get_gmail_service
+            from tool_modules.aa_gmail.src.tools_basic import (
+                _format_email_date,
+                _get_header,
+                get_gmail_service,
+            )
         except ImportError:
             try:
-                from .tools_basic import _format_email_date, _get_header, get_gmail_service
+                from .tools_basic import (
+                    _format_email_date,
+                    _get_header,
+                    get_gmail_service,
+                )
             except ImportError:
                 return AdapterResult(
                     source="gmail",

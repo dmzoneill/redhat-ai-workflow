@@ -107,8 +107,12 @@ class CommandHelp:
             lines.append("\n*Inputs:*")
             for inp in self.inputs:
                 required = " (required)" if inp.get("required") else ""
-                default = f" [default: {inp.get('default')}]" if "default" in inp else ""
-                lines.append(f"• `{inp['name']}`{required}: {inp.get('description', '')}{default}")
+                default = (
+                    f" [default: {inp.get('default')}]" if "default" in inp else ""
+                )
+                lines.append(
+                    f"• `{inp['name']}`{required}: {inp.get('description', '')}{default}"
+                )
 
         if self.parameters:
             props = self.parameters.get("properties", {})
@@ -117,7 +121,9 @@ class CommandHelp:
                 required_params = self.parameters.get("required", [])
                 for name, info in props.items():
                     required = " (required)" if name in required_params else ""
-                    lines.append(f"• `{name}`{required}: {info.get('description', info.get('type', ''))}")
+                    lines.append(
+                        f"• `{name}`{required}: {info.get('description', info.get('type', ''))}"
+                    )
 
         if self.examples:
             lines.append("\n*Examples:*")
@@ -131,7 +137,10 @@ class CommandHelp:
 
     def format_text(self) -> str:
         """Format help for plain text display."""
-        lines = [f"{self.name} - {self.description}", f"Type: {self.command_type.value}"]
+        lines = [
+            f"{self.name} - {self.description}",
+            f"Type: {self.command_type.value}",
+        ]
 
         if self.usage:
             lines.append(f"\nUsage: {self.usage}")
@@ -200,7 +209,12 @@ class CommandRegistry:
             command_type=CommandType.BUILTIN,
             category="jira",
             contextual=True,
-            examples=["@me jira", "@me jira bug", "@me jira task", "@me jira subtask AAP-12345"],
+            examples=[
+                "@me jira",
+                "@me jira bug",
+                "@me jira task",
+                "@me jira subtask AAP-12345",
+            ],
         ),
         # Search commands
         "search": CommandInfo(
@@ -208,7 +222,11 @@ class CommandRegistry:
             description="Search Slack messages, code, or Jira",
             command_type=CommandType.BUILTIN,
             category="search",
-            examples=["@me search billing errors", "@me search code auth handler", "@me search jira AAP billing"],
+            examples=[
+                "@me search billing errors",
+                "@me search code auth handler",
+                "@me search jira AAP billing",
+            ],
         ),
         "who": CommandInfo(
             name="who",
@@ -231,7 +249,11 @@ class CommandRegistry:
             command_type=CommandType.BUILTIN,
             category="cursor",
             contextual=True,
-            examples=["@me cursor", "@me cursor chat from thread", "@me cursor AAP-12345"],
+            examples=[
+                "@me cursor",
+                "@me cursor chat from thread",
+                "@me cursor AAP-12345",
+            ],
         ),
         # Sprint bot commands
         "sprint": CommandInfo(
@@ -239,7 +261,11 @@ class CommandRegistry:
             description="Control the sprint bot - list/approve/start issues",
             command_type=CommandType.BUILTIN,
             category="sprint",
-            examples=["@me sprint issues", "@me sprint approve AAP-12345", "@me sprint start AAP-12345"],
+            examples=[
+                "@me sprint issues",
+                "@me sprint approve AAP-12345",
+                "@me sprint start AAP-12345",
+            ],
         ),
         # Meet bot commands
         "meet": CommandInfo(
@@ -247,7 +273,12 @@ class CommandRegistry:
             description="Control the meet bot - join/leave meetings, get captions",
             command_type=CommandType.BUILTIN,
             category="meet",
-            examples=["@me meet join", "@me meet leave", "@me meet captions", "@me meet list"],
+            examples=[
+                "@me meet join",
+                "@me meet leave",
+                "@me meet captions",
+                "@me meet list",
+            ],
         ),
         # Cron commands
         "cron": CommandInfo(
@@ -278,7 +309,11 @@ class CommandRegistry:
             description="Query or list saved knowledge",
             command_type=CommandType.BUILTIN,
             category="research",
-            examples=["@me knowledge billing", "@me knowledge list", "@me knowledge delete billing-errors"],
+            examples=[
+                "@me knowledge billing",
+                "@me knowledge list",
+                "@me knowledge delete billing-errors",
+            ],
         ),
     }
 
@@ -335,7 +370,12 @@ class CommandRegistry:
         # Apply filters
         if filter_text:
             filter_lower = filter_text.lower()
-            commands = [c for c in commands if filter_lower in c.name.lower() or filter_lower in c.description.lower()]
+            commands = [
+                c
+                for c in commands
+                if filter_lower in c.name.lower()
+                or filter_lower in c.description.lower()
+            ]
 
         if category:
             commands = [c for c in commands if c.category == category]
@@ -446,7 +486,9 @@ class CommandRegistry:
                 if inputs:
                     required_inputs = [i for i in inputs if i.get("required")]
                     if required_inputs:
-                        args = " ".join(f"--{i['name']}=<value>" for i in required_inputs[:2])
+                        args = " ".join(
+                            f"--{i['name']}=<value>" for i in required_inputs[:2]
+                        )
                         examples.append(f"@me {name} {args}")
 
                 self._skills_cache[name] = CommandInfo(
@@ -577,7 +619,9 @@ class CommandRegistry:
 
         return related
 
-    def format_list(self, commands: list[CommandInfo], format_type: str = "slack") -> str:
+    def format_list(
+        self, commands: list[CommandInfo], format_type: str = "slack"
+    ) -> str:
         """
         Format a list of commands for display.
 
@@ -617,7 +661,9 @@ class CommandRegistry:
                 if len(by_type[cmd_type]) > 20:
                     lines.append(f"  _...and {len(by_type[cmd_type]) - 20} more_")
 
-        lines.append("\n_Use `@me help <command>` for details. 🧵 = supports thread context_")
+        lines.append(
+            "\n_Use `@me help <command>` for details. 🧵 = supports thread context_"
+        )
 
         return "\n".join(lines)
 

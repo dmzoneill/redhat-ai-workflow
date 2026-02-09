@@ -81,7 +81,9 @@ class PollCondition:
             return
 
         # Parse age condition
-        age_match = re.match(r"age\s*([<>=!]+)\s*(\d+[a-z]+)", self.condition_str, re.IGNORECASE)
+        age_match = re.match(
+            r"age\s*([<>=!]+)\s*(\d+[a-z]+)", self.condition_str, re.IGNORECASE
+        )
         if age_match:
             self.condition_type = "age"
             self.operator = age_match.group(1)
@@ -89,7 +91,9 @@ class PollCondition:
             return
 
         # Parse count condition
-        count_match = re.match(r"count\s*([<>=!]+)\s*(\d+)", self.condition_str, re.IGNORECASE)
+        count_match = re.match(
+            r"count\s*([<>=!]+)\s*(\d+)", self.condition_str, re.IGNORECASE
+        )
         if count_match:
             self.condition_type = "count"
             self.operator = count_match.group(1)
@@ -116,7 +120,9 @@ class PollCondition:
 
             for item in items:
                 # Try to get created/updated date from item
-                date_str = item.get("created_at") or item.get("updated_at") or item.get("date")
+                date_str = (
+                    item.get("created_at") or item.get("updated_at") or item.get("date")
+                )
                 if not date_str:
                     continue
 
@@ -134,7 +140,9 @@ class PollCondition:
 
                     age = now - item_date
 
-                    if self.threshold_duration and self._compare_duration(age, self.threshold_duration):
+                    if self.threshold_duration and self._compare_duration(
+                        age, self.threshold_duration
+                    ):
                         matching.append(item)
 
                 except Exception as e:
@@ -416,7 +424,9 @@ class PollEngine:
                     new_items = self._filter_triggered(job_name, items)
 
                     if new_items:
-                        logger.info(f"Poll condition met for {job_name}: {len(new_items)} new items")
+                        logger.info(
+                            f"Poll condition met for {job_name}: {len(new_items)} new items"
+                        )
                         await self._trigger_job(job, new_items)
 
             # Sleep before next iteration
@@ -428,12 +438,16 @@ class PollEngine:
         new_items = []
 
         # Clean up old entries
-        self._triggered_hashes = {k: v for k, v in self._triggered_hashes.items() if now - v < self._dedup_ttl}
+        self._triggered_hashes = {
+            k: v for k, v in self._triggered_hashes.items() if now - v < self._dedup_ttl
+        }
 
         # Also enforce max size by removing oldest entries if over limit
         if len(self._triggered_hashes) > self._max_triggered_hashes:
             # Sort by timestamp and keep only the newest entries
-            sorted_hashes = sorted(self._triggered_hashes.items(), key=lambda x: x[1], reverse=True)
+            sorted_hashes = sorted(
+                self._triggered_hashes.items(), key=lambda x: x[1], reverse=True
+            )
             self._triggered_hashes = dict(sorted_hashes[: self._max_triggered_hashes])
 
         for item in items:

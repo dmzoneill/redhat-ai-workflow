@@ -96,9 +96,15 @@ class MeetingNote:
             "calendar_name": self.calendar_name,
             "meet_url": self.meet_url,
             "event_id": self.event_id,
-            "scheduled_start": self.scheduled_start.isoformat() if self.scheduled_start else None,
-            "scheduled_end": self.scheduled_end.isoformat() if self.scheduled_end else None,
-            "actual_start": self.actual_start.isoformat() if self.actual_start else None,
+            "scheduled_start": (
+                self.scheduled_start.isoformat() if self.scheduled_start else None
+            ),
+            "scheduled_end": (
+                self.scheduled_end.isoformat() if self.scheduled_end else None
+            ),
+            "actual_start": (
+                self.actual_start.isoformat() if self.actual_start else None
+            ),
             "actual_end": self.actual_end.isoformat() if self.actual_end else None,
             "organizer": self.organizer,
             "attendees": self.attendees,
@@ -368,7 +374,11 @@ class MeetingNotesDB:
                     auto_join=bool(row["auto_join"]),
                     bot_mode=row["bot_mode"] or "notes",
                     enabled=bool(row["enabled"]),
-                    added_at=datetime.fromisoformat(row["added_at"]) if row["added_at"] else None,
+                    added_at=(
+                        datetime.fromisoformat(row["added_at"])
+                        if row["added_at"]
+                        else None
+                    ),
                 )
                 for row in rows
             ]
@@ -380,7 +390,9 @@ class MeetingNotesDB:
             if not self._db:
                 return False
 
-            cursor = await self._db.execute("DELETE FROM calendars WHERE calendar_id = ?", (calendar_id,))
+            cursor = await self._db.execute(
+                "DELETE FROM calendars WHERE calendar_id = ?", (calendar_id,)
+            )
             await self._db.commit()
             return cursor.rowcount > 0
 
@@ -440,7 +452,8 @@ class MeetingNotesDB:
 
             # Check if meeting already exists
             cursor = await self._db.execute(
-                "SELECT id FROM meetings WHERE event_id = ? AND calendar_id = ?", (event_id, calendar_id)
+                "SELECT id FROM meetings WHERE event_id = ? AND calendar_id = ?",
+                (event_id, calendar_id),
             )
             existing = await cursor.fetchone()
             if existing:
@@ -450,7 +463,9 @@ class MeetingNotesDB:
                     ("in_progress", now, now, existing[0]),
                 )
                 await self._db.commit()
-                logger.info(f"Meeting already exists (id={existing[0]}), reusing record")
+                logger.info(
+                    f"Meeting already exists (id={existing[0]}), reusing record"
+                )
                 return existing[0]
 
             cursor = await self._db.execute(
@@ -468,8 +483,16 @@ class MeetingNotesDB:
                     meeting.calendar_name,
                     meeting.meet_url,
                     event_id,
-                    meeting.scheduled_start.isoformat() if meeting.scheduled_start else None,
-                    meeting.scheduled_end.isoformat() if meeting.scheduled_end else None,
+                    (
+                        meeting.scheduled_start.isoformat()
+                        if meeting.scheduled_start
+                        else None
+                    ),
+                    (
+                        meeting.scheduled_end.isoformat()
+                        if meeting.scheduled_end
+                        else None
+                    ),
                     meeting.actual_start.isoformat() if meeting.actual_start else None,
                     meeting.actual_end.isoformat() if meeting.actual_end else None,
                     meeting.organizer,
@@ -487,14 +510,18 @@ class MeetingNotesDB:
             await self._db.commit()
             return cursor.lastrowid or 0
 
-    async def get_meeting(self, meeting_id: int, include_transcript: bool = False) -> Optional[MeetingNote]:
+    async def get_meeting(
+        self, meeting_id: int, include_transcript: bool = False
+    ) -> Optional[MeetingNote]:
         """Get a meeting by ID."""
         async with self._lock:
             await self._connect_internal()
             if not self._db:
                 return None
 
-            cursor = await self._db.execute("SELECT * FROM meetings WHERE id = ?", (meeting_id,))
+            cursor = await self._db.execute(
+                "SELECT * FROM meetings WHERE id = ?", (meeting_id,)
+            )
             row = await cursor.fetchone()
 
             if not row:
@@ -507,7 +534,9 @@ class MeetingNotesDB:
 
             return meeting
 
-    async def get_meeting_by_event(self, event_id: str, calendar_id: str) -> Optional[MeetingNote]:
+    async def get_meeting_by_event(
+        self, event_id: str, calendar_id: str
+    ) -> Optional[MeetingNote]:
         """Get a meeting by Google Calendar event ID."""
         async with self._lock:
             await self._connect_internal()
@@ -515,7 +544,8 @@ class MeetingNotesDB:
                 return None
 
             cursor = await self._db.execute(
-                "SELECT * FROM meetings WHERE event_id = ? AND calendar_id = ?", (event_id, calendar_id)
+                "SELECT * FROM meetings WHERE event_id = ? AND calendar_id = ?",
+                (event_id, calendar_id),
             )
             row = await cursor.fetchone()
 
@@ -568,7 +598,9 @@ class MeetingNotesDB:
 
             return [self._row_to_meeting(row) for row in rows]
 
-    async def get_recent_meetings(self, limit: int = 20, status: str = "completed") -> list[dict]:
+    async def get_recent_meetings(
+        self, limit: int = 20, status: str = "completed"
+    ) -> list[dict]:
         """Get recent meetings as simple dicts with transcript counts.
 
         This is optimized for UI display - returns lightweight dicts instead of full MeetingNote objects.
@@ -637,12 +669,21 @@ class MeetingNotesDB:
                 ):
                     set_parts.append(f"{key} = ?")
                     values.append(value)
-                elif key in ("scheduled_start", "scheduled_end", "actual_start", "actual_end"):
+                elif key in (
+                    "scheduled_start",
+                    "scheduled_end",
+                    "actual_start",
+                    "actual_end",
+                ):
                     set_parts.append(f"{key} = ?")
-                    values.append(value.isoformat() if isinstance(value, datetime) else value)
+                    values.append(
+                        value.isoformat() if isinstance(value, datetime) else value
+                    )
                 elif key in ("attendees", "action_items", "tags"):
                     set_parts.append(f"{key} = ?")
-                    values.append(json.dumps(value) if isinstance(value, list) else value)
+                    values.append(
+                        json.dumps(value) if isinstance(value, list) else value
+                    )
 
             values.append(meeting_id)
             query = f"UPDATE meetings SET {', '.join(set_parts)} WHERE id = ?"
@@ -659,9 +700,13 @@ class MeetingNotesDB:
                 return False
 
             # Delete transcript first (cascade should handle this, but be explicit)
-            await self._db.execute("DELETE FROM transcripts WHERE meeting_id = ?", (meeting_id,))
+            await self._db.execute(
+                "DELETE FROM transcripts WHERE meeting_id = ?", (meeting_id,)
+            )
 
-            cursor = await self._db.execute("DELETE FROM meetings WHERE id = ?", (meeting_id,))
+            cursor = await self._db.execute(
+                "DELETE FROM meetings WHERE id = ?", (meeting_id,)
+            )
             await self._db.commit()
             return cursor.rowcount > 0
 
@@ -674,10 +719,24 @@ class MeetingNotesDB:
             calendar_name=row["calendar_name"] or "",
             meet_url=row["meet_url"] or "",
             event_id=row["event_id"] or "",
-            scheduled_start=datetime.fromisoformat(row["scheduled_start"]) if row["scheduled_start"] else None,
-            scheduled_end=datetime.fromisoformat(row["scheduled_end"]) if row["scheduled_end"] else None,
-            actual_start=datetime.fromisoformat(row["actual_start"]) if row["actual_start"] else None,
-            actual_end=datetime.fromisoformat(row["actual_end"]) if row["actual_end"] else None,
+            scheduled_start=(
+                datetime.fromisoformat(row["scheduled_start"])
+                if row["scheduled_start"]
+                else None
+            ),
+            scheduled_end=(
+                datetime.fromisoformat(row["scheduled_end"])
+                if row["scheduled_end"]
+                else None
+            ),
+            actual_start=(
+                datetime.fromisoformat(row["actual_start"])
+                if row["actual_start"]
+                else None
+            ),
+            actual_end=(
+                datetime.fromisoformat(row["actual_end"]) if row["actual_end"] else None
+            ),
             organizer=row["organizer"] or "",
             attendees=json.loads(row["attendees"]) if row["attendees"] else [],
             description=row["description"] or "",
@@ -686,13 +745,19 @@ class MeetingNotesDB:
             tags=json.loads(row["tags"]) if row["tags"] else [],
             status=row["status"] or "scheduled",
             bot_mode=row["bot_mode"] or "notes",
-            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
-            updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+            created_at=(
+                datetime.fromisoformat(row["created_at"]) if row["created_at"] else None
+            ),
+            updated_at=(
+                datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None
+            ),
         )
 
     # ==================== Transcript Operations ====================
 
-    async def add_transcript_entry(self, meeting_id: int, entry: TranscriptEntry) -> int:
+    async def add_transcript_entry(
+        self, meeting_id: int, entry: TranscriptEntry
+    ) -> int:
         """Add a transcript entry to a meeting."""
         async with self._lock:
             await self._connect_internal()
@@ -714,7 +779,9 @@ class MeetingNotesDB:
             await self._db.commit()
             return cursor.lastrowid or 0
 
-    async def add_transcript_entries(self, meeting_id: int, entries: list[TranscriptEntry]) -> int:
+    async def add_transcript_entries(
+        self, meeting_id: int, entries: list[TranscriptEntry]
+    ) -> int:
         """Add multiple transcript entries efficiently."""
         async with self._lock:
             await self._connect_internal()
@@ -726,7 +793,10 @@ class MeetingNotesDB:
                 INSERT INTO transcripts (meeting_id, speaker, text, timestamp)
                 VALUES (?, ?, ?, ?)
             """,
-                [(meeting_id, e.speaker, e.text, e.timestamp.isoformat()) for e in entries],
+                [
+                    (meeting_id, e.speaker, e.text, e.timestamp.isoformat())
+                    for e in entries
+                ],
             )
             await self._db.commit()
             return len(entries)
@@ -737,7 +807,9 @@ class MeetingNotesDB:
             await self._connect_internal()
             return await self._get_transcript_internal(meeting_id)
 
-    async def get_transcript_entries(self, meeting_id: int, limit: int = 50) -> list[TranscriptEntry]:
+    async def get_transcript_entries(
+        self, meeting_id: int, limit: int = 50
+    ) -> list[TranscriptEntry]:
         """Get recent transcript entries for a meeting (with limit)."""
         async with self._lock:
             await self._connect_internal()
@@ -861,7 +933,9 @@ class MeetingNotesDB:
             stats = {}
 
             # Calendar count
-            cursor = await self._db.execute("SELECT COUNT(*) FROM calendars WHERE enabled = 1")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM calendars WHERE enabled = 1"
+            )
             row = await cursor.fetchone()
             stats["calendars"] = row[0] if row else 0
 
@@ -881,7 +955,11 @@ class MeetingNotesDB:
             stats["transcript_entries"] = row[0] if row else 0
 
             # Database size
-            stats["db_size_kb"] = round(self.db_path.stat().st_size / 1024, 2) if self.db_path.exists() else 0
+            stats["db_size_kb"] = (
+                round(self.db_path.stat().st_size / 1024, 2)
+                if self.db_path.exists()
+                else 0
+            )
 
             return stats
 

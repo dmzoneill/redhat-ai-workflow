@@ -36,7 +36,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 # This prevents "threads can only be started once" errors when module is reloaded
 import importlib.util  # noqa: E402
 
-_types_path = Path(__file__).parent.parent.parent.parent / "services" / "slop" / "types.py"
+_types_path = (
+    Path(__file__).parent.parent.parent.parent / "services" / "slop" / "types.py"
+)
 _types_spec = importlib.util.spec_from_file_location("slop_types", _types_path)
 _types_module = importlib.util.module_from_spec(_types_spec)
 _types_spec.loader.exec_module(_types_module)
@@ -65,7 +67,9 @@ def _get_db_connection():
     return aiosqlite.connect(str(DEFAULT_DB_PATH))
 
 
-async def _get_fixable_findings(min_confidence: float = 0.90, limit: int = 50) -> list[dict]:
+async def _get_fixable_findings(
+    min_confidence: float = 0.90, limit: int = 50
+) -> list[dict]:
     """
     Get findings that meet auto-fix criteria.
 
@@ -77,7 +81,9 @@ async def _get_fixable_findings(min_confidence: float = 0.90, limit: int = 50) -
         List of fixable findings with confidence scores
     """
     async with _get_db_connection() as db:
-        db.row_factory = lambda cursor, row: dict(zip([col[0] for col in cursor.description], row))
+        db.row_factory = lambda cursor, row: dict(
+            zip([col[0] for col in cursor.description], row)
+        )
 
         # Get open findings in auto-fixable categories
         categories = ", ".join(f"'{c.value}'" for c in AUTO_FIXABLE_CATEGORIES)
@@ -104,7 +110,11 @@ async def _get_fixable_findings(min_confidence: float = 0.90, limit: int = 50) -
         # Calculate confidence for each finding
         fixable = []
         for row in rows:
-            category = SlopCategory(row["category"]) if row["category"] in [c.value for c in SlopCategory] else None
+            category = (
+                SlopCategory(row["category"])
+                if row["category"] in [c.value for c in SlopCategory]
+                else None
+            )
             if category:
                 confidence = calculate_fix_confidence(category, row.get("tool", ""))
                 if confidence >= min_confidence:
@@ -130,7 +140,9 @@ async def _apply_fix(finding: dict, dry_run: bool = False) -> dict:
     import importlib.util
 
     transforms_path = Path(__file__).parent / "transforms.py"
-    transforms_spec = importlib.util.spec_from_file_location("transforms", transforms_path)
+    transforms_spec = importlib.util.spec_from_file_location(
+        "transforms", transforms_path
+    )
     transforms_module = importlib.util.module_from_spec(transforms_spec)
     transforms_spec.loader.exec_module(transforms_module)
     apply_transform = transforms_module.apply_transform
@@ -312,7 +324,8 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text="No auto-fixable findings found.\n\n" "Run `slop_fixable()` to see what's available.",
+                    text="No auto-fixable findings found.\n\n"
+                    "Run `slop_fixable()` to see what's available.",
                 )
             ]
 
@@ -329,22 +342,30 @@ def register_tools(server: "FastMCP") -> int:
             if result["success"]:
                 fixed_files.append(result["file"])
                 fixed_ids.append(result["finding_id"])
-                lines.append(f"✅ `{result['file']}:{result['line']}` - {result['action']}")
+                lines.append(
+                    f"✅ `{result['file']}:{result['line']}` - {result['action']}"
+                )
                 if result.get("diff"):
                     lines.append(f"```diff\n{result['diff']}\n```")
             else:
                 errors.append(result)
-                lines.append(f"❌ `{finding['file']}:{finding['line']}` - {result.get('error', 'Unknown error')}")
+                lines.append(
+                    f"❌ `{finding['file']}:{finding['line']}` - {result.get('error', 'Unknown error')}"
+                )
 
         # Commit if not dry run
         commit_hash = ""
         if not dry_run and fixed_files and commit:
             unique_files = list(set(fixed_files))
-            commit_msg = f"fix(slop): auto-fix {len(fixed_ids)} high-confidence issues\n\n"
+            commit_msg = (
+                f"fix(slop): auto-fix {len(fixed_ids)} high-confidence issues\n\n"
+            )
             commit_msg += "Categories fixed:\n"
             categories = set(f["category"] for f in findings if f["id"] in fixed_ids)
             for cat in categories:
-                count = sum(1 for f in findings if f["id"] in fixed_ids and f["category"] == cat)
+                count = sum(
+                    1 for f in findings if f["id"] in fixed_ids and f["category"] == cat
+                )
                 commit_msg += f"- {cat}: {count}\n"
 
             commit_hash = await _commit_fixes(unique_files, commit_msg)
@@ -375,11 +396,17 @@ def register_tools(server: "FastMCP") -> int:
             Statistics including total findings, fixable count, and fix history.
         """
         async with _get_db_connection() as db:
-            db.row_factory = lambda cursor, row: dict(zip([col[0] for col in cursor.description], row))
+            db.row_factory = lambda cursor, row: dict(
+                zip([col[0] for col in cursor.description], row)
+            )
 
             # Total by status
-            cursor = await db.execute("SELECT status, COUNT(*) as count FROM findings GROUP BY status")
-            status_counts = {row["status"]: row["count"] for row in await cursor.fetchall()}
+            cursor = await db.execute(
+                "SELECT status, COUNT(*) as count FROM findings GROUP BY status"
+            )
+            status_counts = {
+                row["status"]: row["count"] for row in await cursor.fetchall()
+            }
 
             # By category
             cursor = await db.execute(
@@ -416,14 +443,18 @@ def register_tools(server: "FastMCP") -> int:
             for row in category_counts[:10]:
                 cat = row["category"]
                 count = row["count"]
-                fixable = "✅" if cat in [c.value for c in AUTO_FIXABLE_CATEGORIES] else "❌"
+                fixable = (
+                    "✅" if cat in [c.value for c in AUTO_FIXABLE_CATEGORIES] else "❌"
+                )
                 lines.append(f"- {cat}: {count} {fixable}")
 
         # Recent fixes
         if recent_fixes:
             lines.append("\n### Recently Fixed")
             for row in recent_fixes:
-                lines.append(f"- {row['category']}: {row['count']} (last: {row['last_fixed']})")
+                lines.append(
+                    f"- {row['category']}: {row['count']} (last: {row['last_fixed']})"
+                )
 
         return [TextContent(type="text", text="\n".join(lines))]
 

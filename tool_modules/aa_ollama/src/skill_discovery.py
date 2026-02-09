@@ -72,7 +72,9 @@ class SkillToolDiscovery:
             self._extract_tools_from_step(step, tools)
 
         self._cache[skill_name] = tools
-        logger.info(f"Discovered {len(tools)} tools for skill {skill_name}: {sorted(tools)}")
+        logger.info(
+            f"Discovered {len(tools)} tools for skill {skill_name}: {sorted(tools)}"
+        )
         return tools
 
     def _extract_tools_from_step(self, step: dict, tools: set[str]) -> None:
@@ -200,8 +202,19 @@ class SkillToolDiscovery:
         writes = []
 
         # Memory tool patterns
-        memory_read_tools = {"memory_read", "memory_query", "check_known_issues", "knowledge_query"}
-        memory_write_tools = {"memory_write", "memory_update", "memory_append", "memory_session_log", "learn_tool_fix"}
+        memory_read_tools = {
+            "memory_read",
+            "memory_query",
+            "check_known_issues",
+            "knowledge_query",
+        }
+        memory_write_tools = {
+            "memory_write",
+            "memory_update",
+            "memory_append",
+            "memory_session_log",
+            "learn_tool_fix",
+        }
 
         # Patterns for compute blocks
         read_patterns = [
@@ -236,17 +249,41 @@ class SkillToolDiscovery:
                     matches = pattern.findall(compute)
                     for match in matches:
                         if isinstance(match, str) and match:
-                            reads.append({"source": "compute", "key": match, "step": step.get("name", "")})
+                            reads.append(
+                                {
+                                    "source": "compute",
+                                    "key": match,
+                                    "step": step.get("name", ""),
+                                }
+                            )
                         elif pattern.pattern == r"memory\.check_known_issues":
-                            reads.append({"source": "compute", "key": "learned/patterns", "step": step.get("name", "")})
+                            reads.append(
+                                {
+                                    "source": "compute",
+                                    "key": "learned/patterns",
+                                    "step": step.get("name", ""),
+                                }
+                            )
 
                 for pattern in write_patterns:
                     matches = pattern.findall(compute)
                     for match in matches:
                         if isinstance(match, str) and match:
-                            writes.append({"source": "compute", "key": match, "step": step.get("name", "")})
+                            writes.append(
+                                {
+                                    "source": "compute",
+                                    "key": match,
+                                    "step": step.get("name", ""),
+                                }
+                            )
                         elif "memory_session_log" in pattern.pattern:
-                            writes.append({"source": "compute", "key": "sessions/today", "step": step.get("name", "")})
+                            writes.append(
+                                {
+                                    "source": "compute",
+                                    "key": "sessions/today",
+                                    "step": step.get("name", ""),
+                                }
+                            )
 
             # Recursively check nested structures
             for branch in ["then", "else", "parallel"]:
@@ -332,7 +369,9 @@ def detect_skill(message: str) -> str | None:
     for skill_name, patterns in SKILL_PATTERNS.items():
         for pattern in patterns:
             if pattern.search(message):
-                logger.debug(f"Fast skill detection: {skill_name} matched '{message[:50]}...'")
+                logger.debug(
+                    f"Fast skill detection: {skill_name} matched '{message[:50]}...'"
+                )
                 return skill_name
     return None
 

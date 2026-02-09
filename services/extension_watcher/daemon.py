@@ -34,7 +34,9 @@ EXTENSION_DIR = PROJECT_ROOT / "extensions" / "aa_workflow_vscode"
 EXTENSION_SRC = EXTENSION_DIR / "src"
 WATCH_EXTENSIONS = {".ts", ".json"}
 DEBOUNCE_SECONDS = 2.0
-ENABLE_NOTIFY = "--notify" in sys.argv or os.environ.get("EXTENSION_WATCHER_NOTIFY", "").lower() in ("1", "true")
+ENABLE_NOTIFY = "--notify" in sys.argv or os.environ.get(
+    "EXTENSION_WATCHER_NOTIFY", ""
+).lower() in ("1", "true")
 
 
 def log(msg: str):
@@ -164,7 +166,9 @@ def main():
                     log("╚════════════════════════════════════════════╝")
                     log("")
                 else:
-                    send_notification("Extension Compile Failed", "Check terminal for errors")
+                    send_notification(
+                        "Extension Compile Failed", "Check terminal for errors"
+                    )
 
                 needs_compile = False
                 changed_files.clear()

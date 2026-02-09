@@ -64,7 +64,9 @@ def get_chrome_settings() -> tuple[Path, list[str]]:
     chrome_base = Path(chrome_dir).expanduser()
 
     # Profiles to try (in order)
-    profiles = creds_config.get("chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"])
+    profiles = creds_config.get(
+        "chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"]
+    )
 
     return chrome_base, profiles
 
@@ -146,7 +148,9 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     # Return the first (and likely only) valid token from newest file
                     token = matches[0]
                     print(f"📁 Found xoxc_token in Chrome profile: {prof}")
-                    print(f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})")
+                    print(
+                        f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})"
+                    )
                     return token
 
         except Exception as e:

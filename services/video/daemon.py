@@ -282,7 +282,11 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if self._status == "rendering":
             # If already rendering, check if we need to switch modes
             if self._video_mode == "black":
-                return {"success": True, "message": "Already rendering black screen", "device": device}
+                return {
+                    "success": True,
+                    "message": "Already rendering black screen",
+                    "device": device,
+                }
             else:
                 # Stop current rendering first
                 await self._handle_stop_video()
@@ -304,7 +308,9 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # Emit signals
             self.emit_event("RenderingStarted", device)
 
-            logger.info(f"Started rendering to {device} ({width}x{height}) in black mode")
+            logger.info(
+                f"Started rendering to {device} ({width}x{height}) in black mode"
+            )
             return {
                 "success": True,
                 "device": device,
@@ -345,7 +351,10 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             dict with success status
         """
         if self._status != "rendering":
-            return {"success": False, "error": "Not currently rendering. Call start_black_screen first."}
+            return {
+                "success": False,
+                "error": "Not currently rendering. Call start_black_screen first.",
+            }
 
         if self._video_mode == "full":
             # Already in full mode - just update audio source if needed
@@ -422,7 +431,11 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         new_mode = "full" if enabled else "black"
 
         if self._video_mode == new_mode:
-            return {"success": True, "mode": new_mode, "message": f"Already in {new_mode} mode"}
+            return {
+                "success": True,
+                "mode": new_mode,
+                "message": f"Already in {new_mode} mode",
+            }
 
         try:
             old_mode = self._video_mode
@@ -482,14 +495,19 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # If we have a renderer, update its audio capture
             if self._renderer:
                 # Stop existing audio capture
-                if hasattr(self._renderer, "_audio_capture") and self._renderer._audio_capture:
+                if (
+                    hasattr(self._renderer, "_audio_capture")
+                    and self._renderer._audio_capture
+                ):
                     await self._renderer._audio_capture.stop()
 
                 # Update the sink_input_index and restart audio capture
                 self._renderer._sink_input_index = new_sink_input_index
                 if hasattr(self._renderer, "_start_audio_capture"):
                     await self._renderer._start_audio_capture()
-                    logger.info(f"Audio capture restarted with sink_input_index={new_sink_input_index}")
+                    logger.info(
+                        f"Audio capture restarted with sink_input_index={new_sink_input_index}"
+                    )
 
             return {
                 "success": True,
@@ -583,7 +601,10 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             self._attendees = enriched_attendees
 
             photos_found = sum(1 for a in enriched_attendees if a.get("photo_path"))
-            logger.info(f"Updated attendees: {len(enriched_attendees)} participants, " f"{photos_found} with photos")
+            logger.info(
+                f"Updated attendees: {len(enriched_attendees)} participants, "
+                f"{photos_found} with photos"
+            )
 
             # If renderer is running, update it
             if self._renderer and hasattr(self._renderer, "update_attendees"):
@@ -786,7 +807,8 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     "real_name": best_match.get("real_name", ""),
                 }
                 logger.debug(
-                    f"Resolved '{name}' -> Slack user {result['slack_id']} " f"(score: {result['match_score']:.2f})"
+                    f"Resolved '{name}' -> Slack user {result['slack_id']} "
+                    f"(score: {result['match_score']:.2f})"
                 )
 
             # Cache the result (even if empty to avoid repeated lookups)
@@ -849,7 +871,11 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         - Mode can be changed at runtime without restarting
         """
         try:
-            from tool_modules.aa_meet_bot.src.video_generator import Attendee, RealtimeVideoRenderer, VideoConfig
+            from tool_modules.aa_meet_bot.src.video_generator import (
+                Attendee,
+                RealtimeVideoRenderer,
+                VideoConfig,
+            )
 
             # Create config
             if self._width == 1280 and self._height == 720:
@@ -875,7 +901,9 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             )
 
             # Get initial attendees
-            attendee_objs = [Attendee(name=a.get("name", "Unknown")) for a in self._attendees]
+            attendee_objs = [
+                Attendee(name=a.get("name", "Unknown")) for a in self._attendees
+            ]
             if not attendee_objs:
                 attendee_objs = [Attendee(name="Waiting for participants...")]
 
@@ -937,7 +965,9 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         if self._status == "rendering":
             checks["rendering"] = True
-            checks["device_exists"] = self._current_device and Path(self._current_device).exists()
+            checks["device_exists"] = (
+                self._current_device and Path(self._current_device).exists()
+            )
 
         healthy = checks.get("running", False) and checks.get("dbus_connected", False)
 
@@ -984,7 +1014,9 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 logger.error(f"Failed to create video device: {e}")
 
         self.is_running = True
-        logger.info(f"Video daemon ready (flip={self._flip}, create_device={self.create_device})")
+        logger.info(
+            f"Video daemon ready (flip={self._flip}, create_device={self.create_device})"
+        )
         logger.info("Waiting for D-Bus commands...")
 
     async def run_daemon(self):
@@ -1062,7 +1094,8 @@ async def start_video_cli(device: str, audio_input: str, audio_output: str, flip
     try:
         if await client.connect():
             result = await client.call_method(
-                "start_video", [device, audio_input or "", audio_output or "", 1920, 1080, flip]
+                "start_video",
+                [device, audio_input or "", audio_output or "", 1920, 1080, flip],
             )
             await client.disconnect()
             print(json.dumps(result, indent=2))

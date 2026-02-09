@@ -81,13 +81,18 @@ def _find_saas_matches(saas_dir: Path, service_name: str) -> list[Path]:
     """Find SaaS YAML files matching service name."""
     matches = []
     for f in saas_dir.rglob("*.yml"):
-        if service_name.lower() in f.name.lower() or service_name.lower() in str(f).lower():
+        if (
+            service_name.lower() in f.name.lower()
+            or service_name.lower() in str(f).lower()
+        ):
             if "saas" in f.name.lower() or "saas" in str(f.parent).lower():
                 matches.append(f)
     return matches
 
 
-async def _grep_saas_files(saas_dir: Path, service_name: str, repo_path: str) -> list[Path]:
+async def _grep_saas_files(
+    saas_dir: Path, service_name: str, repo_path: str
+) -> list[Path]:
     """Use grep to find SaaS files."""
     success, stdout, stderr = await run_cmd(
         ["grep", "-rl", service_name, str(saas_dir), "--include=*.yml"], cwd=repo_path
@@ -128,7 +133,9 @@ async def _find_namespace_files(namespace: str, repo_path: str) -> list[str]:
     )
 
     if not success or not stdout.strip():
-        success, stdout, stderr = await run_cmd(["grep", "-rl", namespace, repo_path, "--include=*.yml"], cwd=repo_path)
+        success, stdout, stderr = await run_cmd(
+            ["grep", "-rl", namespace, repo_path, "--include=*.yml"], cwd=repo_path
+        )
 
     if success and stdout.strip():
         return stdout.strip().split("\n")[:10]
@@ -155,7 +162,9 @@ def _extract_namespace_resources(filepath: str) -> list[str]:
             docs = list(yaml.safe_load_all(content))
             for doc in docs:
                 if isinstance(doc, dict):
-                    resources = doc.get("resourceTemplates", []) or doc.get("resources", [])
+                    resources = doc.get("resourceTemplates", []) or doc.get(
+                        "resources", []
+                    )
                     for r in resources[:10]:
                         if isinstance(r, dict):
                             name = r.get("name", "unnamed")
@@ -187,7 +196,9 @@ async def _appinterface_diff_impl(path: str) -> list[TextContent]:
         lines.append("No uncommitted changes")
         return [TextContent(type="text", text="\n".join(lines))]
 
-    success, stdout, stderr = await run_cmd(["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path)
+    success, stdout, stderr = await run_cmd(
+        ["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path
+    )
 
     if stdout.strip():
         lines.append("\n### YAML Changes")
@@ -198,7 +209,9 @@ async def _appinterface_diff_impl(path: str) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _appinterface_get_saas_impl(service_name: str, path: str) -> list[TextContent]:
+async def _appinterface_get_saas_impl(
+    service_name: str, path: str
+) -> list[TextContent]:
     """Implementation of appinterface_get_saas tool."""
     repo_path = path or APP_INTERFACE_PATH
     if not repo_path or not os.path.isdir(repo_path):
@@ -216,7 +229,9 @@ async def _appinterface_get_saas_impl(service_name: str, path: str) -> list[Text
         matches = await _grep_saas_files(saas_dir, service_name, repo_path)
 
     if not matches:
-        return [TextContent(type="text", text=f"⚠️ No SaasFile found for `{service_name}`")]
+        return [
+            TextContent(type="text", text=f"⚠️ No SaasFile found for `{service_name}`")
+        ]
 
     lines.append(f"Found {len(matches)} matching file(s):")
     lines.append("")
@@ -246,7 +261,9 @@ async def _appinterface_resources_impl(namespace: str, path: str) -> list[TextCo
         # List files
         for f in files:
             try:
-                rel_path = Path(f).relative_to(repo_path) if Path(f).is_absolute() else f
+                rel_path = (
+                    Path(f).relative_to(repo_path) if Path(f).is_absolute() else f
+                )
             except ValueError:
                 rel_path = f
             lines.append(f"- `{rel_path}`")
@@ -264,12 +281,16 @@ async def _appinterface_validate_impl(path: str) -> list[TextContent]:
     """Implementation of appinterface_validate tool."""
     repo_path = path or APP_INTERFACE_PATH
     if not repo_path or not os.path.isdir(repo_path):
-        return [TextContent(type="text", text=f"❌ app-interface not found at {repo_path}")]
+        return [
+            TextContent(type="text", text=f"❌ app-interface not found at {repo_path}")
+        ]
 
     lines = ["## App-Interface Validation", ""]
 
     if (Path(repo_path) / "Makefile").exists():
-        success, stdout, stderr = await run_cmd(["make", "bundle", "validate"], cwd=repo_path, timeout=600)
+        success, stdout, stderr = await run_cmd(
+            ["make", "bundle", "validate"], cwd=repo_path, timeout=600
+        )
 
         output = stdout + stderr
 
@@ -284,7 +305,9 @@ async def _appinterface_validate_impl(path: str) -> list[TextContent]:
     else:
         lines.append("⚠️ No Makefile found, trying qontract-validator directly...")
 
-        success, stdout, stderr = await run_cmd(["qontract-validator", "--only-errors"], cwd=repo_path)
+        success, stdout, stderr = await run_cmd(
+            ["qontract-validator", "--only-errors"], cwd=repo_path
+        )
 
         if success:
             lines.append("✅ Valid")

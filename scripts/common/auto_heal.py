@@ -236,13 +236,21 @@ def log_failure(
 
     if memory_helper:
         try:
-            memory_helper.append_to_list("learned/tool_failures", "failure_history", entry)
+            memory_helper.append_to_list(
+                "learned/tool_failures", "failure_history", entry
+            )
             # Update stats
-            memory_helper.increment_field("learned/tool_failures", "stats.total_failures")
+            memory_helper.increment_field(
+                "learned/tool_failures", "stats.total_failures"
+            )
             if fixed:
-                memory_helper.increment_field("learned/tool_failures", "stats.auto_fixed")
+                memory_helper.increment_field(
+                    "learned/tool_failures", "stats.auto_fixed"
+                )
             else:
-                memory_helper.increment_field("learned/tool_failures", "stats.manual_required")
+                memory_helper.increment_field(
+                    "learned/tool_failures", "stats.manual_required"
+                )
         except Exception as e:
             # Memory logging is best-effort - don't fail the main operation
             import logging
@@ -252,7 +260,9 @@ def log_failure(
     return entry
 
 
-def build_auto_heal_block(step_name: str, tool_name: str, output_var: str, cluster_hint: str = "auto") -> str:
+def build_auto_heal_block(
+    step_name: str, tool_name: str, output_var: str, cluster_hint: str = "auto"
+) -> str:
     """
     Generate YAML for an auto-heal block after a tool call.
 

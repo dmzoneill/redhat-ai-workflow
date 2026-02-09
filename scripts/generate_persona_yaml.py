@@ -186,7 +186,9 @@ def validate_persona(persona_name: str) -> list[str]:
     skills = persona.get("skills", [])
     for skill in skills:
         # Extract skill name (strip comments)
-        skill_name = skill.split("#")[0].strip() if isinstance(skill, str) else str(skill)
+        skill_name = (
+            skill.split("#")[0].strip() if isinstance(skill, str) else str(skill)
+        )
         skill_name = skill_name.strip("- ").strip()
 
         if skill_name and skill_name not in available_skills:
@@ -269,7 +271,11 @@ def regenerate_persona(persona_name: str, dry_run: bool = False) -> bool:
     if dry_run:
         if original_content != modified_content:
             print(f"\n=== {persona_name}.yaml (changes) ===")
-            print(modified_content[:500] + "..." if len(modified_content) > 500 else modified_content)
+            print(
+                modified_content[:500] + "..."
+                if len(modified_content) > 500
+                else modified_content
+            )
         else:
             print(f"{persona_name}.yaml: No changes needed")
         return True

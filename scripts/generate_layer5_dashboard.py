@@ -40,12 +40,16 @@ def _build_header(lines: list[str]) -> None:
     lines.append("")
 
 
-def _build_overview(lines: list[str], patterns: list, conf_counts: dict, stats: dict) -> None:
+def _build_overview(
+    lines: list[str], patterns: list, conf_counts: dict, stats: dict
+) -> None:
     """Build overview section."""
     lines.append("## 📊 Overview")
     lines.append("")
     lines.append(f"- **Total Patterns**: {len(patterns)}")
-    high_conf_count = conf_counts["critical"] + conf_counts["high"] + conf_counts["medium"]
+    high_conf_count = (
+        conf_counts["critical"] + conf_counts["high"] + conf_counts["medium"]
+    )
     lines.append(f"- **High Confidence (>= 80%)**: {high_conf_count}")
     lines.append(f"- **Last Updated**: {stats.get('last_updated', 'Never')}")
     lines.append("")
@@ -57,7 +61,9 @@ def _build_confidence_levels(lines: list[str], conf_counts: dict) -> None:
     lines.append("")
     lines.append("| Level | Confidence | Count | Behavior |")
     lines.append("|-------|-----------|-------|----------|")
-    lines.append(f"| 🔴 Critical | >= 95% | {conf_counts['critical']} | **Blocks execution** |")
+    lines.append(
+        f"| 🔴 Critical | >= 95% | {conf_counts['critical']} | **Blocks execution** |"
+    )
     lines.append(f"| 🟠 High | 85-94% | {conf_counts['high']} | Strong warning |")
     lines.append(f"| 🟡 Medium | 75-84% | {conf_counts['medium']} | Warning |")
     lines.append(f"| ⚪ Low | < 75% | {conf_counts['low']} | No warning (filtered) |")
@@ -69,7 +75,9 @@ def _build_top_patterns(lines: list[str], patterns: list) -> None:
     lines.append("## 🔝 Top Patterns by Confidence")
     lines.append("")
 
-    sorted_patterns = sorted(patterns, key=lambda p: p.get("confidence", 0), reverse=True)
+    sorted_patterns = sorted(
+        patterns, key=lambda p: p.get("confidence", 0), reverse=True
+    )
     top_patterns = sorted_patterns[:10]
 
     if top_patterns:
@@ -100,7 +108,9 @@ def _build_category_breakdown(lines: list[str], stats: dict) -> None:
         lines.append("| Category | Count |")
         lines.append("|----------|-------|")
 
-        for category, count in sorted(category_stats.items(), key=lambda x: x[1], reverse=True):
+        for category, count in sorted(
+            category_stats.items(), key=lambda x: x[1], reverse=True
+        ):
             lines.append(f"| {category.replace('_', ' ').title()} | {count} |")
 
         lines.append("")
@@ -149,7 +159,9 @@ def _build_optimization_opportunities(lines: list[str], opt_stats: dict) -> None
     lines.append("")
 
     if opt_stats["candidates_for_pruning"] > 0:
-        lines.append("💡 **Recommendation**: Run pattern pruning to remove stale patterns.")
+        lines.append(
+            "💡 **Recommendation**: Run pattern pruning to remove stale patterns."
+        )
         lines.append("")
         lines.append("```bash")
         lines.append("python scripts/optimize_patterns.py --prune")
@@ -168,7 +180,9 @@ def _build_tools_with_patterns(lines: list[str], patterns: list) -> None:
         tool_counts[tool] = tool_counts.get(tool, 0) + 1
 
     if tool_counts:
-        sorted_tools = sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+        sorted_tools = sorted(tool_counts.items(), key=lambda x: x[1], reverse=True)[
+            :10
+        ]
 
         lines.append("| Tool | Patterns |")
         lines.append("|------|----------|")
@@ -187,7 +201,9 @@ def _build_recent_activity(lines: list[str], patterns: list) -> None:
     lines.append("## 📅 Recent Activity")
     lines.append("")
 
-    recent_patterns = sorted(patterns, key=lambda p: p.get("last_seen", ""), reverse=True)[:5]
+    recent_patterns = sorted(
+        patterns, key=lambda p: p.get("last_seen", ""), reverse=True
+    )[:5]
 
     if recent_patterns:
         lines.append("| Tool | Last Seen | Confidence | Observations |")
@@ -252,7 +268,9 @@ def generate_dashboard(output_file: Path = None) -> str:
     # Footer
     lines.append("---")
     lines.append("")
-    lines.append("*This dashboard is generated automatically from learned usage patterns.*")
+    lines.append(
+        "*This dashboard is generated automatically from learned usage patterns.*"
+    )
     lines.append("")
 
     # Join all lines

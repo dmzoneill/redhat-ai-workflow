@@ -105,13 +105,19 @@ async def _podman_compose_status_impl(
         return f"❌ podman-compose not available or no compose file found: {output}"
 
     if not output.strip() or "no containers" in output.lower():
-        return "No containers running" + (f" matching '{filter_name}'" if filter_name else "")
+        return "No containers running" + (
+            f" matching '{filter_name}'" if filter_name else ""
+        )
 
     # Filter output if filter_name provided
     if filter_name:
         filtered_lines = []
         for line in output.strip().split("\n"):
-            if filter_name.lower() in line.lower() or line.startswith("CONTAINER") or line.startswith("NAME"):
+            if (
+                filter_name.lower() in line.lower()
+                or line.startswith("CONTAINER")
+                or line.startswith("NAME")
+            ):
                 filtered_lines.append(line)
         output = "\n".join(filtered_lines)
 
@@ -309,7 +315,12 @@ async def _podman_images_impl(
     Returns:
         Image list.
     """
-    cmd = ["podman", "images", "--format", "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.Created}}"]
+    cmd = [
+        "podman",
+        "images",
+        "--format",
+        "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.Created}}",
+    ]
     if all_images:
         cmd.append("-a")
     if filter_name:
@@ -323,7 +334,12 @@ async def _podman_images_impl(
     if not output.strip():
         return "No images found" + (f" matching '{filter_name}'" if filter_name else "")
 
-    lines = ["## Podman Images", "", "| Image | ID | Size | Created |", "|-------|-----|------|---------|"]
+    lines = [
+        "## Podman Images",
+        "",
+        "| Image | ID | Size | Created |",
+        "|-------|-----|------|---------|",
+    ]
     for line in output.strip().split("\n"):
         parts = line.split("|")
         if len(parts) >= 4:
@@ -750,7 +766,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Build result.
         """
-        return await _podman_build_impl(repo, tag, dockerfile, no_cache, build_args, timeout)
+        return await _podman_build_impl(
+            repo, tag, dockerfile, no_cache, build_args, timeout
+        )
 
     @auto_heal()
     @registry.tool()
@@ -784,7 +802,9 @@ def register_tools(server: FastMCP) -> int:
         Returns:
             Run result with container ID.
         """
-        return await _podman_run_impl(image, name, command, detach, rm, ports, volumes, env_vars, network, timeout)
+        return await _podman_run_impl(
+            image, name, command, detach, rm, ports, volumes, env_vars, network, timeout
+        )
 
     @auto_heal()
     @registry.tool()

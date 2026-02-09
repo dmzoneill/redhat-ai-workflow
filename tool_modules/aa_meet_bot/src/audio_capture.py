@@ -82,7 +82,9 @@ class RingBuffer:
             else:
                 # Split read
                 first_part = self.max_samples - self.read_pos
-                data = np.concatenate([self.buffer[self.read_pos :], self.buffer[: n - first_part]])
+                data = np.concatenate(
+                    [self.buffer[self.read_pos :], self.buffer[: n - first_part]]
+                )
 
             self.read_pos = end_pos % self.max_samples
             return data
@@ -100,7 +102,9 @@ class RingBuffer:
                 return self.buffer[self.read_pos : end_pos].copy()
             else:
                 first_part = self.max_samples - self.read_pos
-                return np.concatenate([self.buffer[self.read_pos :], self.buffer[: n - first_part]])
+                return np.concatenate(
+                    [self.buffer[self.read_pos :], self.buffer[: n - first_part]]
+                )
 
     def available(self) -> int:
         """Return number of samples available to read."""
@@ -182,7 +186,9 @@ class PulseAudioCapture:
                     "--latency-msec",
                     str(self.chunk_ms),
                 ]
-                logger.info(f"Using monitor-stream capture from sink-input {self.sink_input_index}")
+                logger.info(
+                    f"Using monitor-stream capture from sink-input {self.sink_input_index}"
+                )
             else:
                 # Method 2: Direct source capture (for testing with physical mic)
                 # Use parec with --device for direct source capture
@@ -214,7 +220,9 @@ class PulseAudioCapture:
             self._process_pid = self._process.pid
             if self._process_pid:
                 PulseAudioCapture._active_captures[self._process_pid] = self
-                logger.info(f"Audio capture process started with PID {self._process_pid}")
+                logger.info(
+                    f"Audio capture process started with PID {self._process_pid}"
+                )
 
             self._running = True
 
@@ -289,7 +297,9 @@ class PulseAudioCapture:
                     logger.info(f"Audio capture process {pid} terminated gracefully")
                 except asyncio.TimeoutError:
                     # Force kill if terminate didn't work
-                    logger.warning(f"Audio capture process {pid} didn't terminate, killing...")
+                    logger.warning(
+                        f"Audio capture process {pid} didn't terminate, killing..."
+                    )
                     self._process.kill()
                     try:
                         await asyncio.wait_for(self._process.wait(), timeout=1.0)
@@ -309,7 +319,10 @@ class PulseAudioCapture:
                 self._process = None
 
         # Remove from active captures tracking
-        if self._process_pid and self._process_pid in PulseAudioCapture._active_captures:
+        if (
+            self._process_pid
+            and self._process_pid in PulseAudioCapture._active_captures
+        ):
             del PulseAudioCapture._active_captures[self._process_pid]
             logger.info(f"Removed PID {self._process_pid} from active captures")
 
@@ -463,7 +476,9 @@ class RealtimeSTTPipeline:
                 logger.error("Failed to initialize NPU STT")
                 return False
 
-            logger.info(f"STT initialized on {self._stt.get_device_info()['actual_device']}")
+            logger.info(
+                f"STT initialized on {self._stt.get_device_info()['actual_device']}"
+            )
 
             # Start audio capture
             self._capture = PulseAudioCapture(
@@ -534,7 +549,9 @@ class RealtimeSTTPipeline:
         last_log_time = time.time()
 
         try:
-            logger.info(f"🎧 NPU STT: Starting audio processing loop (VAD threshold: {self.vad_threshold})")
+            logger.info(
+                f"🎧 NPU STT: Starting audio processing loop (VAD threshold: {self.vad_threshold})"
+            )
 
             consecutive_none_chunks = 0
             max_none_chunks = 50  # ~5 seconds of no data = audio source gone
@@ -544,7 +561,9 @@ class RealtimeSTTPipeline:
                 if chunk is None:
                     consecutive_none_chunks += 1
                     if consecutive_none_chunks >= max_none_chunks:
-                        logger.warning("🎧 NPU STT: Audio source appears to be gone (too many empty chunks)")
+                        logger.warning(
+                            "🎧 NPU STT: Audio source appears to be gone (too many empty chunks)"
+                        )
                         self._running = False
                         break
                     await asyncio.sleep(0.1)  # Brief wait before retry
@@ -581,7 +600,9 @@ class RealtimeSTTPipeline:
                     # Check max duration
                     speech_duration = now - self._speech_start_time
                     if speech_duration >= self.max_speech_duration:
-                        logger.info(f"🎧 NPU STT: Max duration reached ({speech_duration:.1f}s), transcribing...")
+                        logger.info(
+                            f"🎧 NPU STT: Max duration reached ({speech_duration:.1f}s), transcribing..."
+                        )
                         await self._transcribe_buffer(is_final=False)
                         self._speech_buffer.clear()
                         self._speech_start_time = now
@@ -589,12 +610,16 @@ class RealtimeSTTPipeline:
                 else:
                     # Silence
                     if self._in_speech:
-                        self._speech_buffer.append(chunk.data)  # Include trailing silence
+                        self._speech_buffer.append(
+                            chunk.data
+                        )  # Include trailing silence
 
                         silence_time = now - self._last_speech_time
                         if silence_time >= self.silence_duration:
                             # End of speech segment
-                            speech_duration = self._last_speech_time - self._speech_start_time
+                            speech_duration = (
+                                self._last_speech_time - self._speech_start_time
+                            )
 
                             logger.info(
                                 f"🎧 NPU STT: 🔇 Speech ENDED after {speech_duration:.1f}s "
@@ -629,7 +654,9 @@ class RealtimeSTTPipeline:
         audio = np.concatenate(list(self._speech_buffer))
         duration = len(audio) / self.sample_rate
 
-        logger.info(f"🎧 NPU STT: 🔄 Transcribing {duration:.1f}s of audio (final={is_final})...")
+        logger.info(
+            f"🎧 NPU STT: 🔄 Transcribing {duration:.1f}s of audio (final={is_final})..."
+        )
 
         # Transcribe on NPU
         start = time.time()
@@ -639,7 +666,9 @@ class RealtimeSTTPipeline:
         if result.text:
             rtf = elapsed / duration if duration > 0 else 0
             # Log the full transcription prominently
-            logger.info(f'🎧 NPU STT: ✅ [{elapsed:.2f}s, RTF:{rtf:.2f}] "{result.text}"')
+            logger.info(
+                f'🎧 NPU STT: ✅ [{elapsed:.2f}s, RTF:{rtf:.2f}] "{result.text}"'
+            )
 
             # Call callback with the transcription
             self.on_transcription(result.text, is_final)

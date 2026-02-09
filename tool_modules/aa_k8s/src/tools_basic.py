@@ -56,9 +56,15 @@ async def _k8s_environment_summary_impl(
             continue
 
         # Get namespaces with our prefix
-        success, output = await run_kubectl(["get", "namespaces", "-o", "name"], kubeconfig=kubeconfig)
+        success, output = await run_kubectl(
+            ["get", "namespaces", "-o", "name"], kubeconfig=kubeconfig
+        )
         if success:
-            ns_list = [ln.replace("namespace/", "") for ln in output.strip().split("\n") if "your-app" in ln]
+            ns_list = [
+                ln.replace("namespace/", "")
+                for ln in output.strip().split("\n")
+                if "your-app" in ln
+            ]
             lines.append(f"- Namespaces: {len(ns_list)}")
             for ns in ns_list[:5]:
                 lines.append(f"  - {ns}")
@@ -93,13 +99,21 @@ async def _k8s_namespace_health_impl(
     pending = 0
 
     # Get pods
-    success, output = await run_kubectl(["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["get", "pods", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+    )
     if success:
         pod_lines = [ln for ln in output.strip().split("\n")[1:] if ln.strip()]
         total = len(pod_lines)
         running = len([ln for ln in pod_lines if "Running" in ln])
         pending = len([ln for ln in pod_lines if "Pending" in ln])
-        failed = len([ln for ln in pod_lines if "Error" in ln or "Failed" in ln or "CrashLoop" in ln])
+        failed = len(
+            [
+                ln
+                for ln in pod_lines
+                if "Error" in ln or "Failed" in ln or "CrashLoop" in ln
+            ]
+        )
 
         lines.append("### Pods")
         lines.append(f"- Total: {total}")
@@ -193,7 +207,9 @@ async def _kubectl_cp_impl(
 
 
 @auto_heal()
-async def _kubectl_describe_deployment_impl(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+async def _kubectl_describe_deployment_impl(
+    deployment_name: str, namespace: str, environment: str = "stage"
+) -> str:
     """Describe a deployment in detail."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
@@ -207,13 +223,19 @@ async def _kubectl_describe_deployment_impl(deployment_name: str, namespace: str
 
 
 @auto_heal()
-async def _kubectl_describe_pod_impl(pod_name: str, namespace: str, environment: str = "stage") -> str:
+async def _kubectl_describe_pod_impl(
+    pod_name: str, namespace: str, environment: str = "stage"
+) -> str:
     """Describe a pod in detail."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["describe", "pod", pod_name], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["describe", "pod", pod_name], kubeconfig=kubeconfig, namespace=namespace
+    )
     if not success:
         return f"❌ Failed: {output}"
-    return f"## Pod: {pod_name}\n\n```\n{truncate_output(output, max_length=10000)}\n```"
+    return (
+        f"## Pod: {pod_name}\n\n```\n{truncate_output(output, max_length=10000)}\n```"
+    )
 
 
 @auto_heal()
@@ -245,8 +267,14 @@ async def _kubectl_exec_impl(
         args.extend(["-c", container])
     args.append("--")
     args.extend(command.split())
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=timeout)
-    return f"## Exec: {command}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace, timeout=timeout
+    )
+    return (
+        f"## Exec: {command}\n\n```\n{output}\n```"
+        if success
+        else f"❌ Failed: {output}"
+    )
 
 
 @auto_heal()
@@ -264,38 +292,52 @@ async def _kubectl_get_impl(
         args.append(name)
     if output_format:
         args.extend(["-o", output_format])
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace
+    )
     if not success:
         return f"❌ Failed: {output}"
     return f"## {resource.title()}\n\n```\n{truncate_output(output, max_length=15000)}\n```"
 
 
 @auto_heal()
-async def _kubectl_get_configmaps_impl(namespace: str, environment: str = "stage") -> str:
+async def _kubectl_get_configmaps_impl(
+    namespace: str, environment: str = "stage"
+) -> str:
     """List configmaps in a namespace."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["get", "configmaps"], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["get", "configmaps"], kubeconfig=kubeconfig, namespace=namespace
+    )
     return f"## ConfigMaps\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
 
 @auto_heal()
-async def _kubectl_get_deployments_impl(namespace: str, environment: str = "stage") -> str:
+async def _kubectl_get_deployments_impl(
+    namespace: str, environment: str = "stage"
+) -> str:
     """List deployments in a namespace."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
         ["get", "deployments", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
     )
-    return f"## Deployments\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    return (
+        f"## Deployments\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    )
 
 
 @auto_heal()
-async def _kubectl_get_events_impl(namespace: str, environment: str = "stage", field_selector: str = "") -> str:
+async def _kubectl_get_events_impl(
+    namespace: str, environment: str = "stage", field_selector: str = ""
+) -> str:
     """Get events in a namespace (useful for debugging)."""
     kubeconfig = get_kubeconfig(environment, namespace)
     args = ["get", "events", "--sort-by=.lastTimestamp"]
     if field_selector:
         args.extend(["--field-selector", field_selector])
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace
+    )
     if not success:
         return f"❌ Failed: {output}"
     lines = output.split("\n")
@@ -308,7 +350,9 @@ async def _kubectl_get_events_impl(namespace: str, environment: str = "stage", f
 async def _kubectl_get_ingress_impl(namespace: str, environment: str = "stage") -> str:
     """List ingress resources in a namespace."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["get", "ingress", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["get", "ingress", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+    )
     return f"## Ingress\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
 
@@ -326,7 +370,9 @@ async def _kubectl_get_pods_impl(
         args.extend(["-l", selector])
     if all_namespaces:
         args.append("--all-namespaces")
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=None if all_namespaces else namespace)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=None if all_namespaces else namespace
+    )
     return output if success else f"❌ Failed: {output}"
 
 
@@ -357,7 +403,9 @@ async def _kubectl_get_secret_value_impl(
     jsonpath = f"{{.data.{key}}}"
     args = ["get", "secret", secret_name, "-o", f"jsonpath={jsonpath}"]
 
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace
+    )
 
     if not success:
         return f"❌ Failed to get secret {secret_name}/{key}: {output}"
@@ -378,7 +426,9 @@ async def _kubectl_get_secret_value_impl(
 async def _kubectl_get_secrets_impl(namespace: str, environment: str = "stage") -> str:
     """List secrets in a namespace (names only)."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["get", "secrets"], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["get", "secrets"], kubeconfig=kubeconfig, namespace=namespace
+    )
     return f"## Secrets\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
 
@@ -386,7 +436,9 @@ async def _kubectl_get_secrets_impl(namespace: str, environment: str = "stage") 
 async def _kubectl_get_services_impl(namespace: str, environment: str = "stage") -> str:
     """List services in a namespace."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["get", "services", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace)
+    success, output = await run_kubectl(
+        ["get", "services", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
+    )
     return f"## Services\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
 
 
@@ -433,14 +485,22 @@ async def _kubectl_logs_impl(
     if since:
         args.append(f"--since={since}")
 
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace, timeout=120)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace, timeout=120
+    )
 
     target = pod_name or f"selector {selector}"
-    return f"## Logs: {target}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    return (
+        f"## Logs: {target}\n\n```\n{output}\n```"
+        if success
+        else f"❌ Failed: {output}"
+    )
 
 
 @auto_heal()
-async def _kubectl_rollout_restart_impl(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+async def _kubectl_rollout_restart_impl(
+    deployment_name: str, namespace: str, environment: str = "stage"
+) -> str:
     """Restart a deployment (rolling restart)."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
@@ -448,11 +508,17 @@ async def _kubectl_rollout_restart_impl(deployment_name: str, namespace: str, en
         kubeconfig=kubeconfig,
         namespace=namespace,
     )
-    return f"✅ Deployment restarted: {deployment_name}" if success else f"❌ Failed: {output}"
+    return (
+        f"✅ Deployment restarted: {deployment_name}"
+        if success
+        else f"❌ Failed: {output}"
+    )
 
 
 @auto_heal()
-async def _kubectl_rollout_status_impl(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+async def _kubectl_rollout_status_impl(
+    deployment_name: str, namespace: str, environment: str = "stage"
+) -> str:
     """Check rollout status of a deployment."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
@@ -470,7 +536,11 @@ async def _kubectl_saas_deployments_impl(namespace: str) -> str:
     success, output = await run_kubectl(
         ["get", "deployments", "-o", "wide"], kubeconfig=kubeconfig, namespace=namespace
     )
-    return f"## SaaS Deployments: {namespace}\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    return (
+        f"## SaaS Deployments: {namespace}\n\n```\n{output}\n```"
+        if success
+        else f"❌ Failed: {output}"
+    )
 
 
 @auto_heal()
@@ -484,14 +554,18 @@ async def _kubectl_saas_pipelines_impl(namespace: str = "") -> str:
         "wide",
         "--sort-by=.metadata.creationTimestamp",
     ]
-    success, output = await run_kubectl(args, kubeconfig=kubeconfig, namespace=namespace if namespace else None)
+    success, output = await run_kubectl(
+        args, kubeconfig=kubeconfig, namespace=namespace if namespace else None
+    )
     if not success:
         return f"❌ Failed: {output}\n\nRun: `kube ap` to authenticate"
     return f"## SaaS Pipelines\n\n```\n{output}\n```"
 
 
 @auto_heal()
-async def _kubectl_scale_impl(deployment_name: str, replicas: int, namespace: str, environment: str = "stage") -> str:
+async def _kubectl_scale_impl(
+    deployment_name: str, replicas: int, namespace: str, environment: str = "stage"
+) -> str:
     """Scale a deployment."""
     kubeconfig = get_kubeconfig(environment, namespace)
     success, output = await run_kubectl(
@@ -506,8 +580,12 @@ async def _kubectl_scale_impl(deployment_name: str, replicas: int, namespace: st
 async def _kubectl_top_pods_impl(namespace: str, environment: str = "stage") -> str:
     """Show resource usage (CPU/memory) for pods."""
     kubeconfig = get_kubeconfig(environment, namespace)
-    success, output = await run_kubectl(["top", "pods"], kubeconfig=kubeconfig, namespace=namespace)
-    return f"## Pod Metrics\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    success, output = await run_kubectl(
+        ["top", "pods"], kubeconfig=kubeconfig, namespace=namespace
+    )
+    return (
+        f"## Pod Metrics\n\n```\n{output}\n```" if success else f"❌ Failed: {output}"
+    )
 
 
 def _register_health_tools(registry: ToolRegistry) -> None:
@@ -579,17 +657,25 @@ def _register_basic_ops_tools(registry: ToolRegistry) -> None:
             kubectl_cp("/tmp/script.sh", "pod-name:/tmp/script.sh", "ns", to_pod=True)
             kubectl_cp("pod-name:/tmp/output.log", "/tmp/output.log", "ns", to_pod=False)
         """
-        return await _kubectl_cp_impl(source, destination, namespace, environment, container, to_pod)
+        return await _kubectl_cp_impl(
+            source, destination, namespace, environment, container, to_pod
+        )
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_describe_deployment(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_describe_deployment(
+        deployment_name: str, namespace: str, environment: str = "stage"
+    ) -> str:
         """Describe a deployment in detail."""
-        return await _kubectl_describe_deployment_impl(deployment_name, namespace, environment)
+        return await _kubectl_describe_deployment_impl(
+            deployment_name, namespace, environment
+        )
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_describe_pod(pod_name: str, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_describe_pod(
+        pod_name: str, namespace: str, environment: str = "stage"
+    ) -> str:
         """Describe a pod in detail."""
         return await _kubectl_describe_pod_impl(pod_name, namespace, environment)
 
@@ -617,7 +703,9 @@ def _register_basic_ops_tools(registry: ToolRegistry) -> None:
         Returns:
             Command output.
         """
-        return await _kubectl_exec_impl(pod_name, command, namespace, environment, container, timeout)
+        return await _kubectl_exec_impl(
+            pod_name, command, namespace, environment, container, timeout
+        )
 
     @auto_heal()
     @registry.tool()
@@ -629,7 +717,9 @@ def _register_basic_ops_tools(registry: ToolRegistry) -> None:
         output_format: str = "",
     ) -> str:
         """Get any Kubernetes resource (pods, deployments, pvc, cronjobs, etc.)."""
-        return await _kubectl_get_impl(resource, namespace, environment, name, output_format)
+        return await _kubectl_get_impl(
+            resource, namespace, environment, name, output_format
+        )
 
     @auto_heal()
     @registry.tool()
@@ -659,7 +749,9 @@ def _register_basic_ops_tools(registry: ToolRegistry) -> None:
         Returns:
             Pod logs.
         """
-        return await _kubectl_logs_impl(pod_name, namespace, environment, container, tail, previous, since, selector)
+        return await _kubectl_logs_impl(
+            pod_name, namespace, environment, container, tail, previous, since, selector
+        )
 
     @auto_heal()
     @registry.tool()
@@ -669,9 +761,13 @@ def _register_basic_ops_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_scale(deployment_name: str, replicas: int, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_scale(
+        deployment_name: str, replicas: int, namespace: str, environment: str = "stage"
+    ) -> str:
         """Scale a deployment."""
-        return await _kubectl_scale_impl(deployment_name, replicas, namespace, environment)
+        return await _kubectl_scale_impl(
+            deployment_name, replicas, namespace, environment
+        )
 
 
 def _register_resource_getters_tools(registry: ToolRegistry) -> None:
@@ -685,13 +781,17 @@ def _register_resource_getters_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_get_deployments(namespace: str, environment: str = "stage") -> str:
+    async def kubectl_get_deployments(
+        namespace: str, environment: str = "stage"
+    ) -> str:
         """List deployments in a namespace."""
         return await _kubectl_get_deployments_impl(namespace, environment)
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_get_events(namespace: str, environment: str = "stage", field_selector: str = "") -> str:
+    async def kubectl_get_events(
+        namespace: str, environment: str = "stage", field_selector: str = ""
+    ) -> str:
         """Get events in a namespace (useful for debugging)."""
         return await _kubectl_get_events_impl(namespace, environment, field_selector)
 
@@ -710,7 +810,9 @@ def _register_resource_getters_tools(registry: ToolRegistry) -> None:
         all_namespaces: bool = False,
     ) -> str:
         """List pods in a namespace."""
-        return await _kubectl_get_pods_impl(namespace, environment, selector, all_namespaces)
+        return await _kubectl_get_pods_impl(
+            namespace, environment, selector, all_namespaces
+        )
 
     @auto_heal()
     @registry.tool()
@@ -734,7 +836,9 @@ def _register_resource_getters_tools(registry: ToolRegistry) -> None:
         Returns:
             Secret value (decoded if requested).
         """
-        return await _kubectl_get_secret_value_impl(secret_name, key, namespace, environment, decode)
+        return await _kubectl_get_secret_value_impl(
+            secret_name, key, namespace, environment, decode
+        )
 
     @auto_heal()
     @registry.tool()
@@ -754,15 +858,23 @@ def _register_rollout_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_rollout_restart(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_rollout_restart(
+        deployment_name: str, namespace: str, environment: str = "stage"
+    ) -> str:
         """Restart a deployment (rolling restart)."""
-        return await _kubectl_rollout_restart_impl(deployment_name, namespace, environment)
+        return await _kubectl_rollout_restart_impl(
+            deployment_name, namespace, environment
+        )
 
     @auto_heal()
     @registry.tool()
-    async def kubectl_rollout_status(deployment_name: str, namespace: str, environment: str = "stage") -> str:
+    async def kubectl_rollout_status(
+        deployment_name: str, namespace: str, environment: str = "stage"
+    ) -> str:
         """Check rollout status of a deployment."""
-        return await _kubectl_rollout_status_impl(deployment_name, namespace, environment)
+        return await _kubectl_rollout_status_impl(
+            deployment_name, namespace, environment
+        )
 
 
 def _register_saas_tools(registry: ToolRegistry) -> None:

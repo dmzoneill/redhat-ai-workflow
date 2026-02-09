@@ -143,7 +143,9 @@ def check_tools(required: list[str]) -> dict:
     }
 
 
-def check_branch_exists(branch: str, repo_path: str = ".", check_remote: bool = True) -> dict:
+def check_branch_exists(
+    branch: str, repo_path: str = ".", check_remote: bool = True
+) -> dict:
     """
     Check if a branch exists locally or remotely.
 

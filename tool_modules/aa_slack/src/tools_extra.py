@@ -48,7 +48,9 @@ def _get_slack_config() -> dict:
     return cast(dict, config.get("slack", {}))
 
 
-async def _send_via_dbus(channel_id: str, text: str, thread_ts: str = "") -> dict | None:
+async def _send_via_dbus(
+    channel_id: str, text: str, thread_ts: str = ""
+) -> dict | None:
     """
     Try to send a message via the D-Bus daemon.
 
@@ -98,7 +100,9 @@ async def get_manager():
                 curr_dir = Path(__file__).parent.absolute()
                 listener_file = curr_dir / "listener.py"
 
-                spec = importlib.util.spec_from_file_location("slack_listener_dynamic", listener_file)
+                spec = importlib.util.spec_from_file_location(
+                    "slack_listener_dynamic", listener_file
+                )
                 mod = importlib.util.module_from_spec(spec)
                 # Add to sys.modules to handle internal relative imports in listener.py if any
                 sys.modules["slack_listener_dynamic"] = mod
@@ -183,7 +187,9 @@ async def _slack_get_channels_impl() -> str:
         return json.dumps({"error": str(e)})
 
 
-async def _slack_list_messages_impl(channel_id: str, limit: int, include_threads: bool) -> str:
+async def _slack_list_messages_impl(
+    channel_id: str, limit: int, include_threads: bool
+) -> str:
     """Implementation of slack_list_messages tool."""
     try:
         manager = await get_manager()
@@ -213,10 +219,15 @@ async def _slack_list_messages_impl(channel_id: str, limit: int, include_threads
             if include_threads and msg.get("reply_count", 0) > 0:
                 try:
                     thread_ts = msg.get("thread_ts") or msg.get("ts")
-                    replies = await manager.session.get_thread_replies(channel_id, thread_ts)
+                    replies = await manager.session.get_thread_replies(
+                        channel_id, thread_ts
+                    )
                     for reply in replies[1:]:  # Skip first (parent)
                         reply_user = reply.get("user", "")
-                        reply_name = await manager.state_db.get_user_name(reply_user) or reply_user
+                        reply_name = (
+                            await manager.state_db.get_user_name(reply_user)
+                            or reply_user
+                        )
                         result.append(
                             {
                                 "ts": reply.get("ts", ""),

@@ -45,7 +45,14 @@ def get_performance_summary_path() -> Path:
     now = datetime.now()
     year = now.year
     quarter = (now.month - 1) // 3 + 1
-    return AA_CONFIG_DIR / "performance" / str(year) / f"q{quarter}" / "performance" / "summary.json"
+    return (
+        AA_CONFIG_DIR
+        / "performance"
+        / str(year)
+        / f"q{quarter}"
+        / "performance"
+        / "summary.json"
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +102,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "skill_execution": str(SKILL_EXECUTION_FILE),
                 "performance_summary": str(get_performance_summary_path()),
             },
-            "cache_age": {k: datetime.now().timestamp() - v for k, v in self._last_modified.items()},
+            "cache_age": {
+                k: datetime.now().timestamp() - v
+                for k, v in self._last_modified.items()
+            },
         }
 
     # ==================== D-Bus Handlers ====================
@@ -121,7 +131,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "day_of_quarter": day_of_quarter,
                 "overall_percentage": perf_summary.get("overall_percentage", 0),
                 "competencies": {
-                    k: {"points": perf_summary.get("cumulative_points", {}).get(k, 0), "percentage": v}
+                    k: {
+                        "points": perf_summary.get("cumulative_points", {}).get(k, 0),
+                        "percentage": v,
+                    }
                     for k, v in perf_summary.get("cumulative_percentage", {}).items()
                 },
                 "highlights": perf_summary.get("highlights", []),
@@ -240,7 +253,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         return {
             "healthy": healthy,
             "checks": checks,
-            "message": "Stats daemon is healthy" if healthy else "Stats daemon has issues",
+            "message": (
+                "Stats daemon is healthy" if healthy else "Stats daemon has issues"
+            ),
             "timestamp": self._last_health_check,
         }
 

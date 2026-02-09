@@ -80,7 +80,11 @@ class ToolRegistry:
         Returns:
             List of category names
         """
-        return [name for name, cat in self.categories.items() if cat.priority >= min_priority]
+        return [
+            name
+            for name, cat in self.categories.items()
+            if cat.priority >= min_priority
+        ]
 
     def to_prompt_format(self, exclude: set[str] | None = None) -> str:
         """Format categories for NPU prompt.
