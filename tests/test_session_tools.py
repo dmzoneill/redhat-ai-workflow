@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 import pytest
 import yaml
 from fastmcp import Context, FastMCP
+from mcp.types import ListRootsResult, Root
 
 from server.persona_loader import PersonaLoader
 from server.workspace_state import ChatSession, WorkspaceState
@@ -1447,7 +1448,7 @@ class TestDetectProjectFromMcpRoots:
     @pytest.mark.asyncio
     async def test_empty_roots(self):
         ctx = MagicMock(spec=Context)
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=ListRootsResult)
         mock_result.roots = []
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
         result = await session_tools._detect_project_from_mcp_roots(ctx)
@@ -1456,10 +1457,10 @@ class TestDetectProjectFromMcpRoots:
     @pytest.mark.asyncio
     async def test_matching_root(self):
         ctx = MagicMock(spec=Context)
-        mock_root = MagicMock()
+        mock_root = MagicMock(spec=Root)
         mock_root.uri = "file:///home/user/myproject"
         mock_root.name = "myproject"
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=ListRootsResult)
         mock_result.roots = [mock_root]
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
 
@@ -1476,10 +1477,10 @@ class TestDetectProjectFromMcpRoots:
     @pytest.mark.asyncio
     async def test_no_matching_root(self):
         ctx = MagicMock(spec=Context)
-        mock_root = MagicMock()
+        mock_root = MagicMock(spec=Root)
         mock_root.uri = "file:///home/user/other"
         mock_root.name = "other"
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=ListRootsResult)
         mock_result.roots = [mock_root]
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
 
@@ -1495,10 +1496,10 @@ class TestDetectProjectFromMcpRoots:
     @pytest.mark.asyncio
     async def test_non_file_uri(self):
         ctx = MagicMock(spec=Context)
-        mock_root = MagicMock()
+        mock_root = MagicMock(spec=Root)
         mock_root.uri = "/home/user/myproject"
         mock_root.name = "myproject"
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=ListRootsResult)
         mock_result.roots = [mock_root]
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
 
@@ -1521,10 +1522,10 @@ class TestDetectProjectFromMcpRoots:
     @pytest.mark.asyncio
     async def test_no_config(self):
         ctx = MagicMock(spec=Context)
-        mock_root = MagicMock()
+        mock_root = MagicMock(spec=Root)
         mock_root.uri = "file:///home/user/proj"
         mock_root.name = "proj"
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=ListRootsResult)
         mock_result.roots = [mock_root]
         ctx.session.list_roots = AsyncMock(return_value=mock_result)
 

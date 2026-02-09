@@ -51,26 +51,24 @@ class TestToolModuleLoading:
     """Test that individual tool modules load correctly."""
 
     def _load_module(self, module_name: str):
-        """Load a tool module using importlib."""
-        import importlib.util
+        """Load a tool module using importlib.
+
+        Uses importlib.import_module with proper package paths so that
+        relative imports (e.g., from .common) work correctly.
+        """
+        import importlib
 
         # Try tools_basic.py first (new structure), then tools.py (legacy)
         tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools_basic.py"
-        if not tools_file.exists():
+        if tools_file.exists():
+            module_path = f"tool_modules.aa_{module_name}.src.tools_basic"
+        else:
             tools_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / "tools.py"
-        if not tools_file.exists():
-            pytest.skip(f"Module aa_{module_name} not found")
+            if not tools_file.exists():
+                pytest.skip(f"Module aa_{module_name} not found")
+            module_path = f"tool_modules.aa_{module_name}.src.tools"
 
-        # Add server to path for imports
-        spec = importlib.util.spec_from_file_location(
-            f"aa_{module_name}_tools", tools_file
-        )
-        if spec is None or spec.loader is None:
-            pytest.fail(f"Could not create spec for {module_name}")
-
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return importlib.import_module(module_path)
 
     def test_load_workflow_module(self):
         """Workflow tools module should load."""
@@ -152,19 +150,14 @@ class TestWorkflowExtractedModules:
 
     def test_lint_tools_loadable(self):
         """Lint tools module should be loadable."""
-        import importlib.util
+        import importlib
 
-        # Try tools_basic.py first (new structure), fallback to tools.py (legacy)
+        # Use proper package import so relative imports work
         tools_file = TOOL_MODULES_DIR / "aa_lint" / "src" / "tools_basic.py"
-        if not tools_file.exists():
-            tools_file = TOOL_MODULES_DIR / "aa_lint" / "src" / "tools.py"
-
-        spec = importlib.util.spec_from_file_location(
-            "lint_tools",
-            tools_file,
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        if tools_file.exists():
+            module = importlib.import_module("tool_modules.aa_lint.src.tools_basic")
+        else:
+            module = importlib.import_module("tool_modules.aa_lint.src.tools")
 
         assert hasattr(module, "register_tools")
         assert callable(module.register_tools)

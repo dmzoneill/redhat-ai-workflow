@@ -1,10 +1,12 @@
 """Tests for persona_loader module."""
 
 import sys
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastmcp import Context, FastMCP
+from mcp.types import Tool
 
 # Ensure project root is on sys.path so `server` is importable as a package
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -322,7 +324,7 @@ class TestLoadToolModule:
         mock_server.list_tools = AsyncMock(return_value=[])
         loader = PersonaLoader(mock_server)
 
-        mock_spec = MagicMock()
+        mock_spec = MagicMock(spec=ModuleSpec)
         mock_spec.loader = MagicMock()
 
         with patch(
@@ -351,13 +353,13 @@ class TestLoadToolModule:
 
         mock_server = MagicMock(spec=FastMCP)
 
-        tool_before = MagicMock()
+        tool_before = MagicMock(spec=Tool)
         tool_before.name = "existing_tool"
-        tool_after_1 = MagicMock()
+        tool_after_1 = MagicMock(spec=Tool)
         tool_after_1.name = "existing_tool"
-        tool_after_2 = MagicMock()
+        tool_after_2 = MagicMock(spec=Tool)
         tool_after_2.name = "new_tool_1"
-        tool_after_3 = MagicMock()
+        tool_after_3 = MagicMock(spec=Tool)
         tool_after_3.name = "new_tool_2"
 
         mock_server.list_tools = AsyncMock(
@@ -370,7 +372,7 @@ class TestLoadToolModule:
 
         mock_module = MagicMock()
         mock_module.register_tools = MagicMock()
-        mock_spec = MagicMock()
+        mock_spec = MagicMock(spec=ModuleSpec)
         mock_spec.loader = MagicMock()
 
         with patch(
@@ -410,7 +412,7 @@ class TestLoadToolModule:
         loader = PersonaLoader(mock_server)
 
         mock_module = MagicMock()
-        mock_spec = MagicMock()
+        mock_spec = MagicMock(spec=ModuleSpec)
         mock_spec.loader = MagicMock()
 
         with patch(
@@ -525,11 +527,11 @@ class TestClearNonCoreTools:
         """Removes all tools except core ones."""
         mock_server = MagicMock(spec=FastMCP)
 
-        tool_core = MagicMock()
+        tool_core = MagicMock(spec=Tool)
         tool_core.name = "persona_load"
-        tool_regular = MagicMock()
+        tool_regular = MagicMock(spec=Tool)
         tool_regular.name = "custom_tool"
-        tool_regular2 = MagicMock()
+        tool_regular2 = MagicMock(spec=Tool)
         tool_regular2.name = "another_tool"
 
         mock_server.list_tools = AsyncMock(
@@ -559,7 +561,7 @@ class TestClearNonCoreTools:
         """Handles exception when removing tools."""
         mock_server = MagicMock(spec=FastMCP)
 
-        tool = MagicMock()
+        tool = MagicMock(spec=Tool)
         tool.name = "bad_tool"
         mock_server.list_tools = AsyncMock(return_value=[tool])
         mock_server.remove_tool.side_effect = Exception("oops")

@@ -11,7 +11,6 @@ Provides tools for:
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -29,7 +28,9 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 # Setup project path for server imports
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
-from server.utils import load_config, resolve_repo_path, run_cmd_full, truncate_output
+from server.utils import load_config, run_cmd_full, truncate_output
+
+from .common import _resolve_repo_path_local
 
 logger = logging.getLogger(__name__)
 
@@ -45,20 +46,6 @@ def _get_repo_paths() -> dict:
             if info.get("path")
         }
     return {}
-
-
-def _resolve_repo_path_local(repo: str, repo_paths: dict) -> str:
-    """Resolve repository name to absolute path."""
-    if os.path.isabs(repo):
-        return repo
-    if repo in repo_paths:
-        return os.path.expanduser(repo_paths[repo])
-    if repo == ".":
-        return os.getcwd()
-    path = resolve_repo_path(repo)
-    if os.path.isdir(path):
-        return path
-    raise ValueError(f"Repository not found: {repo}")
 
 
 async def _run_black(path: str, fix: bool, lines: list[str]) -> bool:

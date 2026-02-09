@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import FastMCP
 from mcp.types import TextContent
 
 # ---------------------------------------------------------------------------
@@ -62,7 +63,7 @@ def test_register_returns_count():
             register_scheduler_tools,
         )
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         # Make server.tool() return a passthrough decorator
         server.tool.return_value = lambda fn: fn
         count = register_scheduler_tools(server)
@@ -88,7 +89,7 @@ async def test_cron_list_scheduler_disabled():
         mock_sm.is_service_enabled.return_value = False
         mock_cm.get.return_value = {}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.tool.return_value = lambda fn: fn
         register_scheduler_tools(server)
 
@@ -135,7 +136,7 @@ async def test_cron_list_no_jobs():
 
             return dec
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.tool = make_dec
 
         from tool_modules.aa_workflow.src.scheduler_tools import (
@@ -182,7 +183,7 @@ async def test_cron_list_with_cron_job():
 
             return dec
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.tool = make_dec
 
         from tool_modules.aa_workflow.src.scheduler_tools import (
@@ -234,7 +235,7 @@ async def test_cron_list_poll_job():
 
             return dec
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.tool = make_dec
 
         from tool_modules.aa_workflow.src.scheduler_tools import (
@@ -275,7 +276,7 @@ async def test_cron_list_default_retry_badge():
 
             return dec
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.tool = make_dec
 
         from tool_modules.aa_workflow.src.scheduler_tools import (
@@ -305,7 +306,7 @@ def _build_captured_tools():
 
         return dec
 
-    server = MagicMock()
+    server = MagicMock(spec=FastMCP)
     server.tool = make_dec
 
     from tool_modules.aa_workflow.src.scheduler_tools import register_scheduler_tools

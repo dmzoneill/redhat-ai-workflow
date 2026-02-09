@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from server.workspace_state import WorkspaceState
+
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -141,7 +143,7 @@ class TestGetChatStateAsync:
     @pytest.mark.asyncio
     async def test_returns_workspace_state(self):
         ctx = AsyncMock()
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "backend"
         mock_state.issue_key = "AAP-1"
         mock_state.branch = "main"
@@ -299,7 +301,7 @@ class TestSetChatProject:
         assert chat_context._chat_state["project"] is None
 
     def test_updates_workspace_registry(self, mock_config):
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
             mock_registry.get_or_create.return_value = mock_state
             result = chat_context.set_chat_project("backend")
@@ -312,7 +314,7 @@ class TestSetChatIssue:
         assert chat_context._chat_state["issue_key"] == "AAP-123"
 
     def test_updates_workspace_registry(self):
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
             mock_registry.get_or_create.return_value = mock_state
             chat_context.set_chat_issue("AAP-456")
@@ -328,7 +330,7 @@ class TestGetChatIssue:
         assert result == "AAP-789"
 
     def test_from_workspace_registry(self):
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.issue_key = "AAP-100"
         with patch("server.workspace_state.WorkspaceRegistry") as mock_registry:
             mock_registry.get.return_value = mock_state
@@ -359,7 +361,7 @@ class TestGetChatBranch:
 
 class TestGetChatState:
     def test_from_workspace_registry(self, mock_config):
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "backend"
         mock_state.issue_key = "AAP-1"
         mock_state.branch = "main"
@@ -456,7 +458,7 @@ class TestProjectContextImpl:
     @pytest.mark.asyncio
     async def test_get_context(self, mock_config):
         ctx = AsyncMock()
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "backend"
         mock_state.issue_key = None
         mock_state.branch = None
@@ -477,7 +479,7 @@ class TestProjectContextImpl:
     @pytest.mark.asyncio
     async def test_set_project(self, mock_config):
         ctx = AsyncMock()
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "backend"
         mock_state.issue_key = None
         mock_state.branch = None
@@ -517,7 +519,7 @@ class TestProjectContextImpl:
     @pytest.mark.asyncio
     async def test_set_issue_and_branch(self, mock_config):
         ctx = AsyncMock()
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "backend"
         mock_state.issue_key = "AAP-1"
         mock_state.branch = "feature/x"

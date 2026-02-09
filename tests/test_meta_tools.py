@@ -4,12 +4,15 @@ Tests the helper functions and async tool implementations in
 tool_modules/aa_workflow/src/meta_tools.py.
 """
 
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
-from mcp.types import TextContent
+from fastmcp import Context, FastMCP
+from mcp.types import TextContent, Tool
 
+from server.workspace_state import ChatSession, WorkspaceRegistry, WorkspaceState
 from tool_modules.aa_workflow.src import meta_tools as mt
 from tool_modules.aa_workflow.src import skill_engine as se
 
@@ -479,7 +482,6 @@ class TestRegisterMetaTools:
 
     def test_registers_tools(self):
         """Test that register_meta_tools returns a count."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-meta")
         count = mt.register_meta_tools(server)
@@ -487,7 +489,6 @@ class TestRegisterMetaTools:
 
     def test_registers_expected_tools(self):
         """Test that expected tools are registered."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-meta")
         count = mt.register_meta_tools(server)
@@ -503,7 +504,6 @@ class TestContextFilterLogic:
     @pytest.mark.asyncio
     async def test_tool_filter_not_available(self):
         """Test context_filter returns warning when filter not available."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ctx-filter")
         with patch.object(mt, "TOOL_FILTER_AVAILABLE", False):
@@ -515,7 +515,6 @@ class TestContextFilterLogic:
     @pytest.mark.asyncio
     async def test_tool_filter_available_success(self):
         """Test context_filter with mocked filter."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ctx-filter2")
 
@@ -565,7 +564,6 @@ class TestContextFilterLogic:
     @pytest.mark.asyncio
     async def test_tool_filter_error(self):
         """Test context_filter handles errors."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ctx-err")
 
@@ -587,7 +585,6 @@ class TestToolGapsList:
 
     @pytest.mark.asyncio
     async def test_no_gaps(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gaps")
         mt.register_meta_tools(server)
@@ -625,7 +622,6 @@ class TestToolGapsList:
 
     @pytest.mark.asyncio
     async def test_gaps_error(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gaps-err")
         mt.register_meta_tools(server)
@@ -649,7 +645,6 @@ class TestToolGapUpdate:
 
     @pytest.mark.asyncio
     async def test_invalid_status(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gap-update")
         mt.register_meta_tools(server)
@@ -670,7 +665,6 @@ class TestApplyToolFilter:
     @pytest.mark.asyncio
     async def test_not_available(self):
         """Test when tool filter is not available."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-apply-filter")
         with patch.object(mt, "TOOL_FILTER_AVAILABLE", False):
@@ -682,7 +676,6 @@ class TestApplyToolFilter:
     @pytest.mark.asyncio
     async def test_apply_filter_error(self):
         """Test apply_tool_filter handles internal errors gracefully."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-apply-filter-err")
         with (
@@ -706,7 +699,6 @@ class TestApplyToolFilterFull:
     @pytest.mark.asyncio
     async def test_apply_filter_full_path(self):
         """Test apply_tool_filter full path with mocked server/filter."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-apply-full")
 
@@ -720,17 +712,17 @@ class TestApplyToolFilterFull:
         }
 
         # Create a mock tool object
-        mock_tool = MagicMock()
+        mock_tool = MagicMock(spec=Tool)
         mock_tool.name = "extra_tool"
 
-        mock_server_inner = MagicMock()
+        mock_server_inner = MagicMock(spec=FastMCP)
         mock_server_inner.list_tools = AsyncMock(return_value=[mock_tool])
         mock_server_inner.remove_tool = MagicMock()
 
-        mock_session = MagicMock()
+        mock_session = MagicMock()  # MCP protocol session, not ChatSession
         mock_session.send_tool_list_changed = AsyncMock()
 
-        mock_ctx = MagicMock()
+        mock_ctx = MagicMock(spec=Context)
         mock_ctx._fastmcp = mock_server_inner
         mock_ctx.session = mock_session
 
@@ -758,7 +750,6 @@ class TestApplyToolFilterFull:
     @pytest.mark.asyncio
     async def test_apply_filter_no_ctx(self):
         """Test apply_tool_filter when ctx is falsy."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-apply-noctx")
         with patch.object(mt, "TOOL_FILTER_AVAILABLE", True):
@@ -771,7 +762,6 @@ class TestApplyToolFilterFull:
     @pytest.mark.asyncio
     async def test_apply_filter_with_real_ctx(self):
         """Test apply_tool_filter through server.call_tool with mocked filter."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-apply-realctx")
 
@@ -810,7 +800,6 @@ class TestWorkspaceStateExport:
     @pytest.mark.asyncio
     async def test_export_error(self):
         """Test workspace_state_export handles import error."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ws-export")
         mt.register_meta_tools(server)
@@ -823,7 +812,6 @@ class TestWorkspaceStateExport:
     @pytest.mark.asyncio
     async def test_export_success(self):
         """Test workspace_state_export with success result."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ws-export-ok")
         mt.register_meta_tools(server)
@@ -847,7 +835,6 @@ class TestWorkspaceStateExport:
     @pytest.mark.asyncio
     async def test_export_failure(self):
         """Test workspace_state_export with failure result."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-ws-export-fail")
         mt.register_meta_tools(server)
@@ -877,7 +864,6 @@ class TestSessionInfoTool:
     @pytest.mark.asyncio
     async def test_no_session(self):
         """Test session_info with no active session."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-session-info")
         mt.register_meta_tools(server)
@@ -981,7 +967,6 @@ class TestContextFilterFormatting:
     @pytest.mark.asyncio
     async def test_context_filter_with_no_skill(self):
         """Test context_filter when no skill is detected."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-cf-noskill")
 
@@ -1014,7 +999,6 @@ class TestContextFilterFormatting:
     @pytest.mark.asyncio
     async def test_context_filter_with_memory_state(self):
         """Test context_filter shows memory state."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-cf-mem")
 
@@ -1054,7 +1038,6 @@ class TestContextFilterFormatting:
     @pytest.mark.asyncio
     async def test_context_filter_with_patterns_and_semantic(self):
         """Test context_filter shows learned patterns and semantic knowledge."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-cf-patterns")
 
@@ -1099,7 +1082,6 @@ class TestContextFilterFormatting:
     @pytest.mark.asyncio
     async def test_context_filter_with_empty_memory_state(self):
         """Test context_filter when no active work context."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-cf-empty-mem")
 
@@ -1136,7 +1118,6 @@ class TestContextFilterFormatting:
     @pytest.mark.asyncio
     async def test_context_filter_tool_grouping(self):
         """Test context_filter groups tools by prefix."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-cf-groups")
 
@@ -1176,7 +1157,6 @@ class TestToolExecViaServer:
 
     @pytest.mark.asyncio
     async def test_tool_exec_unknown(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-exec-unknown")
         mt.register_meta_tools(server)
@@ -1187,7 +1167,6 @@ class TestToolExecViaServer:
 
     @pytest.mark.asyncio
     async def test_tool_exec_bad_json(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-exec-badjson")
         mt.register_meta_tools(server)
@@ -1200,7 +1179,6 @@ class TestToolExecViaServer:
 
     @pytest.mark.asyncio
     async def test_tool_list_via_server(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-list-server")
         mt.register_meta_tools(server)
@@ -1219,7 +1197,6 @@ class TestToolGapErrorPaths:
     @pytest.mark.asyncio
     async def test_gaps_list_import_error(self):
         """Test tool_gaps_list when tool_gap_detector cannot be imported."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gap-ie")
         mt.register_meta_tools(server)
@@ -1235,7 +1212,6 @@ class TestToolGapErrorPaths:
     @pytest.mark.asyncio
     async def test_gap_update_import_error(self):
         """Test tool_gap_update when tool_gap_detector cannot be imported."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gap-upd-ie")
         mt.register_meta_tools(server)
@@ -1255,7 +1231,6 @@ class TestToolGapUpdateViaServer:
 
     @pytest.mark.asyncio
     async def test_gap_update_success(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gap-upd-ok")
         mt.register_meta_tools(server)
@@ -1275,7 +1250,6 @@ class TestToolGapUpdateViaServer:
 
     @pytest.mark.asyncio
     async def test_gap_update_not_found(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gap-upd-nf")
         mt.register_meta_tools(server)
@@ -1302,7 +1276,6 @@ class TestToolGapsListViaServer:
 
     @pytest.mark.asyncio
     async def test_gaps_list_with_results(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gaps-list-ok")
         mt.register_meta_tools(server)
@@ -1332,7 +1305,6 @@ class TestToolGapsListViaServer:
 
     @pytest.mark.asyncio
     async def test_gaps_list_empty(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-gaps-list-empty")
         mt.register_meta_tools(server)
@@ -1379,7 +1351,7 @@ class TestHandleToolExecErrorEdge:
 
 def _make_mock_workspace(session_id="test-session-123"):
     """Create a mock workspace with a session for testing."""
-    mock_session = MagicMock()
+    mock_session = MagicMock(spec=ChatSession)
     mock_session.session_id = session_id
     mock_session.persona = "developer"
     mock_session.project = "test-project"
@@ -1387,9 +1359,9 @@ def _make_mock_workspace(session_id="test-session-123"):
     mock_session.issue_key = "AAP-123"
     mock_session.branch = "feature/test"
     mock_session.name = "Test Session"
-    mock_session.started_at = MagicMock()
+    mock_session.started_at = MagicMock(spec=datetime)
     mock_session.started_at.isoformat.return_value = "2025-01-01T00:00:00"
-    mock_session.last_activity = MagicMock()
+    mock_session.last_activity = MagicMock(spec=datetime)
     mock_session.last_activity.isoformat.return_value = "2025-01-01T01:00:00"
     mock_session.last_tool = "git_status"
     mock_session.last_tool_time = None
@@ -1397,7 +1369,7 @@ def _make_mock_workspace(session_id="test-session-123"):
     mock_session.tool_count = 10
     mock_session.touch = MagicMock()
 
-    mock_workspace = MagicMock()
+    mock_workspace = MagicMock(spec=WorkspaceState)
     mock_workspace.workspace_uri = "file:///test"
     mock_workspace.project = "test-project"
     mock_workspace.sessions = {session_id: mock_session}
@@ -1418,13 +1390,12 @@ class TestSessionInfoViaServer:
 
     @pytest.mark.asyncio
     async def test_session_info_active_session(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-si")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1437,14 +1408,12 @@ class TestSessionInfoViaServer:
         """Test session_info shows 'just now' for recent tool calls."""
         from datetime import datetime
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-si-recent")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
         mock_session.last_tool_time = datetime.now()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1457,14 +1426,12 @@ class TestSessionInfoViaServer:
         """Test session_info shows 'hours ago' for older tool calls."""
         from datetime import datetime, timedelta
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-si-hours")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
         mock_session.last_tool_time = datetime.now() - timedelta(hours=3)
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1477,14 +1444,12 @@ class TestSessionInfoViaServer:
         """Test session_info shows 'min ago' for medium-age tool calls."""
         from datetime import datetime, timedelta
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-si-min")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
         mock_session.last_tool_time = datetime.now() - timedelta(minutes=15)
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1495,7 +1460,6 @@ class TestSessionInfoViaServer:
     @pytest.mark.asyncio
     async def test_session_info_no_issue_no_branch(self):
         """Test session_info without issue_key or branch."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-si-bare")
         mt.register_meta_tools(server)
@@ -1505,7 +1469,7 @@ class TestSessionInfoViaServer:
         mock_session.branch = None
         mock_session.last_tool = None
         mock_session.name = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1515,13 +1479,12 @@ class TestSessionInfoViaServer:
 
     @pytest.mark.asyncio
     async def test_session_info_with_session_id(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-si-id")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1533,13 +1496,12 @@ class TestSessionInfoViaServer:
 
     @pytest.mark.asyncio
     async def test_session_info_not_found(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-si-nf")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1551,14 +1513,13 @@ class TestSessionInfoViaServer:
 
     @pytest.mark.asyncio
     async def test_session_info_no_active(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-si-none")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
         mock_ws.get_active_session.return_value = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1572,13 +1533,12 @@ class TestSessionRenameViaServer:
 
     @pytest.mark.asyncio
     async def test_rename_active_session(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sr")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1589,14 +1549,13 @@ class TestSessionRenameViaServer:
 
     @pytest.mark.asyncio
     async def test_rename_no_session(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sr-none")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
         mock_ws.get_active_session.return_value = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1606,13 +1565,12 @@ class TestSessionRenameViaServer:
 
     @pytest.mark.asyncio
     async def test_rename_specific_session_not_found(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sr-nf")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1630,14 +1588,12 @@ class TestSessionListViaServer:
     async def test_list_sessions(self):
         from datetime import datetime
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-sl")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
         mock_session.last_activity = datetime.now()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1647,7 +1603,6 @@ class TestSessionListViaServer:
 
     @pytest.mark.asyncio
     async def test_list_empty_sessions(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sl-empty")
         mt.register_meta_tools(server)
@@ -1655,7 +1610,7 @@ class TestSessionListViaServer:
         mock_ws, _ = _make_mock_workspace()
         mock_ws.sessions = {}
         mock_ws.get_active_session.return_value = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1668,8 +1623,6 @@ class TestSessionListViaServer:
         """Test session_list time_ago for older sessions."""
         from datetime import datetime, timedelta
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-sl-old")
         mt.register_meta_tools(server)
 
@@ -1679,7 +1632,7 @@ class TestSessionListViaServer:
         mock_session.tool_call_count = 12
         mock_session.issue_key = "AAP-999"
         mock_session.name = "Old Session"
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1692,8 +1645,6 @@ class TestSessionListViaServer:
         """Test session_list with unnamed sessions."""
         from datetime import datetime
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-sl-noname")
         mt.register_meta_tools(server)
 
@@ -1702,7 +1653,7 @@ class TestSessionListViaServer:
         mock_session.name = None
         mock_session.last_tool = None
         mock_session.issue_key = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1715,15 +1666,13 @@ class TestSessionListViaServer:
         """Test session_list shows 'days ago' for old sessions."""
         from datetime import datetime, timedelta
 
-        from fastmcp import FastMCP
-
         server = FastMCP("test-sl-days")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
         mock_session.last_activity = datetime.now() - timedelta(days=3)
         mock_session.name = "Old session"
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1737,13 +1686,12 @@ class TestSessionSwitchViaServer:
 
     @pytest.mark.asyncio
     async def test_switch_to_session(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sw")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1756,13 +1704,12 @@ class TestSessionSwitchViaServer:
 
     @pytest.mark.asyncio
     async def test_switch_not_found(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sw-nf")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
 
         with patch("server.workspace_state.WorkspaceRegistry", mock_registry):
@@ -1775,7 +1722,6 @@ class TestSessionSwitchViaServer:
     @pytest.mark.asyncio
     async def test_switch_with_all_details(self):
         """Test switch shows issue, branch, and last tool."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sw-det")
         mt.register_meta_tools(server)
@@ -1785,7 +1731,7 @@ class TestSessionSwitchViaServer:
         mock_session.branch = "feat/x"
         mock_session.last_tool = "git_status"
         mock_session.name = "Named"
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1799,7 +1745,6 @@ class TestSessionSwitchViaServer:
     @pytest.mark.asyncio
     async def test_switch_without_details(self):
         """Test switch with session that has no issue/branch/last_tool."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sw-bare")
         mt.register_meta_tools(server)
@@ -1809,7 +1754,7 @@ class TestSessionSwitchViaServer:
         mock_session.branch = None
         mock_session.last_tool = None
         mock_session.name = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1826,7 +1771,6 @@ class TestSessionSyncViaServer:
 
     @pytest.mark.asyncio
     async def test_sync_no_changes(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sync")
         mt.register_meta_tools(server)
@@ -1837,7 +1781,7 @@ class TestSessionSyncViaServer:
             "removed": 0,
             "renamed": 0,
         }
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1854,7 +1798,6 @@ class TestSessionSyncViaServer:
 
     @pytest.mark.asyncio
     async def test_sync_with_changes(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-sync-ch")
         mt.register_meta_tools(server)
@@ -1865,7 +1808,7 @@ class TestSessionSyncViaServer:
             "removed": 1,
             "renamed": 1,
         }
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.save_to_disk = MagicMock()
 
@@ -1886,13 +1829,12 @@ class TestWorkspaceStateListViaServer:
 
     @pytest.mark.asyncio
     async def test_list_workspaces(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-wsl")
         mt.register_meta_tools(server)
 
         mock_ws, mock_session = _make_mock_workspace()
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.get_all.return_value = {"file:///test": mock_ws}
 
@@ -1903,14 +1845,13 @@ class TestWorkspaceStateListViaServer:
 
     @pytest.mark.asyncio
     async def test_list_no_workspaces(self):
-        from fastmcp import FastMCP
 
         server = FastMCP("test-wsl-empty")
         mt.register_meta_tools(server)
 
         mock_ws, _ = _make_mock_workspace()
         mock_ws.get_active_session.return_value = None
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.get_all.return_value = {}
 
@@ -1922,7 +1863,6 @@ class TestWorkspaceStateListViaServer:
     @pytest.mark.asyncio
     async def test_list_with_session_details(self):
         """Test workspace list shows session issue/branch/tools details."""
-        from fastmcp import FastMCP
 
         server = FastMCP("test-wsl-details")
         mt.register_meta_tools(server)
@@ -1931,7 +1871,7 @@ class TestWorkspaceStateListViaServer:
         mock_session.issue_key = "AAP-500"
         mock_session.branch = "feat/branch"
         mock_session.tool_count = 15
-        mock_registry = MagicMock()
+        mock_registry = MagicMock(spec=WorkspaceRegistry)
         mock_registry.get_for_ctx = AsyncMock(return_value=mock_ws)
         mock_registry.get_all.return_value = {"file:///test": mock_ws}
 

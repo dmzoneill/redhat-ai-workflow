@@ -5325,7 +5325,7 @@ class TestExecToolErrorRecoveryRetry:
         ex = _make_executor(debug=True)
         ex.start_time = time.time()
         ex._get_module_for_tool = MagicMock(return_value="somemod")
-        temp_server = MagicMock()
+        temp_server = MagicMock(spec=FastMCP)
         ex._load_and_execute_module_tool = AsyncMock(
             return_value={
                 "success": False,

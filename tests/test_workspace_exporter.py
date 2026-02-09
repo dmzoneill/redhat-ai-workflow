@@ -5,6 +5,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
+from fastmcp import Context
+
+from server.workspace_state import WorkspaceState
 
 # ==================== Helper to import with mocked server.paths ====================
 
@@ -366,8 +369,8 @@ class TestExportWorkspaceStateAsync:
             with patch(
                 "tool_modules.aa_workflow.src.workspace_exporter.export_workspace_state"
             ) as mock_export:
-                ctx = MagicMock()
-                state = MagicMock()
+                ctx = MagicMock(spec=Context)
+                state = MagicMock(spec=WorkspaceState)
                 state.workspace_uri = "file:///test"
                 state.project = "test-project"
                 mock_registry.get_for_ctx = AsyncMock(return_value=state)

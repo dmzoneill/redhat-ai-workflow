@@ -20,7 +20,7 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
-from server.http_client import alertmanager_client, grafana_client
+from server.http_client import grafana_client
 from server.tool_registry import ToolRegistry
 from server.utils import (
     get_bearer_token,
@@ -29,49 +29,9 @@ from server.utils import (
     get_service_url,
 )
 
-# Setup project path for server imports
-
+from .common import alertmanager_request, get_alertmanager_config
 
 logger = logging.getLogger(__name__)
-
-
-# Using shared utilities: get_service_url, get_bearer_token, get_env_config
-
-
-async def alertmanager_request(
-    url: str,
-    endpoint: str,
-    method: str = "GET",
-    data: dict | None = None,
-    token: str | None = None,
-    timeout: int = 30,
-) -> tuple[bool, dict | str]:
-    """Make a request to Alertmanager API using shared HTTP client."""
-    client = alertmanager_client(url, token, timeout)
-    try:
-        if method == "GET":
-            return await client.get(endpoint)
-        elif method == "POST":
-            return await client.post(endpoint, json=data)
-        elif method == "DELETE":
-            return await client.delete(endpoint)
-        else:
-            return False, f"Unsupported method: {method}"
-    finally:
-        await client.close()
-
-
-async def get_alertmanager_config(environment: str) -> tuple[str, str | None]:
-    """Get URL and token for Alertmanager environment.
-
-    Uses shared utilities from server for config loading.
-    Auto-refreshes auth if credentials are stale.
-    """
-    url = get_service_url("alertmanager", environment)
-    env_config = get_env_config(environment, "alertmanager")
-    kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
-    token = await get_bearer_token(kubeconfig, environment=environment, auto_auth=True)
-    return url, token
 
 
 async def get_grafana_config(environment: str) -> tuple[str, str | None]:

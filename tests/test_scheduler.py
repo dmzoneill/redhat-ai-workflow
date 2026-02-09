@@ -6,6 +6,8 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import pytest
+from apscheduler.job import Job
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # We need to mock heavy imports before importing the module
 with (
@@ -553,7 +555,7 @@ class TestCronScheduler:
     async def test_start_disabled(self):
         sched = self._make_scheduler(enabled=False)
         with patch.object(sched, "_create_scheduler") as mock_create:
-            mock_ap = MagicMock()
+            mock_ap = MagicMock(spec=AsyncIOScheduler)
             mock_create.return_value = mock_ap
             with patch("tool_modules.aa_workflow.src.scheduler.CONFIG_FILE") as mock_cf:
                 mock_cf.exists.return_value = False
@@ -568,7 +570,7 @@ class TestCronScheduler:
             jobs=[{"name": "j1", "cron": "0 * * * *", "skill": "s1"}],
         )
         with patch.object(sched, "_create_scheduler") as mock_create:
-            mock_ap = MagicMock()
+            mock_ap = MagicMock(spec=AsyncIOScheduler)
             mock_create.return_value = mock_ap
             with patch("tool_modules.aa_workflow.src.scheduler.CONFIG_FILE") as mock_cf:
                 mock_cf.exists.return_value = False
@@ -587,7 +589,7 @@ class TestCronScheduler:
     async def test_start_no_cron_jobs(self):
         sched = self._make_scheduler(enabled=True)
         with patch.object(sched, "_create_scheduler") as mock_create:
-            mock_ap = MagicMock()
+            mock_ap = MagicMock(spec=AsyncIOScheduler)
             mock_create.return_value = mock_ap
             with patch("tool_modules.aa_workflow.src.scheduler.CONFIG_FILE") as mock_cf:
                 mock_cf.exists.return_value = False
@@ -598,7 +600,7 @@ class TestCronScheduler:
     async def test_stop(self):
         sched = self._make_scheduler()
         sched._running = True
-        sched.scheduler = MagicMock()
+        sched.scheduler = MagicMock(spec=AsyncIOScheduler)
         await sched.stop()
         assert sched._running is False
         sched.scheduler.shutdown.assert_called_once_with(wait=True)
@@ -619,21 +621,21 @@ class TestCronScheduler:
 
     def test_add_cron_job_missing_skill(self):
         sched = self._make_scheduler()
-        sched.scheduler = MagicMock()
+        sched.scheduler = MagicMock(spec=AsyncIOScheduler)
         sched._add_cron_job({"name": "j", "cron": "0 * * * *"})
         sched.scheduler.add_job.assert_not_called()
         assert True
 
     def test_add_cron_job_missing_cron(self):
         sched = self._make_scheduler()
-        sched.scheduler = MagicMock()
+        sched.scheduler = MagicMock(spec=AsyncIOScheduler)
         sched._add_cron_job({"name": "j", "skill": "s"})
         sched.scheduler.add_job.assert_not_called()
         assert True
 
     def test_add_cron_job_success(self):
         sched = self._make_scheduler()
-        sched.scheduler = MagicMock()
+        sched.scheduler = MagicMock(spec=AsyncIOScheduler)
         sched._add_cron_job(
             {
                 "name": "morning",
@@ -650,7 +652,7 @@ class TestCronScheduler:
 
     def test_add_cron_job_bad_cron(self):
         sched = self._make_scheduler()
-        sched.scheduler = MagicMock()
+        sched.scheduler = MagicMock(spec=AsyncIOScheduler)
         sched._add_cron_job({"name": "bad", "skill": "s", "cron": "not valid"})
         # Test verifies no exception is raised (bad cron logged)
         assert True
@@ -673,11 +675,11 @@ class TestCronScheduler:
                 }
 
                 sched = CronScheduler()
-                mock_job1 = MagicMock()
+                mock_job1 = MagicMock(spec=Job)
                 mock_job1.id = "old_job"
-                mock_job2 = MagicMock()
+                mock_job2 = MagicMock(spec=Job)
                 mock_job2.id = "_config_watcher"
-                sched.scheduler = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
                 sched.scheduler.get_jobs.return_value = [mock_job1, mock_job2]
 
                 sched.reload_config()
@@ -749,9 +751,9 @@ class TestCronScheduler:
                 sched._running = True
                 sched.check_config_changed = MagicMock(return_value=True)
                 sched.config.enabled = True  # was enabled
-                sched.scheduler = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
 
-                mock_job = MagicMock()
+                mock_job = MagicMock(spec=Job)
                 mock_job.id = "some_job"
                 sched.scheduler.get_jobs.return_value = [mock_job]
 
@@ -779,7 +781,7 @@ class TestCronScheduler:
                 sched.check_config_changed = MagicMock(return_value=True)
                 sched.config.enabled = False  # was disabled
 
-                sched.scheduler = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
                 sched.scheduler.get_jobs.return_value = []
 
                 with patch(
@@ -856,7 +858,7 @@ class TestCronScheduler:
                 mock_sm.is_job_enabled.return_value = True
                 mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
                 sched = CronScheduler()
-                sched.scheduler = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
                 sched.scheduler.get_job.return_value = None
                 assert sched.get_job_info("j1") is None
 
@@ -882,8 +884,8 @@ class TestCronScheduler:
                     }
                 }
                 sched = CronScheduler()
-                sched.scheduler = MagicMock()
-                mock_job = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
+                mock_job = MagicMock(spec=Job)
                 mock_job.next_run_time = datetime(2025, 1, 1, 8, 0)
                 sched.scheduler.get_job.return_value = mock_job
 
@@ -904,8 +906,8 @@ class TestCronScheduler:
                 mock_sm.is_service_enabled.return_value = True
                 mock_cm.get_all.return_value = {"schedules": {"jobs": []}}
                 sched = CronScheduler()
-                sched.scheduler = MagicMock()
-                mock_job = MagicMock()
+                sched.scheduler = MagicMock(spec=AsyncIOScheduler)
+                mock_job = MagicMock(spec=Job)
                 mock_job.next_run_time = None
                 sched.scheduler.get_job.return_value = mock_job
 
@@ -1016,7 +1018,7 @@ class TestCronScheduler:
 
                 sched = CronScheduler()
                 sched._run_skill = AsyncMock(return_value="done")
-                sched.execution_log = MagicMock()
+                sched.execution_log = MagicMock(spec=JobExecutionLog)
 
                 with patch(
                     "tool_modules.aa_workflow.src.scheduler.notify_cron_job_started",
@@ -1046,7 +1048,7 @@ class TestCronScheduler:
 
                 sched = CronScheduler()
                 sched._run_skill = AsyncMock(side_effect=RuntimeError("broken"))
-                sched.execution_log = MagicMock()
+                sched.execution_log = MagicMock(spec=JobExecutionLog)
 
                 rc = RetryConfig(enabled=False)
                 await sched._execute_job("j1", "s1", {}, [], retry_config=rc)
@@ -1071,7 +1073,7 @@ class TestCronScheduler:
                 callback = AsyncMock()
                 sched = CronScheduler(notification_callback=callback)
                 sched._run_skill = AsyncMock(return_value="done")
-                sched.execution_log = MagicMock()
+                sched.execution_log = MagicMock(spec=JobExecutionLog)
 
                 await sched._execute_job("j1", "s1", {}, ["slack"])
 
@@ -1100,7 +1102,7 @@ class TestCronScheduler:
     @pytest.mark.asyncio
     async def test_run_kube_login_success(self):
         sched = self._make_scheduler()
-        mock_proc = MagicMock()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
         mock_proc.returncode = 0
         mock_proc.communicate = AsyncMock(return_value=(b"Logged in", b""))
 
@@ -1159,7 +1161,7 @@ class TestCronScheduler:
         sched = self._make_scheduler()
         sched._log_to_file = MagicMock()
 
-        mock_proc = MagicMock()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
         mock_proc.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -1178,7 +1180,7 @@ class TestCronScheduler:
         sched._log_to_file = MagicMock()
         sched._cleanup_skill_execution_state = MagicMock()
 
-        mock_proc = MagicMock()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
         mock_proc.kill = MagicMock()
         mock_proc.wait = AsyncMock()
 
@@ -1210,7 +1212,7 @@ class TestCronScheduler:
         sched = self._make_scheduler()
         sched._log_to_file = MagicMock()
 
-        mock_proc = MagicMock()
+        mock_proc = MagicMock(spec=asyncio.subprocess.Process)
         mock_proc.returncode = 1
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
@@ -1234,7 +1236,7 @@ class TestModuleFunctions:
             assert get_scheduler() is None
 
     def test_get_scheduler_exists(self):
-        mock_sched_instance = MagicMock()
+        mock_sched_instance = MagicMock(spec=CronScheduler)
         with patch(
             "tool_modules.aa_workflow.src.scheduler._scheduler", mock_sched_instance
         ):
@@ -1264,7 +1266,7 @@ class TestModuleFunctions:
             with patch("tool_modules.aa_workflow.src.scheduler_config.config_manager"):
                 import tool_modules.aa_workflow.src.scheduler as smod
 
-                existing = MagicMock()
+                existing = MagicMock(spec=CronScheduler)
                 smod._scheduler = existing
 
                 result = init_scheduler()
@@ -1283,7 +1285,7 @@ class TestModuleFunctions:
     async def test_start_scheduler_with_instance(self):
         import tool_modules.aa_workflow.src.scheduler as smod
 
-        mock_sched = MagicMock()
+        mock_sched = MagicMock(spec=CronScheduler)
         mock_sched.start = AsyncMock()
         smod._scheduler = mock_sched
         await start_scheduler(add_cron_jobs=False)
@@ -1303,7 +1305,7 @@ class TestModuleFunctions:
     async def test_stop_scheduler_with_instance(self):
         import tool_modules.aa_workflow.src.scheduler as smod
 
-        mock_sched = MagicMock()
+        mock_sched = MagicMock(spec=CronScheduler)
         mock_sched.stop = AsyncMock()
         smod._scheduler = mock_sched
         await stop_scheduler()

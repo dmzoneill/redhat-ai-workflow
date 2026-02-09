@@ -4,7 +4,9 @@ import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
+from fastmcp import FastMCP
 
 from tool_modules.aa_workflow.src.tools_basic import (
     _ISSUE_DEDUP_SECONDS,
@@ -189,7 +191,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 201
             mock_response.json.return_value = {
                 "html_url": "https://github.com/test/issues/1"
@@ -220,7 +222,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 403
             mock_response.text = "Forbidden"
 
@@ -274,7 +276,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 201
             mock_response.json.return_value = {
                 "html_url": "https://github.com/test/issues/2"
@@ -358,7 +360,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 201
             mock_response.json.return_value = {
                 "html_url": "https://github.com/test/issues/3"
@@ -390,7 +392,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 201
             mock_response.json.return_value = {
                 "html_url": "https://github.com/test/issues/4"
@@ -422,7 +424,7 @@ class TestCreateGithubIssue:
         try:
             tb._recent_issues.clear()
 
-            mock_response = MagicMock()
+            mock_response = MagicMock(spec=httpx.Response)
             mock_response.status_code = 201
             mock_response.json.return_value = {
                 "html_url": "https://github.com/test/issues/5"
@@ -543,7 +545,7 @@ class TestRegisterTools:
         ]
 
     def test_returns_positive_count(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         from contextlib import ExitStack
 
         with ExitStack() as stack:
@@ -554,7 +556,7 @@ class TestRegisterTools:
         assert count > 0
 
     def test_handles_import_error_for_unified_memory(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         from contextlib import ExitStack
 
         with ExitStack() as stack:

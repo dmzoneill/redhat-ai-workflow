@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import FastMCP
 
 from tool_modules.aa_workflow.src.memory_unified import (
     _get_memory_interface,
@@ -23,7 +24,7 @@ def _capture_tools():
 
         return decorator
 
-    mock_server = MagicMock()
+    mock_server = MagicMock(spec=FastMCP)
     # Make server.tool() return a pass-through decorator
     mock_server.tool.return_value = lambda fn: fn
 

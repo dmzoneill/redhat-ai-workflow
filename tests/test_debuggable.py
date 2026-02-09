@@ -5,6 +5,7 @@ from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import FastMCP
 from mcp.types import TextContent
 
 from server.debuggable import (
@@ -378,7 +379,7 @@ class TestSearchForTool:
 
 class TestRegisterDebugTool:
     def test_registers_tool_on_server(self):
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         # mock_server.tool() should return a decorator
         mock_server.tool.return_value = lambda fn: fn
         register_debug_tool(mock_server)
@@ -388,7 +389,7 @@ class TestRegisterDebugTool:
     @pytest.mark.asyncio
     async def test_debug_tool_not_found(self):
         """When tool_name is not in registry, returns error."""
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         registered_fn = None
 
         def capture(fn):
@@ -414,7 +415,7 @@ class TestRegisterDebugTool:
             "func_name": "test_found",
         }
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         registered_fn = None
 
         def capture(fn):
@@ -442,7 +443,7 @@ class TestRegisterDebugTool:
             "func_name": "test_no_err",
         }
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         registered_fn = None
 
         def capture(fn):
@@ -486,7 +487,7 @@ class TestWrapAllTools:
         mod = ModuleType("test_tools")
         mod.__file__ = str(mod_file)
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         count = wrap_all_tools(mock_server, mod)
 
         assert count == 1  # Only public_tool, not _private or sync_func
@@ -507,7 +508,7 @@ class TestWrapAllTools:
         mod = ModuleType("test_tools")
         mod.__file__ = str(mod_file)
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         count = wrap_all_tools(mock_server, mod)
         assert count == 0  # Already registered, should skip
 
@@ -515,7 +516,7 @@ class TestWrapAllTools:
         mod = ModuleType("unreadable_mod")
         mod.__file__ = "/nonexistent/module.py"
 
-        mock_server = MagicMock()
+        mock_server = MagicMock(spec=FastMCP)
         count = wrap_all_tools(mock_server, mod)
         assert count == 0
 
@@ -533,7 +534,7 @@ class TestWrapServerToolsRuntime:
         provider = MagicMock()
         provider._components = {"tool:my_tool@": tool_info}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         count = wrap_server_tools_runtime(server)
@@ -548,7 +549,7 @@ class TestWrapServerToolsRuntime:
         provider = MagicMock()
         provider._components = {"tool:debug_tool@": tool_info}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         original_fn = tool_info.fn
@@ -563,7 +564,7 @@ class TestWrapServerToolsRuntime:
         provider = MagicMock()
         provider._components = {"tool:_internal@": tool_info}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         count = wrap_server_tools_runtime(server)
@@ -573,7 +574,7 @@ class TestWrapServerToolsRuntime:
         provider = MagicMock()
         provider._components = {"resource:some_resource@": MagicMock()}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         count = wrap_server_tools_runtime(server)
@@ -582,14 +583,14 @@ class TestWrapServerToolsRuntime:
     def test_skips_provider_without_components(self):
         provider = MagicMock(spec=[])  # No _components attribute
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         count = wrap_server_tools_runtime(server)
         assert count == 0
 
     def test_no_providers(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = []
 
         count = wrap_server_tools_runtime(server)
@@ -601,7 +602,7 @@ class TestWrapServerToolsRuntime:
         provider = MagicMock()
         provider._components = {"tool:nofn@": tool_info}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         count = wrap_server_tools_runtime(server)

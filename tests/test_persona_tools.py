@@ -4,6 +4,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import Context, FastMCP
+
+from server.workspace_state import WorkspaceRegistry
 
 # ==================== _list_personas_impl ====================
 
@@ -141,7 +144,7 @@ class TestLoadPersonaImpl:
     async def test_dynamic_load_success(self):
         from tool_modules.aa_workflow.src.persona_tools import _load_persona_impl
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
 
         with patch("tool_modules.aa_workflow.src.persona_tools.PERSONAS_DIR"):
             with patch("tool_modules.aa_workflow.src.persona_tools.sys") as mock_sys:
@@ -167,7 +170,7 @@ class TestLoadPersonaImpl:
     async def test_dynamic_load_failure(self):
         from tool_modules.aa_workflow.src.persona_tools import _load_persona_impl
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
 
         with patch("tool_modules.aa_workflow.src.persona_tools.PERSONAS_DIR"):
             with patch("server.persona_loader.get_loader") as mock_get_loader:
@@ -188,7 +191,7 @@ class TestLoadPersonaImpl:
     async def test_fallback_static_mode(self):
         from tool_modules.aa_workflow.src.persona_tools import _load_persona_impl
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
 
         with patch(
             "tool_modules.aa_workflow.src.persona_tools.PERSONAS_DIR"
@@ -214,7 +217,7 @@ class TestLoadPersonaImpl:
     async def test_fallback_persona_not_found(self):
         from tool_modules.aa_workflow.src.persona_tools import _load_persona_impl
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
 
         with patch(
             "tool_modules.aa_workflow.src.persona_tools.PERSONAS_DIR"
@@ -235,7 +238,7 @@ class TestLoadPersonaImpl:
     async def test_fallback_read_error(self):
         from tool_modules.aa_workflow.src.persona_tools import _load_persona_impl
 
-        ctx = MagicMock()
+        ctx = MagicMock(spec=Context)
 
         with patch(
             "tool_modules.aa_workflow.src.persona_tools.PERSONAS_DIR"
@@ -263,7 +266,7 @@ class TestRegisterPersonaTools:
     def test_registers_two_tools(self):
         from tool_modules.aa_workflow.src.persona_tools import register_persona_tools
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         # ToolRegistry wraps server.tool - we need to mock that
         server.tool = MagicMock(return_value=lambda fn: fn)
 

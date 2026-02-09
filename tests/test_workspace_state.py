@@ -5,12 +5,15 @@ independent state (project, persona, issue, branch).
 """
 
 import json
+import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastmcp import Context
+from mcp.types import ListRootsResult
 
 from server.persona_loader import PersonaLoader
 from server.workspace_state import (
@@ -264,7 +267,7 @@ class TestWorkspaceRegistry:
         """Test that get_for_ctx creates new state for unknown workspace."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///home/user/project")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -278,7 +281,7 @@ class TestWorkspaceRegistry:
         """Test that get_for_ctx returns existing state for known workspace."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///home/user/project")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -296,13 +299,13 @@ class TestWorkspaceRegistry:
         """Test that different workspaces have isolated state."""
         mock_ctx1 = MagicMock(spec=Context)
         mock_ctx1.session = AsyncMock()
-        mock_roots1 = MagicMock()
+        mock_roots1 = MagicMock(spec=ListRootsResult)
         mock_roots1.roots = [MagicMock(uri="file:///workspace1")]
         mock_ctx1.session.list_roots = AsyncMock(return_value=mock_roots1)
 
         mock_ctx2 = MagicMock(spec=Context)
         mock_ctx2.session = AsyncMock()
-        mock_roots2 = MagicMock()
+        mock_roots2 = MagicMock(spec=ListRootsResult)
         mock_roots2.roots = [MagicMock(uri="file:///workspace2")]
         mock_ctx2.session.list_roots = AsyncMock(return_value=mock_roots2)
 
@@ -367,7 +370,7 @@ class TestWorkspaceRegistry:
         """Test that get_for_ctx auto-creates a session by default."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///auto-session-async")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -539,7 +542,7 @@ class TestProjectDetection:
 
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///home/user/src/auto-detected")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -566,7 +569,7 @@ class TestGetWorkspaceState:
         """Test the convenience function."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///test")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -594,7 +597,7 @@ class TestMultiWorkspaceIntegration:
         """Create a mock context for a workspace."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri=workspace_uri)]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
         return mock_ctx
@@ -1546,7 +1549,7 @@ class TestWorkspaceRegistryAdvanced:
         """get_for_ctx triggers periodic cleanup after N accesses."""
         mock_ctx = MagicMock(spec=Context)
         mock_ctx.session = AsyncMock()
-        mock_roots = MagicMock()
+        mock_roots = MagicMock(spec=ListRootsResult)
         mock_roots.roots = [MagicMock(uri="file:///cleanup-test")]
         mock_ctx.session.list_roots = AsyncMock(return_value=mock_roots)
 
@@ -3068,7 +3071,7 @@ class TestGetCursorChatInfoFromDb:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")  # Empty file
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 1
         mock_result.stdout = ""
 
@@ -3088,7 +3091,7 @@ class TestGetCursorChatInfoFromDb:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = json.dumps({"allComposers": []})
 
@@ -3108,7 +3111,7 @@ class TestGetCursorChatInfoFromDb:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = json.dumps(
             {
@@ -3135,7 +3138,7 @@ class TestGetCursorChatInfoFromDb:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = json.dumps(
             {
@@ -3263,7 +3266,7 @@ class TestListCursorChats:
             ],
             "lastFocusedComposerIds": ["c2"],
         }
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = json.dumps(composer_data)
 
@@ -3299,7 +3302,7 @@ class TestListCursorChats:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 1
         mock_result.stdout = ""
 
@@ -3393,8 +3396,8 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_finds_issue_keys_in_chat(self):
         """Finds AAP-XXXXX patterns in chat content."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3426,8 +3429,8 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_handles_invalid_json_in_value(self):
         """Handles invalid JSON in database values."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3442,8 +3445,8 @@ class TestGetCursorChatIssueKeysDetailed:
 
     def test_sorts_issue_keys_numerically(self):
         """Issue keys are sorted by numeric part."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3463,8 +3466,8 @@ class TestGetCursorChatIssueKeysDetailed:
         """Handles sqlite3 error for individual chat query."""
         import sqlite3
 
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3487,7 +3490,7 @@ class TestGetCursorChatContentDetailed:
 
     def test_valid_uuid_db_query_fails(self):
         """Returns empty result when DB query fails."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 1
         mock_result.stderr = "error"
 
@@ -3504,7 +3507,7 @@ class TestGetCursorChatContentDetailed:
             {"type": 2, "text": "Hi there! AAP-12345", "createdAt": 1700000001000}
         )
         lines = [f"{bid}:1|{msg1}", f"{bid}:2|{msg2}"]
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "\n".join(lines)
 
@@ -3527,7 +3530,7 @@ class TestGetCursorChatContentDetailed:
             "attachedCodeChunks": [{"filePath": "/src/main.py"}],
         }
         line = f"bubbleId:12345678-1234-5678-1234-567812345678:1|{json.dumps(msg_data)}"
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = line
 
@@ -3549,7 +3552,7 @@ class TestGetCursorChatContentDetailed:
 
     def test_handles_malformed_lines(self):
         """Handles lines without pipe separator."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "no pipe here\n\nsome-key-only"
 
@@ -3567,7 +3570,7 @@ class TestGetCursorChatContentDetailed:
             )
             lines.append(f"bubbleId:12345678-1234-5678-1234-567812345678:{i}|{msg}")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "\n".join(lines)
 
@@ -3592,8 +3595,8 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_detects_persona_load_call(self):
         """Detects persona from persona_load('developer') call."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3609,8 +3612,8 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_detects_agent_parameter(self):
         """Detects persona from agent='devops' in session_start."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3626,8 +3629,8 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_returns_last_persona(self):
         """Returns the last persona loaded (highest bubble_id)."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3644,8 +3647,8 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_ignores_invalid_personas(self):
         """Ignores persona names not in VALID_PERSONAS."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3673,8 +3676,8 @@ class TestGetCursorChatPersonasDetailed:
 
     def test_handles_empty_text(self):
         """Handles entries with empty text field."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3691,8 +3694,8 @@ class TestGetCursorChatPersonasDetailed:
         """Handles sqlite3 error for individual chat query."""
         import sqlite3
 
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3709,8 +3712,8 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_detects_project_from_session_start(self):
         """Detects project from session_start(project='backend') call."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3736,8 +3739,8 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_skips_redhat_ai_workflow(self):
         """Skips 'redhat-ai-workflow' as it's the default workspace."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3771,8 +3774,8 @@ class TestGetCursorChatProjectsDetailed:
 
     def test_config_load_failure_uses_fallback(self):
         """Falls back to hardcoded project list when config fails."""
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
+        mock_conn = MagicMock(spec=sqlite3.Connection)
+        mock_cursor = MagicMock(spec=sqlite3.Cursor)
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_conn.cursor.return_value = mock_cursor
@@ -3803,7 +3806,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_finds_standard_pattern(self):
         """Finds AAP-XXXXX pattern in transcripts."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = (
             "1|||Discussing AAP-12345 today|||Sprint Planning|||2025-01-20T10:00:00"
@@ -3822,7 +3825,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_finds_spoken_pattern(self):
         """Finds spoken patterns like 'issue 12345' or 'ticket 12345'."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = (
             "1|||Let's talk about issue 12345|||Standup|||2025-01-20\n"
@@ -3841,7 +3844,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_filters_by_issue_keys(self):
         """Filters results to specific issue keys when provided."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "1|||AAP-12345 and AAP-99999|||Meeting|||2025-01-20"
 
@@ -3857,7 +3860,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_handles_query_failure(self):
         """Handles subprocess failure gracefully."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 1
         mock_result.stderr = "error"
 
@@ -3883,7 +3886,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_handles_malformed_lines(self):
         """Handles lines with insufficient parts."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "1|||only two parts\n\ninvalid"
 
@@ -3897,7 +3900,7 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_aggregates_matches_across_entries(self):
         """Aggregates match counts across transcript entries."""
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = (
             "1|||AAP-12345 mentioned here|||Sprint|||2025-01-20\n"
@@ -3955,7 +3958,7 @@ class TestInjectContextToCursorChat:
         (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
         (ws_dir / "state.vscdb").write_text("")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 1
         mock_result.stderr = "error"
 

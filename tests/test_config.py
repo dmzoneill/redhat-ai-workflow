@@ -113,7 +113,7 @@ class TestGetTokenFromKubeconfig:
         kubeconfig = tmp_path / "config.s"
         kubeconfig.write_text("dummy")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "sha256~mytoken\n"
 
@@ -129,11 +129,11 @@ class TestGetTokenFromKubeconfig:
         kubeconfig = tmp_path / "config.s"
         kubeconfig.write_text("dummy")
 
-        oc_result = MagicMock()
+        oc_result = MagicMock(spec=subprocess.CompletedProcess)
         oc_result.returncode = 1
         oc_result.stdout = ""
 
-        kubectl_result = MagicMock()
+        kubectl_result = MagicMock(spec=subprocess.CompletedProcess)
         kubectl_result.stdout = "kubectl-token\n"
 
         with patch("subprocess.run", side_effect=[oc_result, kubectl_result]):
@@ -145,14 +145,14 @@ class TestGetTokenFromKubeconfig:
         kubeconfig = tmp_path / "config.s"
         kubeconfig.write_text("dummy")
 
-        oc_result = MagicMock()
+        oc_result = MagicMock(spec=subprocess.CompletedProcess)
         oc_result.returncode = 1
         oc_result.stdout = ""
 
-        kubectl_result = MagicMock()
+        kubectl_result = MagicMock(spec=subprocess.CompletedProcess)
         kubectl_result.stdout = ""
 
-        raw_result = MagicMock()
+        raw_result = MagicMock(spec=subprocess.CompletedProcess)
         raw_result.stdout = "raw-token\n"
 
         with patch(
@@ -176,7 +176,7 @@ class TestGetTokenFromKubeconfig:
         kubeconfig = tmp_path / "config.s"
         kubeconfig.write_text("dummy")
 
-        mock_result = MagicMock()
+        mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "expanded-token\n"
 

@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import FastMCP
 
 from server.main import (
     _get_tool_names_sync,
@@ -18,6 +19,10 @@ from server.main import (
     setup_logging,
     stop_scheduler,
 )
+from server.persona_loader import PersonaLoader
+from server.websocket_server import SkillWebSocketServer
+from tool_modules.aa_workflow.src.poll_engine import PollEngine
+from tool_modules.aa_workflow.src.scheduler import CronScheduler
 
 # ────────────────────────────────────────────────────────────────────
 # setup_logging
@@ -92,20 +97,20 @@ class TestGetToolNamesSync:
             "resource:not_a_tool@": MagicMock(),
         }
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
 
         result = _get_tool_names_sync(server)
         assert result == {"my_tool", "other_tool"}
 
     def test_no_providers(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = []
         assert _get_tool_names_sync(server) == set()
 
     def test_provider_without_components(self):
         provider = MagicMock(spec=[])
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [provider]
         assert _get_tool_names_sync(server) == set()
 
@@ -115,7 +120,7 @@ class TestGetToolNamesSync:
         p2 = MagicMock()
         p2._components = {"tool:b@": MagicMock()}
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = [p1, p2]
 
         assert _get_tool_names_sync(server) == {"a", "b"}
@@ -133,7 +138,7 @@ class TestLoadSingleToolModule:
         tools_file = tools_dir / "tools_basic.py"
         tools_file.write_text("def register_tools(server):\n    pass\n")
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = []
 
         with patch("server.main.get_tools_file_path", return_value=tools_file):
@@ -142,7 +147,7 @@ class TestLoadSingleToolModule:
         assert isinstance(result, list)
 
     def test_missing_tools_file(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         with patch(
             "server.main.get_tools_file_path",
             return_value=Path("/nonexistent/tools.py"),
@@ -156,7 +161,7 @@ class TestLoadSingleToolModule:
         tools_file = tools_dir / "tools.py"
         tools_file.write_text("# no register_tools\nx = 1\n")
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.providers = []
 
         with patch("server.main.get_tools_file_path", return_value=tools_file):
@@ -167,7 +172,7 @@ class TestLoadSingleToolModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("x = 1")
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         with (
             patch("server.main.get_tools_file_path", return_value=tools_file),
             patch("importlib.util.spec_from_file_location", return_value=None),
@@ -186,7 +191,7 @@ class TestRegisterDebugForModule:
         tools_file = tmp_path / "tools.py"
         tools_file.write_text("x = 1")
 
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
 
         with (
             patch("server.main.get_tools_file_path", return_value=tools_file),
@@ -198,7 +203,7 @@ class TestRegisterDebugForModule:
         assert mock_wrap.call_count == 1
 
     def test_skips_missing_file(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
 
         with (
             patch(
@@ -258,7 +263,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             server = create_mcp_server(name="test", tools=["git"])
         assert server is not None
 
@@ -274,7 +279,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             create_mcp_server(name="test", tools=None)
         assert mock_load.call_count == 2  # git + jira
 
@@ -290,7 +295,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             server = create_mcp_server(tools=["unknown_module"])
         assert server is not None
 
@@ -310,7 +315,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             server = create_mcp_server(tools=["git"])
         assert server is not None
 
@@ -331,7 +336,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             server = create_mcp_server(tools=["git"])
         assert server is not None
 
@@ -372,7 +377,7 @@ class TestCreateMcpServer:
             patches["init_loader"] as mock_loader,
             patches["ws_restore"],
         ):
-            mock_loader.return_value = MagicMock()
+            mock_loader.return_value = MagicMock(spec=PersonaLoader)
             server = create_mcp_server(tools=["git"])
         assert server is not None
 
@@ -385,15 +390,17 @@ class TestCreateMcpServer:
 class TestInitScheduler:
     @pytest.mark.asyncio
     async def test_returns_true_on_success(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
 
-        mock_scheduler = MagicMock()
+        mock_scheduler = (
+            MagicMock()
+        )  # CronScheduler - config is instance attr, can't use spec
         mock_scheduler.config.get_poll_jobs.return_value = {}
 
-        mock_poll_engine = MagicMock()
+        mock_poll_engine = MagicMock(spec=PollEngine)
         mock_poll_engine.start = AsyncMock()
 
-        mock_state = MagicMock()
+        mock_state = MagicMock()  # state_manager.state - no concrete class for spec
         mock_state.is_service_enabled.return_value = True
 
         with patch.dict(
@@ -428,7 +435,7 @@ class TestInitScheduler:
     @pytest.mark.asyncio
     async def test_returns_false_on_import_error(self):
         """When scheduler dependencies are missing, returns False."""
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
 
         # Force ImportError by setting modules to None
         with patch.dict(
@@ -450,15 +457,17 @@ class TestInitScheduler:
 
     @pytest.mark.asyncio
     async def test_scheduler_disabled_in_state(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
 
-        mock_scheduler = MagicMock()
+        mock_scheduler = (
+            MagicMock()
+        )  # CronScheduler - config is instance attr, can't use spec
         mock_scheduler.config.get_poll_jobs.return_value = {}
 
-        mock_poll_engine = MagicMock()
+        mock_poll_engine = MagicMock(spec=PollEngine)
         mock_poll_engine.start = AsyncMock()
 
-        mock_state = MagicMock()
+        mock_state = MagicMock()  # state_manager.state - no concrete class for spec
         mock_state.is_service_enabled.return_value = False  # Disabled
 
         with patch.dict(
@@ -539,7 +548,7 @@ class TestStopScheduler:
 class TestRunMcpServer:
     @pytest.mark.asyncio
     async def test_runs_stdio_no_scheduler(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.run_stdio_async = AsyncMock()
 
         with (
@@ -563,7 +572,7 @@ class TestRunMcpServer:
 
     @pytest.mark.asyncio
     async def test_with_scheduler(self):
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.run_stdio_async = AsyncMock()
 
         with (
@@ -587,7 +596,7 @@ class TestRunMcpServer:
     @pytest.mark.asyncio
     async def test_websocket_import_error(self):
         """When websocket module not installed, server still runs."""
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.run_stdio_async = AsyncMock()
 
         with (
@@ -611,12 +620,14 @@ class TestRunMcpServer:
     @pytest.mark.asyncio
     async def test_memory_abstraction_import_error(self):
         """When memory abstraction not available, server still runs."""
-        server = MagicMock()
+        server = MagicMock(spec=FastMCP)
         server.run_stdio_async = AsyncMock()
 
         # Create a mock websocket module that returns a ws_server
-        mock_ws_mod = MagicMock()
-        mock_ws_mod.start_websocket_server = AsyncMock(return_value=MagicMock())
+        mock_ws_mod = MagicMock()  # module mock - no concrete spec
+        mock_ws_mod.start_websocket_server = AsyncMock(
+            return_value=MagicMock(spec=SkillWebSocketServer)
+        )
         mock_ws_mod.stop_websocket_server = AsyncMock()
 
         with (
@@ -651,8 +662,12 @@ class TestMain:
                 "server.persona_loader.get_available_modules",
                 return_value={"git", "jira", "workflow"},
             ),
-            "setup_log": patch("server.main.setup_logging", return_value=MagicMock()),
-            "create": patch("server.main.create_mcp_server", return_value=MagicMock()),
+            "setup_log": patch(
+                "server.main.setup_logging", return_value=MagicMock(spec=logging.Logger)
+            ),
+            "create": patch(
+                "server.main.create_mcp_server", return_value=MagicMock(spec=FastMCP)
+            ),
             "aio": patch("server.main.asyncio"),
         }
 

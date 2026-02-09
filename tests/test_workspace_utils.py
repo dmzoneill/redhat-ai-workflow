@@ -3,8 +3,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastmcp import Context
 
-from server.workspace_state import DEFAULT_PROJECT
+from server.workspace_state import DEFAULT_PROJECT, ChatSession, WorkspaceState
 
 # All async functions in workspace_utils call WorkspaceRegistry.get_for_ctx(ctx).
 # We patch at the class method level on the canonical module.
@@ -29,7 +30,7 @@ def _make_state_mock(
     has_session=True,
 ):
     """Build a MagicMock that behaves like WorkspaceState."""
-    state = MagicMock()
+    state = MagicMock(spec=WorkspaceState)
     state.workspace_uri = workspace_uri
     state.project = project
     state.persona = persona
@@ -39,7 +40,7 @@ def _make_state_mock(
 
     session = None
     if has_session:
-        session = MagicMock()
+        session = MagicMock(spec=ChatSession)
         session.session_id = active_session_id
         session.project = project
         session.persona = persona
@@ -61,7 +62,7 @@ def _make_state_mock(
     }
 
     # create_session should return a new mock session
-    new_session = MagicMock()
+    new_session = MagicMock(spec=ChatSession)
     new_session.session_id = "new-sess"
     new_session.name = "Auto-created"
     state.create_session.return_value = new_session
@@ -72,7 +73,7 @@ def _make_state_mock(
 
 
 def _mock_ctx():
-    return MagicMock()
+    return MagicMock(spec=Context)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -559,7 +560,7 @@ class TestSyncHelpers:
     def test_get_default_workspace(self):
         from server.workspace_utils import get_default_workspace
 
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         with patch(_GET_OR_CREATE, return_value=mock_state):
             result = get_default_workspace()
 
@@ -568,7 +569,7 @@ class TestSyncHelpers:
     def test_get_project_sync(self):
         from server.workspace_utils import get_project_sync
 
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = "proj-1"
         with patch(_GET_OR_CREATE, return_value=mock_state):
             result = get_project_sync()
@@ -578,7 +579,7 @@ class TestSyncHelpers:
     def test_get_project_sync_falls_back_to_default(self):
         from server.workspace_utils import get_project_sync
 
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.project = None
         with patch(_GET_OR_CREATE, return_value=mock_state):
             result = get_project_sync()
@@ -588,7 +589,7 @@ class TestSyncHelpers:
     def test_get_persona_sync(self):
         from server.workspace_utils import get_persona_sync
 
-        mock_state = MagicMock()
+        mock_state = MagicMock(spec=WorkspaceState)
         mock_state.persona = "incident"
         with patch(_GET_OR_CREATE, return_value=mock_state):
             result = get_persona_sync()
