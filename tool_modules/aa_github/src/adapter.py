@@ -171,13 +171,12 @@ class GitHubAdapter:
                         # PR entry like "#123 Title"
                         items.append(
                             MemoryItem(
-                                id=f"github-pr-{hash(line)}",
                                 source="github",
                                 type="pull_request",
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.8,
-                                metadata={"raw": line},
+                                metadata={"raw": line, "id": f"github-pr-{hash(line)}"},
                             )
                         )
 
@@ -208,13 +207,12 @@ class GitHubAdapter:
                     if line.strip() and not line.startswith("#"):
                         items.append(
                             MemoryItem(
-                                id=f"github-workflow-{hash(line)}",
                                 source="github",
                                 type="workflow_run",
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.7,
-                                metadata={"raw": line},
+                                metadata={"raw": line, "id": f"github-workflow-{hash(line)}"},
                             )
                         )
 
@@ -246,13 +244,12 @@ class GitHubAdapter:
                     if line.strip().startswith("#"):
                         items.append(
                             MemoryItem(
-                                id=f"github-issue-{hash(line)}",
                                 source="github",
                                 type="issue",
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.7,
-                                metadata={"raw": line},
+                                metadata={"raw": line, "id": f"github-issue-{hash(line)}"},
                             )
                         )
 
@@ -290,13 +287,12 @@ class GitHubAdapter:
                     if line.strip() and not line.startswith("#"):
                         items.append(
                             MemoryItem(
-                                id=f"github-search-{hash(line)}",
                                 source="github",
                                 type="search_result",
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.75,
-                                metadata={"query": query, "raw": line},
+                                metadata={"query": query, "raw": line, "id": f"github-search-{hash(line)}"},
                             )
                         )
 

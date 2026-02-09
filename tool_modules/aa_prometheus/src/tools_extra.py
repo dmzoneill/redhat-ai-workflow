@@ -173,10 +173,12 @@ async def _prometheus_get_alerts_impl(
     environment: str = "stage",
 ) -> list[TextContent]:
     """Implementation of prometheus_get_alerts tool."""
-    # Re-use prometheus_alerts from tools_basic
-    from .tools_basic import prometheus_alerts
+    # Re-use prometheus_alerts implementation from tools_basic
+    from .tools_basic import _prometheus_alerts_impl
 
-    result = await prometheus_alerts(namespace=namespace, environment=environment)
+    result = await _prometheus_alerts_impl(
+        environment=environment, state="", namespace=namespace, severity=""
+    )
     return result
 
 
@@ -276,7 +278,7 @@ async def _prometheus_pre_deploy_check_impl(
     environment: str = "stage",
 ) -> list[TextContent]:
     """Implementation of prometheus_pre_deploy_check tool."""
-    from .tools_basic import prometheus_alerts
+    from .tools_basic import _prometheus_alerts_impl
 
     # Load namespace from config.json
     namespace = ""
@@ -297,10 +299,11 @@ async def _prometheus_pre_deploy_check_impl(
         ]
 
     # Check for firing alerts
-    result = await prometheus_alerts(
-        namespace=namespace,
-        state="firing",
+    result = await _prometheus_alerts_impl(
         environment=environment,
+        state="firing",
+        namespace=namespace,
+        severity="",
     )
 
     text = result[0].text if result else ""

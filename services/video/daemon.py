@@ -989,7 +989,7 @@ class VideoDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         # If we were rendering, the device may be stale - stop and let caller restart
         if self._status == "rendering":
             logger.warning("Was rendering before sleep - stopping render")
-            await self._stop_render()
+            await self._handle_stop_video()
 
     # =========================================================================
     # Lifecycle

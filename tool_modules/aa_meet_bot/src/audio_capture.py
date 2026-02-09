@@ -158,7 +158,7 @@ class PulseAudioCapture:
         self.chunk_samples = int(sample_rate * chunk_ms / 1000)
         self.sink_input_index = sink_input_index
 
-        self._process: Optional[asyncio.subprocess.Process] = None
+        self._process: Optional[asyncio.subprocess.Process] = None  # pylint: disable=no-member
         self._process_pid: Optional[int] = None  # Track PID for cleanup
         self._running = False
         self._buffer = RingBuffer(max_seconds=30.0, sample_rate=sample_rate)

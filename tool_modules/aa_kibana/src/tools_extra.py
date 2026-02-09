@@ -24,7 +24,8 @@ from server.http_client import kibana_client
 from server.tool_registry import ToolRegistry
 from server.utils import get_kubeconfig, load_config
 
-from .tools_basic import kibana_search_logs
+# Note: kibana_search_logs is defined within register_tools() scope in tools_basic.py
+# and cannot be imported. References to it should be replaced with direct implementations.
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +274,114 @@ async def _kibana_list_dashboards_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+async def _kibana_search_logs_impl(
+    environment: str,
+    query: str = "*",
+    namespace: str = "",
+    time_range: str = "1h",
+    size: int = 100,
+) -> list[TextContent]:
+    """Implementation of kibana_search_logs - shared by tools_basic and tools_extra."""
+    from datetime import datetime, timedelta
+
+    env_config = get_cached_kibana_config(environment)
+    if not env_config:
+        return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
+
+    ns = namespace or env_config.namespace
+
+    # Parse time range
+    unit = time_range[-1]
+    value = int(time_range[:-1])
+
+    now = datetime.utcnow()
+    if unit == "m":
+        from_time = now - timedelta(minutes=value)
+    elif unit == "h":
+        from_time = now - timedelta(hours=value)
+    elif unit == "d":
+        from_time = now - timedelta(days=value)
+    else:
+        from_time = now - timedelta(hours=1)
+
+    # Build Elasticsearch query via Kibana proxy
+    es_query = {
+        "query": {
+            "bool": {
+                "must": [
+                    {"query_string": {"query": query}},
+                    {
+                        "range": {
+                            "@timestamp": {
+                                "gte": from_time.isoformat(),
+                                "lte": now.isoformat(),
+                            }
+                        }
+                    },
+                ]
+            }
+        },
+        "size": size,
+        "sort": [{"@timestamp": {"order": "desc"}}],
+    }
+
+    if ns:
+        es_query["query"]["bool"]["must"].append(
+            {"match": {"kubernetes.namespace_name": ns}}
+        )
+
+    success, result = await kibana_request(
+        environment,
+        f"/api/console/proxy?path={env_config.index_pattern}/_search&method=POST",
+        method="POST",
+        data=es_query,
+    )
+
+    if not success:
+        link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Direct search failed: {result}\n\n**Open in Kibana:** {link}",
+            )
+        ]
+
+    hits = result.get("hits", {}).get("hits", [])
+    total = result.get("hits", {}).get("total", {})
+    if isinstance(total, dict):
+        total = total.get("value", 0)
+
+    lines = [
+        f"## Log Search: {environment}",
+        "",
+        f"**Query:** `{query}`",
+        f"**Namespace:** `{ns}`",
+        f"**Time Range:** Last {time_range}",
+        f"**Results:** {len(hits)} of {total} total",
+        "",
+    ]
+
+    if not hits:
+        lines.append("No matching logs found.")
+    else:
+        lines.append("| Time | Level | Message |")
+        lines.append("|------|-------|---------|")
+
+        for hit in hits[:50]:
+            source = hit.get("_source", {})
+            timestamp = source.get("@timestamp", "")[:19]
+            level = source.get("level", source.get("log", {}).get("level", "INFO"))
+            message = source.get("message", source.get("log", ""))[:80]
+            if len(message) == 80:
+                message += "..."
+            lines.append(f"| {timestamp} | {level} | {message} |")
+
+    link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
+    lines.extend(["", f"**[Open in Kibana]({link})**"])
+
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
 async def _kibana_status_impl(environment: str) -> list[TextContent]:
     """Implementation of kibana_status tool."""
     envs = [environment] if environment else ["stage", "production"]
@@ -352,7 +461,7 @@ def register_tools(server: "FastMCP") -> int:
             Error log entries.
         """
         query = "level:error OR level:ERROR OR log.level:error"
-        return await kibana_search_logs(
+        return await _kibana_search_logs_impl(
             environment=environment,
             query=query,
             namespace=namespace,
@@ -405,7 +514,7 @@ def register_tools(server: "FastMCP") -> int:
             Pod log entries.
         """
         query = f'kubernetes.pod_name:"{pod_name}*"'
-        return await kibana_search_logs(
+        return await _kibana_search_logs_impl(
             environment=environment,
             query=query,
             namespace=namespace,
@@ -482,7 +591,7 @@ def register_tools(server: "FastMCP") -> int:
             f'"{request_id}" OR request_id:"{request_id}" '
             f'OR trace_id:"{request_id}" OR correlation_id:"{request_id}"'
         )
-        return await kibana_search_logs(
+        return await _kibana_search_logs_impl(
             environment=environment,
             query=query,
             namespace=namespace,

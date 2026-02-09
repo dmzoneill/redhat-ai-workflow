@@ -282,7 +282,7 @@ class PiperTTS:
                 # Save to file
                 import wave
 
-                with wave.open(str(audio_path), "wb") as wav:
+                with wave.open(str(audio_path), "wb") as wav:  # pylint: disable=no-member
                     wav.setnchannels(1)
                     wav.setsampwidth(2)  # 16-bit
                     wav.setframerate(sample_rate)
