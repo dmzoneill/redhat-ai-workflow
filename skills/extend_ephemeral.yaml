@@ -318,7 +318,7 @@ steps:
         namespace: {{ selected_ns.namespace if selected_ns else 'unknown' }}
         duration: {{ inputs.duration }}
         new_expiry: {{ extension_status.new_expiry if extension_status else 'unknown' }}
-        timestamp: {{ today }}
+        timestamp: {{ now().isoformat() }}
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

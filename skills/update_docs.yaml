@@ -391,8 +391,8 @@ steps:
       errors_detected = []
 
       # Check git failures
-      git_text = str(git_status_raw) if 'git_status_raw' in dir() and git_status_raw else ""
-      commit_text = str(commit_result_raw) if 'commit_result_raw' in dir() and commit_result_raw else ""
+      git_text = str(changed_files) if 'changed_files' in dir() and changed_files else ""
+      commit_text = str(doc_summary) if 'doc_summary' in dir() and doc_summary else ""
       combined = git_text + commit_text
 
       if "permission denied" in combined.lower():

@@ -373,7 +373,7 @@ export class SlackTab extends BaseTab {
     return `
       <!-- Slack Status -->
       <div class="section">
-        <div class="section-title">💬 Slack Bot Status</div>
+        <div class="section-title">Slack Bot Status</div>
         <div class="grid-4">
           <div class="stat-card ${this.status.connected ? "green" : "red"}">
             <div class="stat-icon">${this.status.connected ? "✓" : "✕"}</div>
@@ -419,7 +419,7 @@ export class SlackTab extends BaseTab {
 
       <!-- Message Search -->
       <div class="section">
-        <div class="section-title">🔍 Search Messages</div>
+        <div class="section-title">Search Messages</div>
         <div class="slack-search-box">
           <input type="text" class="slack-search-input" placeholder="Search Slack messages..."
                  value="${this.escapeHtml(this.searchQuery)}" data-action="searchInput" />
@@ -434,7 +434,7 @@ export class SlackTab extends BaseTab {
       <!-- Direct Messages -->
       ${this.dms.length > 0 ? `
       <div class="section">
-        <div class="section-title">💬 Direct Messages (${this.dms.length})</div>
+        <div class="section-title">Direct Messages (${this.dms.length})</div>
         <div class="slack-dms-grid">
           ${this.dms.map(dm => this.getDMCardHtml(dm)).join("")}
         </div>
@@ -443,7 +443,7 @@ export class SlackTab extends BaseTab {
 
       <!-- Channels -->
       <div class="section">
-        <div class="section-title">📢 Channels (${this.channels.length})</div>
+        <div class="section-title">Channels (${this.channels.length})</div>
         <div class="slack-channels-grid">
           ${this.channels.length > 0 ? this.channels.map((ch) => this.getChannelCardHtml(ch)).join("") : this.getEmptyStateHtml("📢", "No channels found")}
         </div>
@@ -451,7 +451,7 @@ export class SlackTab extends BaseTab {
 
       <!-- Message History -->
       <div class="section">
-        <div class="section-title">📜 Recent Messages (${this.history.length})</div>
+        <div class="section-title">Recent Messages (${this.history.length})</div>
         <div class="slack-history-list">
           ${this.history.length > 0 ? this.history.map((msg) => this.getHistoryItemHtml(msg)).join("") : this.getEmptyStateHtml("📜", "No message history")}
         </div>
@@ -475,7 +475,7 @@ export class SlackTab extends BaseTab {
       <div class="section slack-advanced">
         <!-- Cache Stats -->
         <div class="slack-subsection">
-          <div class="slack-subsection-title">📦 Cache Statistics</div>
+          <div class="slack-subsection-title">Cache Statistics</div>
           <div class="slack-stats-row">
             <span>Channels cached: <strong>${this.cacheStats?.channels_cached || 0}</strong></span>
             <span>Member channels: <strong>${this.cacheStats?.member_channels || 0}</strong></span>
@@ -486,7 +486,7 @@ export class SlackTab extends BaseTab {
 
         <!-- Background Sync -->
         <div class="slack-subsection">
-          <div class="slack-subsection-title">🔄 Background Sync</div>
+          <div class="slack-subsection-title">Background Sync</div>
           <div class="slack-stats-row">
             <span>Status: <strong class="${syncRunning ? "text-success" : ""}">${syncRunning ? "Running" : "Stopped"}</strong></span>
             ${this.syncStatus?.current_task ? `<span>Task: <strong>${this.escapeHtml(this.syncStatus.current_task)}</strong></span>` : ""}
@@ -505,7 +505,7 @@ export class SlackTab extends BaseTab {
 
         <!-- Daemon Stats -->
         <div class="slack-subsection">
-          <div class="slack-subsection-title">🤖 Daemon Statistics</div>
+          <div class="slack-subsection-title">Daemon Statistics</div>
           <div class="slack-stats-row">
             <span>Uptime: <strong>${uptime}</strong></span>
             <span>Polls: <strong>${this.status?.polls || 0}</strong></span>
@@ -520,7 +520,7 @@ export class SlackTab extends BaseTab {
 
         <!-- User Search -->
         <div class="slack-subsection">
-          <div class="slack-subsection-title">👤 User Search</div>
+          <div class="slack-subsection-title">User Search</div>
           <div class="slack-search-box">
             <input type="text" class="slack-search-input" placeholder="Search users by name or email..."
                    value="${this.escapeHtml(this.userSearchQuery)}" data-action="userSearchInput" />
@@ -531,7 +531,7 @@ export class SlackTab extends BaseTab {
 
         <!-- Compose Message -->
         <div class="slack-subsection">
-          <div class="slack-subsection-title">✉️ Send Message</div>
+          <div class="slack-subsection-title">Send Message</div>
           <div class="slack-compose">
             <select class="slack-channel-select" data-action="selectChannel">
               <option value="">Select channel...</option>
@@ -548,7 +548,7 @@ export class SlackTab extends BaseTab {
         <!-- Available Commands -->
         ${this.commands.length > 0 ? `
         <div class="slack-subsection">
-          <div class="slack-subsection-title">⚡ Available @me Commands (${this.commands.length})</div>
+          <div class="slack-subsection-title">Available @me Commands (${this.commands.length})</div>
           <div class="slack-commands-list">
             ${this.commands.slice(0, 10).map(cmd => `
               <div class="slack-command-item">
@@ -609,7 +609,7 @@ export class SlackTab extends BaseTab {
 
     return `
       <div class="section context-injection-section">
-        <div class="section-title">🧠 Persona Context Injection</div>
+        <div class="section-title">Persona Context Injection</div>
         <p class="text-secondary text-sm mb-16">
           The Slack persona gathers context from multiple knowledge sources before responding.
           Test what context would be injected for any question or message.
@@ -1161,7 +1161,7 @@ export class SlackTab extends BaseTab {
   private getPendingMessagesHtml(): string {
     return `
       <div class="section">
-        <div class="section-title">⏳ Pending Approval (${this.pendingMessages.length})</div>
+        <div class="section-title">Pending Approval (${this.pendingMessages.length})</div>
         <div class="slack-pending-list">
           ${this.pendingMessages.map((msg) => this.getPendingMessageHtml(msg)).join("")}
         </div>

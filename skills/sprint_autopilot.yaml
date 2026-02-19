@@ -275,7 +275,7 @@ steps:
 
       # Fallback: construct from issue key
       if not branch_name:
-          branch_name = "{{ issue_key }}".lower().replace("-", "-")
+          branch_name = "{{ issue_key }}".lower().replace(" ", "-")
 
       result = {"branch_name": branch_name}
 

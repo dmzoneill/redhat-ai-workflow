@@ -137,7 +137,7 @@ steps:
                       session_data = yaml.safe_load(f) or {}
                   memory["sessions"].append({
                       "date": sf.stem,
-                      "actions": session_data.get("actions", [])[-10:],
+                      "actions": session_data.get("entries", session_data.get("actions", []))[-10:],
                   })
               except Exception:
                   pass
@@ -234,7 +234,7 @@ steps:
     description: "Format memory view output"
     compute: |
       from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
       section = inputs.section or "all"
       lines = []
 

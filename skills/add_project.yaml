@@ -89,8 +89,7 @@ steps:
     tool: project_detect
     args:
       path: "{{ path }}"
-    outputs:
-      - detected_settings
+    output: detected_settings
 
   - name: validate_path
     description: Verify the project path exists
@@ -98,16 +97,14 @@ steps:
     tool: shell
     args:
       command: "test -d '{{ path }}' && echo 'exists' || echo 'missing'"
-    outputs:
-      - path_status
+    output: path_status
 
   - name: get_project_name
     description: Determine project name
     tool: shell
     args:
       command: "basename '{{ path }}'"
-    outputs:
-      - detected_name
+    output: detected_name
 
   - name: check_gitlab_access
     description: Verify GitLab project is accessible
@@ -117,8 +114,7 @@ steps:
       project: "{{ gitlab }}"
       state: "opened"
     on_error: auto_heal
-    outputs:
-      - gitlab_check
+    output: gitlab_check
 
   - name: check_jira_access
     description: Verify Jira project is accessible
@@ -126,8 +122,7 @@ steps:
     args:
       project: "{{ jira_project }}"
     on_error: auto_heal
-    outputs:
-      - jira_check
+    output: jira_check
 
   - name: add_project
     description: Add project to config.json
@@ -140,8 +135,7 @@ steps:
       jira_component: "{{ jira_component | default('') }}"
       konflux_namespace: "{{ konflux_namespace | default('') }}"
       auto_detect: true
-    outputs:
-      - add_result
+    output: add_result
 
   - name: setup_quay_repo
     description: Add Quay repository configuration
@@ -153,8 +147,7 @@ steps:
         # For now, output instructions
         echo "To add Quay repository, update config.json:"
         echo "  quay.repositories.{{ name | default(detected_name) }}: {{ konflux_namespace }}/{{ name | default(detected_name) }}-main/{{ name | default(detected_name) }}-main"
-    outputs:
-      - quay_instructions
+    output: quay_instructions
 
   - name: setup_bonfire_app
     description: Add Bonfire app configuration
@@ -165,8 +158,7 @@ steps:
         # Output bonfire configuration instructions
         echo "To add Bonfire app, update config.json bonfire.apps section"
         echo "See existing apps for reference"
-    outputs:
-      - bonfire_instructions
+    output: bonfire_instructions
 
   - name: generate_project_knowledge
     description: Generate initial project knowledge
@@ -176,8 +168,7 @@ steps:
       project: "{{ name | default(detected_name) }}"
       persona: "developer"
     on_error: continue
-    outputs:
-      - knowledge_result
+    output: knowledge_result
 
   - name: create_vector_index
     description: Create semantic vector index for the project
@@ -186,8 +177,7 @@ steps:
     args:
       project: "{{ name | default(detected_name) }}"
     on_error: continue
-    outputs:
-      - index_result
+    output: index_result
 
   - name: start_file_watcher
     description: Start file watcher for automatic index updates
@@ -197,8 +187,7 @@ steps:
       project: "{{ name | default(detected_name) }}"
       action: "start"
     on_error: continue
-    outputs:
-      - watcher_result
+    output: watcher_result
 
   - name: summary
     description: Summarize what was done
@@ -323,7 +312,7 @@ steps:
         path: {{ path }}
         gitlab: {{ gitlab }}
         jira_project: {{ jira_project }}
-        added: {{ today }}
+        added: {{ now().isoformat() }}
     on_error: continue
 
 outputs:

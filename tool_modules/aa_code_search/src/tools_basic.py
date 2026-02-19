@@ -830,8 +830,12 @@ def _index_project(project: str, force: bool = False) -> dict:
     metadata_path = VECTOR_DB_PATH / project / "metadata.json"
     existing_hashes = {}
     if metadata_path.exists() and not force:
-        with open(metadata_path, encoding="utf-8") as f:
-            existing_hashes = json.load(f).get("file_hashes", {})
+        try:
+            with open(metadata_path, encoding="utf-8") as f:
+                existing_hashes = json.load(f).get("file_hashes", {})
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(f"Corrupted metadata.json for {project}, will re-index: {e}")
+            existing_hashes = {}
 
     new_hashes = {}
     all_data = []

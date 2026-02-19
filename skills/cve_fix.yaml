@@ -1189,6 +1189,72 @@ steps:
       result = "Temp directory cleaned up"
     output: cleanup_result
 
+  # ---- Fallback: initialize pipfile_update from committed branch state ----
+  - name: init_pipfile_update_for_resume
+    description: "Initialize pipfile_update from existing branch when resuming with committed changes"
+    condition: "work_check.has_work and work_check.is_resume and resume_state.already_committed"
+    compute: |
+      import json
+      import os
+      import subprocess
+
+      repo_path = resolved_repo["path"]
+      default_branch = resolved_repo.get("default_branch", "main")
+      package = cve_info["affected_package"]
+
+      new_version = ""
+      old_version = ""
+
+      # Extract current version from Pipfile.lock on the branch
+      lock_path = os.path.join(repo_path, "Pipfile.lock")
+      if os.path.exists(lock_path):
+          try:
+              with open(lock_path) as f:
+                  lock_data = json.load(f)
+              for section in ["default", "develop"]:
+                  for name, info in lock_data.get(section, {}).items():
+                      if name.lower() == package.lower():
+                          new_version = info.get("version", "")
+                          break
+                  if new_version:
+                      break
+          except Exception:
+              pass
+
+      # Extract old version from origin/main for comparison
+      try:
+          old_lock_proc = subprocess.run(
+              ["git", "-C", repo_path, "show", f"origin/{default_branch}:Pipfile.lock"],
+              capture_output=True, text=True, timeout=30,
+          )
+          if old_lock_proc.returncode == 0:
+              old_data = json.loads(old_lock_proc.stdout)
+              for section in ["default", "develop"]:
+                  for name, info in old_data.get(section, {}).items():
+                      if name.lower() == package.lower():
+                          old_version = info.get("version", "")
+                          break
+                  if old_version:
+                      break
+      except Exception:
+          pass
+
+      version_num = new_version.lstrip("=<>~!") if new_version else "latest"
+
+      result = {
+          "success": True,
+          "package": package,
+          "old_version": old_version or "(unknown)",
+          "new_version": new_version or "(unknown)",
+          "version_constraint": f">={version_num}",
+          "hashes_count": 0,
+          "pipfile_updated": True,
+          "pipfile_lock_updated": True,
+          "companion_packages_updated": [],
+          "compatibility_notes": "",
+      }
+    output: pipfile_update
+
   # ==================== COMMIT CHANGES ====================
 
   - name: build_commit_message

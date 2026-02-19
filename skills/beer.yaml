@@ -470,7 +470,7 @@ steps:
     condition: "inputs.get('generate_standup', True)"
     compute: |
       from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
       lines = []
 
       # Yesterday (what I did today)
@@ -584,7 +584,7 @@ steps:
       # Import shared linkify functions
       from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
 
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
 
       def build_link(url, text):
           if is_slack:
@@ -660,19 +660,22 @@ steps:
 
       # Tomorrow's Calendar
       lines.append("## ⏰ Tomorrow's Schedule")
-      if tomorrow_calendar and not any('error' in e for e in tomorrow_calendar):
-        early_meetings = [e for e in tomorrow_calendar if e.get('early')]
-        if early_meetings:
-          lines.append("**⚠️ Early meetings:**")
-          for e in early_meetings:
-            lines.append(f"- **{e['time']}** {e['title']} 📹")
+      if isinstance(tomorrow_calendar, list):
+        has_errors = any('error' in str(e) for e in tomorrow_calendar)
+        if has_errors:
+          lines.append("- Calendar not accessible")
+        elif tomorrow_calendar:
+          early_meetings = [e for e in tomorrow_calendar if e.get('early')]
+          if early_meetings:
+            lines.append("**⚠️ Early meetings:**")
+            for e in early_meetings:
+              lines.append(f"- **{e['time']}** {e['title']} 📹")
 
-        for e in tomorrow_calendar[:5]:
-          if not e.get('early'):
-            meet = "📹" if e.get('meet_link') else ""
-            lines.append(f"- {e['time']} - {e['title']} {meet}")
-
-        if not tomorrow_calendar:
+          for e in tomorrow_calendar[:5]:
+            if not e.get('early'):
+              meet = "📹" if e.get('meet_link') else ""
+              lines.append(f"- {e['time']} - {e['title']} {meet}")
+        else:
           lines.append("- No meetings tomorrow! 🎉")
       else:
         lines.append("- Calendar not accessible")

@@ -88,6 +88,9 @@ dev = [
     "mypy>=1.8.0",
     "bandit>=1.7.0",
 ]
+report = [
+    "weasyprint>=62.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/ai-workflow"

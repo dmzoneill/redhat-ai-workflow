@@ -87,15 +87,15 @@ steps:
     condition: "inputs.check_all_failed"
     tool: systemctl_list_units
     args:
-      pattern: "--failed"
+      state: "failed"
     output: failed_units_raw
     on_error: continue
 
   - name: list_workflow_units
     description: "List all aa-workflow unit files"
-    tool: systemctl_list_unit_files
+    tool: shell
     args:
-      pattern: "aa-workflow-*"
+      command: "systemctl list-unit-files 'aa-workflow-*' --no-pager 2>/dev/null || echo 'No aa-workflow units found'"
     output: workflow_unit_files_raw
     on_error: continue
 

@@ -222,8 +222,7 @@ steps:
     condition: "scale_status.success and inputs.wait"
     tool: kubectl_rollout_status
     args:
-      action: "status"
-      resource: "deployment/{{ inputs.deployment }}"
+      deployment_name: "{{ inputs.deployment }}"
       namespace: "{{ inputs.namespace }}"
       environment: "{{ inputs.environment }}"
     output: rollout_status_raw

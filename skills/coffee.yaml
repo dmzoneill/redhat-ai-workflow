@@ -1218,7 +1218,7 @@ steps:
       from scripts.common.parsers import linkify_jira_keys
 
       # Slack vs Markdown link helper
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
 
       def build_link(url, text):
           if is_slack:

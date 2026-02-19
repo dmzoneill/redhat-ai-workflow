@@ -49,7 +49,7 @@ steps:
   - name: determine_date
     description: "Parse target date or use today"
     compute: |
-      from datetime import date, datetime
+      from datetime import date, datetime, timedelta
 
       if inputs.date:
           target = date.fromisoformat(inputs.date)
@@ -64,6 +64,9 @@ steps:
       quarter_start = date(year, start_month, start_day)
       day_of_quarter = (target - quarter_start).days + 1
 
+      # Calculate next day for JQL range queries (avoids '+' operator issues)
+      next_day = target + timedelta(days=1)
+
       result = {
           "date": target.isoformat(),
           "date_display": target.strftime("%A, %B %d, %Y"),
@@ -71,6 +74,7 @@ steps:
           "quarter": quarter,
           "day_of_quarter": day_of_quarter,
           "jira_date_filter": target.strftime("%Y-%m-%d"),
+          "jira_next_day": next_day.strftime("%Y-%m-%d"),
       }
     output: target_date
 
@@ -79,7 +83,7 @@ steps:
     description: "Fetch Jira issues resolved on target date"
     tool: jira_search
     args:
-      jql: "resolved >= '{{ target_date.jira_date_filter }}' AND resolved < '{{ target_date.jira_date_filter }}' + 1d AND (assignee = currentUser() OR reporter = currentUser()) ORDER BY resolved DESC"
+      jql: "resolved >= '{{ target_date.jira_date_filter }}' AND resolved < '{{ target_date.jira_next_day }}' AND (assignee = currentUser() OR reporter = currentUser()) ORDER BY resolved DESC"
       max_results: 50
     output: jira_resolved_raw
     on_error: continue
@@ -89,18 +93,45 @@ steps:
     description: "Fetch Jira issues created by me on target date"
     tool: jira_search
     args:
-      jql: "reporter = currentUser() AND created >= '{{ target_date.jira_date_filter }}' AND created < '{{ target_date.jira_date_filter }}' + 1d ORDER BY created DESC"
+      jql: "reporter = currentUser() AND created >= '{{ target_date.jira_date_filter }}' AND created < '{{ target_date.jira_next_day }}' ORDER BY created DESC"
       max_results: 50
     output: jira_created_raw
     on_error: continue
 
-  # Fetch GitLab MRs merged today
+  # Fetch GitLab MRs merged today (across all configured projects)
   - name: fetch_gitlab_mrs
-    description: "Fetch GitLab MRs merged on target date"
-    tool: gitlab_mr_list
-    args:
-      state: "merged"
-      author: "currentUser"
+    description: "Fetch GitLab MRs merged on target date from configured projects"
+    compute: |
+      import subprocess
+      import json
+      from pathlib import Path
+
+      config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+      mrs_text = []
+
+      if config_file.exists():
+          with open(config_file) as f:
+              config = json.load(f)
+
+          for name, proj in config.get("repositories", {}).items():
+              gitlab_path = proj.get("gitlab", "")
+              # Skip non-GitLab projects (e.g. github: prefixed)
+              if not gitlab_path or gitlab_path.startswith("github:"):
+                  continue
+              try:
+                  cmd = [
+                      "glab", "mr", "list",
+                      "--state", "merged",
+                      "--author", "@me",
+                      "--repo", gitlab_path,
+                  ]
+                  output = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=30)
+                  if output.strip():
+                      mrs_text.append(f"## {name}\n{output.strip()}")
+              except Exception:
+                  pass
+
+      result = "\n\n".join(mrs_text) if mrs_text else ""
     output: gitlab_mrs_raw
     on_error: continue
 

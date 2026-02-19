@@ -1,0 +1,8 @@
+last_ci_health_check:
+  ci_valid: true
+  errors: []
+  has_failures: true
+  pipeline_count: 5
+  project: dataverse/data-products/source-aligned/aapautomationanalytics/aapautomationanalytics-dbt
+  timestamp: '2026-02-18T15:21:08.643925'
+last_updated: '2026-02-18T15:21:08.644225'

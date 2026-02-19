@@ -432,7 +432,7 @@ steps:
       from datetime import datetime
       from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
 
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
 
       lines = []
       lines.append(f"## 📋 Standup Summary")
@@ -657,7 +657,7 @@ steps:
     compute: |
       from scripts.common.parsers import linkify_jira_keys
 
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
       lines = [enhanced_standup]
 
       data = discovered_work_daily

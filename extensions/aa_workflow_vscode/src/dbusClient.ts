@@ -773,7 +773,7 @@ class DBusClient {
       if (result.success && result.data) {
         const parsed = typeof result.data === "string" ? JSON.parse(result.data) : result.data;
         return {
-          success: parsed.success !== false,
+          success: parsed.success !== false && !parsed.error,
           data: parsed as T,
           error: parsed.error,
         };
@@ -1678,7 +1678,7 @@ class DBusClient {
   /**
    * Backfill historical statistics
    */
-  async stats_backfill(days: number = 7): Promise<DBusResult> {
+  async stats_backfill(days: number = 30): Promise<DBusResult> {
     return this.callMethod("stats", "backfill", { days });
   }
 
@@ -1722,6 +1722,104 @@ class DBusClient {
    */
   async stats_evaluateQuestion(questionId: string): Promise<DBusResult> {
     return this.callMethod("stats", "evaluate_question", { question_id: questionId });
+  }
+
+  /**
+   * Get captured days with stats for a quarter (calendar view)
+   */
+  async stats_getCapturedDays(year?: number, quarter?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_captured_days", { year, quarter });
+  }
+
+  /**
+   * Get issue hierarchy (ANSTRAT > Epic > Issue) from captured data
+   */
+  async stats_getIssueHierarchy(refresh?: boolean): Promise<DBusResult> {
+    return this.callMethod("stats", "get_issue_hierarchy", { refresh_from_jira: refresh || false });
+  }
+
+  /**
+   * Get full event list for a specific date (day detail view)
+   */
+  async stats_getDayDetail(date: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_day_detail", { date });
+  }
+
+  /**
+   * Get per-competency evidence breakdown with gap suggestions
+   */
+  async stats_getCompetencyEvidence(year?: number, quarter?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_competency_evidence", { year, quarter });
+  }
+
+  /**
+   * Get the full merged scoring configuration (defaults + user overrides)
+   */
+  async stats_getScoringConfig(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_scoring_config");
+  }
+
+  /**
+   * Update scoring config with partial overrides, saves and re-evaluates
+   */
+  async stats_setScoringConfig(config: Record<string, unknown>): Promise<DBusResult> {
+    return this.callMethod("stats", "set_scoring_config", config);
+  }
+
+  /**
+   * Reset scoring config to defaults and re-evaluate
+   */
+  async stats_resetScoringConfig(): Promise<DBusResult> {
+    return this.callMethod("stats", "reset_scoring_config");
+  }
+
+  /**
+   * Parse an executive email and cache the structured result
+   */
+  async stats_parseExecutiveEmail(text: string, emailId?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "parse_executive_email", { text, email_id: emailId });
+  }
+
+  /**
+   * Map user's deliverables to an executive email's strategic targets
+   */
+  async stats_mapDeliverables(emailId?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "map_deliverables", { email_id: emailId });
+  }
+
+  /**
+   * List cached parsed executive emails for the quarter
+   */
+  async stats_listExecutiveEmails(): Promise<DBusResult> {
+    return this.callMethod("stats", "list_executive_emails", {});
+  }
+
+  /**
+   * Delete a cached executive email
+   */
+  async stats_deleteExecutiveEmail(emailId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "delete_executive_email", { email_id: emailId });
+  }
+
+  /**
+   * Search Gmail for executive emails
+   */
+  async stats_searchExecutiveGmail(query: string, maxResults: number = 10): Promise<DBusResult> {
+    return this.callMethod("stats", "search_executive_gmail", { query, max_results: maxResults });
+  }
+
+  /**
+   * Read a Gmail message by ID
+   */
+  async stats_readGmailMessage(messageId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "read_gmail_message", { message_id: messageId });
+  }
+
+  /**
+   * Backfill executive emails for the entire current quarter.
+   */
+  async stats_backfillExecutiveEmails(): Promise<DBusResult> {
+    return this.callMethod("stats", "backfill_executive_emails", {});
   }
 
   // ==========================================================================

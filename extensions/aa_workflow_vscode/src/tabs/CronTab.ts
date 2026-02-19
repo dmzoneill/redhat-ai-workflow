@@ -121,7 +121,7 @@ export class CronTab extends BaseTab {
     return `
       <!-- Scheduler Status -->
       <div class="section">
-        <div class="section-title">⏰ Scheduler Status</div>
+        <div class="section-title">Scheduler Status</div>
         <div class="grid-4">
           <div class="stat-card ${enabled ? "green" : "red"}">
             <div class="stat-icon">${enabled ? "▶" : "⏸"}</div>
@@ -157,7 +157,7 @@ export class CronTab extends BaseTab {
 
       <!-- Cron Jobs -->
       <div class="section">
-        <div class="section-title">📋 Scheduled Jobs</div>
+        <div class="section-title">Scheduled Jobs</div>
         <div class="cron-jobs-list">
           ${jobs.length > 0 ? jobs.map((job) => this.getCronJobHtml(job)).join("") : this.getEmptyStateHtml("📋", "No cron jobs configured")}
         </div>
@@ -165,7 +165,7 @@ export class CronTab extends BaseTab {
 
       <!-- Execution History -->
       <div class="section">
-        <div class="section-title">📜 Execution History</div>
+        <div class="section-title">Execution History</div>
         <div class="cron-history-list">
           ${history.length > 0 ? history.slice(0, this.historyLimit).map((entry) => this.getHistoryEntryHtml(entry)).join("") : this.getEmptyStateHtml("📜", "No execution history")}
         </div>

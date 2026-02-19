@@ -287,11 +287,11 @@ steps:
       # Record this cleanup
       cleanup_record = {
           "dry_run": inputs.dry_run,
-          "total_stale": analysis.total if analysis else 0,
-          "active_issues_cleaned": analysis.counts.active_issues if analysis else 0,
-          "open_mrs_cleaned": analysis.counts.open_mrs if analysis else 0,
-          "ephemeral_cleaned": analysis.counts.ephemeral_namespaces if analysis else 0,
-          "archived_sessions": archive_result.archived if archive_result else 0,
+          "total_stale": analysis["total"] if analysis else 0,
+          "active_issues_cleaned": analysis["counts"]["active_issues"] if analysis else 0,
+          "open_mrs_cleaned": analysis["counts"]["open_mrs"] if analysis else 0,
+          "ephemeral_cleaned": analysis["counts"]["ephemeral_namespaces"] if analysis else 0,
+          "archived_sessions": archive_result.get("archived", 0) if archive_result else 0,
           "timestamp": datetime.now().isoformat(),
       }
 

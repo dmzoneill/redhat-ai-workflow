@@ -205,7 +205,7 @@ export class ServicesTab extends BaseTab {
     return `
       <!-- Service Status Summary -->
       <div class="section">
-        <div class="section-title">🔌 Service Status</div>
+        <div class="section-title">Service Status</div>
         <div class="grid-3">
           <div class="stat-card green">
             <div class="stat-icon">✓</div>
@@ -284,7 +284,7 @@ export class ServicesTab extends BaseTab {
 
     return `
       <div class="section">
-        <div class="section-title">💬 Slack Bot</div>
+        <div class="section-title">Slack Bot</div>
         <div class="service-card">
           <div class="service-header">
             <div class="service-title">
@@ -320,7 +320,7 @@ export class ServicesTab extends BaseTab {
   private getOllamaStatusHtml(): string {
     return `
       <div class="section">
-        <div class="section-title">🤖 Ollama Instances</div>
+        <div class="section-title">Ollama Instances</div>
         <div class="grid-2">
           ${this.ollamaInstances.map((instance) => `
             <div class="service-card">

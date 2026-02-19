@@ -136,14 +136,12 @@ steps:
       notifications_sent = 0
 
       for issue_key in issues:
-          # Get issue details via nested skill runner calling jira_view_issue
-          view_result = run_skill("jira_view_issue_wrapper", {"issue_key": issue_key})
-          # Fallback: use memory_ask to get issue info if wrapper doesn't exist
-          if not view_result.get("success"):
-              # Try direct approach - skip this issue if we can't fetch it
+          # Get issue details via tool runner
+          view_result = run_tool("jira_get_issue", {"issue_key": issue_key})
+          if not view_result:
               continue
 
-          issue_text = str(view_result.get("result", ""))
+          issue_text = str(view_result)
 
           # Parse comments from issue text
           comments = []
@@ -219,11 +217,11 @@ steps:
 
           # Post response to Jira (unless dry run)
           if final_response and not dry_run:
-              post_result = run_skill("jira_add_comment_wrapper", {
+              post_result = run_tool("jira_add_comment", {
                   "issue_key": issue_key,
                   "comment": final_response,
               })
-              if post_result.get("success"):
+              if post_result:
                   responses_sent += 1
 
           # Notify user via Slack

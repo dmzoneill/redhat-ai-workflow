@@ -1309,7 +1309,7 @@ steps:
     description: "Compile review findings"
     compute: |
       from scripts.common.parsers import linkify_jira_keys, linkify_mr_ids
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
       lines = []
       lines.append("## PR Review Summary")
       mr_str = linkify_mr_ids(f"!{mr_id}", slack_format=is_slack)

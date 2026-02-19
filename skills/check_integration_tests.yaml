@@ -235,7 +235,7 @@ steps:
     tool: memory_session_log
     args:
       action: "Checked integration tests"
-      details: "namespace={{ inputs.namespace }}, tests={{ tests_info.total if tests_info is defined else 'unknown' }}"
+      details: "namespace={{ inputs.namespace }}, tests={{ tests_info.count if tests_info is defined else 'unknown' }}"
     on_error: continue
 
   - name: track_test_checks

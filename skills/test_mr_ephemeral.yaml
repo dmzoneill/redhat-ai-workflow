@@ -156,6 +156,8 @@ steps:
             repo_path = str(candidate)
             break
 
+      jira_config = config.get("jira", {})
+
       result = {
           "gitlab_project": aa_config.get("gitlab", "automation-analytics/automation-analytics-backend"),
           "konflux_namespace": aa_config.get("konflux_namespace", "aap-aa-tenant"),
@@ -165,6 +167,7 @@ steps:
           "quay_release_namespace": "redhat-services-prod",
           "ephemeral_kubeconfig": bonfire_config.get("kubeconfig", str(Path.home() / ".kube/config.e")),
           "repo_path": repo_path,
+          "jira_url": jira_config.get("url", "https://issues.redhat.com"),
       }
     output: cfg
 
@@ -1670,7 +1673,7 @@ outputs:
       ### ClowdApp Selection
       **Component:** `{{ clowdapp_selection.clowdapp }}`
       **Reason:** {{ clowdapp_selection.reason }}
-      {% if clowdapp_selection.jira_key %}**Jira:** [{{ clowdapp_selection.jira_key }}]({{ cfg.jira.url }}/browse/{{ clowdapp_selection.jira_key }}){% endif %}
+      {% if clowdapp_selection.jira_key %}**Jira:** [{{ clowdapp_selection.jira_key }}]({{ cfg.jira_url }}/browse/{{ clowdapp_selection.jira_key }}){% endif %}
       {% if clowdapp_selection.billing_files %}
       **Billing files changed:**
       {% for f in clowdapp_selection.billing_files %}

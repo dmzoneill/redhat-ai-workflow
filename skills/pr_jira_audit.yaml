@@ -370,7 +370,7 @@ steps:
     description: "Compile audit results"
     compute: |
       from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
 
       _resolved = resolved if isinstance(resolved, dict) else {}
       gitlab_project = _resolved.get('gitlab_project', 'unknown')

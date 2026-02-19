@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ quarter }} Quarterly Connection Report</title>
+<style>
+  /* ===== Page Setup ===== */
+  @page {
+    size: A4;
+    margin: 20mm 15mm 25mm 15mm;
+    @bottom-center {
+      content: "{{ quarter }} Quarterly Connection Report";
+      font-size: 8pt;
+      color: #999;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #999;
+    }
+  }
+
+  /* ===== Base ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #1a1a1a;
+    background: #fff;
+  }
+
+  /* ===== Cover Page ===== */
+  .cover {
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
+    text-align: center;
+  }
+  .cover-title {
+    font-size: 28pt;
+    font-weight: 700;
+    color: #1a1a1a;
+    margin-bottom: 8px;
+  }
+  .cover-subtitle {
+    font-size: 14pt;
+    color: #555;
+    margin-bottom: 30px;
+  }
+  .cover-score {
+    font-size: 60pt;
+    font-weight: 800;
+    margin: 10px 0;
+  }
+  .cover-score-label {
+    font-size: 12pt;
+    color: #777;
+    margin-bottom: 40px;
+  }
+  .cover-meta {
+    font-size: 9pt;
+    color: #999;
+  }
+  .cover-meta span { margin: 0 10px; }
+
+  /* ===== Section Layout ===== */
+  .section-page { page-break-before: always; }
+  .section-title {
+    font-size: 16pt;
+    font-weight: 700;
+    color: #1a1a1a;
+    border-bottom: 2px solid #2196F3;
+    padding-bottom: 6px;
+    margin-bottom: 16px;
+  }
+  .section-subtitle {
+    font-size: 11pt;
+    font-weight: 600;
+    color: #333;
+    margin: 14px 0 8px;
+  }
+
+  /* ===== Stats Grid ===== */
+  .stats-grid {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .stat-card {
+    flex: 0 1 auto;
+    width: 18%;
+    min-width: 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 10px 6px;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 18pt;
+    font-weight: 700;
+    color: #1a1a1a;
+  }
+  .stat-label {
+    font-size: 7pt;
+    color: #777;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ===== Competency Bars ===== */
+  .comp-bar-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 9pt;
+  }
+  .comp-bar-name {
+    width: 160px;
+    font-weight: 500;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .comp-bar-track {
+    flex: 1;
+    height: 14px;
+    background: #f0f0f0;
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0 8px;
+  }
+  .comp-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+  }
+  .comp-bar-pct {
+    width: 45px;
+    text-align: right;
+    font-weight: 600;
+    color: #333;
+  }
+
+  /* ===== Calendar ===== */
+  .calendar-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .calendar-month {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 8px;
+    width: 220px;
+  }
+  .calendar-month-title {
+    text-align: center;
+    font-weight: 600;
+    font-size: 9pt;
+    margin-bottom: 4px;
+    color: #333;
+  }
+  .calendar-month table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+  .calendar-month th {
+    font-weight: 600;
+    color: #999;
+    padding: 2px 0;
+    text-align: center;
+  }
+  .calendar-month td {
+    text-align: center;
+    padding: 3px 0;
+  }
+  .cal-has-data {
+    background: #e3f2fd;
+    border-radius: 3px;
+    font-weight: 600;
+    color: #1565c0;
+  }
+  .cal-no-data { color: #ccc; }
+  .cal-empty { }
+
+  /* ===== Issue Hierarchy ===== */
+  .hierarchy-tree { font-size: 9pt; }
+  .hier-anstrat {
+    font-weight: 700;
+    color: #1565c0;
+    margin-top: 10px;
+    padding: 4px 0;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  .hier-epic {
+    margin-left: 16px;
+    font-weight: 600;
+    color: #2e7d32;
+    padding: 3px 0;
+  }
+  .hier-issue {
+    margin-left: 32px;
+    color: #555;
+    padding: 2px 0;
+  }
+  .hier-key {
+    font-family: "Cascadia Code", "Fira Code", monospace;
+    font-size: 8pt;
+  }
+  .hier-points {
+    color: #999;
+    font-size: 8pt;
+    margin-left: 6px;
+  }
+  .hier-unattached {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px dashed #ccc;
+  }
+
+  /* ===== Mindmap SVG ===== */
+  .mindmap-container {
+    text-align: center;
+    margin: 12px 0;
+  }
+  .mindmap-container svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* ===== Sunburst SVG ===== */
+  .sunburst-container {
+    text-align: center;
+    margin: 12px 0;
+  }
+  .sunburst-container svg {
+    max-width: 300px;
+    height: auto;
+  }
+
+  /* ===== Evidence Table ===== */
+  .evidence-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+    margin-bottom: 10px;
+  }
+  .evidence-table th {
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    padding: 4px 6px;
+    text-align: left;
+    font-weight: 600;
+    color: #555;
+  }
+  .evidence-table td {
+    border: 1px solid #e0e0e0;
+    padding: 3px 6px;
+    color: #333;
+    vertical-align: top;
+  }
+  .evidence-table tr:nth-child(even) td { background: #fafafa; }
+
+  /* ===== Gap Cards ===== */
+  .gap-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .gap-card {
+    flex: 1;
+    min-width: 200px;
+    border: 1px solid #ffcdd2;
+    border-left: 4px solid #ef5350;
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .gap-card-name {
+    font-weight: 600;
+    font-size: 10pt;
+    color: #c62828;
+  }
+  .gap-card-pct {
+    font-size: 9pt;
+    color: #e53935;
+  }
+  .gap-card-suggestion {
+    font-size: 8pt;
+    color: #555;
+    margin-top: 4px;
+  }
+
+  /* ===== Strategy Section ===== */
+  .strat-priorities-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .strat-priority {
+    flex: 1;
+    min-width: 180px;
+    border: 1px solid #e0e0e0;
+    border-left: 3px solid #2196F3;
+    border-radius: 4px;
+    padding: 6px 8px;
+  }
+  .strat-priority-name {
+    font-weight: 600;
+    font-size: 9pt;
+    color: #1565c0;
+  }
+  .strat-priority-ctx {
+    font-size: 8pt;
+    color: #777;
+    margin-top: 2px;
+  }
+
+  .strat-alignment-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+  }
+  .strat-alignment-card.covered { border-left: 4px solid #4caf50; }
+  .strat-alignment-card.gap { border-left: 4px solid #ef5350; }
+  .strat-align-name {
+    font-weight: 600;
+    font-size: 9pt;
+  }
+  .strat-align-status {
+    font-size: 8pt;
+    font-weight: 600;
+  }
+  .strat-align-status.covered { color: #2e7d32; }
+  .strat-align-status.gap { color: #c62828; }
+  .strat-align-matches {
+    font-size: 8pt;
+    color: #555;
+  }
+
+  .strat-coverage-bar-container {
+    margin: 12px 0;
+    text-align: center;
+  }
+  .strat-coverage-pct {
+    font-size: 32pt;
+    font-weight: 800;
+  }
+  .strat-coverage-bar {
+    height: 12px;
+    background: #f0f0f0;
+    border-radius: 6px;
+    max-width: 400px;
+    margin: 6px auto;
+    overflow: hidden;
+  }
+  .strat-coverage-fill {
+    height: 100%;
+    border-radius: 6px;
+  }
+  .strat-coverage-stats {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    font-size: 9pt;
+    color: #555;
+    margin-top: 8px;
+  }
+  .strat-coverage-stat strong {
+    font-size: 14pt;
+    color: #1a1a1a;
+    display: block;
+  }
+
+  /* ===== Match Badges ===== */
+  .match-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 7pt;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .match-direct { background: #e8f5e9; color: #2e7d32; }
+  .match-anstrat { background: #e3f2fd; color: #1565c0; }
+  .match-theme { background: #fff8e1; color: #f57f17; }
+
+  /* ===== Theme Badges ===== */
+  .theme-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 8pt;
+    margin: 2px 3px;
+    color: #333;
+  }
+
+  /* ===== Activity Log ===== */
+  .log-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+  .log-table th {
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
+    padding: 4px 6px;
+    text-align: left;
+    font-weight: 600;
+  }
+  .log-table td {
+    border: 1px solid #e0e0e0;
+    padding: 3px 6px;
+    vertical-align: top;
+  }
+
+  /* ===== Progress / Questions ===== */
+  .question-block {
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .question-text {
+    font-weight: 600;
+    font-size: 9pt;
+    color: #333;
+  }
+  .question-answer {
+    font-size: 9pt;
+    color: #555;
+    margin-top: 4px;
+  }
+
+  /* ===== Highlights / Gaps Lists ===== */
+  .highlight-list, .gap-list {
+    list-style: none;
+    padding-left: 0;
+  }
+  .highlight-list li, .gap-list li {
+    padding: 3px 0 3px 16px;
+    position: relative;
+    font-size: 9pt;
+  }
+  .highlight-list li::before {
+    content: "\2713";
+    position: absolute;
+    left: 0;
+    color: #4caf50;
+    font-weight: 700;
+  }
+  .gap-list li::before {
+    content: "\26A0";
+    position: absolute;
+    left: 0;
+    color: #f57f17;
+  }
+
+  /* ===== Utility ===== */
+  .text-muted { color: #999; font-size: 8pt; }
+  .text-center { text-align: center; }
+  .mb-8 { margin-bottom: 8px; }
+  .mb-16 { margin-bottom: 16px; }
+  .empty-note {
+    color: #bbb;
+    font-style: italic;
+    font-size: 9pt;
+    padding: 8px 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== COVER PAGE ===== -->
+<div class="cover">
+  <div class="cover-title">Quarterly Connection Report</div>
+  <div class="cover-subtitle">{{ quarter }}</div>
+  <div class="cover-score" style="color: {{ score_color }};">{{ overall_pct }}%</div>
+  <div class="cover-score-label">Overall Performance Score</div>
+  <div class="cover-meta">
+    <span>Generated: {{ generated_at }}</span>
+    <span>|</span>
+    <span>Day {{ day_of_quarter }} of Quarter</span>
+    <span>|</span>
+    <span>{{ total_events }} Events Captured</span>
+  </div>
+</div>
+
+<!-- ===== 1. OVERVIEW ===== -->
+<div class="section-page">
+  <div class="section-title">1. Overview</div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value">{{ overall_pct }}%</div>
+      <div class="stat-label">Overall Score</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ days_captured }}</div>
+      <div class="stat-label">Days Captured</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ total_issues }}</div>
+      <div class="stat-label">Issues Delivered</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ total_events }}</div>
+      <div class="stat-label">Total Events</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">{{ num_competencies }}</div>
+      <div class="stat-label">Competencies</div>
+    </div>
+  </div>
+
+  {% if sunburst_svg %}
+  <div class="section-subtitle">Competency Sunburst</div>
+  <div class="sunburst-container">{{ sunburst_svg | safe }}</div>
+  {% endif %}
+
+  <div class="section-subtitle">Top Competencies</div>
+  {{ competency_bars_html | safe }}
+
+  {% if highlights %}
+  <div class="section-subtitle">Highlights</div>
+  <ul class="highlight-list">
+    {% for h in highlights %}
+    <li>{{ h }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if gaps_list %}
+  <div class="section-subtitle">Areas Needing Attention</div>
+  <ul class="gap-list">
+    {% for g in gaps_list %}
+    <li>{{ g }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+<!-- ===== 2. CALENDAR ===== -->
+<div class="section-page">
+  <div class="section-title">2. Calendar Coverage</div>
+  <p class="mb-16 text-muted">Days with captured performance data are highlighted.</p>
+  {{ calendar_html | safe }}
+</div>
+
+<!-- ===== 3. ISSUE HIERARCHY ===== -->
+<div class="section-page">
+  <div class="section-title">3. Issue Hierarchy</div>
+  {% if hierarchy %}
+  <div class="hierarchy-tree">
+    {% for strat in hierarchy.get('strategies', []) %}
+    <div class="hier-anstrat">
+      <span class="hier-key">{{ strat.key }}</span> {{ strat.summary or '' }}
+      {% if strat.points %}<span class="hier-points">({{ strat.points }} pts)</span>{% endif %}
+    </div>
+    {% for epic in strat.get('children', []) %}
+    <div class="hier-epic">
+      <span class="hier-key">{{ epic.key }}</span> {{ epic.summary or '' }}
+      {% if epic.points %}<span class="hier-points">({{ epic.points }} pts)</span>{% endif %}
+    </div>
+    {% for issue in epic.get('children', []) %}
+    <div class="hier-issue">
+      <span class="hier-key">{{ issue.key }}</span> {{ issue.summary or '' }}
+      {% if issue.points %}<span class="hier-points">({{ issue.points }} pts)</span>{% endif %}
+    </div>
+    {% endfor %}
+    {% endfor %}
+    {% endfor %}
+
+    {% if hierarchy.get('unattached_epics') %}
+    <div class="hier-unattached">
+      <div class="section-subtitle">Unattached Epics</div>
+      {% for epic in hierarchy.unattached_epics %}
+      <div class="hier-epic">
+        <span class="hier-key">{{ epic.key }}</span> {{ epic.summary or '' }}
+        {% if epic.points %}<span class="hier-points">({{ epic.points }} pts)</span>{% endif %}
+      </div>
+      {% for issue in epic.get('children', []) %}
+      <div class="hier-issue">
+        <span class="hier-key">{{ issue.key }}</span> {{ issue.summary or '' }}
+        {% if issue.points %}<span class="hier-points">({{ issue.points }} pts)</span>{% endif %}
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="empty-note">No issue hierarchy data available.</p>
+  {% endif %}
+</div>
+
+<!-- ===== 4. ISSUE MINDMAP ===== -->
+<div class="section-page">
+  <div class="section-title">4. Issue Mindmap</div>
+  {% if mindmap_svg %}
+  <div class="mindmap-container">{{ mindmap_svg | safe }}</div>
+  {% else %}
+  <p class="empty-note">No issue data available for mindmap generation.</p>
+  {% endif %}
+</div>
+
+<!-- ===== 5. COMPETENCIES ===== -->
+<div class="section-page">
+  <div class="section-title">5. Competency Breakdown</div>
+
+  <div class="section-subtitle">Progress Bars</div>
+  {{ competency_bars_html | safe }}
+
+  {% if competency_evidence %}
+  <div class="section-subtitle">Evidence by Competency</div>
+  {% for comp_name, events in competency_evidence.items() %}
+  <div class="mb-8">
+    <strong style="font-size:9pt;">{{ comp_name | replace('_',' ') | title }}</strong>
+    <span class="text-muted">({{ events | length }} events)</span>
+  </div>
+  {% if events %}
+  <table class="evidence-table">
+    <thead><tr><th>Date</th><th>Title</th><th>Source</th><th>Type</th><th>Pts</th></tr></thead>
+    <tbody>
+    {% for ev in events[:15] %}
+    <tr>
+      <td>{{ ev.date }}</td>
+      <td>{{ ev.title }}</td>
+      <td>{{ ev.source }}</td>
+      <td>{{ ev.type }}</td>
+      <td>{{ ev.points }}</td>
+    </tr>
+    {% endfor %}
+    {% if events | length > 15 %}
+    <tr><td colspan="5" class="text-muted">... and {{ events | length - 15 }} more events</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% endfor %}
+  {% endif %}
+
+  {% if gap_suggestions %}
+  <div class="section-subtitle">Gap Analysis</div>
+  <div class="gap-cards">
+    {% for comp_name, gs in gap_suggestions.items() %}
+    <div class="gap-card">
+      <div class="gap-card-name">{{ comp_name | replace('_',' ') | title }}</div>
+      <div class="gap-card-pct">{{ gs.percentage }}% (deficit: {{ gs.deficit }} pts)</div>
+      {% for sug in gs.get('suggestions', [])[:3] %}
+      <div class="gap-card-suggestion">- {{ sug }}</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ===== 6. PROGRESS ===== -->
+<div class="section-page">
+  <div class="section-title">6. Progress &amp; Quarterly Questions</div>
+  {% if questions_summary %}
+  {% for q in questions_summary %}
+  <div class="question-block">
+    <div class="question-text">{{ q.question }}</div>
+    {% if q.get('answer') %}
+    <div class="question-answer">{{ q.answer }}</div>
+    {% else %}
+    <div class="question-answer text-muted">Not yet answered.</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="empty-note">No quarterly questions available.</p>
+  {% endif %}
+
+  {% if highlights %}
+  <div class="section-subtitle">Recent Highlights</div>
+  <ul class="highlight-list">
+    {% for h in highlights %}
+    <li>{{ h }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+
+<!-- ===== 7. EXECUTIVE STRATEGY ===== -->
+<div class="section-page">
+  <div class="section-title">7. Executive Strategy Alignment</div>
+
+  {% if strategy_data %}
+    {% if strategy_data.parsed_email %}
+    <div class="section-subtitle">Email Summary</div>
+    <p class="text-muted mb-8">
+      From: <strong>{{ strategy_data.parsed_email.sender or 'Unknown' }}</strong>
+      | {{ strategy_data.parsed_email.total_priorities }} priorities
+      | {{ strategy_data.parsed_email.total_issue_keys }} issue keys
+      | {{ strategy_data.parsed_email.total_themes }} themes
+    </p>
+
+    {% if strategy_data.parsed_email.priorities %}
+    <div class="section-subtitle">Strategic Priorities</div>
+    <div class="strat-priorities-grid">
+      {% for p in strategy_data.parsed_email.priorities %}
+      <div class="strat-priority">
+        <div class="strat-priority-name">{{ p.name }}</div>
+        <div class="strat-priority-ctx">{{ p.context[:120] }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if strategy_data.parsed_email.themes %}
+    <div class="section-subtitle">Themes</div>
+    <div class="mb-8">
+      {% for t in strategy_data.parsed_email.themes %}
+      <span class="theme-badge">{{ t.name }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% if strategy_data.priority_coverage %}
+    <div class="section-subtitle">Priority Alignment</div>
+    {% for pc in strategy_data.priority_coverage %}
+    <div class="strat-alignment-card {{ pc.status }}">
+      <span class="strat-align-status {{ pc.status }}">{% if pc.status == 'covered' %}COVERED{% else %}GAP{% endif %}</span>
+      <span class="strat-align-name">{{ pc.name }}</span>
+      {% if pc.matching_issues %}
+      <div class="strat-align-matches">Matched: {{ pc.matching_issues | join(', ') }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if strategy_data.coverage_summary %}
+    <div class="section-subtitle">Alignment Score</div>
+    <div class="strat-coverage-bar-container">
+      {% set cpct = strategy_data.coverage_summary.coverage_pct %}
+      {% if cpct >= 70 %}{% set ccolor = '#4caf50' %}{% elif cpct >= 40 %}{% set ccolor = '#ff9800' %}{% else %}{% set ccolor = '#ef5350' %}{% endif %}
+      <div class="strat-coverage-pct" style="color:{{ ccolor }};">{{ cpct }}%</div>
+      <div class="strat-coverage-bar">
+        <div class="strat-coverage-fill" style="width:{{ cpct }}%;background:{{ ccolor }};"></div>
+      </div>
+      <div class="strat-coverage-stats">
+        <div class="strat-coverage-stat"><strong>{{ strategy_data.coverage_summary.covered }}</strong>Covered</div>
+        <div class="strat-coverage-stat"><strong>{{ strategy_data.coverage_summary.gaps }}</strong>Gaps</div>
+        <div class="strat-coverage-stat"><strong>{{ strategy_data.coverage_summary.mapped_issues }}</strong>Mapped Issues</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if strategy_data.mappings %}
+    <div class="section-subtitle">Detailed Mappings</div>
+    <table class="evidence-table">
+      <thead><tr><th>Match</th><th>Issue</th><th>Summary</th><th>Pts</th><th>Email Context</th></tr></thead>
+      <tbody>
+      {% for m in strategy_data.mappings %}
+      <tr>
+        <td>
+          {% if m.match_type == 'direct_key' %}<span class="match-badge match-direct">Direct</span>
+          {% elif m.match_type == 'anstrat_link' %}<span class="match-badge match-anstrat">ANSTRAT</span>
+          {% else %}<span class="match-badge match-theme">Theme</span>{% endif %}
+        </td>
+        <td class="hier-key">{{ m.user_issue }}</td>
+        <td>{{ m.user_summary[:60] }}</td>
+        <td>{{ m.user_points }}</td>
+        <td class="text-muted">{{ m.email_context[:80] }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+  {% else %}
+  <p class="empty-note">No executive emails have been parsed yet. Use the Strategy tab to add one.</p>
+  {% endif %}
+</div>
+
+<!-- ===== 8. ACTIVITY LOG ===== -->
+<div class="section-page">
+  <div class="section-title">8. Activity Log</div>
+  {% if all_events %}
+  <table class="log-table">
+    <thead><tr><th>Date</th><th>Source</th><th>Type</th><th>Title</th><th>Pts</th></tr></thead>
+    <tbody>
+    {% for ev in all_events[-100:] %}
+    <tr>
+      <td>{{ ev.get('date', '') }}</td>
+      <td>{{ ev.get('source', '') }}</td>
+      <td>{{ ev.get('type', '') }}</td>
+      <td>{{ ev.get('title', '') }}</td>
+      <td>{{ ev.get('points', 0) }}</td>
+    </tr>
+    {% endfor %}
+    {% if all_events | length > 100 %}
+    <tr><td colspan="5" class="text-muted">Showing last 100 of {{ all_events | length }} events.</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-note">No activity events recorded.</p>
+  {% endif %}
+</div>
+
+</body>
+</html>

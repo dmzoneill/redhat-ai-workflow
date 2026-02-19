@@ -111,6 +111,10 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._background_sync_offset: int = 0
         self._last_background_sync: float = 0
 
+        # Lock to serialize sync operations across loops (prevents
+        # concurrent WorkspaceRegistry access from fast/recent/background loops)
+        self._sync_lock = asyncio.Lock()
+
         # Register custom D-Bus method handlers
         self.register_handler("search_chats", self._handle_search_chats)
         self.register_handler("get_sessions", self._handle_get_sessions)
@@ -618,7 +622,10 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             True if active session changed or session count changed, False otherwise
         """
         try:
-            active_sessions, session_count = self._get_active_session_ids()
+            loop = asyncio.get_event_loop()
+            active_sessions, session_count = await loop.run_in_executor(
+                None, self._get_active_session_ids
+            )
 
             changed = False
 
@@ -631,7 +638,6 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     f"Session count changed: {self._last_session_count} -> {session_count}, "
                     "triggering full sync"
                 )
-                # Trigger a full sync to update the registry with adds/removes
                 await self._do_sync()
                 changed = True
 
@@ -652,55 +658,56 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             logger.debug(f"Fast sync error: {e}")
             return False
 
+    def _recent_sync_work(self) -> dict:
+        """Blocking work for recent sync (runs in thread executor)."""
+        from server.workspace_state import WorkspaceRegistry
+
+        if WorkspaceRegistry.count() == 0:
+            WorkspaceRegistry.load_from_disk()
+
+        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
+            session_ids=self._recent_active_sessions
+        )
+
+        all_states = WorkspaceRegistry.get_all_as_dict()
+        all_sessions = WorkspaceRegistry.get_all_sessions()
+
+        session_state = {
+            "workspaces": all_states,
+            "sessions": all_sessions,
+            "workspace_count": len(all_states),
+            "session_count": (
+                len(all_sessions)
+                if all_sessions
+                else sum(len(ws.get("sessions", {})) for ws in all_states.values())
+            ),
+            "last_sync": sync_result,
+            "sync_type": "recent",
+            "recent_sessions": list(self._recent_active_sessions),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        self._write_state_file(session_state)
+        return sync_result
+
     async def _do_recent_sync(self) -> dict:
         """Sync recent active sessions with full detail (5 second interval).
 
         This syncs the last N active sessions with full chat content scanning
-        for persona, issue keys, project, etc.
+        for persona, issue keys, project, etc. Runs blocking I/O in a thread
+        executor to keep the event loop responsive for watchdog pings.
 
         Returns:
             Sync result dict
         """
-        # Skip if no recent sessions to sync
         if not self._recent_active_sessions:
             logger.debug("Recent sync: No recent sessions, skipping")
             return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
         try:
-            from server.workspace_state import WorkspaceRegistry
-
-            # Note: We don't load from disk every time - the registry persists in memory
-            # Only load if registry is empty (first run after startup)
-            if WorkspaceRegistry.count() == 0:
-                WorkspaceRegistry.load_from_disk()
-
-            # Sync only recent sessions (never pass None - that triggers full scan)
-            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
-                session_ids=self._recent_active_sessions
-            )
-
-            # Get all workspace states and sessions for state file
-            all_states = WorkspaceRegistry.get_all_as_dict()
-            all_sessions = WorkspaceRegistry.get_all_sessions()
-
-            # Build session state
-            session_state = {
-                "workspaces": all_states,
-                "sessions": all_sessions,
-                "workspace_count": len(all_states),
-                "session_count": (
-                    len(all_sessions)
-                    if all_sessions
-                    else sum(len(ws.get("sessions", {})) for ws in all_states.values())
-                ),
-                "last_sync": sync_result,
-                "sync_type": "recent",
-                "recent_sessions": self._recent_active_sessions,
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Write state file
-            self._write_state_file(session_state)
+            async with self._sync_lock:
+                loop = asyncio.get_event_loop()
+                sync_result = await loop.run_in_executor(None, self._recent_sync_work)
 
             self._sync_count += 1
             self._last_sync_time = time.time()
@@ -719,86 +726,82 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             self.record_failed_operation()
             return {"error": str(e)}
 
+    def _background_sync_work(self) -> dict:
+        """Blocking work for background sync (runs in thread executor)."""
+        from server.workspace_state import WorkspaceRegistry
+
+        if WorkspaceRegistry.count() == 0:
+            WorkspaceRegistry.load_from_disk()
+
+        all_sessions = WorkspaceRegistry.get_all_sessions()
+        all_session_ids = [
+            s.get("session_id") for s in all_sessions if s.get("session_id")
+        ]
+
+        background_ids = [
+            sid for sid in all_session_ids if sid not in self._recent_active_sessions
+        ]
+
+        if not background_ids:
+            logger.debug("No background sessions to sync")
+            return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
+
+        batch_start = self._background_sync_offset
+        batch_end = batch_start + self._background_batch_size
+        batch_ids = background_ids[batch_start:batch_end]
+
+        if batch_end >= len(background_ids):
+            self._background_sync_offset = 0
+        else:
+            self._background_sync_offset = batch_end
+
+        if not batch_ids:
+            return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
+
+        logger.debug(
+            f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start})"
+        )
+
+        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=batch_ids)
+
+        all_states = WorkspaceRegistry.get_all_as_dict()
+        all_sessions = WorkspaceRegistry.get_all_sessions()
+
+        session_state = {
+            "workspaces": all_states,
+            "sessions": all_sessions,
+            "workspace_count": len(all_states),
+            "session_count": len(all_sessions),
+            "last_sync": sync_result,
+            "sync_type": "background",
+            "batch_offset": batch_start,
+            "batch_size": len(batch_ids),
+            "total_background": len(background_ids),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        self._write_state_file(session_state)
+
+        self._last_background_sync = time.time()
+        logger.debug(f"Background sync: batch {batch_start}-{batch_end}, {sync_result}")
+
+        return sync_result
+
     async def _do_background_sync(self) -> dict:
         """Background sync: Incremental sync for all other sessions (60 second interval).
 
-        Processes sessions in batches to avoid CPU spikes.
+        Processes sessions in batches to avoid CPU spikes. Runs blocking I/O
+        in a thread executor to keep the event loop responsive.
 
         Returns:
             Sync result dict
         """
         try:
-            from server.workspace_state import WorkspaceRegistry
-
-            # Only load if registry is empty
-            if WorkspaceRegistry.count() == 0:
-                WorkspaceRegistry.load_from_disk()
-
-            # Get all session IDs
-            all_sessions = WorkspaceRegistry.get_all_sessions()
-            all_session_ids = [
-                s.get("session_id") for s in all_sessions if s.get("session_id")
-            ]
-
-            # Exclude recent sessions (already synced frequently)
-            background_ids = [
-                sid
-                for sid in all_session_ids
-                if sid not in self._recent_active_sessions
-            ]
-
-            if not background_ids:
-                logger.debug("No background sessions to sync")
-                return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
-
-            # Get batch for this cycle
-            batch_start = self._background_sync_offset
-            batch_end = batch_start + self._background_batch_size
-            batch_ids = background_ids[batch_start:batch_end]
-
-            # Update offset for next cycle (wrap around)
-            if batch_end >= len(background_ids):
-                self._background_sync_offset = 0
-            else:
-                self._background_sync_offset = batch_end
-
-            if not batch_ids:
-                return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
-
-            logger.debug(
-                f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start})"
-            )
-
-            # Sync this batch
-            sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
-                session_ids=batch_ids
-            )
-
-            # Get updated states
-            all_states = WorkspaceRegistry.get_all_as_dict()
-            all_sessions = WorkspaceRegistry.get_all_sessions()
-
-            # Build session state
-            session_state = {
-                "workspaces": all_states,
-                "sessions": all_sessions,
-                "workspace_count": len(all_states),
-                "session_count": len(all_sessions),
-                "last_sync": sync_result,
-                "sync_type": "background",
-                "batch_offset": batch_start,
-                "batch_size": len(batch_ids),
-                "total_background": len(background_ids),
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Write state file
-            self._write_state_file(session_state)
-
-            self._last_background_sync = time.time()
-            logger.debug(
-                f"Background sync: batch {batch_start}-{batch_end}, {sync_result}"
-            )
+            async with self._sync_lock:
+                loop = asyncio.get_event_loop()
+                sync_result = await loop.run_in_executor(
+                    None, self._background_sync_work
+                )
 
             return sync_result
 
@@ -809,50 +812,50 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             logger.debug(traceback.format_exc())
             return {"error": str(e)}
 
+    def _initial_sync_work(self):
+        """Blocking work for initial sync (runs in thread executor)."""
+        from server.workspace_state import WorkspaceRegistry
+
+        WorkspaceRegistry.load_from_disk()
+
+        for workspace_path in self._configured_paths:
+            workspace_uri = workspace_path
+            if not workspace_uri.startswith("file://"):
+                workspace_uri = f"file://{workspace_path}"
+            WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
+
+        sync_result = WorkspaceRegistry.sync_all_with_cursor(skip_content_scan=True)
+
+        all_states = WorkspaceRegistry.get_all_as_dict()
+        all_sessions = WorkspaceRegistry.get_all_sessions()
+
+        session_state = {
+            "workspaces": all_states,
+            "sessions": all_sessions,
+            "workspace_count": len(all_states),
+            "session_count": len(all_sessions),
+            "last_sync": sync_result,
+            "sync_type": "initial",
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        self._write_state_file(session_state)
+        return len(all_sessions)
+
     async def _do_initial_sync(self):
         """Initial lightweight sync - skips expensive content scanning.
 
         Called at startup to quickly populate state. Content scanning
-        happens incrementally via background sync.
+        happens incrementally via background sync. Runs blocking I/O
+        in a thread executor to keep the event loop responsive.
         """
         try:
-            from server.workspace_state import WorkspaceRegistry
-
-            # Load from disk
-            WorkspaceRegistry.load_from_disk()
-
-            # Ensure configured workspaces exist
-            for workspace_path in self._configured_paths:
-                workspace_uri = workspace_path
-                if not workspace_uri.startswith("file://"):
-                    workspace_uri = f"file://{workspace_path}"
-                WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
-
-            # Lightweight sync - just names and timestamps, no content scanning
-            # Pass empty list to skip content scanning entirely
-            sync_result = WorkspaceRegistry.sync_all_with_cursor(skip_content_scan=True)
-
-            # Get all workspace states
-            all_states = WorkspaceRegistry.get_all_as_dict()
-            all_sessions = WorkspaceRegistry.get_all_sessions()
-
-            # Build session state
-            session_state = {
-                "workspaces": all_states,
-                "sessions": all_sessions,
-                "workspace_count": len(all_states),
-                "session_count": len(all_sessions),
-                "last_sync": sync_result,
-                "sync_type": "initial",
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Write state file
-            self._write_state_file(session_state)
+            loop = asyncio.get_event_loop()
+            session_count = await loop.run_in_executor(None, self._initial_sync_work)
 
             self._sync_count += 1
             self._last_sync_time = time.time()
-            logger.info(f"Initial sync complete: {len(all_sessions)} sessions")
+            logger.info(f"Initial sync complete: {session_count} sessions")
             self.record_successful_operation()
 
         except Exception as e:
@@ -862,55 +865,56 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             logger.debug(traceback.format_exc())
             self.record_failed_operation()
 
-    async def _do_sync(self):
-        """Full sync - called on manual refresh.
+    def _full_sync_work(self):
+        """Blocking work for full sync (runs in thread executor)."""
+        from server.workspace_state import WorkspaceRegistry
 
-        Each service writes to its own state file. The VS Code extension
-        reads all state files on refresh and merges them for display.
-        This prevents race conditions - no shared file between services.
+        WorkspaceRegistry.load_from_disk()
+
+        for workspace_path in self._configured_paths:
+            workspace_uri = workspace_path
+            if not workspace_uri.startswith("file://"):
+                workspace_uri = f"file://{workspace_path}"
+            WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
+
+        sync_result = WorkspaceRegistry.sync_all_with_cursor()
+
+        all_states = WorkspaceRegistry.get_all_as_dict()
+        all_sessions = WorkspaceRegistry.get_all_sessions()
+
+        session_state = {
+            "workspaces": all_states,
+            "sessions": all_sessions,
+            "workspace_count": len(all_states),
+            "session_count": (
+                len(all_sessions)
+                if all_sessions
+                else sum(len(ws.get("sessions", {})) for ws in all_states.values())
+            ),
+            "last_sync": sync_result,
+            "sync_type": "full",
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        self._write_state_file(session_state)
+        return len(all_sessions), sync_result
+
+    async def _do_sync(self):
+        """Full sync - called on manual refresh or session count change.
+
+        Runs blocking I/O in a thread executor to keep the event loop
+        responsive for watchdog pings.
         """
         try:
-            from server.workspace_state import WorkspaceRegistry
-
-            # Load from disk (registry is per-process, so we need to load first)
-            WorkspaceRegistry.load_from_disk()
-
-            # Ensure configured workspaces exist
-            for workspace_path in self._configured_paths:
-                # Convert path to file:// URI if needed
-                workspace_uri = workspace_path
-                if not workspace_uri.startswith("file://"):
-                    workspace_uri = f"file://{workspace_path}"
-                WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
-
-            # Full sync with Cursor's database
-            sync_result = WorkspaceRegistry.sync_all_with_cursor()
-
-            # Get all workspace states
-            all_states = WorkspaceRegistry.get_all_as_dict()
-            all_sessions = WorkspaceRegistry.get_all_sessions()
-
-            # Build session state
-            session_state = {
-                "workspaces": all_states,
-                "sessions": all_sessions,
-                "workspace_count": len(all_states),
-                "session_count": (
-                    len(all_sessions)
-                    if all_sessions
-                    else sum(len(ws.get("sessions", {})) for ws in all_states.values())
-                ),
-                "last_sync": sync_result,
-                "sync_type": "full",
-                "updated_at": datetime.now().isoformat(),
-            }
-
-            # Write to our own state file atomically
-            self._write_state_file(session_state)
+            async with self._sync_lock:
+                loop = asyncio.get_event_loop()
+                session_count, sync_result = await loop.run_in_executor(
+                    None, self._full_sync_work
+                )
 
             self._sync_count += 1
             self._last_sync_time = time.time()
-            logger.debug(f"Full sync: {len(all_sessions)} sessions, {sync_result}")
+            logger.debug(f"Full sync: {session_count} sessions, {sync_result}")
             self.record_successful_operation()
 
         except Exception as e:
@@ -1097,8 +1101,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         """Handle system wake from sleep - refresh session state."""
         logger.info("System wake detected - triggering session refresh")
         try:
-            # Trigger immediate sync of recent sessions
-            await self._sync_recent_sessions()
+            await self._do_recent_sync()
             logger.info("Post-wake session refresh complete")
         except Exception as e:
             logger.error(f"Error refreshing sessions after wake: {e}")

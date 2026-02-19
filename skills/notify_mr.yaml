@@ -419,7 +419,7 @@ steps:
       errors_detected = []
 
       # Check GitLab failures
-      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      mr_text = str(mr_result) if 'mr_result' in dir() and mr_result else ""
       if "no such host" in mr_text.lower():
           errors_detected.append({
               "tool": "gitlab_mr_view",
@@ -436,7 +436,7 @@ steps:
           })
 
       # Check Slack failures
-      slack_text = str(slack_result_raw) if 'slack_result_raw' in dir() and slack_result_raw else ""
+      slack_text = str(slack_result) if 'slack_result' in dir() and slack_result else ""
       if "not_in_channel" in slack_text.lower() or "channel_not_found" in slack_text.lower():
           errors_detected.append({
               "tool": "slack_post_team",
@@ -483,7 +483,7 @@ steps:
 outputs:
   - name: summary
     value: |
-      {% set is_slack = inputs.slack_format | default(true) %}
+      {% set is_slack = inputs.slack_format | default(false) %}
       ## {{ "✅ Team Notified" if slack_result else "📋 Message Ready" }}
 
       {% if is_slack %}

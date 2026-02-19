@@ -141,3 +141,23 @@ tool_fixes:
     on the D-Bus interface
   times_prevented: 0
   tool_name: slop_scan_now skill
+- date_learned: '2026-02-17'
+  error_pattern: HTTP error 400 date arithmetic + 1d
+  fix_applied: 'Use JIRA''s built-in date functions instead of arithmetic: replace
+    "''date'' + 1d" with "endOfDay(''date'')" or calculate the next date explicitly
+    in the skill''s compute step and use absolute date ranges like "resolved >= ''2026-02-17''
+    AND resolved < ''2026-02-18''"'
+  root_cause: JQL date arithmetic using '+' character (e.g., '2026-02-17' + 1d) causes
+    HTTP 400 because '+' is a reserved character in JQL that gets misinterpreted during
+    URL encoding
+  times_prevented: 0
+  tool_name: jira_search
+- date_learned: '2026-02-17'
+  error_pattern: Missing required argument.*project
+  fix_applied: Update the skill's fetch_gitlab_mrs step to include the project parameter.
+    The skill should iterate over configured projects or use a default project from
+    the session context.
+  root_cause: The performance/collect_daily skill calls gitlab_mr_list without passing
+    the required 'project' parameter
+  times_prevented: 0
+  tool_name: gitlab_mr_list

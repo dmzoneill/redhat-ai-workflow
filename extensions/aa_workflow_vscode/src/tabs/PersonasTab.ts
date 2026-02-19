@@ -141,7 +141,7 @@ export class PersonasTab extends BaseTab {
 
       <!-- Personas List -->
       <div class="section">
-        <div class="section-title">📋 Available Personas (${this.personas.length})</div>
+        <div class="section-title">Available Personas (${this.personas.length})</div>
         ${this.viewMode === "card" ? this.getPersonaCardsHtml() : this.getPersonaTableHtml()}
       </div>
     `;

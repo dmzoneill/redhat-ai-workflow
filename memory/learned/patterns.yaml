@@ -1,3 +1,4 @@
+ci_failure_patterns: []
 code_searches:
 - patterns_found: 0
   project: myproj
@@ -1621,7 +1622,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-02-09T23:28:48.244139'
   total_combinations: 140
-last_updated: '2026-02-10T00:04:24.385397'
+last_updated: '2026-02-19T00:01:39.517821'
 popular_queries:
 - avg_results: 0.0
   first_searched: '2026-02-07T20:58:16.717532'
@@ -1650,3 +1651,81 @@ vector_reindexes:
   timestamp: '2026-02-10T00:01:10.224354'
   total_chunks: 0
   total_files: 0
+- errors: 2
+  force: false
+  projects_indexed: 5
+  timestamp: '2026-02-14T21:01:04.887050'
+  total_chunks: 0
+  total_files: 0
+- errors: 2
+  force: false
+  projects_indexed: 5
+  timestamp: '2026-02-15T00:02:11.742106'
+  total_chunks: 0
+  total_files: 0
+- errors: 2
+  force: false
+  projects_indexed: 5
+  timestamp: '2026-02-15T21:02:26.855719'
+  total_chunks: 0
+  total_files: 0
+- errors: 2
+  force: false
+  projects_indexed: 5
+  timestamp: '2026-02-16T00:02:05.845146'
+  total_chunks: 0
+  total_files: 0
+- errors: 3
+  force: false
+  projects_indexed: 4
+  timestamp: '2026-02-16T15:03:15.989824'
+  total_chunks: 0
+  total_files: 0
+- errors: 3
+  force: false
+  projects_indexed: 4
+  timestamp: '2026-02-16T18:00:58.507212'
+  total_chunks: 0
+  total_files: 0
+- errors: 4
+  force: false
+  projects_indexed: 3
+  timestamp: '2026-02-16T21:02:11.391177'
+  total_chunks: 0
+  total_files: 0
+- errors: 4
+  force: false
+  projects_indexed: 3
+  timestamp: '2026-02-17T00:01:05.106603'
+  total_chunks: 0
+  total_files: 0
+- errors: 4
+  force: false
+  projects_indexed: 3
+  timestamp: '2026-02-17T12:01:11.720050'
+  total_chunks: 0
+  total_files: 0
+- errors: 4
+  force: false
+  projects_indexed: 3
+  timestamp: '2026-02-17T18:01:14.010092'
+  total_chunks: 0
+  total_files: 0
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-18T18:03:42.594793'
+  total_chunks: 9097
+  total_files: 5427
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-18T21:02:41.579951'
+  total_chunks: 591
+  total_files: 34
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-19T00:01:39.503843'
+  total_chunks: 1476
+  total_files: 235

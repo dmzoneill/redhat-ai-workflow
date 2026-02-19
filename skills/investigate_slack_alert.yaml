@@ -666,7 +666,7 @@ steps:
       errors_detected = []
 
       # Check Kubernetes failures
-      pods_text = str(pods_raw) if 'pods_raw' in dir() and pods_raw else ""
+      pods_text = str(pod_status) if 'pod_status' in dir() and pod_status else ""
       if "forbidden" in pods_text.lower() or "unauthorized" in pods_text.lower():
           errors_detected.append({
               "tool": "kubectl_get_pods",
@@ -683,7 +683,7 @@ steps:
           })
 
       # Check Kibana failures
-      logs_text = str(logs_raw) if 'logs_raw' in dir() and logs_raw else ""
+      logs_text = str(recent_logs) if 'recent_logs' in dir() and recent_logs else ""
       if "unauthorized" in logs_text.lower() or "authentication required" in logs_text.lower():
           errors_detected.append({
               "tool": "kibana_search_logs",
@@ -693,7 +693,7 @@ steps:
           })
 
       # Check Jira failures
-      jira_text = str(jira_search_raw) if 'jira_search_raw' in dir() and jira_search_raw else ""
+      jira_text = str(existing_issues) if 'existing_issues' in dir() and existing_issues else ""
       if "unauthorized" in jira_text.lower():
           errors_detected.append({
               "tool": "jira_search",

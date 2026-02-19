@@ -1,0 +1,57 @@
+notifications:
+- job_name: hello_world_test
+  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
+    \ 10 minutes"
+  skill: hello_world
+  success: false
+  timestamp: '2026-02-16T21:10:00.082673'
+  title: 'Scheduled Job: hello_world_test'
+- job_name: vector_reindex_3h
+  message: "\u274C Skill `reindex_all_vectors` failed.\n\nError: Claude CLI timed\
+    \ out after 10 minutes"
+  skill: reindex_all_vectors
+  success: false
+  timestamp: '2026-02-16T21:10:00.089615'
+  title: 'Scheduled Job: vector_reindex_3h'
+- job_name: daily_cve_fix
+  message: "\u274C Skill `cve_fix` failed.\n\nError: Claude CLI timed out after 10\
+    \ minutes"
+  skill: cve_fix
+  success: false
+  timestamp: '2026-02-17T10:10:00.063406'
+  title: 'Scheduled Job: daily_cve_fix'
+- job_name: daily_performance_collection
+  message: "\u274C Skill `performance/collect_daily` failed.\n\nError: Claude CLI\
+    \ timed out after 10 minutes"
+  skill: performance/collect_daily
+  success: false
+  timestamp: '2026-02-17T17:10:00.156026'
+  title: 'Scheduled Job: daily_performance_collection'
+- job_name: evening_pr_review
+  message: "\u274C Skill `review_all_prs` failed.\n\nError: Claude CLI timed out after\
+    \ 10 minutes"
+  skill: review_all_prs
+  success: false
+  timestamp: '2026-02-17T17:10:00.168173'
+  title: 'Scheduled Job: evening_pr_review'
+- job_name: hello_world_test
+  message: "\u274C Skill `hello_world` failed.\n\nError: Claude CLI timed out after\
+    \ 10 minutes"
+  skill: hello_world
+  success: false
+  timestamp: '2026-02-17T18:10:00.085823'
+  title: 'Scheduled Job: hello_world_test'
+- job_name: vector_reindex_3h
+  message: "\u274C Skill `reindex_all_vectors` failed.\n\nError: Claude CLI timed\
+    \ out after 10 minutes"
+  skill: reindex_all_vectors
+  success: false
+  timestamp: '2026-02-17T18:10:00.103878'
+  title: 'Scheduled Job: vector_reindex_3h'
+- job_name: evening_slop_scan
+  message: "\u274C Skill `slop_scan` failed.\n\nError: Claude CLI timed out after\
+    \ 30 minutes"
+  skill: slop_scan
+  success: false
+  timestamp: '2026-02-17T18:30:00.124670'
+  title: 'Scheduled Job: evening_slop_scan'

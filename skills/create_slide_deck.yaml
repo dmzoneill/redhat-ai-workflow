@@ -67,15 +67,15 @@ steps:
     description: "Extract presentation ID from result"
     compute: |
       import re
-      result = create_result or ""
+      text = str(create_result) if create_result else ""
       # Extract ID from the result text
-      match = re.search(r'\*\*ID:\*\* `([^`]+)`', result)
+      match = re.search(r'\*\*ID:\*\* `([^`]+)`', text)
       if match:
-          presentation_id = match.group(1)
+          result = match.group(1)
       else:
           # Try to find any ID-like string
-          match = re.search(r'[a-zA-Z0-9_-]{20,}', result)
-          presentation_id = match.group(0) if match else ""
+          match = re.search(r'[a-zA-Z0-9_-]{20,}', text)
+          result = match.group(0) if match else ""
     output: presentation_id
 
   # If topic provided but no outline, research and generate outline
@@ -122,16 +122,15 @@ steps:
       - Next steps
       - Resources
       """
-      # Remove extra indentation from the outline
       import textwrap
-      outline = textwrap.dedent(generated_outline)
+      result = textwrap.dedent(generated_outline)
     output: outline
 
   - name: use_provided_outline
     description: "Use provided outline"
     condition: "{{ inputs.outline }}"
     compute: |
-      outline = inputs.get('outline', '')
+      result = inputs.get('outline', '')
     output: outline
 
   # Build slides from outline if provided

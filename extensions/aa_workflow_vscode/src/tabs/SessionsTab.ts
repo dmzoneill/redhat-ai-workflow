@@ -176,7 +176,7 @@ export class SessionsTab extends BaseTab {
     if (this.lastError) {
       return `
         <div class="section">
-          <div class="section-title">💬 Session Overview</div>
+          <div class="section-title">Session Overview</div>
           ${this.getErrorHtml(`Failed to load sessions: ${this.lastError}`)}
           <div class="mt-16">
             <button class="btn btn-sm" data-action="refreshSessions">⟳ Retry</button>

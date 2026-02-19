@@ -132,7 +132,7 @@ export class ToolsTab extends BaseTab {
     return `
       <!-- Tools Overview -->
       <div class="section">
-        <div class="section-title">🔧 Tool Modules</div>
+        <div class="section-title">Tool Modules</div>
         <div class="grid-3">
           <div class="stat-card blue">
             <div class="stat-icon">📦</div>

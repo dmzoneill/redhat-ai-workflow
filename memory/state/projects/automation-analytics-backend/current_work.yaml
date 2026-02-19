@@ -1,0 +1,16 @@
+active_issues:
+- created: 2026-02-10
+  key: AAP-65344
+  status: New
+  summary: Create Snowpipe S3 buckets and read-only IAM credentials in
+  type: Story
+- created: 2026-02-10
+  key: AAP-65345
+  status: New
+  summary: Main ingress processor - copy bundles to Snowpipe S3 bucket
+  type: Story
+- created: 2026-02-10
+  key: AAP-65346
+  status: New
+  summary: Billing ingress - wire Snowpipe S3 bucket into billing Clowd
+  type: Story

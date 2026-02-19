@@ -515,7 +515,7 @@ steps:
       errors_detected = []
 
       # Check GitLab failures
-      mr_text = str(mr_details_raw) if 'mr_details_raw' in dir() and mr_details_raw else ""
+      mr_text = str(mr_details) if 'mr_details' in dir() and mr_details else ""
       update_text = str(update_result) if 'update_result' in dir() and update_result else ""
       combined = mr_text + update_text
 

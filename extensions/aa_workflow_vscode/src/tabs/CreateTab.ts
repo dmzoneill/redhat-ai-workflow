@@ -96,7 +96,7 @@ export class CreateTab extends BaseTab {
     return `
       <!-- Issue Key Auto-Context -->
       <div class="section">
-        <div class="section-title">🎯 Quick Start</div>
+        <div class="section-title">Quick Start</div>
         <div class="create-quick-start">
           <input type="text" id="issueKeyInput" placeholder="AAP-12345" class="create-issue-input" />
           <button class="btn btn-sm btn-primary" data-action="autoContext">
@@ -108,7 +108,7 @@ export class CreateTab extends BaseTab {
 
       <!-- Persona Selection -->
       <div class="section">
-        <div class="section-title">🤖 Persona</div>
+        <div class="section-title">Persona</div>
         <div class="create-persona-selector">
           ${this.personas.map((p) => `
             <div class="create-persona-chip ${this.selectedPersona === p.id ? "selected" : ""}"
@@ -122,7 +122,7 @@ export class CreateTab extends BaseTab {
 
       <!-- Context Builder -->
       <div class="section">
-        <div class="section-title">🧩 Context Builder</div>
+        <div class="section-title">Context Builder</div>
         <div class="create-context-builder">
           <!-- Skills & Tools Column -->
           <div class="create-context-column">
@@ -195,7 +195,7 @@ export class CreateTab extends BaseTab {
 
       <!-- Ralph Wiggum Loop -->
       <div class="section">
-        <div class="section-title">🔄 Ralph Wiggum Loop</div>
+        <div class="section-title">Ralph Wiggum Loop</div>
         <div class="create-ralph-config">
           <div class="create-ralph-toggle">
             <div class="toggle-switch ${this.ralphEnabled ? "active" : ""}" id="ralphToggle" data-action="toggleRalph"></div>
@@ -231,7 +231,7 @@ export class CreateTab extends BaseTab {
 
       <!-- Session Inspector -->
       <div class="section">
-        <div class="section-title">🔍 Session Inspector</div>
+        <div class="section-title">Session Inspector</div>
         <div class="create-session-inspector">
           <div class="create-session-source">
             <div class="create-session-header">
@@ -268,7 +268,7 @@ export class CreateTab extends BaseTab {
 
       <!-- Prompt Preview -->
       <div class="section">
-        <div class="section-title">📝 Preview</div>
+        <div class="section-title">Preview</div>
         <div class="create-prompt-preview">
           <div class="create-prompt-header">
             <span>Super Prompt Preview</span>

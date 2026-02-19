@@ -208,7 +208,7 @@ export class SlopTab extends BaseTab {
     return `
       <!-- Overview Stats -->
       <div class="section">
-        <div class="section-title">🔍 Code Quality Overview</div>
+        <div class="section-title">Code Quality Overview</div>
         <div class="grid-4">
           <div class="stat-card ${scan_in_progress ? "blue" : "green"}">
             <div class="stat-icon">${scan_in_progress ? "⟳" : "✓"}</div>
@@ -250,7 +250,7 @@ export class SlopTab extends BaseTab {
 
       <!-- Loop Status Grid -->
       <div class="section">
-        <div class="section-title">🔄 Analysis Loops</div>
+        <div class="section-title">Analysis Loops</div>
         <div class="grid-auto">
           ${loopsList.length > 0 ? loopsList.map((loop) => this.getLoopCardHtml(loop)).join("") : this.getEmptyStateHtml("🔄", "No loops configured")}
         </div>
@@ -258,7 +258,7 @@ export class SlopTab extends BaseTab {
 
       <!-- Findings Table -->
       <div class="section">
-        <div class="section-title">📋 Findings (${this.findings.length}${totalFindings > this.findings.length ? ` of ${totalFindings}` : ""})</div>
+        <div class="section-title">Findings (${this.findings.length}${totalFindings > this.findings.length ? ` of ${totalFindings}` : ""})</div>
         ${this.getFiltersHtml()}
         <div class="table-container">
           ${this.findings.length > 0 ? this.getFindingsTableHtml() : this.getEmptyStateHtml("✓", "No findings match your filters")}
@@ -459,7 +459,7 @@ export class SlopTab extends BaseTab {
 
     return `
       <div class="section">
-        <div class="section-title">📊 Severity Breakdown</div>
+        <div class="section-title">Severity Breakdown</div>
         <div class="severity-breakdown">
           ${severities.map((s) => {
             const count = stats.by_severity?.[s] || 0;

@@ -315,19 +315,19 @@ export class MemoryTab extends BaseTab {
 
       <!-- Vector Databases (Code Search) -->
       <div class="section">
-        <div class="section-title">🔍 Vector Databases</div>
+        <div class="section-title">Vector Databases</div>
         ${this.getVectorDatabasesHtml()}
       </div>
 
       <!-- Slack Database -->
       <div class="section">
-        <div class="section-title">💬 Slack Database</div>
+        <div class="section-title">Slack Database</div>
         ${this.getSlackDatabaseHtml()}
       </div>
 
       <!-- Session Logs -->
       <div class="section">
-        <div class="section-title">📜 Session Logs</div>
+        <div class="section-title">Session Logs</div>
         <div class="session-logs-list">
           ${this.sessionLogs.length > 0 ? this.sessionLogs.map((log) => this.getSessionLogHtml(log)).join("") : this.getEmptyStateHtml("📜", "No session logs")}
         </div>

@@ -462,15 +462,15 @@ steps:
       if "issue_creations" not in patterns:
           patterns["issue_creations"] = []
 
-      # Record this creation
+      # Record this creation (use dict .get() for compute step outputs)
       creation_record = {
-          "issue_key": create_status.issue_key if create_status else None,
-          "project": inputs.project,
-          "issue_type": inputs.issue_type,
-          "priority": inputs.priority,
-          "linked_to": inputs.link_to if inputs.link_to else None,
-          "code_context_added": enhanced_description.was_enhanced if enhanced_description else False,
-          "files_referenced": enhanced_description.files_added if enhanced_description else 0,
+          "issue_key": create_status.get("issue_key") if create_status else None,
+          "project": inputs.get("project", ""),
+          "issue_type": inputs.get("issue_type", ""),
+          "priority": inputs.get("priority", ""),
+          "linked_to": inputs.get("link_to") or None,
+          "code_context_added": enhanced_description.get("was_enhanced", False) if enhanced_description else False,
+          "files_referenced": enhanced_description.get("files_added", 0) if enhanced_description else 0,
           "timestamp": datetime.now().isoformat(),
       }
 
@@ -502,9 +502,11 @@ steps:
   # ==================== NOTIFY TEAM ====================
 
   - name: build_notification_message
-    description: "Build Slack notification message for the new issue"
+    description: "Build Slack notification message and JSON inputs for the new issue"
     condition: "create_status and create_status.success and inputs.notify_team"
     compute: |
+      import json
+
       issue_key = create_status.get('issue_key', 'Unknown')
       summary = inputs.get('summary', 'No summary')
       issue_type = inputs.get('issue_type', 'Task')
@@ -518,9 +520,13 @@ steps:
       if link_to:
           message += f"\n*Linked to:* <https://issues.redhat.com/browse/{link_to}|{link_to}>"
 
+      # Pre-build JSON string with proper escaping for skill_run inputs
+      notify_inputs_json = json.dumps({"message": message, "type": "info"})
+
       result = {
           "message": message,
           "type": "info",
+          "inputs_json": notify_inputs_json,
       }
     output: notification_message
     on_error: continue
@@ -531,7 +537,7 @@ steps:
     tool: skill_run
     args:
       skill_name: "notify_team"
-      inputs: '{"message": "{{ notification_message.message }}", "type": "{{ notification_message.type }}"}'
+      inputs: "{{ notification_message.inputs_json }}"
     output: notify_result
     on_error: continue
 

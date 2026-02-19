@@ -129,6 +129,7 @@
     ],
     "full_name": "Your Name",
     "gitlab_username": "YOUR_USERNAME",
+    "github_username": "YOUR_GITHUB_USERNAME",
     "jira_username": "YOUR_USERNAME",
     "timezone": "Europe/Dublin"
   },
@@ -1300,6 +1301,7 @@
         "skill": "cve_fix",
         "cron": "0 10 * * 1-5",
         "persona": "developer",
+        "timeout_seconds": 1200,
         "inputs": {
           "downstream_component": "automation-analytics-backend",
           "max_cves": 1

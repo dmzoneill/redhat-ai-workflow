@@ -267,7 +267,7 @@ steps:
     description: "Compile status of all my MRs"
     compute: |
       from scripts.common.parsers import linkify_mr_ids, linkify_jira_keys
-      is_slack = inputs.get('slack_format', True)
+      is_slack = inputs.get('slack_format', False)
 
       lines = ["## 📋 Your Open MRs", ""]
       lines.append(f"**User:** {my_username}")

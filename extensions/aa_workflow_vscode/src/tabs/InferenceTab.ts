@@ -153,7 +153,7 @@ export class InferenceTab extends BaseTab {
     return `
       <!-- Inference Context Inspector -->
       <div class="section">
-        <div class="section-title">🧪 Inference Context Inspector</div>
+        <div class="section-title">Inference Context Inspector</div>
         <p class="text-secondary text-sm mb-12">
           Preview the full context that would be sent to Claude for any message. Shows persona, memory, tools, and semantic knowledge.
         </p>
@@ -206,7 +206,7 @@ export class InferenceTab extends BaseTab {
 
       <!-- Configuration -->
       <div class="section">
-        <div class="section-title">⚙️ Tool Filtering Configuration</div>
+        <div class="section-title">Tool Filtering Configuration</div>
         <div class="card">
           <div class="grid-3">
             <div class="inference-config-item">
@@ -255,7 +255,7 @@ export class InferenceTab extends BaseTab {
 
       <!-- Persona Statistics -->
       <div class="section">
-        <div class="section-title">📊 Persona Statistics</div>
+        <div class="section-title">Persona Statistics</div>
         <div class="inference-persona-grid">
           ${this.personaStats.map((p) => `
             <div class="inference-persona-card">
@@ -270,7 +270,7 @@ export class InferenceTab extends BaseTab {
 
       <!-- Ollama Instances -->
       <div class="section">
-        <div class="section-title">🦙 Ollama Instances</div>
+        <div class="section-title">Ollama Instances</div>
         <div class="inference-ollama-grid">
           ${this.ollamaInstances.map((instance) => `
             <div class="inference-ollama-card ${instance.status}">

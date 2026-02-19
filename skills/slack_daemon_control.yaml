@@ -153,50 +153,52 @@ steps:
         log_file = Path("/tmp/slack-daemon.log")
         pid_file = Path("/tmp/slack-daemon.pid")
 
+        already_running = False
         # Check if already running
         if pid_file.exists():
           try:
             pid = int(pid_file.read_text().strip())
             os.kill(pid, 0)  # Check if process exists
             result = {"success": False, "error": f"Daemon already running (PID: {pid})"}
-            raise SystemExit  # Skip to output
+            already_running = True
           except (OSError, ValueError):
             pid_file.unlink(missing_ok=True)
 
-        cmd = [
-          "nohup",
-          sys.executable,
-          str(daemon_script),
-          "--dbus",
-        ]
-        if inputs.get("enable_llm"):
-          cmd.append("--llm")
-        if inputs.get("verbose"):
-          cmd.append("--verbose")
+        if not already_running:
+          cmd = [
+            "nohup",
+            sys.executable,
+            str(daemon_script),
+            "--dbus",
+          ]
+          if inputs.get("enable_llm"):
+            cmd.append("--llm")
+          if inputs.get("verbose"):
+            cmd.append("--verbose")
 
-        with open(log_file, "w") as log:
-          process = subprocess.Popen(
-            cmd,
-            stdout=log,
-            stderr=log,
-            start_new_session=True,
-          )
+          with open(log_file, "w") as log:
+            process = subprocess.Popen(
+              cmd,
+              stdout=log,
+              stderr=log,
+              start_new_session=True,
+            )
 
-        pid_file.write_text(str(process.pid))
+          pid_file.write_text(str(process.pid))
 
-        import time
-        time.sleep(2)
+          import time
+          time.sleep(2)
 
-        try:
-          os.kill(process.pid, 0)
-          result = {
-            "success": True,
-            "pid": process.pid,
-            "log_file": str(log_file),
-            "message": f"Daemon started (PID: {process.pid})"
-          }
-        except OSError:
-          result = {"success": False, "error": "Daemon failed to start. Check logs."}
+          try:
+            os.kill(process.pid, 0)
+            result = {
+              "success": True,
+              "pid": process.pid,
+              "log_file": str(log_file),
+              "message": f"Daemon started (PID: {process.pid})"
+            }
+          except OSError:
+            result = {"success": False, "error": "Daemon failed to start. Check logs."}
 
       elif action == "stop":
         cmd = [sys.executable, str(control_script), "stop"]
