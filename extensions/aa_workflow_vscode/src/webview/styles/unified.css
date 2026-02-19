@@ -363,12 +363,23 @@ body[data-vscode-theme-kind="vscode-light"] {
 
 .success-banner .banner-content,
 .create-quick-start,
-.create-ralph-slider,
-.cron-job-item,
-.bot-controls {
+.create-ralph-slider {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.cron-job-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bot-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .running-skill-info,
@@ -485,7 +496,8 @@ body[data-vscode-theme-kind="vscode-light"] {
 }
 
 .table,
-.session-table {
+.session-table,
+.persona-table {
   width: 100%;
   border-collapse: collapse;
 }
@@ -851,7 +863,8 @@ body[data-vscode-theme-kind="vscode-light"] {
   margin-bottom: 10px;
 }
 
-.session-table thead {
+.session-table thead,
+.persona-table thead {
   background: var(--bg-card);
   position: sticky;
   top: 0;
@@ -903,7 +916,8 @@ body[data-vscode-theme-kind="vscode-light"] {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.session-table td {
+.session-table td,
+.persona-table td {
   padding: 10px 12px;
   color: var(--text-primary);
   vertical-align: middle;
@@ -1001,9 +1015,15 @@ body[data-vscode-theme-kind="vscode-light"] {
   gap: 6px;
 }
 
-.session-table tbody tr {
+.session-table tbody tr,
+.persona-table tbody tr {
   border-bottom: 1px solid var(--border);
   transition: background 0.2s ease;
+}
+
+.session-table tbody tr:hover,
+.persona-table tbody tr:hover {
+  background: var(--overlay-5);
 }
 
 .skill-item-icon {
@@ -1104,7 +1124,8 @@ body[data-vscode-theme-kind="vscode-light"] {
   background: rgba(139, 92, 246, 0.2);
 }
 
-.session-table tbody tr.active {
+.session-table tbody tr.active,
+.persona-table tbody tr.active {
   background: rgba(16, 185, 129, 0.08);
 }
 
@@ -2175,8 +2196,8 @@ textarea:focus,
   font-size: var(--text-base);
 }
 
-.history-status.success,
-.history-status.failed,
+.history-status.success { color: var(--success); }
+.history-status.failed { color: var(--error); }
 
 /* ============================================================================
    8. STATUS & BADGES
@@ -2255,7 +2276,16 @@ textarea:focus,
    9. TABLES
    ============================================================================ */
 
-.table th,
+.table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
 
 /* ============================================================================
    10. UTILITIES
@@ -2413,7 +2443,7 @@ textarea:focus,
 /* --- Background --- */
 
 /* Brand background colors - monochromatic */
-.bg-blue, .bg-purple, .bg-green,
+.bg-blue, .bg-purple, .bg-green { background: var(--overlay-6); }
 
 /* Dark background for code/items */
 .dark-bg { background: var(--overlay-dark); }
@@ -2641,7 +2671,10 @@ textarea:focus,
   border-left: 3px solid #EE0000;
 }
 
-.context-section.pink,
+.context-section.pink {
+  background: var(--overlay-5);
+  border-left: 3px solid #EE0000;
+}
 
 /* Chips/badges */
 
@@ -2788,7 +2821,7 @@ textarea:focus,
   color: var(--text-secondary);
 }
 
-.legend-dot.purple,
+.legend-dot.purple { background: var(--overlay-8); }
 
 /* ============================================================================
    10.6 CREATE TAB STYLES
@@ -2920,7 +2953,9 @@ textarea:focus,
   margin-bottom: 6px;
 }
 
-.create-ralph-option input,
+.create-ralph-option input {
+  accent-color: var(--accent);
+}
 
 /* ============================================================================
    10.7 SESSIONS TAB STYLES
@@ -3001,6 +3036,9 @@ textarea:focus,
 }
 
 .session-table th.center,
+.persona-table th.center {
+  text-align: center;
+}
 
 /* .session-name-cell: flex-row inherited */
 
@@ -3027,7 +3065,10 @@ textarea:focus,
 .persona-badge.developer,
 .persona-badge.devops,
 .persona-badge.incident,
-.persona-badge.release,
+.persona-badge.release {
+  background: var(--overlay-6);
+  color: var(--text-primary);
+}
 
 /* ============================================================================
    10.8 PERSONAS TAB STYLES
@@ -3094,8 +3135,6 @@ textarea:focus,
   border-bottom: 1px solid var(--border);
 }
 
-.persona-table th.center,
-
 /* ============================================================================
    10.9 SKILLS TAB STYLES
    ============================================================================ */
@@ -3114,7 +3153,15 @@ textarea:focus,
 /* Skills Sidebar */
 /* Sidebar shared base */
 .skills-sidebar,
-.tools-sidebar,
+.tools-sidebar {
+  width: 260px;
+  min-width: 260px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  display: flex;
+  flex-direction: column;
+}
 
 /* Skill Category */
 
@@ -3590,7 +3637,10 @@ textarea:focus,
 }
 
 .source-badge.chat,
-.source-badge.cron,
+.source-badge.cron {
+  background: var(--overlay-6);
+  color: var(--text-primary);
+}
 
 /* ============================================================================
    10.10 TOOLS TAB STYLES
@@ -4172,8 +4222,8 @@ textarea:focus,
 
 /* .cron-history-item:hover: hover-accent-border inherited */
 
-.cron-history-item.error,
-.cron-history-status.error,
+.cron-history-item.error { border-left-color: var(--error); }
+.cron-history-status.error { background: var(--error); }
 
 /* ============================================================================
    10.14 SLACK TAB STYLES
@@ -4914,7 +4964,7 @@ textarea:focus,
       padding: 8px 0;
       border-bottom: 1px solid var(--border);
       margin-bottom: 16px;
-      flex-shrink: 0; /* Don't shrink the tab bar */;
+      flex-shrink: 0; /* Don't shrink the tab bar */
     }
 
     .meetings-subtab {
@@ -6464,7 +6514,13 @@ textarea:focus,
        COMPETENCY CATEGORY GROUPS
        ========================================================================= */
 
-    .perf-comp-category-label,
+    .perf-comp-category-label {
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      font-size: var(--text-xs);
+      letter-spacing: 0.5px;
+    }
 
     /* =========================================================================
        COMPETENCY GOAL & DESCRIPTION (expanded)
@@ -6511,9 +6567,15 @@ textarea:focus,
       white-space: nowrap;
     }
 
-    .perf-event-link,
+    .perf-event-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: var(--text-sm);
+    }
 
-    .perf-event-link:hover,
+    .perf-event-link:hover {
+      text-decoration: underline;
+    }
 
     /* =========================================================================
        GAPS OVERVIEW (on Overview tab)
