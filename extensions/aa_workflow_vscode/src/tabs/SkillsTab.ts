@@ -640,7 +640,7 @@ export class SkillsTab extends BaseTab {
         <!-- Mind Map Full View -->
         <div class="mindmap-container">
           <div class="mindmap-header-compact">
-            <div class="mindmap-header-top">
+            <div class="flex-between mindmap-header-top">
               <div class="flex-row mindmap-header-left">
                 <span class="mindmap-icon">🧠</span>
                 <div class="mindmap-title-block">
@@ -735,13 +735,13 @@ export class SkillsTab extends BaseTab {
       const elapsed = this.formatDuration(skill.elapsed);
       html += `
         <div class="item-row running-skill-item" data-execution-id="${skill.executionId}">
-          <div class="flex-col running-skill-progress">
+          <div class="flex-col gap-4 running-skill-progress">
             <div class="running-skill-progress-bar">
               <div class="running-skill-progress-fill" style="width: ${skill.progress}%"></div>
             </div>
             <div class="running-skill-progress-text">${skill.progress}%</div>
           </div>
-          <div class="label-sm text-meta running-skill-info">
+          <div class="flex-1 label-sm text-meta running-skill-info">
             <div class="label-sm text-meta running-skill-name">${this.escapeHtml(skill.skillName)}</div>
             <div class="flex-row running-skill-source">
               <span class="${skill.source === 'slack' ? 'dot ' : ''}source-badge ${skill.source}">${skill.source}</span>
@@ -823,7 +823,7 @@ export class SkillsTab extends BaseTab {
 
   private getSkillInfoView(skill: SkillDefinition): string {
     return `
-      <div class="flex-col skill-info-view">
+      <div class="flex-col gap-16 skill-info-view">
         <div class="card skill-info-card">
           <div class="skill-info-title">${this.escapeHtml(skill.name)} ${skill.version ? `<span class="skill-version">v${skill.version}</span>` : ""}</div>
           <div class="skill-info-desc">${this.escapeHtml(skill.description || "No description")}</div>
@@ -870,7 +870,7 @@ export class SkillsTab extends BaseTab {
 
     if (steps.length === 0) {
       return `
-        <div class="flex-col skill-workflow-view">
+        <div class="flex-col gap-16 skill-workflow-view">
           <div class="flex-between workflow-header">
             <div class="workflow-title">${this.escapeHtml(skill.name)}</div>
             <div class="workflow-meta">Steps: ${skill.step_count || 0} • Status: Ready</div>
@@ -902,10 +902,10 @@ export class SkillsTab extends BaseTab {
     const statusClass = isExecuting && execStatus === "running" ? "status-running" : "";
 
     return `
-      <div class="flex-col skill-workflow-view">
+      <div class="flex-col gap-16 skill-workflow-view">
         <div class="flex-between workflow-header">
           <div class="workflow-title">${this.escapeHtml(skill.name)}</div>
-          <div class="workflow-header-right">
+          <div class="flex-row gap-16 workflow-header-right">
             <div class="workflow-meta ${statusClass}">Steps: ${steps.length} • Status: ${statusText}</div>
             <div class="view-toggle">
               <button class="toggle-btn ${this.workflowViewMode === "horizontal" ? "active" : ""}" data-workflow-view="horizontal">━ Horizontal</button>
@@ -1336,9 +1336,9 @@ export class SkillsTab extends BaseTab {
 
         <!-- Legend (compact, bottom-left) -->
         <div class="mindmap-legend-compact">
-          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Skill</span>
-          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-tool"></span>Tool</span>
-          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-intent"></span>Intent</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Skill</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-tool"></span>Tool</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-intent"></span>Intent</span>
         </div>
       </div>
 

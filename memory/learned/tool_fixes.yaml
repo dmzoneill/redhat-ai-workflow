@@ -161,3 +161,9 @@ tool_fixes:
     the required 'project' parameter
   times_prevented: 0
   tool_name: gitlab_mr_list
+- date_learned: '2026-02-20'
+  error_pattern: service failed to restart
+  fix_applied: Check service logs
+  root_cause: Unknown
+  times_prevented: 0
+  tool_name: systemctl_restart

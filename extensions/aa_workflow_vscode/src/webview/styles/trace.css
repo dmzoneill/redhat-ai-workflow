@@ -1,0 +1,145 @@
+/* Trace viewer styles - trace-* selectors */
+/* Used by sprintRenderer.ts trace panel */
+
+.trace-viewer {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+}
+
+.trace-details {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.trace-tab-content {
+  display: none;
+}
+
+.trace-close:hover,
+.trace-info-item strong,
+.trace-tab-content.active {
+  display: block;
+}
+
+.trace-info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.trace-timeline { max-height: 500px; overflow-y: auto; }
+
+.trace-viewer { margin-bottom: 16px; }
+
+.trace-step.failed .trace-content { border-left-color: var(--error); }
+
+.trace-step.success .trace-content { border-left-color: var(--success); }
+
+.trace-viewer .trace-header {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trace-viewer .trace-header h3 { margin: 0; flex: 1; font-size: var(--text-lg); }
+
+.trace-state {
+  padding: 4px 12px;
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--rh-white);
+  text-transform: uppercase;
+}
+
+.trace-close {
+  background: none;
+  border: none;
+  font-size: var(--text-lg);
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 4px 8px;
+}
+
+.trace-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  font-size: var(--text-md);
+}
+
+.trace-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+
+.trace-tab {
+  padding: 8px 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+}
+
+.trace-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  font-size: var(--text-md);
+}
+
+.trace-steps { position: relative; padding-left: 24px; }
+
+.trace-steps::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.trace-step { display: flex; gap: 12px; margin-bottom: 12px; position: relative; }
+
+.trace-marker {
+  position: absolute;
+  left: -24px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-md);
+  background: var(--bg-card);
+  z-index: 1;
+}
+
+.trace-content {
+  flex: 1;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  border-left: 3px solid var(--border);
+}
+
+.trace-time { font-size: var(--text-sm); color: var(--text-muted); font-family: var(--font-mono); }
+
+.trace-error { color: var(--error); margin-top: 4px; }
+
+.trace-mermaid pre { margin: 0; white-space: pre-wrap; font-size: var(--text-sm); font-family: var(--font-mono); color: var(--text-secondary); }
+
+.trace-mermaid-note { margin-top: 12px; font-size: var(--text-sm); color: var(--text-muted); }
+
+.trace-empty { text-align: center; padding: 32px; color: var(--text-muted); }

@@ -139,15 +139,23 @@ export class HtmlGenerator {
   /**
    * Get all CSS styles combined
    *
-   * All styles are now in a single unified.css file to prevent
-   * duplication and ensure consistency across all tabs.
+   * Styles are split across files for maintainability:
+   * unified.css (shared), d3-charts.css, performance.css, meetings.css, trace.css
    */
   private getAllStyles(): string {
-    const css = this.loadCssFile("unified.css");
-    logger.log(`unified.css loaded: ${css.length} chars`);
-    const d3Css = this.loadCssFile("d3-charts.css");
-    logger.log(`d3-charts.css loaded: ${d3Css.length} chars`);
-    return css + "\n" + d3Css;
+    const files = [
+      "unified.css",
+      "d3-charts.css",
+      "performance.css",
+      "meetings.css",
+      "trace.css",
+    ];
+    const parts = files.map((f) => {
+      const content = this.loadCssFile(f);
+      logger.log(`${f} loaded: ${content.length} chars`);
+      return content;
+    });
+    return parts.join("\n");
   }
 
   /**

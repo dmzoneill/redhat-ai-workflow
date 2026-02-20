@@ -311,7 +311,7 @@ export class OverviewTab extends BaseTab {
         ${barsHtml}
       </div>
       <div class="history-legend">
-        <div class="history-legend-item">
+        <div class="flex-row gap-6 history-legend-item">
           <span class="dot legend-dot red"></span>
           <span>Tool Calls</span>
         </div>

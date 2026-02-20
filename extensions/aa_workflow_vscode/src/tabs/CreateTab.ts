@@ -136,10 +136,10 @@ export class CreateTab extends BaseTab {
         <div class="section-title">Context Builder</div>
         <div class="create-context-builder">
           <!-- Skills & Tools Column -->
-          <div class="flex-col create-context-column">
+          <div class="flex-col gap-16 create-context-column">
             <div class="create-context-group">
               <div class="create-context-title">⚡ Skills (${this.skills.length})</div>
-              <div class="flex-col create-context-list" id="skillSourceList">
+              <div class="flex-col gap-4 create-context-list" id="skillSourceList">
                 ${this.skills.slice(0, 20).map((s) => `
                   <div class="flex-row create-context-item" data-source="skill" data-skill-id="${s.id}">
                     <input type="checkbox" />
@@ -153,17 +153,17 @@ export class CreateTab extends BaseTab {
 
             <div class="create-context-group">
               <div class="create-context-title">🔧 Tools</div>
-              <div class="flex-col create-context-list" id="toolSourceList">
+              <div class="flex-col gap-4 create-context-list" id="toolSourceList">
                 <div class="empty-state-mini" id="toolsPlaceholder">Select a persona to load tools</div>
               </div>
             </div>
           </div>
 
           <!-- Memory, Slack, Code Column -->
-          <div class="flex-col create-context-column">
+          <div class="flex-col gap-16 create-context-column">
             <div class="create-context-group">
               <div class="create-context-title">🧠 Memory</div>
-              <div class="flex-col create-context-list" id="memorySourceList">
+              <div class="flex-col gap-4 create-context-list" id="memorySourceList">
                 <div class="flex-row create-context-item selected" data-source="memory" data-path="state/current_work">
                   <input type="checkbox" checked />
                   <span class="create-context-name">Current Work</span>
@@ -226,7 +226,7 @@ export class CreateTab extends BaseTab {
 
             <div class="create-ralph-option">
               <label>Max Iterations</label>
-              <div class="create-ralph-slider">
+              <div class="flex-col gap-12 create-ralph-slider">
                 <input type="range" id="ralphMaxIterations" min="1" max="50" value="10" />
                 <span id="ralphMaxIterationsValue">10</span>
               </div>
@@ -249,7 +249,7 @@ export class CreateTab extends BaseTab {
               <span class="create-session-icon">🟣</span>
               <span>Cursor Chats</span>
             </div>
-            <div class="flex-col create-session-list" id="cursorSessionList">
+            <div class="flex-col gap-4 create-session-list" id="cursorSessionList">
               <div class="empty-state-mini">Loading...</div>
             </div>
           </div>
@@ -259,7 +259,7 @@ export class CreateTab extends BaseTab {
               <span class="create-session-icon">🟠</span>
               <span>Claude Code</span>
             </div>
-            <div class="flex-col create-session-list" id="claudeSessionList">
+            <div class="flex-col gap-4 create-session-list" id="claudeSessionList">
               <div class="empty-state-mini">No sessions found</div>
             </div>
           </div>
@@ -269,7 +269,7 @@ export class CreateTab extends BaseTab {
               <span class="create-session-icon">🔵</span>
               <span>Gemini</span>
             </div>
-            <div class="flex-col create-session-list" id="geminiSessionList">
+            <div class="flex-col gap-4 create-session-list" id="geminiSessionList">
               <div class="empty-state-mini">No sessions found</div>
             </div>
             <button class="btn btn-xs" data-action="importGemini">📥 Import</button>

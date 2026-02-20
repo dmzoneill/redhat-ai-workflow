@@ -203,7 +203,7 @@ export class ToolsTab extends BaseTab {
         html += `
           <div class="tools-module-item ${isSelected ? "selected" : ""}" data-module="${module.name}">
             <span class="tools-module-icon">${module.icon || "📦"}</span>
-            <div class="label-sm text-meta tools-module-info">
+            <div class="flex-1 label-sm text-meta tools-module-info">
               <div class="tools-module-name">${this.escapeHtml(module.displayName || module.name)}</div>
               <div class="text-muted-sm tools-module-count">${module.toolCount} tools</div>
             </div>

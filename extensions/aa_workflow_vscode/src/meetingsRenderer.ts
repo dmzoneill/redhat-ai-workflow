@@ -671,7 +671,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <button class="btn-small" id="btn-clear-captions">🗑️ Clear</button>
           </div>
         </div>
-        <div class="flex-col live-captions-feed" id="transcriptionFeed">
+        <div class="flex-col gap-12 live-captions-feed" id="transcriptionFeed">
           ${state.captions?.length > 0 ? state.captions.map((caption: any) => `
             <div class="live-caption-entry">
               <div class="flex-between caption-meta">
@@ -756,7 +756,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
       <!-- Current Meeting Tab -->
       <div class="subtab-content active" id="subtab-current">
         <div class="meetings-two-col">
-          <div class="flex-col meetings-sidebar">
+          <div class="flex-col gap-16 meetings-sidebar">
             <!-- Bot Status + Stats Combined -->
             <div class="section">
               <h2 class="section-title">📊 Bot Status</h2>
@@ -828,7 +828,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <!-- Monitored Calendars -->
             <div class="section">
               <h2 class="section-title">📆 Monitored Calendars</h2>
-              <div class="flex-col calendar-list">
+              <div class="flex-col gap-6 calendar-list">
                 ${calendarsHtml}
               </div>
               <p class="hint-text mt-8">
@@ -863,7 +863,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             </div>
           </div>
 
-          <div class="meetings-main">
+          <div class="flex-col gap-16 meetings-main">
             <div class="active-meeting-panel">
               ${activeMeetingContent}
             </div>

@@ -176,7 +176,7 @@ export class CronTab extends BaseTab {
       <!-- Execution History -->
       <div class="section">
         <div class="section-title">Execution History</div>
-        <div class="flex-col cron-history-list">
+        <div class="flex-col gap-6 cron-history-list">
           ${history.length > 0 ? history.slice(0, this.historyLimit).map((entry) => this.getHistoryEntryHtml(entry)).join("") : this.getEmptyStateHtml("📜", "No execution history")}
         </div>
         ${history.length > this.historyLimit ? `
@@ -200,7 +200,7 @@ export class CronTab extends BaseTab {
     return `
       <div class="card item-row cron-job-item ${!job.enabled ? "disabled" : ""}">
         <div class="cron-job-status ${statusClass}">${statusIcon}</div>
-        <div class="label-sm text-meta cron-job-info">
+        <div class="flex-1 label-sm text-meta cron-job-info">
           <div class="cron-job-name">${this.escapeHtml(job.name)}</div>
           <div class="flex-row cron-job-details">
             <span class="text-muted-sm cron-job-skill">⚡ ${this.escapeHtml(job.skill)}</span>

@@ -696,7 +696,7 @@ export class PerformanceTab extends BaseTab {
       }
       strategyHtml += `</div>`;
 
-      strategyHtml += `<div class="overview-priorities">`;
+      strategyHtml += `<div class="flex-col gap-6 overview-priorities">`;
       for (const prio of align.priorities) {
         const statusClass = prio.status === "covered" ? "overview-prio-covered" : "overview-prio-gap";
         const statusIcon = prio.status === "covered" ? "\u2705" : "\u26A0\uFE0F";
@@ -1116,7 +1116,7 @@ export class PerformanceTab extends BaseTab {
 
           <div class="exec-senders-section">
             <label class="scoring-field-label scoring-label-block">Configured Senders</label>
-            <div class="scoring-tags exec-senders-list">
+            <div class="flex-row flex-wrap gap-6 scoring-tags exec-senders-list">
               ${this.state.executive_senders.map(s =>
                 `<span class="scoring-tag">${this.escapeHtml(s)}<span class="scoring-tag-x"
                   data-action="removeExecutiveSender"
@@ -1438,7 +1438,7 @@ export class PerformanceTab extends BaseTab {
 
     // Event list with lineage
     if (detail && detail.has_data && detail.events.length > 0) {
-      html += `<div class="flex-col perf-day-events">`;
+      html += `<div class="flex-col gap-4 perf-day-events">`;
       for (const ev of detail.events) {
         const pts = Object.values(ev.points || {}).reduce((a: number, b: number) => a + b, 0);
 
@@ -2128,20 +2128,20 @@ export class PerformanceTab extends BaseTab {
         </div>
         <div class="perf-mindmap-d3-tooltip" id="perfMindmapTooltip"></div>
         <div class="perf-mindmap-d3-legend">
-          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Root</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Root</span>
           ${Object.entries(PILLAR_DEFS).map(([name, def]) =>
-            `<span class="legend-item-compact"><span class="dot legend-dot" style="background:${def.color}"></span>${name}</span>`
+            `<span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot" style="background:${def.color}"></span>${name}</span>`
           ).join("\n          ")}
           <span class="legend-separator">|</span>
-          <span class="legend-item-compact"><span class="dot legend-dot perf-mm-legend-ring legend-dot-default"></span>Pillar</span>
-          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-small"></span>Competency</span>
-          <span class="legend-item-compact"><span class="dot legend-dot perf-mm-legend-roundrect legend-dot-default"></span>ANSTRAT</span>
-          <span class="legend-item-compact"><span class="dot legend-dot perf-mm-legend-triangle legend-dot-default"></span>Epic</span>
-          <span class="legend-item-compact"><span class="dot legend-dot perf-mm-legend-square legend-dot-default"></span>Issue</span>
-          <span class="legend-item-compact"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Strategy</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-ring legend-dot-default"></span>Pillar</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-small"></span>Competency</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-roundrect legend-dot-default"></span>ANSTRAT</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-triangle legend-dot-default"></span>Epic</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-square legend-dot-default"></span>Issue</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Strategy</span>
           <span class="legend-separator">|</span>
-          <span class="legend-item-compact" title="Solid diamond = covered"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Covered</span>
-          <span class="legend-item-compact" title="Dashed diamond = gap"><span class="dot legend-dot perf-mm-diamond-legend perf-help-dot-comparison"></span>Gap</span>
+          <span class="flex-row gap-4 legend-item-compact" title="Solid diamond = covered"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Covered</span>
+          <span class="flex-row gap-4 legend-item-compact" title="Dashed diamond = gap"><span class="dot legend-dot perf-mm-diamond-legend perf-help-dot-comparison"></span>Gap</span>
         </div>
       </div>
       <script id="perfMindmapData" type="application/json">${graphJson}</script>
@@ -2400,7 +2400,7 @@ export class PerformanceTab extends BaseTab {
 
         html += `
           <div class="perf-competency-row${expandedClass}">
-            <div class="flex-col perf-competency-header" data-action="toggleCompetency" data-key="${this.escapeHtml(id)}">
+            <div class="flex-col gap-4 perf-competency-header" data-action="toggleCompetency" data-key="${this.escapeHtml(id)}">
               <div class="perf-comp-header-top">
                 <span class="perf-competency-expand-icon">${isExpanded ? "\u25BC" : "\u25B6"}</span>
                 <span class="perf-competency-name">${this.escapeHtml(meta?.name || this.formatCompetencyName(id))}</span>
@@ -2452,7 +2452,7 @@ export class PerformanceTab extends BaseTab {
     return `
       <div class="perf-gaps-alert">
         <div class="perf-gaps-title">Areas Needing Attention</div>
-        <div class="flex-col perf-gaps-items">${gapItems}</div>
+        <div class="flex-col gap-6 perf-gaps-items">${gapItems}</div>
       </div>
     `;
   }
@@ -2886,7 +2886,10 @@ export class PerformanceTab extends BaseTab {
                 ).join("")}
               </select>
             </div>
-            <div id="perf-help-compare" class="perf-help-diagram perf-help-compare-container"></div>
+            <div class="perf-help-compare-layout">
+              <div id="perf-help-compare" class="perf-help-diagram perf-help-compare-container"></div>
+              <div id="perf-help-compare-radar" class="perf-help-diagram perf-help-compare-radar-container"></div>
+            </div>
             <div class="perf-help-legend">
               <span class="perf-help-legend-item"><span class="perf-help-dot perf-help-dot-current"></span>Your Level (solid)</span>
               <span class="perf-help-legend-item"><span class="perf-help-dot perf-help-dot-comparison"></span>Comparison (dashed)</span>
@@ -4259,6 +4262,7 @@ export class PerformanceTab extends BaseTab {
         // 2.4 Level Compare
         function initCompare(hd) {
           var container = document.getElementById('perf-help-compare');
+          var radarContainer = document.getElementById('perf-help-compare-radar');
           var select = document.getElementById('perf-help-compare-level');
           if (!container || !select) return;
 
@@ -4300,10 +4304,98 @@ export class PerformanceTab extends BaseTab {
                 p.replace('End-to-End', 'E2E') + ': ' + arrow + ' ' + Math.abs(diff).toFixed(1) + '</span>';
             });
             container.appendChild(deltaDiv);
+
+            renderCompareRadar(hd, radarContainer, myPw, cmpPw, hd.level, cmpLevel);
           }
 
           render();
           select.addEventListener('change', render);
+        }
+
+        function renderCompareRadar(hd, container, myPw, cmpPw, myLevel, cmpLevel) {
+          if (!container || typeof d3 === 'undefined') return;
+          container.innerHTML = '';
+
+          var pillars = Object.keys(hd.pillarColors);
+          var n = pillars.length;
+          if (n === 0) return;
+
+          var size = 320, cx = size / 2, cy = size / 2, R = 110;
+          var svg = d3.select(container).append('svg')
+            .attr('width', size).attr('height', size)
+            .attr('viewBox', '0 0 ' + size + ' ' + size);
+
+          var maxW = 0;
+          pillars.forEach(function(p) {
+            var v1 = myPw[p] || 0, v2 = cmpPw[p] || 0;
+            if (v1 > maxW) maxW = v1;
+            if (v2 > maxW) maxW = v2;
+          });
+          maxW = Math.max(maxW, 1.5);
+
+          var angleStep = (2 * Math.PI) / n;
+
+          [0.25, 0.5, 0.75, 1.0].forEach(function(f) {
+            svg.append('circle').attr('cx', cx).attr('cy', cy).attr('r', R * f)
+              .attr('fill', 'none').attr('stroke', '#333').attr('stroke-width', 0.5);
+          });
+
+          pillars.forEach(function(p, i) {
+            var angle = -Math.PI / 2 + i * angleStep;
+            var ex = cx + R * Math.cos(angle);
+            var ey = cy + R * Math.sin(angle);
+            svg.append('line').attr('x1', cx).attr('y1', cy).attr('x2', ex).attr('y2', ey)
+              .attr('stroke', '#444').attr('stroke-width', 0.5);
+
+            var lx = cx + (R + 28) * Math.cos(angle);
+            var ly = cy + (R + 28) * Math.sin(angle);
+            svg.append('text').attr('x', lx).attr('y', ly)
+              .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
+              .attr('font-size', '10px').attr('fill', hd.pillarColors[p] || '#888')
+              .text(p.replace('End-to-End ', 'E2E '));
+          });
+
+          function polyPoints(pw) {
+            return pillars.map(function(p, i) {
+              var angle = -Math.PI / 2 + i * angleStep;
+              var r = R * ((pw[p] || 0) / maxW);
+              return (cx + r * Math.cos(angle)) + ',' + (cy + r * Math.sin(angle));
+            }).join(' ');
+          }
+
+          svg.append('polygon').attr('points', polyPoints(cmpPw))
+            .attr('fill', '#888').attr('fill-opacity', 0.08)
+            .attr('stroke', '#888').attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '6,3');
+
+          svg.append('polygon').attr('points', polyPoints(myPw))
+            .attr('fill', 'var(--rh-red, #ee0000)').attr('fill-opacity', 0.15)
+            .attr('stroke', 'var(--rh-red, #ee0000)').attr('stroke-width', 2);
+
+          pillars.forEach(function(p, i) {
+            var angle = -Math.PI / 2 + i * angleStep;
+
+            var r1 = R * ((myPw[p] || 0) / maxW);
+            svg.append('circle')
+              .attr('cx', cx + r1 * Math.cos(angle)).attr('cy', cy + r1 * Math.sin(angle))
+              .attr('r', 4).attr('fill', 'var(--rh-red, #ee0000)');
+            svg.append('text')
+              .attr('x', cx + r1 * Math.cos(angle)).attr('y', cy + r1 * Math.sin(angle) - 10)
+              .attr('text-anchor', 'middle').attr('font-size', '10px').attr('font-weight', 'bold')
+              .attr('fill', 'var(--rh-red, #ee0000)').text(myPw[p] || 0);
+
+            var r2 = R * ((cmpPw[p] || 0) / maxW);
+            svg.append('circle')
+              .attr('cx', cx + r2 * Math.cos(angle)).attr('cy', cy + r2 * Math.sin(angle))
+              .attr('r', 3).attr('fill', '#888').attr('stroke', '#fff').attr('stroke-width', 0.5);
+          });
+
+          svg.append('text').attr('x', 8).attr('y', size - 6)
+            .attr('font-size', '9px').attr('fill', 'var(--rh-red, #ee0000)')
+            .text('\u25CF ' + myLevel.toUpperCase());
+          svg.append('text').attr('x', 8).attr('y', size - 18)
+            .attr('font-size', '9px').attr('fill', '#888')
+            .text('\u25CB ' + cmpLevel.toUpperCase() + ' (dashed)');
         }
 
         // 3.2 Treemap

@@ -435,7 +435,7 @@ export class SlackTab extends BaseTab {
       <!-- Message Search -->
       <div class="section">
         <div class="section-title">Search Messages</div>
-        <div class="slack-search-box">
+        <div class="flex-row slack-search-box">
           <input type="text" class="slack-search-input" placeholder="Search Slack messages..."
                  value="${this.escapeHtml(this.searchQuery)}" data-action="searchInput" />
           <button class="btn btn-xs" data-action="searchSlack">Search</button>
@@ -467,7 +467,7 @@ export class SlackTab extends BaseTab {
       <!-- Message History -->
       <div class="section">
         <div class="section-title">Recent Messages (${this.history.length})</div>
-        <div class="flex-col slack-history-list">
+        <div class="flex-col gap-6 slack-history-list">
           ${this.history.length > 0 ? this.history.map((msg) => this.getHistoryItemHtml(msg)).join("") : this.getEmptyStateHtml("📜", "No message history")}
         </div>
         ${this.history.length >= this.historyLimit ? `
@@ -536,7 +536,7 @@ export class SlackTab extends BaseTab {
         <!-- User Search -->
         <div class="slack-subsection">
           <div class="slack-subsection-title">User Search</div>
-          <div class="slack-search-box">
+          <div class="flex-row slack-search-box">
             <input type="text" class="slack-search-input" placeholder="Search users by name or email..."
                    value="${this.escapeHtml(this.userSearchQuery)}" data-action="userSearchInput" />
             <button class="btn btn-xs" data-action="searchUsers">Search</button>
@@ -564,7 +564,7 @@ export class SlackTab extends BaseTab {
         ${this.commands.length > 0 ? `
         <div class="slack-subsection">
           <div class="slack-subsection-title">Available @me Commands (${this.commands.length})</div>
-          <div class="flex-col slack-commands-list">
+          <div class="flex-col gap-6 slack-commands-list">
             ${this.commands.slice(0, 10).map(cmd => `
               <div class="item-row slack-command-item">
                 <span class="slack-command-name">@me ${this.escapeHtml(cmd.name)}</span>
