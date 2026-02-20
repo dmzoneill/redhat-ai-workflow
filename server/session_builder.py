@@ -119,7 +119,6 @@ class SessionBuilder:
         Returns:
             True if successful
         """
-        # Handle subdirectory skills (e.g., "performance/collect_daily")
         skill_file = SKILLS_DIR / f"{skill_id}.yaml"
         if not skill_file.exists():
             return False

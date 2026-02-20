@@ -90,6 +90,16 @@ export class MeetingsTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.upcomingCount,
+      this.activeCount,
+      this.state?.upcomingMeetings?.length ?? 0,
+      this.state?.activeMeetingCount ?? 0,
+    ];
+    return parts.join("|");
+  }
+
   getContent(): string {
     // Show error state if we have an error and no data
     if (this.lastError && !this.state) {

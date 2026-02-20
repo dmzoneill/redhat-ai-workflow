@@ -37,7 +37,6 @@ from server.paths import (
     AA_CONFIG_DIR,
     AGENT_STATS_FILE,
     INFERENCE_STATS_FILE,
-    PERFORMANCE_DIR,
     SKILL_EXECUTION_FILE,
 )
 from services.base.daemon import BaseDaemon
@@ -47,19 +46,29 @@ from services.stats.email_parser import (
     get_executive_emails_dir,
     get_executive_senders,
     parse_email_text,
+    set_executive_senders,
 )
 from services.stats.scorer import (
     COMPETENCY_DEFS,
     SCORING_CONFIG_FILE,
     get_competency_meta,
     get_effective_defs,
+    get_engineering_levels,
     get_gap_suggestions,
+    get_level_description,
+    get_level_weights,
     get_merged_config,
+    get_npu_settings,
+    get_scope_multipliers,
+    get_strategy_alignment_config,
     load_scoring_config,
-    map_competencies,
     save_scoring_config,
 )
-from services.stats.strategy import build_strategy_alignment
+from services.stats.strategy import (
+    build_strategy_alignment,
+    build_strategy_context_index,
+)
+from tool_modules.aa_performance.src.question_manager import QuestionManager
 
 
 def get_performance_summary_path() -> Path:
@@ -119,6 +128,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler(
             "get_competency_evidence", self._handle_get_competency_evidence
         )
+        self.register_handler("add_question", self._handle_add_question)
+        self.register_handler("remove_question", self._handle_remove_question)
+        self.register_handler("get_question_detail", self._handle_get_question_detail)
+        self.register_handler("add_question_note", self._handle_add_question_note)
 
         # Executive strategy mapping handlers
         self.register_handler(
@@ -137,6 +150,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("read_gmail_message", self._handle_read_gmail_message)
         self.register_handler(
             "backfill_executive_emails", self._handle_backfill_executive_emails
+        )
+        self.register_handler(
+            "get_executive_senders", self._handle_get_executive_senders
+        )
+        self.register_handler(
+            "set_executive_senders", self._handle_set_executive_senders
         )
 
     # ==================== D-Bus Interface Methods ====================
@@ -177,6 +196,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             quarter_start = datetime(now.year, (quarter - 1) * 3 + 1, 1)
             day_of_quarter = (now - quarter_start).days + 1
 
+            questions_summary = self._get_questions_summary()
+
             performance_data = {
                 "last_updated": perf_summary.get("last_updated", now.isoformat()),
                 "quarter": f"Q{quarter} {now.year}",
@@ -191,7 +212,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 },
                 "highlights": perf_summary.get("highlights", []),
                 "gaps": perf_summary.get("gaps", []),
-                "questions_summary": perf_summary.get("questions_summary"),
+                "questions_summary": questions_summary,
                 "strategy_alignment": perf_summary.get("strategy_alignment"),
             }
 
@@ -229,6 +250,120 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
     # ==================== Performance / QC ====================
 
+    def _get_questions_summary(
+        self, year: int | None = None, quarter: int | None = None
+    ) -> list[dict] | None:
+        """Load questions summary from QuestionManager for the current quarter."""
+        try:
+            perf_dir = self._get_perf_dir(year, quarter)
+            qm = QuestionManager(perf_dir)
+            summary = qm.get_questions_summary()
+            return summary if summary else None
+        except Exception as e:
+            logger.debug(f"Failed to load questions summary: {e}")
+            return None
+
+    async def _handle_add_question(self, **kwargs) -> dict:
+        """Add a new custom question."""
+        text = kwargs.get("text", "").strip()
+        if not text:
+            return {"success": False, "error": "Question text is required"}
+        try:
+            perf_dir = self._get_perf_dir()
+            qm = QuestionManager(perf_dir)
+            q_id = text.lower().replace(" ", "_")[:40]
+            qm.add_question(question_id=q_id, text=text)
+            return {"success": True, "questions_summary": qm.get_questions_summary()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_remove_question(self, **kwargs) -> dict:
+        """Remove a question by ID."""
+        question_id = kwargs.get("question_id", "").strip()
+        if not question_id:
+            return {"success": False, "error": "question_id is required"}
+        try:
+            perf_dir = self._get_perf_dir()
+            qm = QuestionManager(perf_dir)
+            removed = qm.remove_question(question_id)
+            if not removed:
+                return {
+                    "success": False,
+                    "error": f"Question '{question_id}' not found",
+                }
+            return {"success": True, "questions_summary": qm.get_questions_summary()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_get_question_detail(self, **kwargs) -> dict:
+        """Get full evidence details for a question, sorted by points."""
+        question_id = kwargs.get("question_id", "").strip()
+        if not question_id:
+            return {"success": False, "error": "question_id is required"}
+        try:
+            perf_dir = self._get_perf_dir()
+            daily_dir = self._get_daily_dir()
+            qm = QuestionManager(perf_dir)
+            question = qm.get_question(question_id)
+            if not question:
+                return {
+                    "success": False,
+                    "error": f"Question '{question_id}' not found",
+                }
+
+            events = qm.get_evidence_details(question_id, daily_dir)
+            sorted_events = sorted(
+                events,
+                key=lambda e: sum(e.get("points", {}).values()),
+                reverse=True,
+            )
+
+            evidence = [
+                {
+                    "id": e.get("id", ""),
+                    "title": e.get("title", ""),
+                    "source": e.get("source", ""),
+                    "date": e.get("date", ""),
+                    "points": sum(e.get("points", {}).values()),
+                    "competencies": list(e.get("points", {}).keys()),
+                }
+                for e in sorted_events
+            ]
+
+            return {
+                "success": True,
+                "question_id": question_id,
+                "text": question.get("text", ""),
+                "evidence": evidence,
+                "manual_notes": question.get("manual_notes", []),
+                "llm_summary": question.get("llm_summary"),
+                "last_evaluated": question.get("last_evaluated"),
+                "total_evidence": len(events),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_add_question_note(self, **kwargs) -> dict:
+        """Add a manual note to a question."""
+        question_id = kwargs.get("question_id", "").strip()
+        note = kwargs.get("note", "").strip()
+        if not question_id:
+            return {"success": False, "error": "question_id is required"}
+        if not note:
+            return {"success": False, "error": "note is required"}
+        try:
+            perf_dir = self._get_perf_dir()
+            qm = QuestionManager(perf_dir)
+            added = qm.add_note(question_id, note)
+            if not added:
+                return {
+                    "success": False,
+                    "error": f"Question '{question_id}' not found",
+                }
+            return {"success": True, "questions_summary": qm.get_questions_summary()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def _get_perf_dir(
         self, year: int | None = None, quarter: int | None = None
     ) -> Path:
@@ -243,6 +378,36 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self, year: int | None = None, quarter: int | None = None
     ) -> Path:
         return get_executive_emails_dir(self._get_perf_dir(year, quarter))
+
+    def _tag_events_to_questions(
+        self, perf_dir: Path, daily_data: dict | None = None
+    ) -> int:
+        """Initialize questions if needed and tag events to them.
+
+        If daily_data is provided, tags only those events.
+        If None, scans all daily files to rebuild question evidence.
+        """
+        qm = QuestionManager(perf_dir)
+        tagged_total = 0
+
+        if daily_data:
+            for event in daily_data.get("events", []):
+                tagged = qm.tag_event_to_questions(event)
+                tagged_total += len(tagged)
+        else:
+            daily_dir = perf_dir / "daily"
+            if daily_dir.exists():
+                for daily_file in sorted(daily_dir.glob("*.json")):
+                    try:
+                        with open(daily_file, encoding="utf-8") as f:
+                            data = json.load(f)
+                        for event in data.get("events", []):
+                            tagged = qm.tag_event_to_questions(event)
+                            tagged_total += len(tagged)
+                    except Exception as exc:
+                        logger.debug("Suppressed error tagging events: %s", exc)
+
+        return tagged_total
 
     def _update_summary(
         self, year: int | None = None, quarter: int | None = None
@@ -270,8 +435,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 continue
 
         _, _, _, target_per_competency = get_effective_defs()
+        cfg = get_merged_config()
+        level = cfg.get("engineering_level", "sse")
+        lw = get_level_weights(level)
+        target_scale = lw.get("target_scale", 1.0)
+        effective_target = max(round(target_per_competency * target_scale), 1)
+
         cumulative_pct = {
-            k: min(round(v / target_per_competency * 100), 100)
+            k: min(round(v / effective_target * 100), 100)
             for k, v in cumulative_points.items()
         }
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
@@ -295,6 +466,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             emails_dir,
         )
 
+        questions_summary = self._get_questions_summary(year, quarter)
+
         summary = {
             "year": y,
             "quarter": q,
@@ -306,6 +479,81 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "highlights": highlights,
             "gaps": gaps,
             "strategy_alignment": strategy_alignment,
+            "questions_summary": questions_summary,
+            "effective_target": effective_target,
+            "engineering_level": level,
+            "last_updated": now.isoformat(),
+        }
+
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        summary_file = perf_dir / "summary.json"
+        with open(summary_file, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        self._stats_cache.pop(str(summary_file), None)
+        self._last_modified.pop(str(summary_file), None)
+
+        return summary
+
+    def _update_summary_from_data(
+        self,
+        cumulative_points: dict[str, int],
+        total_events: int,
+        highlights: list[str],
+        year: int | None = None,
+        quarter: int | None = None,
+    ) -> dict:
+        """Build and write quarter summary from pre-computed scoring data.
+
+        Avoids re-reading daily files when the caller already has the
+        aggregated data (e.g. after _rescore).
+        """
+        _, _, _, target_per_competency = get_effective_defs()
+        cfg = get_merged_config()
+        level = cfg.get("engineering_level", "sse")
+        lw = get_level_weights(level)
+        target_scale = lw.get("target_scale", 1.0)
+        effective_target = max(round(target_per_competency * target_scale), 1)
+
+        cumulative_pct = {
+            k: min(round(v / effective_target * 100), 100)
+            for k, v in cumulative_points.items()
+        }
+        overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
+        gaps = [k for k, v in cumulative_pct.items() if v < 25]
+
+        now = datetime.now()
+        y = year or now.year
+        q = quarter or ((now.month - 1) // 3 + 1)
+        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        sm, sd = quarter_starts[q]
+        day_of_quarter = (now.date() - date(y, sm, sd)).days + 1
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        strategy_alignment = build_strategy_alignment(
+            y,
+            q,
+            cumulative_points,
+            perf_dir,
+            emails_dir,
+        )
+        questions_summary = self._get_questions_summary(year, quarter)
+
+        summary = {
+            "year": y,
+            "quarter": q,
+            "day_of_quarter": day_of_quarter,
+            "cumulative_points": cumulative_points,
+            "cumulative_percentage": cumulative_pct,
+            "overall_percentage": overall,
+            "total_events": total_events,
+            "highlights": highlights,
+            "gaps": gaps,
+            "strategy_alignment": strategy_alignment,
+            "questions_summary": questions_summary,
+            "effective_target": effective_target,
+            "engineering_level": level,
             "last_updated": now.isoformat(),
         }
 
@@ -328,6 +576,21 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             target = date.today()
 
         try:
+            year = target.year
+            quarter = (target.month - 1) // 3 + 1
+            perf_dir = self._get_perf_dir(year, quarter)
+            emails_dir = self._get_executive_emails_dir(year, quarter)
+
+            self._collector.strategy_index = build_strategy_context_index(emails_dir)
+
+            cache_file = perf_dir / "jira_hierarchy_cache.json"
+            if cache_file.exists():
+                try:
+                    with open(cache_file, encoding="utf-8") as f:
+                        self._collector.hierarchy_cache = json.load(f)
+                except Exception:
+                    self._collector.hierarchy_cache = {}
+
             loop = asyncio.get_event_loop()
             daily_data = await loop.run_in_executor(
                 None,
@@ -335,6 +598,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 target,
             )
             await loop.run_in_executor(None, self._update_summary)
+
+            # Tag collected events to quarterly questions
+            await loop.run_in_executor(
+                None, self._tag_events_to_questions, perf_dir, daily_data
+            )
+
             return {
                 "success": True,
                 "event_count": len(daily_data.get("events", [])),
@@ -391,6 +660,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         if all_weekdays:
             await loop.run_in_executor(None, self._update_summary)
 
+            # Rebuild all question evidence from scratch after backfill
+            perf_dir = self._get_perf_dir(year, quarter)
+            await loop.run_in_executor(
+                None, self._tag_events_to_questions, perf_dir, None
+            )
+
         return {
             "success": True,
             "processed": len(all_weekdays),
@@ -400,7 +675,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         }
 
     async def _handle_evaluate_all(self, **kwargs) -> dict:
-        """Re-score every event in the quarter using current scoring config."""
+        """Re-score every event in the quarter using current scoring config.
+
+        Builds the strategy context index from cached executive emails,
+        loads the hierarchy cache, and re-enriches + re-scores all events
+        with scope/role/strategy/level-aware weights.
+        """
         now = datetime.now()
         year = kwargs.get("year") or now.year
         quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
@@ -411,9 +691,33 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         loop = asyncio.get_event_loop()
 
-        def _rescore() -> int:
-            _, _, daily_cap, _ = get_effective_defs()
+        perf_dir = self._get_perf_dir(year, quarter)
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        strategy_index = build_strategy_context_index(emails_dir)
+
+        cache_file = perf_dir / "jira_hierarchy_cache.json"
+        hierarchy_cache: dict = {}
+        if cache_file.exists():
+            try:
+                with open(cache_file, encoding="utf-8") as f:
+                    hierarchy_cache = json.load(f)
+            except Exception:
+                pass
+
+        self._collector.hierarchy_cache = hierarchy_cache
+        self._collector.strategy_index = strategy_index
+
+        def _rescore() -> tuple[int, dict[str, int], int, list[str]]:
+            eff_defs, min_sig, daily_cap, _ = get_effective_defs()
+            cfg = get_merged_config()
+            _level = cfg.get("engineering_level", "sse")  # noqa: F841
+            strategy_cfg = get_strategy_alignment_config()
+            _min_overlap = strategy_cfg.get("min_text_overlap_words", 3)  # noqa: F841
             updated = 0
+            cumulative_points: dict[str, int] = {}
+            total_events = 0
+            highlights: list[str] = []
+
             for daily_file in sorted(daily_dir.glob("*.json")):
                 try:
                     with open(daily_file, encoding="utf-8") as f:
@@ -423,11 +727,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
                 events = data.get("events", [])
                 for ev in events:
-                    ev["points"] = map_competencies(
-                        ev.get("title", ""),
-                        ev.get("source", ""),
-                        ev.get("type", ""),
-                    )
+                    self._collector._enrich_event(ev, eff_defs, min_sig)
 
                 daily_points: dict[str, int] = {}
                 for ev in events:
@@ -435,18 +735,39 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         current = daily_points.get(comp_id, 0)
                         daily_points[comp_id] = min(current + pts, daily_cap)
 
-                data["daily_points"] = daily_points
-                data["daily_total"] = sum(daily_points.values())
-                data["re_evaluated_at"] = datetime.now().isoformat()
+                old_points = data.get("daily_points", {})
+                if daily_points != old_points:
+                    data["daily_points"] = daily_points
+                    data["daily_total"] = sum(daily_points.values())
+                    data["re_evaluated_at"] = datetime.now().isoformat()
+                    with open(daily_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    updated += 1
 
-                with open(daily_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
-                updated += 1
+                for comp_id, pts in daily_points.items():
+                    cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
+                total_events += len(events)
+                for ev in events[:3]:
+                    if ev.get("title") and len(highlights) < 10:
+                        highlights.append(ev["title"][:80])
 
-            return updated
+            return updated, cumulative_points, total_events, highlights
 
-        files_updated = await loop.run_in_executor(None, _rescore)
-        await loop.run_in_executor(None, self._update_summary, year, quarter)
+        result = await loop.run_in_executor(None, _rescore)
+        files_updated, cumulative_points, total_events, highlights = result
+        await loop.run_in_executor(
+            None,
+            self._update_summary_from_data,
+            cumulative_points,
+            total_events,
+            highlights,
+            year,
+            quarter,
+        )
+
+        # Rebuild question evidence after rescoring (points may have changed)
+        perf_dir = self._get_perf_dir(year, quarter)
+        await loop.run_in_executor(None, self._tag_events_to_questions, perf_dir, None)
 
         return {
             "success": True,
@@ -457,10 +778,40 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
     async def _handle_get_scoring_config(self, **kwargs) -> dict:
         """Return the full merged scoring config (defaults + user overrides)."""
         cfg = get_merged_config()
+        level = cfg.get("engineering_level", "sse")
         for comp_id, comp_cfg in cfg.get("competencies", {}).items():
             defn = COMPETENCY_DEFS.get(comp_id, {})
             comp_cfg["name"] = defn.get("name", comp_id)
             comp_cfg["category"] = defn.get("category", "Other")
+            level_data = get_level_description(comp_id, level)
+            if level_data.get("title"):
+                comp_cfg["level_title"] = level_data["title"]
+            if level_data.get("description"):
+                comp_cfg["level_description"] = level_data["description"]
+        cfg["engineering_levels"] = get_engineering_levels()
+
+        yaml_level_weights = get_level_weights(level)
+        user_cfg = load_scoring_config()
+        user_lw = user_cfg.get("level_weight_overrides", {}).get(level, {})
+        if user_lw:
+            merged_lw = dict(yaml_level_weights)
+            for key in ("role_weights", "pillar_weights"):
+                if key in user_lw and isinstance(user_lw[key], dict):
+                    base = dict(yaml_level_weights.get(key, {}))
+                    if key == "role_weights":
+                        for scope, roles in user_lw[key].items():
+                            if isinstance(roles, dict):
+                                base[scope] = {**base.get(scope, {}), **roles}
+                    else:
+                        base.update(user_lw[key])
+                    merged_lw[key] = base
+            cfg["level_weights"] = merged_lw
+        else:
+            cfg["level_weights"] = yaml_level_weights
+
+        cfg["scope_multipliers"] = get_scope_multipliers()
+        cfg["strategy_alignment"] = get_strategy_alignment_config()
+        cfg["npu_settings"] = get_npu_settings()
         return {"success": True, "config": cfg}
 
     async def _handle_set_scoring_config(self, **kwargs) -> dict:
@@ -471,6 +822,41 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             for key in ("min_signals", "daily_cap", "target_per_competency"):
                 if key in kwargs:
                     current[key] = int(kwargs[key])
+
+            if "engineering_level" in kwargs:
+                current["engineering_level"] = str(kwargs["engineering_level"])
+
+            if "scope_multipliers" in kwargs and isinstance(
+                kwargs["scope_multipliers"], dict
+            ):
+                current["scope_multipliers"] = kwargs["scope_multipliers"]
+
+            if "strategy_alignment" in kwargs and isinstance(
+                kwargs["strategy_alignment"], dict
+            ):
+                if "strategy_alignment" not in current:
+                    current["strategy_alignment"] = {}
+                current["strategy_alignment"].update(kwargs["strategy_alignment"])
+
+            if "npu_settings" in kwargs and isinstance(kwargs["npu_settings"], dict):
+                if "npu_settings" not in current:
+                    current["npu_settings"] = {}
+                current["npu_settings"].update(kwargs["npu_settings"])
+
+            lw_overrides = kwargs.get("level_weight_overrides")
+            if lw_overrides and isinstance(lw_overrides, dict):
+                level = current.get(
+                    "engineering_level", kwargs.get("engineering_level", "sse")
+                )
+                if "level_weight_overrides" not in current:
+                    current["level_weight_overrides"] = {}
+                if level not in current["level_weight_overrides"]:
+                    current["level_weight_overrides"][level] = {}
+                for key in ("role_weights", "pillar_weights"):
+                    if key in lw_overrides and isinstance(lw_overrides[key], dict):
+                        current["level_weight_overrides"][level][key] = lw_overrides[
+                            key
+                        ]
 
             comp_updates = kwargs.get("competencies")
             if comp_updates and isinstance(comp_updates, dict):
@@ -593,7 +979,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             },
         }
 
-    async def _handle_get_issue_hierarchy(self, **kwargs) -> dict:
+    async def _handle_get_issue_hierarchy(self, **kwargs) -> dict:  # noqa: C901
         """Extract issue keys from daily data and build hierarchy tree."""
         import subprocess
 
@@ -687,6 +1073,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         env=rh_env,
                     )
                     info: dict[str, str] = {"key": key, "type": "story"}
+                    desc_lines: list[str] = []
+                    in_description = False
                     for line in result.split("\n"):
                         m = re.match(
                             r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$",
@@ -694,6 +1082,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             re.IGNORECASE,
                         )
                         if m:
+                            in_description = False
                             field = m.group(1).strip().lower().replace(" ", "_")
                             val = m.group(2).strip()
                             if field in (
@@ -707,6 +1096,18 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                 info["epic"] = val
                             if field == "component/s":
                                 info["component"] = val
+                            if field == "reporter":
+                                info["reporter"] = val
+                            if field in ("assignee", "assigned_to"):
+                                info["assignee"] = val
+                            if field == "description":
+                                in_description = True
+                                if val:
+                                    desc_lines.append(val)
+                        elif in_description:
+                            desc_lines.append(line.strip())
+                    if desc_lines:
+                        info["description"] = " ".join(desc_lines)[:500]
                     if "summary" not in info:
                         for line in result.split("\n"):
                             if key in line:
@@ -965,13 +1366,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         else:
             lines = [
                 f"# Q{quarter} {year} Quarterly Connection Report",
-                f"",
+                "",
                 f"**Generated:** {now.strftime('%Y-%m-%d %H:%M')}",
                 f"**Overall Score:** {summary.get('overall_percentage', 0)}%",
                 f"**Total Events:** {len(all_events)}",
-                f"",
-                f"## Competency Progress",
-                f"",
+                "",
+                "## Competency Progress",
+                "",
             ]
             for comp, pct in sorted(
                 summary.get("cumulative_percentage", {}).items(),
@@ -982,12 +1383,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 lines.append(f"- **{name}**: {pct}% ({pts} pts)")
 
             if summary.get("gaps"):
-                lines.append(f"\n## Areas Needing Attention\n")
+                lines.append("\n## Areas Needing Attention\n")
                 for gap in summary["gaps"]:
                     lines.append(f"- {gap.replace('_', ' ').title()}")
 
             if summary.get("highlights"):
-                lines.append(f"\n## Highlights\n")
+                lines.append("\n## Highlights\n")
                 for h in summary["highlights"]:
                     lines.append(f"- {h}")
 
@@ -1193,9 +1594,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 parsed = json.load(f)
             email_id = parsed.get("email_id", files[0].stem)
 
-        now = datetime.now()
-        year = now.year
-        quarter = (now.month - 1) // 3 + 1
         hierarchy_result = await self._handle_get_issue_hierarchy(
             refresh_from_jira=False
         )
@@ -1389,6 +1787,24 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             cache_file.unlink()
             return {"success": True, "deleted": email_id}
         return {"success": False, "error": f"Email {email_id} not found"}
+
+    async def _handle_get_executive_senders(self, **kwargs) -> dict:
+        """Return the configured executive email senders."""
+        return {"success": True, "senders": get_executive_senders()}
+
+    async def _handle_set_executive_senders(self, **kwargs) -> dict:
+        """Update the executive email senders list in config.json."""
+        senders = kwargs.get("senders")
+        if senders is None:
+            return {"success": False, "error": "No senders provided"}
+        if not isinstance(senders, list):
+            return {"success": False, "error": "senders must be a list"}
+        cleaned = [
+            s.strip().lower() for s in senders if isinstance(s, str) and s.strip()
+        ]
+        if set_executive_senders(cleaned):
+            return {"success": True, "senders": cleaned}
+        return {"success": False, "error": "Failed to write config.json"}
 
     async def _handle_search_executive_gmail(self, **kwargs) -> dict:
         """Search Gmail for executive emails."""
@@ -1942,6 +2358,37 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
     # ==================== Lifecycle ====================
 
+    def _run_clean_migration(self) -> None:
+        """Clean break migration: delete old config, write new defaults.
+
+        Runs once on first startup after the scoring redesign.
+        """
+        if not SCORING_CONFIG_FILE.exists():
+            return
+
+        try:
+            with open(SCORING_CONFIG_FILE, encoding="utf-8") as f:
+                old_cfg = json.load(f)
+        except Exception:
+            return
+
+        if "scope_multipliers" in old_cfg:
+            return
+
+        logger.info("Scoring redesign migration: upgrading scoring_config.json")
+        try:
+            SCORING_CONFIG_FILE.unlink()
+            logger.info("Deleted old scoring_config.json")
+        except Exception as e:
+            logger.warning(f"Failed to delete old config: {e}")
+
+        new_config: dict = {}
+        for k in ("engineering_level",):
+            if k in old_cfg:
+                new_config[k] = old_cfg[k]
+        save_scoring_config(new_config)
+        logger.info("Created new scoring_config.json with redesigned schema")
+
     async def startup(self):
         """Initialize daemon resources."""
         await super().startup()
@@ -1950,10 +2397,33 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         AA_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
+        self._run_clean_migration()
+
         self._load_file(AGENT_STATS_FILE)
         self._load_file(INFERENCE_STATS_FILE)
         self._load_file(SKILL_EXECUTION_FILE)
         self._load_file(get_performance_summary_path())
+
+        npu_settings = get_npu_settings()
+        if npu_settings.get("enabled", False):
+            try:
+                from services.stats.npu_classifier import NPUCompetencyClassifier
+
+                classifier = NPUCompetencyClassifier(
+                    device=npu_settings.get("device", "CPU"),
+                    confidence_threshold=npu_settings.get("confidence_threshold", 0.35),
+                    bonus_signals=npu_settings.get("bonus_signals", 2),
+                )
+                cfg = get_merged_config()
+                level = cfg.get("engineering_level", "sse")
+                success = await classifier.initialize(COMPETENCY_DEFS, level)
+                if success:
+                    self._collector.npu_classifier = classifier
+                    logger.info("NPU classifier initialized successfully")
+                else:
+                    logger.info("NPU classifier failed to initialize, disabled")
+            except Exception as e:
+                logger.info(f"NPU classifier unavailable: {e}")
 
         if self.enable_dbus:
             await self.start_dbus()
@@ -1983,7 +2453,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         checks = {
             "running": self.is_running,
             "config_dir_exists": AA_CONFIG_DIR.exists(),
-            "cache_entries": len(self._stats_cache) > 0,
         }
 
         healthy = all(checks.values())

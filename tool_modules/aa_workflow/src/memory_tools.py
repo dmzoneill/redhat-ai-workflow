@@ -30,7 +30,9 @@ For the new unified memory interface, see:
 - tool_modules/aa_workflow/src/memory_unified.py - Unified MCP tools
 """
 
+import fcntl
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -749,6 +751,67 @@ async def _memory_query_impl(
         ]
 
 
+_ISSUE_KEY_RE = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
+
+
+def _extract_issue_keys(*texts: str) -> list[str]:
+    """Extract unique Jira issue keys (e.g. AAP-12345) from text strings."""
+    keys: set[str] = set()
+    for text in texts:
+        if text:
+            keys.update(_ISSUE_KEY_RE.findall(text))
+    return sorted(keys) if keys else []
+
+
+def append_session_entry(entry: dict) -> None:
+    """Thread/process-safe append to today's session log file.
+
+    Uses fcntl.flock to prevent concurrent corruption when multiple
+    sessions (chat windows, cron jobs, skills) write simultaneously.
+
+    Args:
+        entry: Dict with at minimum 'action'. Optional fields: details,
+               type, session_id, skill_name, tool_name, result,
+               duration_ms, issues, accomplished, decisions, next_steps.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    session_dir = MEMORY_DIR / "sessions"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    session_file = session_dir / f"{today}.yaml"
+    lock_file = session_dir / f"{today}.lock"
+
+    if "time" not in entry:
+        entry["time"] = datetime.now().strftime("%H:%M:%S")
+
+    # Auto-extract issue keys from action/details if not provided
+    if "issues" not in entry:
+        issues = _extract_issue_keys(entry.get("action", ""), entry.get("details", ""))
+        if issues:
+            entry["issues"] = issues
+
+    try:
+        with open(lock_file, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                if session_file.exists():
+                    with open(session_file, encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                else:
+                    data = {"date": today, "entries": []}
+
+                if "entries" not in data:
+                    data["entries"] = []
+
+                data["entries"].append(entry)
+
+                with open(session_file, "w", encoding="utf-8") as f:
+                    yaml.dump(data, f, default_flow_style=False)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except Exception as e:
+        logger.warning("Failed to append session entry: %s", e)
+
+
 async def _memory_session_log_impl(action: str, details: str = "") -> list[TextContent]:
     """
     Log an action to today's session log.
@@ -763,40 +826,31 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
     Returns:
         Confirmation of the log entry.
     """
-    # Track memory write
     from tool_modules.aa_workflow.src.agent_stats import record_memory_write
 
     record_memory_write()
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    session_file = MEMORY_DIR / "sessions" / f"{today}.yaml"
-    session_file.parent.mkdir(parents=True, exist_ok=True)
+    entry: dict[str, Any] = {
+        "action": action,
+        "type": "manual",
+    }
+    if details:
+        entry["details"] = details
+
+    # Attach session_id if available
+    try:
+        from server.workspace_state import WorkspaceRegistry
+
+        workspace = WorkspaceRegistry.get_default_workspace()
+        if workspace:
+            session = workspace.get_active_session(refresh_tools=False)
+            if session:
+                entry["session_id"] = session.session_id
+    except Exception:
+        pass
 
     try:
-        # Load existing or create new
-        if session_file.exists():
-            with open(session_file, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-        else:
-            data = {"date": today, "entries": []}
-
-        if "entries" not in data:
-            data["entries"] = []
-
-        # Add entry
-        entry = {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "action": action,
-        }
-        if details:
-            entry["details"] = details
-
-        data["entries"].append(entry)
-
-        # Write back
-        with open(session_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
-
+        append_session_entry(entry)
         return [TextContent(type="text", text=f"✅ Logged: {action}")]
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Error logging: {e}")]

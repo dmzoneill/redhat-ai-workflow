@@ -1,0 +1,107 @@
+# Skill: Sync documentation data sources
+
+name: docs_sync
+description: |
+  Sync all external data sources for the documentation site.
+  Pulls latest data from Jira, Google Drive, Git commits, and processes
+  static YAML + conversation notes into docs/ pages.
+
+  Supports selective sync (skip Jira or Drive if not needed).
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - docs_build
+  chains_to:
+    - docs_build
+    - docs_serve
+  provides_context_for:
+    - docs_build
+    - docs_add_note
+
+inputs:
+  - name: skip_jira
+    type: boolean
+    required: false
+    default: false
+    description: "Skip Jira sync (useful if JIRA_JPAT not set)"
+
+  - name: skip_drive
+    type: boolean
+    required: false
+    default: false
+    description: "Skip Google Drive sync (useful if no credentials)"
+
+  - name: full_jira
+    type: boolean
+    required: false
+    default: false
+    description: "Force full Jira re-sync (ignores cache)"
+
+steps:
+  - name: check_project_dir
+    description: "Verify the docs project exists"
+    compute: |
+      from pathlib import Path
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      if not project.exists():
+          raise RuntimeError(f"Docs project not found at {project}")
+      result = str(project)
+    output: project_dir
+
+  - name: run_sync
+    description: "Run the sync pipeline"
+    compute: |
+      import subprocess, sys
+      from pathlib import Path
+
+      project = Path(project_dir)
+      cmd = [sys.executable, str(project / "scripts" / "generate_all.py"), "--sync-only"]
+
+      if inputs.get("skip_jira"):
+          cmd.append("--skip-jira")
+      if inputs.get("skip_drive"):
+          cmd.append("--skip-drive")
+
+      proc = subprocess.run(cmd, cwd=project, capture_output=True, text=True, timeout=300)
+      output = proc.stdout + proc.stderr
+
+      if proc.returncode != 0:
+          result = f"❌ Sync failed (exit {proc.returncode}):\n```\n{output[-2000:]}\n```"
+      else:
+          lines = [l for l in output.split("\n") if l.strip().startswith("[")]
+          summary = "\n".join(lines) if lines else "Sync completed"
+          result = f"✅ Data sync complete\n\n{summary}"
+    output: sync_result
+
+  - name: run_full_jira
+    description: "Run full Jira re-sync if requested"
+    condition: "inputs.full_jira and not inputs.skip_jira"
+    compute: |
+      import subprocess, sys
+      from pathlib import Path
+
+      project = Path(project_dir)
+      cmd = [sys.executable, str(project / "scripts" / "jira_sync.py"), "--full"]
+      proc = subprocess.run(cmd, cwd=project, capture_output=True, text=True, timeout=300)
+
+      if proc.returncode != 0:
+          result = f"⚠️ Full Jira sync had issues:\n{proc.stderr[-500:]}"
+      else:
+          result = "✅ Full Jira re-sync complete"
+    output: jira_full_result
+
+  - name: log_sync
+    description: "Log the sync to session"
+    tool: memory_session_log
+    args:
+      action: "Docs sync completed"
+      details: "{{ sync_result }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: "{{ sync_result }}{% if jira_full_result is defined %}\n\n{{ jira_full_result }}{% endif %}"

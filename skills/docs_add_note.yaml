@@ -1,0 +1,90 @@
+# Skill: Add a conversation note to the docs project
+
+name: docs_add_note
+description: |
+  Add an AI conversation note to data/notes/ in the docs project.
+  Notes are Markdown files with YAML frontmatter that get incorporated
+  into documentation pages via COMPOSE markers.
+
+  Use this during conversations to capture insights, decisions, or
+  analysis that should become part of the documentation.
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - docs_build
+  chains_to:
+    - docs_sync
+    - docs_build
+  provides_context_for: []
+
+inputs:
+  - name: title
+    type: string
+    required: true
+    description: "Note title (also used to generate filename)"
+
+  - name: content
+    type: string
+    required: true
+    description: "Markdown content of the note"
+
+  - name: tags
+    type: string
+    required: false
+    description: "Comma-separated tags (e.g. 'billing,architecture')"
+
+  - name: related_issues
+    type: string
+    required: false
+    description: "Comma-separated Jira issue keys (e.g. 'AAP-12345,AAP-12346')"
+
+steps:
+  - name: create_note
+    description: "Create the note file in data/notes/"
+    compute: |
+      from pathlib import Path
+      from datetime import date
+      import re
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      notes_dir = project / "data" / "notes"
+      notes_dir.mkdir(parents=True, exist_ok=True)
+
+      title = inputs["title"]
+      slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+      filename = f"{date.today().isoformat()}-{slug}.md"
+      filepath = notes_dir / filename
+
+      tags_str = inputs.get("tags", "")
+      tags = [t.strip() for t in tags_str.split(",") if t.strip()] if tags_str else []
+
+      issues_str = inputs.get("related_issues", "")
+      issues = [i.strip() for i in issues_str.split(",") if i.strip()] if issues_str else []
+
+      frontmatter = ["---"]
+      frontmatter.append(f'title: "{title}"')
+      frontmatter.append(f'date: "{date.today().isoformat()}"')
+      if tags:
+          frontmatter.append("tags:")
+          for t in tags:
+              frontmatter.append(f"  - {t}")
+      if issues:
+          frontmatter.append("related_issues:")
+          for i in issues:
+              frontmatter.append(f"  - {i}")
+      frontmatter.append("---")
+      frontmatter.append("")
+
+      content = "\n".join(frontmatter) + inputs["content"] + "\n"
+      filepath.write_text(content)
+
+      result = f"✅ Note created: `data/notes/{filename}`\n\nTags: {', '.join(tags) if tags else 'none'}\n\nTo include in a page, add: `<!-- COMPOSE:notes:{tags[0] if tags else slug} -->`"
+    output: note_result
+
+outputs:
+  - name: summary
+    value: "{{ note_result }}"

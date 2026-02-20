@@ -154,18 +154,9 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
 
     created = 0
 
-    for skill_file in sorted(SKILLS_DIR.glob("**/*.yaml")):
-        rel = skill_file.relative_to(SKILLS_DIR)
-
-        # Determine skill name and command name
-        if len(rel.parts) > 1:
-            # Subdirectory skill like performance/collect_daily.yaml
-            skill_name = str(rel.with_suffix("")).replace("/", "-")
-            full_skill_name = str(rel.with_suffix("")).replace("-", "/")
-        else:
-            skill_name = skill_file.stem
-            full_skill_name = skill_file.stem
-
+    for skill_file in sorted(SKILLS_DIR.glob("*.yaml")):
+        skill_name = skill_file.stem
+        full_skill_name = skill_file.stem
         command_name = skill_name.replace("_", "-")
 
         # Skip if command already exists

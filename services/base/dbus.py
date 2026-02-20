@@ -192,7 +192,10 @@ class DaemonDBusBase(ABC):
         }
 
     async def start_dbus(self):
-        """Start the D-Bus service."""
+        """Start the D-Bus service. Idempotent -- skips if already connected."""
+        if self._bus is not None:
+            return True
+
         if not DBUS_AVAILABLE:
             logger.warning("D-Bus not available (dbus-next not installed)")
             return False

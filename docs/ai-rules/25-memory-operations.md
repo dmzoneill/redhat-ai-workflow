@@ -36,7 +36,8 @@ memory_ask("Where is the billing calculation?")
 | `memory_write(key, content)` | Replace entire file |
 | `memory_update(key, path, value)` | Update specific field |
 | `memory_append(key, list_path, item)` | Add to a list |
-| `memory_session_log(action, details)` | Log to today's session |
+| `memory_session_log(action, details)` | Log context/decisions to today's session |
+| `session_close(issues, accomplished, ...)` | **MANDATORY** structured session summary at end |
 
 ### Examples
 
@@ -47,9 +48,53 @@ memory_update("state/current_work", "active_issues[0].status", '"In Progress"')
 # Append to a list
 memory_append("state/current_work", "follow_ups", '{"task": "Review MR", "priority": "high"}')
 
-# Log an action
-memory_session_log("Created MR !1234", "For AAP-12345, fixes auth bug")
+# Log context/narrative (things only the LLM knows)
+memory_session_log("Investigated auth failure", "Root cause: JWT key rotation expired")
+
+# Close session with structured summary (MANDATORY before ending)
+session_close(
+    issues="AAP-12345, AAP-12346",
+    accomplished="Fixed auth bug\nAdded tests",
+    decisions="Chose JWT refresh approach",
+    next_steps="Address MR review comments"
+)
 ```
+
+## Session Log Format
+
+Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) use an enriched entry format.
+Each entry has a `type` field indicating its source:
+
+| Type | Source | Description |
+|------|--------|-------------|
+| `session` | Auto (session_tools.py) | Session start/end events |
+| `skill` | Auto (skill_engine.py) | Skill execution completions |
+| `tool` | Auto (debuggable.py) | Significant tool calls (commits, MR creation, Jira transitions) |
+| `manual` | LLM (memory_session_log) | Context, decisions, findings logged by the LLM |
+| `summary` | LLM (session_close) | Structured session summary with issues, accomplished, next_steps |
+| `cron` | Auto (cron jobs) | Scheduled task results |
+
+### Entry Fields
+
+All entries have: `time`, `action`, `type`. Additional fields by type:
+
+| Field | Types | Description |
+|-------|-------|-------------|
+| `session_id` | all | Which chat session produced this entry |
+| `details` | all | Human-readable description |
+| `issues` | all | Jira issue keys (auto-extracted from text) |
+| `skill_name` | skill | Name of the skill that ran |
+| `tool_name` | tool | Name of the tool that was called |
+| `result` | skill, tool | `success` or `failure` |
+| `duration_ms` | skill, tool | Execution time in milliseconds |
+| `accomplished` | summary | List of what was done |
+| `decisions` | summary | List of key decisions |
+| `next_steps` | summary | List of unfinished work |
+| `files_changed` | summary | List of key files modified |
+
+### Concurrency
+
+Multiple sessions can write to the same daily file safely -- all writes use `fcntl.flock` file locking.
 
 ## Learning from Errors
 
@@ -122,7 +167,7 @@ memory/
 │   ├── tool_fixes.yaml        # Tool-specific fixes
 │   └── runbooks.yaml          # Procedures that worked
 └── sessions/
-    └── YYYY-MM-DD.yaml        # Daily session logs
+    └── YYYY-MM-DD.yaml        # Daily session logs (enriched format)
 ```
 
 ## Common Patterns
@@ -149,15 +194,14 @@ learn_tool_fix(
 )
 ```
 
-### End of Day Summary
+### End of Session (MANDATORY)
 
 ```python
-memory_session_log("End of day", '''
-  Completed:
-  - Fixed AAP-12345 (MR !1234)
-  - Reviewed AAP-12346
-  Tomorrow:
-  - Deploy to stage
-  - Address review comments
-''')
+session_close(
+    issues="AAP-12345",
+    accomplished="Fixed auth bug in middleware\nAdded 3 unit tests",
+    decisions="Used JWT refresh instead of session extension",
+    next_steps="Deploy to stage\nAddress review comments on MR !1234",
+    files_changed="src/auth/middleware.py, tests/test_auth.py"
+)
 ```

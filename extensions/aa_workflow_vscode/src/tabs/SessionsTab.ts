@@ -78,6 +78,17 @@ export class SessionsTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.sessions.length,
+      this.stats?.total_sessions ?? 0,
+      this.groupBy,
+      this.viewMode,
+      this.searchQuery,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -192,9 +203,9 @@ export class SessionsTab extends BaseTab {
     return `
       <!-- Header with title and controls -->
       <div class="section">
-        <div class="session-header">
+        <div class="flex-between session-header">
           <div class="session-header-title">💬 ${groupTitle}</div>
-          <div class="session-header-controls">
+          <div class="flex-row session-header-controls">
             <div class="session-search">
               <input type="text" placeholder="🔍 Search chats..." id="sessionSearch" value="${this.escapeHtml(this.searchQuery)}" />
             </div>
@@ -242,7 +253,7 @@ export class SessionsTab extends BaseTab {
     const statusIcon = session.status === "active" ? "●" : session.status === "idle" ? "◐" : "○";
 
     return `
-      <div class="session-card ${statusClass}" data-session-id="${session.id}">
+      <div class="card session-card ${statusClass}" data-session-id="${session.id}">
         <div class="session-card-header">
           <div class="session-card-status ${statusClass}">${statusIcon}</div>
           <div class="session-card-name">${this.escapeHtml(session.name || session.id)}</div>
@@ -347,7 +358,7 @@ export class SessionsTab extends BaseTab {
         <td>
           <span class="session-status-icon ${statusClass}">${statusIcon}</span>
         </td>
-        <td class="session-name-cell">
+        <td class="flex-row session-name-cell">
           ${isActive ? '<span class="active-badge">ACTIVE</span>' : ''}
           <span class="session-name-link" data-action="openChatSession" data-session-id="${session.id}" data-session-name="${this.escapeHtml(sessionName).replace(/"/g, '&quot;')}" title="Click to find this chat">
             ${this.escapeHtml(sessionName)}

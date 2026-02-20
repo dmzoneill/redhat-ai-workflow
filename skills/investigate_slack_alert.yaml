@@ -655,7 +655,14 @@ steps:
     tool: memory_session_log
     args:
       action: "Investigated Slack alert: {{ alert_info.alert_name if alert_info else 'unknown' }}"
-      details: "Environment: {{ cfg.environment }}, Issues: {{ pod_analysis.total_issues if pod_analysis else 0 }}"
+      details: >-
+        Environment: {{ cfg.environment }},
+        Namespace: {{ alert_info.namespace if alert_info else 'unknown' }},
+        Unhealthy pods: {{ pod_analysis.total_issues if pod_analysis else 0 }},
+        Error patterns: {{ error_analysis.errors | length if error_analysis and error_analysis.errors else 0 }},
+        Is billing: {{ alert_info.is_billing if alert_info else false }},
+        Jira: {{ jira_result.key if jira_result and jira_result.key else 'none' }} ({{ jira_result.action if jira_result else 'n/a' }}),
+        Slack reply: {{ 'sent' if reply_result else 'failed' }}
     on_error: continue
 
   # ==================== LEARNING FROM FAILURES ====================

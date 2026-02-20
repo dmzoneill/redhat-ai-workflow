@@ -458,12 +458,36 @@ steps:
       result = {"timestamp": datetime.now().isoformat()}
     output: memory_context
 
+  - name: build_feedback_log_details
+    description: "Build enriched details for session log"
+    compute: |
+      analysis = feedback_with_calendar_check or feedback_analysis or []
+      mr_ids = [str(f.get("mr_id", "?")) for f in analysis]
+      needs_response_count = sum(
+          len(f.get("needs_response", [])) for f in analysis
+      )
+      meeting_count = sum(
+          len(f.get("meeting_requests", [])) for f in analysis
+      )
+      result = {
+          "mr_count": len(analysis),
+          "mr_ids": mr_ids[:5],
+          "needs_response": needs_response_count,
+          "meeting_requests": meeting_count,
+      }
+    output: feedback_log_details
+    on_error: continue
+
   - name: log_session_feedback_check
     description: "Log feedback check to session"
     tool: memory_session_log
     args:
       action: "Checked MR feedback"
-      details: "{{ (feedback_with_calendar_check or feedback_analysis) | length if (feedback_with_calendar_check or feedback_analysis) else 0 }} MRs with feedback"
+      details: >-
+        {{ feedback_log_details.mr_count if feedback_log_details else 0 }} MRs with feedback
+        (IDs: {{ feedback_log_details.mr_ids | join(', ') if feedback_log_details and feedback_log_details.mr_ids else 'none' }}),
+        {{ feedback_log_details.needs_response if feedback_log_details else 0 }} needing response,
+        {{ feedback_log_details.meeting_requests if feedback_log_details else 0 }} meeting requests
     on_error: continue
 
   - name: create_followups_for_feedback

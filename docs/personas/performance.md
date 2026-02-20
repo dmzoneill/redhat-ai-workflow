@@ -22,10 +22,10 @@ The performance persona is designed for tracking work accomplishments and mappin
 
 | Skill | Description |
 |-------|-------------|
-| performance/collect_daily | Collect daily performance data |
-| performance/backfill_missing | Backfill missing weekdays |
-| performance/evaluate_questions | AI evaluation of quarterly questions |
-| performance/export_report | Export quarterly report |
+| performance_collect_daily | Collect daily performance data |
+| performance_backfill_missing | Backfill missing weekdays |
+| performance_evaluate_questions | AI evaluation of quarterly questions |
+| performance_export_report | Export quarterly report |
 
 ## Use Cases
 

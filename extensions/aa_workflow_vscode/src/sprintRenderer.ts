@@ -575,13 +575,13 @@ function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean =
           <span class="text-sm text-muted">No actions</span>
         ` : `
           <div class="issue-actions">
-            ${showStartIssue ? `<button class="issue-btn start" data-action="startIssue" data-issue="${escapeHtml(issue.key)}" title="Start this issue immediately (bypasses all checks)">▶ Force Start</button>` : ""}
-            ${issue.approvalStatus === "pending" || issue.approvalStatus === "waiting" ? `<button class="issue-btn approve" data-action="approve" data-issue="${escapeHtml(issue.key)}">✓ Approve</button>` : ""}
-            ${issue.approvalStatus === "approved" ? `<button class="issue-btn reject" data-action="reject" data-issue="${escapeHtml(issue.key)}">✗ Unapprove</button>` : ""}
-            ${showAbort ? `<button class="issue-btn abort" data-action="abort" data-issue="${escapeHtml(issue.key)}">⏹ Abort</button>` : ""}
-            ${showChat ? `<button class="issue-btn chat" data-action="openChat" data-issue="${escapeHtml(issue.key)}" data-chat-id="${escapeHtml(issue.chatId || "")}">💬 Chat</button>` : ""}
-            ${showOpenInCursor ? `<button class="issue-btn open-cursor" data-action="openInCursor" data-issue="${escapeHtml(issue.key)}" title="Open background work in Cursor for interactive continuation">📂 Open in Cursor</button>` : ""}
-            ${showViewTrace ? `<button class="issue-btn trace" data-action="viewTrace" data-issue="${escapeHtml(issue.key)}" title="View execution trace and state machine">🔍 Trace</button>` : ""}
+            ${showStartIssue ? `<button class="btn btn-xs btn-success" data-action="startIssue" data-issue="${escapeHtml(issue.key)}" title="Start this issue immediately (bypasses all checks)">▶ Force Start</button>` : ""}
+            ${issue.approvalStatus === "pending" || issue.approvalStatus === "waiting" ? `<button class="btn btn-xs btn-success" data-action="approve" data-issue="${escapeHtml(issue.key)}">✓ Approve</button>` : ""}
+            ${issue.approvalStatus === "approved" ? `<button class="btn btn-xs" data-action="reject" data-issue="${escapeHtml(issue.key)}">✗ Unapprove</button>` : ""}
+            ${showAbort ? `<button class="btn btn-xs btn-danger" data-action="abort" data-issue="${escapeHtml(issue.key)}">⏹ Abort</button>` : ""}
+            ${showChat ? `<button class="btn btn-xs btn-info" data-action="openChat" data-issue="${escapeHtml(issue.key)}" data-chat-id="${escapeHtml(issue.chatId || "")}">💬 Chat</button>` : ""}
+            ${showOpenInCursor ? `<button class="btn btn-xs" data-action="openInCursor" data-issue="${escapeHtml(issue.key)}" title="Open background work in Cursor for interactive continuation">📂 Open in Cursor</button>` : ""}
+            ${showViewTrace ? `<button class="btn btn-xs" data-action="viewTrace" data-issue="${escapeHtml(issue.key)}" title="View execution trace and state machine">🔍 Trace</button>` : ""}
           </div>
         `}
       </div>
@@ -596,7 +596,7 @@ function renderSprintHistory(history: CompletedSprint[]): string {
 
   return `
     <div class="sprint-history">
-      <div class="sprint-history-header" data-action="toggleHistory">
+      <div class="flex-between sprint-history-header" data-action="toggleHistory">
         <span class="sprint-history-title">📚 Previous Sprints (${history.length})</span>
         <span>▶</span>
       </div>
@@ -605,9 +605,9 @@ function renderSprintHistory(history: CompletedSprint[]): string {
           .map(
             (sprint) => `
           <div class="past-sprint">
-            <div class="past-sprint-header">
+            <div class="flex-between past-sprint-header">
               <span class="past-sprint-name">${escapeHtml(sprint.name)}</span>
-              <span class="past-sprint-dates">${formatTimestamp(sprint.startDate)} - ${formatTimestamp(sprint.endDate)}</span>
+              <span class="text-muted-sm past-sprint-dates">${formatTimestamp(sprint.startDate)} - ${formatTimestamp(sprint.endDate)}</span>
             </div>
             <div class="past-sprint-stats">
               <span>✅ ${sprint.completedPoints}/${sprint.totalPoints} points</span>
@@ -635,7 +635,7 @@ function renderToolRequests(requests: ToolGapRequest[]): string {
         <h3 class="section-title">🔧 Tool Requests</h3>
         <div class="empty-state p-24">
           <div>No tool gaps recorded yet.</div>
-          <div class="text-base mt-8">
+          <div class="text-md mt-8">
             When skills need tools that don't exist, they'll appear here.
           </div>
         </div>
@@ -649,7 +649,7 @@ function renderToolRequests(requests: ToolGapRequest[]): string {
       ${openRequests
         .map(
           (req) => `
-        <div class="tool-request-card">
+        <div class="card tool-request-card">
           <div class="tool-request-header">
             <span class="tool-request-name">${escapeHtml(req.suggested_tool_name)}</span>
             <span class="tool-request-votes">👍 ${req.vote_count} request${req.vote_count !== 1 ? "s" : ""}</span>
@@ -826,12 +826,12 @@ export function renderTraceTimeline(trace: ExecutionTrace): string {
       <div class="trace-step ${statusClass}">
         <div class="trace-marker">${icon}</div>
         <div class="trace-content">
-          <div class="trace-header">
+          <div class="item-row trace-header">
             <span class="trace-time">${timeStr}</span>
             <span class="trace-name">${escapeHtml(step.name)}</span>
             ${step.duration_ms ? `<span class="trace-duration">${step.duration_ms}ms</span>` : ""}
           </div>
-          ${details.length > 0 ? `<div class="trace-details">${details.join("")}</div>` : ""}
+          ${details.length > 0 ? `<div class="text-meta trace-details">${details.join("")}</div>` : ""}
         </div>
       </div>
     `;
@@ -862,7 +862,7 @@ export function renderTraceViewer(issueKey: string): string {
   if (!trace) {
     return `
       <div class="trace-viewer">
-        <div class="trace-header">
+        <div class="item-row trace-header">
           <h3>Execution Trace: ${escapeHtml(issueKey)}</h3>
           <button class="trace-close" data-action="closeTrace">✕</button>
         </div>
@@ -885,7 +885,7 @@ export function renderTraceViewer(issueKey: string): string {
 
   return `
     <div class="trace-viewer">
-      <div class="trace-header">
+      <div class="item-row trace-header">
         <h3>Execution Trace: ${escapeHtml(issueKey)}</h3>
         <span class="trace-state state-${stateColor}">${escapeHtml(trace.current_state)}</span>
         <button class="trace-close" data-action="closeTrace">✕</button>
@@ -991,40 +991,40 @@ export function getSprintTabContent(
       <!-- Sprint Headers - Current and Next -->
       <div class="sprint-headers">
         <!-- Current Sprint -->
-        <div class="sprint-header current">
+        <div class="card sprint-header current">
           <div class="sprint-header-badge">CURRENT</div>
-          <div class="sprint-header-content">
+          <div class="flex-col sprint-header-content">
             <div class="sprint-title">🎯 ${state.currentSprint ? escapeHtml(state.currentSprint.name) : "No Active Sprint"}</div>
             ${state.currentSprint ? `
-              <div class="sprint-dates">
+              <div class="text-muted-sm sprint-dates">
                 ${formatTimestamp(state.currentSprint.startDate)} - ${formatTimestamp(state.currentSprint.endDate)}
               </div>
-              <div class="sprint-progress">
+              <div class="flex-row sprint-progress">
                 <div class="sprint-progress-bar">
                   <div class="sprint-progress-fill" style="width: ${progressPercent}%;"></div>
                 </div>
-                <span class="sprint-progress-text">${completedPoints}/${totalPoints} pts (${progressPercent}%)</span>
+                <span class="text-muted-sm sprint-progress-text">${completedPoints}/${totalPoints} pts (${progressPercent}%)</span>
               </div>
             ` : `
-              <div class="sprint-dates">No active sprint loaded from Jira</div>
+              <div class="text-muted-sm sprint-dates">No active sprint loaded from Jira</div>
             `}
           </div>
         </div>
 
         <!-- Next Sprint -->
-        <div class="sprint-header next">
+        <div class="card sprint-header next">
           <div class="sprint-header-badge">NEXT</div>
-          <div class="sprint-header-content">
+          <div class="flex-col sprint-header-content">
             <div class="sprint-title">📅 ${state.nextSprint ? escapeHtml(state.nextSprint.name) : "No Upcoming Sprint"}</div>
             ${state.nextSprint ? `
-              <div class="sprint-dates">
+              <div class="text-muted-sm sprint-dates">
                 ${formatTimestamp(state.nextSprint.startDate)} - ${formatTimestamp(state.nextSprint.endDate)}
               </div>
               <div class="sprint-stats">
                 ${state.nextSprint.totalPoints} pts planned
               </div>
             ` : `
-              <div class="sprint-dates">No upcoming sprint scheduled</div>
+              <div class="text-muted-sm sprint-dates">No upcoming sprint scheduled</div>
             `}
           </div>
         </div>
@@ -1034,7 +1034,7 @@ export function getSprintTabContent(
       <div class="bot-controls-bar">
         <div class="bot-controls">
           <!-- Automatic Mode Toggle -->
-          <div class="bot-toggle" title="When enabled, bot automatically processes approved issues during working hours (Mon-Fri 9am-5pm)">
+          <div class="flex-row bot-toggle" title="When enabled, bot automatically processes approved issues during working hours (Mon-Fri 9am-5pm)">
             <div class="bot-toggle-switch ${state.automaticMode ? "active" : ""}" data-action="toggleAutomatic"></div>
             <span class="bot-toggle-label">Automatic</span>
           </div>
@@ -1042,7 +1042,7 @@ export function getSprintTabContent(
           <!-- Manual Start/Stop Button - Styled like Meetings tab -->
           ${state.manuallyStarted ? `
             <div class="bot-status-pill running ml-16">
-              <span class="status-dot online"></span>
+              <span class="dot status-dot online"></span>
               <span>Running</span>
               <button class="btn btn-xs btn-danger" data-action="stopBot" title="Stop the bot immediately">Stop</button>
             </div>
@@ -1053,7 +1053,7 @@ export function getSprintTabContent(
           `}
 
           <!-- Status Indicator -->
-          <span class="bot-status-indicator ml-12 text-base text-muted">
+          <span class="bot-status-indicator ml-12 text-md text-muted">
             ${state.manuallyStarted
               ? '<span class="text-success">● Running (manual)</span>'
               : state.automaticMode
@@ -1065,7 +1065,7 @@ export function getSprintTabContent(
           <div class="flex-spacer"></div>
 
           <!-- Background Toggle -->
-          <div class="bot-toggle" title="When enabled, new issue chats open in background and you stay in your current chat">
+          <div class="flex-row bot-toggle" title="When enabled, new issue chats open in background and you stay in your current chat">
             <div class="bot-toggle-switch ${state.backgroundTasks ? "active" : ""}" data-action="toggleBackgroundTasks"></div>
             <span class="bot-toggle-label">Background</span>
           </div>
@@ -1092,7 +1092,7 @@ export function getSprintTabContent(
       <div class="sprint-subtab-content active" id="subtab-all">
         <!-- Not Ready Section - Need refinement first -->
         <div class="sprint-section not-ready">
-          <div class="sprint-section-header">
+          <div class="item-row sprint-section-header">
             <span class="sprint-section-title">${notReadyConfig?.icon || "⚠️"} ${notReadyConfig?.displayName || "Not Ready"} (${notReadyIssues.length})</span>
             <span class="sprint-section-subtitle">${notReadyConfig?.description || "Need refinement before bot can work"}</span>
           </div>
@@ -1113,7 +1113,7 @@ export function getSprintTabContent(
 
         <!-- Ready Section - Bot can work on these -->
         <div class="sprint-section ready">
-          <div class="sprint-section-header">
+          <div class="item-row sprint-section-header">
             <span class="sprint-section-title">${readyConfig?.icon || "📋"} ${readyConfig?.displayName || "Ready"} (${readyIssues.length})</span>
             <span class="sprint-section-subtitle">${readyConfig?.description || "Refined and ready for bot to implement"}</span>
             ${readyIssues.length > 0 && readyConfig?.showApproveButtons !== false ? `
@@ -1140,7 +1140,7 @@ export function getSprintTabContent(
 
         <!-- In Progress Section - Currently being worked on -->
         <div class="sprint-section in-progress">
-          <div class="sprint-section-header">
+          <div class="item-row sprint-section-header">
             <span class="sprint-section-title">${inProgressConfig?.icon || "🔄"} ${inProgressConfig?.displayName || "In Progress"} (${inProgressIssues.length})</span>
             <span class="sprint-section-subtitle">${inProgressConfig?.description || "Currently being worked on"}</span>
           </div>
@@ -1161,7 +1161,7 @@ export function getSprintTabContent(
 
         <!-- Review Section - Awaiting code review -->
         <div class="sprint-section review">
-          <div class="sprint-section-header">
+          <div class="item-row sprint-section-header">
             <span class="sprint-section-title">${reviewConfig?.icon || "👀"} ${reviewConfig?.displayName || "Review"} (${reviewIssues.length})</span>
             <span class="sprint-section-subtitle">${reviewConfig?.description || "Awaiting code review"}${reviewConfig?.botMonitors ? " - bot monitors for comments" : ""}</span>
           </div>
@@ -1182,7 +1182,7 @@ export function getSprintTabContent(
 
         <!-- Done Section - Completed -->
         <div class="sprint-section done">
-          <div class="sprint-section-header">
+          <div class="item-row sprint-section-header">
             <span class="sprint-section-title">${doneConfig?.icon || "✅"} ${doneConfig?.displayName || "Done"} (${doneIssues.length})</span>
             <span class="sprint-section-subtitle">${doneConfig?.description || "Completed"}</span>
           </div>
@@ -1313,13 +1313,13 @@ export function getSprintTabScript(): string {
             return;
           }
 
-          // Issue action buttons (legacy .issue-btn without data-action)
-          const issueBtn = target.closest('.issue-btn');
-          if (issueBtn) {
+          // Issue action buttons in .issue-actions (fallback for buttons not caught by data-action delegation)
+          const issueActionBtn = target.closest('.issue-actions .btn');
+          if (issueActionBtn) {
             e.stopPropagation();
-            const action = issueBtn.getAttribute('data-action');
-            const issueKey = issueBtn.getAttribute('data-issue');
-            const chatId = issueBtn.getAttribute('data-chat-id');
+            const action = issueActionBtn.getAttribute('data-action');
+            const issueKey = issueActionBtn.getAttribute('data-issue');
+            const chatId = issueActionBtn.getAttribute('data-chat-id');
 
             console.log('[SprintTab] Button clicked:', { action, issueKey, chatId });
 

@@ -201,6 +201,18 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "clean memory" / "memory cleanup" | `memory_cleanup` | `{}` |
 | "edit memory" / "update memory" | `memory_edit` | `{"file": "...", "action": "..."}` |
 
+### Documentation Site
+
+| User Says | Skill | inputs JSON |
+|-----------|-------|-------------|
+| "sync docs" / "update docs data" | `docs_sync` | `{}` |
+| "build docs" / "build site" | `docs_build` | `{}` |
+| "preview docs" / "serve docs" | `docs_serve` | `{}` |
+| "deploy docs" / "publish docs" | `docs_deploy` | `{"message": "..."}` |
+| "docs status" / "what's synced" | `docs_status` | `{}` |
+| "add a note" / "capture this" | `docs_add_note` | `{"title": "...", "content": "...", "tags": "..."}` |
+| "new section" / "add docs section" | `docs_add_section` | `{"section": "...", "title": "..."}` |
+
 ## Intent → Persona Mapping
 
 If no skill matches, load the right persona for the domain:

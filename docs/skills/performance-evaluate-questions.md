@@ -10,7 +10,7 @@ The `evaluate_questions` skill uses Claude to analyze collected evidence and gen
 
 ```bash
 # Evaluate all questions for current quarter
-skill_run("performance/evaluate_questions")
+skill_run("performance_evaluate_questions")
 
 # Or use the Cursor command
 /performance-evaluate
@@ -20,13 +20,13 @@ skill_run("performance/evaluate_questions")
 
 ```bash
 # Evaluate all questions
-skill_run("performance/evaluate_questions")
+skill_run("performance_evaluate_questions")
 
 # Evaluate a specific question only
-skill_run("performance/evaluate_questions", '{"question_id": "q1"}')
+skill_run("performance_evaluate_questions", '{"question_id": "q1"}')
 
 # Evaluate technical contributions question
-skill_run("performance/evaluate_questions", '{"question_id": "technical_contributions"}')
+skill_run("performance_evaluate_questions", '{"question_id": "technical_contributions"}')
 ```
 
 ## Parameters

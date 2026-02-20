@@ -192,7 +192,13 @@
         "aa-workflow.defaultAgent": {
           "type": "string",
           "default": "",
-          "enum": ["", "developer", "devops", "incident", "release"],
+          "enum": [
+            "",
+            "developer",
+            "devops",
+            "incident",
+            "release"
+          ],
           "enumDescriptions": [
             "Core - base workflow tools",
             "Developer - coding, PRs, code review",
@@ -299,6 +305,7 @@
   "dependencies": {
     "dbus-next": "^0.10.2",
     "js-yaml": "^4.1.0",
+    "morphdom": "^2.7.8",
     "ws": "^8.16.0"
   }
 }

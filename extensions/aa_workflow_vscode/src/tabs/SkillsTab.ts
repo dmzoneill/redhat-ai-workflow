@@ -108,10 +108,22 @@ export class SkillsTab extends BaseTab {
 
   /**
    * Check if the mind map view is currently active.
-   * Does NOT consume forceNextRender (that's handled in notifyNeedsRenderIfNotMindMap).
    */
   public isMindMapActive(): boolean {
     return this.skillView === "mindmap";
+  }
+
+  /**
+   * Check and consume the force-render flag.
+   * Used by the render callback in commandCenter to allow renders that would
+   * otherwise be skipped (e.g., the initial render when switching TO mind map view).
+   */
+  public consumeForceRender(): boolean {
+    if (this.forceNextRender) {
+      this.forceNextRender = false;
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -123,11 +135,9 @@ export class SkillsTab extends BaseTab {
    * (skill started/completed) even during an active workflow or mind map.
    */
   private notifyNeedsRenderIfNotMindMap(): void {
-    // Consume the force flag once - if set, always allow the render
+    // Check the force flag but don't consume it here - consumeForceRender()
+    // handles consumption so the render callback in commandCenter also sees it.
     const forced = this.forceNextRender;
-    if (forced) {
-      this.forceNextRender = false;
-    }
 
     if (!forced && this.isMindMapActive()) {
       logger.log("Skipping re-render - mind map is active");
@@ -485,6 +495,19 @@ export class SkillsTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.skills.length,
+      this._buildRunningSkillsStructuralFingerprint(),
+      this.selectedSkill ?? "",
+      this.skillView,
+      this.workflowViewMode,
+      this.detailedExecution?.status ?? "",
+      this.mindMapData ? 1 : 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     const now = Date.now();
     const timeSinceLastLoad = now - this.lastSkillsListLoad;
@@ -618,7 +641,7 @@ export class SkillsTab extends BaseTab {
         <div class="mindmap-container">
           <div class="mindmap-header-compact">
             <div class="mindmap-header-top">
-              <div class="mindmap-header-left">
+              <div class="flex-row mindmap-header-left">
                 <span class="mindmap-icon">🧠</span>
                 <div class="mindmap-title-block">
                   <span class="mindmap-title-text">Skills Mind Map</span>
@@ -671,7 +694,7 @@ export class SkillsTab extends BaseTab {
 
         <!-- Skills Main Content -->
         <div class="skills-main">
-          <div class="skills-main-header">
+          <div class="flex-between skills-main-header">
             <div class="skills-main-title">
               ${this.selectedSkill ? this.selectedSkill : "Select a skill"}
             </div>
@@ -696,32 +719,32 @@ export class SkillsTab extends BaseTab {
 
     let html = `
       <div class="running-skills-panel">
-        <div class="running-skills-header">
-          <div class="running-skills-title">
+        <div class="flex-between running-skills-header">
+          <div class="flex-row running-skills-title">
             <span class="running-indicator"></span>
             Running Skills (${running.length})
           </div>
-          <div class="running-skills-actions">
+          <div class="actions-row running-skills-actions">
             <button class="btn btn-xs btn-danger" data-action="clearStaleSkills">Clear Stale</button>
           </div>
         </div>
-        <div class="running-skills-list">
+        <div class="flex-col running-skills-list">
     `;
 
     running.forEach((skill) => {
       const elapsed = this.formatDuration(skill.elapsed);
       html += `
-        <div class="running-skill-item" data-execution-id="${skill.executionId}">
-          <div class="running-skill-progress">
+        <div class="item-row running-skill-item" data-execution-id="${skill.executionId}">
+          <div class="flex-col running-skill-progress">
             <div class="running-skill-progress-bar">
               <div class="running-skill-progress-fill" style="width: ${skill.progress}%"></div>
             </div>
             <div class="running-skill-progress-text">${skill.progress}%</div>
           </div>
-          <div class="running-skill-info">
-            <div class="running-skill-name">${this.escapeHtml(skill.skillName)}</div>
-            <div class="running-skill-source">
-              <span class="source-badge ${skill.source}">${skill.source}</span>
+          <div class="label-sm text-meta running-skill-info">
+            <div class="label-sm text-meta running-skill-name">${this.escapeHtml(skill.skillName)}</div>
+            <div class="flex-row running-skill-source">
+              <span class="${skill.source === 'slack' ? 'dot ' : ''}source-badge ${skill.source}">${skill.source}</span>
               ${skill.currentStep ? `Step: ${this.escapeHtml(skill.currentStep)}` : ""}
             </div>
           </div>
@@ -800,19 +823,19 @@ export class SkillsTab extends BaseTab {
 
   private getSkillInfoView(skill: SkillDefinition): string {
     return `
-      <div class="skill-info-view">
-        <div class="skill-info-card">
+      <div class="flex-col skill-info-view">
+        <div class="card skill-info-card">
           <div class="skill-info-title">${this.escapeHtml(skill.name)} ${skill.version ? `<span class="skill-version">v${skill.version}</span>` : ""}</div>
           <div class="skill-info-desc">${this.escapeHtml(skill.description || "No description")}</div>
         </div>
 
         ${skill.inputs && skill.inputs.length > 0 ? `
           <div class="skill-inputs-section">
-            <div class="skill-inputs-title">📥 Inputs</div>
+            <div class="flex-row skill-inputs-title">📥 Inputs</div>
             ${skill.inputs.map((input) => `
-              <div class="skill-input-item">
+              <div class="item-row skill-input-item">
                 <span class="skill-input-name">${input.name}${input.required ? " *" : ""}</span>
-                <span class="skill-input-type">${input.type || "any"}</span>
+                <span class="font-semibold skill-input-type">${input.type || "any"}</span>
                 <span class="skill-input-desc">${this.escapeHtml(input.description || "")}</span>
               </div>
             `).join("")}
@@ -824,11 +847,11 @@ export class SkillsTab extends BaseTab {
           <div class="skill-stats-grid">
             <div class="skill-stat">
               <span class="stat-value">${skill.step_count || 0}</span>
-              <span class="stat-label">Steps</span>
+              <span class="label-sm stat-label">Steps</span>
             </div>
             <div class="skill-stat">
               <span class="stat-value">${skill.inputs?.length || 0}</span>
-              <span class="stat-label">Inputs</span>
+              <span class="label-sm stat-label">Inputs</span>
             </div>
           </div>
         </div>
@@ -847,8 +870,8 @@ export class SkillsTab extends BaseTab {
 
     if (steps.length === 0) {
       return `
-        <div class="skill-workflow-view">
-          <div class="workflow-header">
+        <div class="flex-col skill-workflow-view">
+          <div class="flex-between workflow-header">
             <div class="workflow-title">${this.escapeHtml(skill.name)}</div>
             <div class="workflow-meta">Steps: ${skill.step_count || 0} • Status: Ready</div>
           </div>
@@ -879,8 +902,8 @@ export class SkillsTab extends BaseTab {
     const statusClass = isExecuting && execStatus === "running" ? "status-running" : "";
 
     return `
-      <div class="skill-workflow-view">
-        <div class="workflow-header">
+      <div class="flex-col skill-workflow-view">
+        <div class="flex-between workflow-header">
           <div class="workflow-title">${this.escapeHtml(skill.name)}</div>
           <div class="workflow-header-right">
             <div class="workflow-meta ${statusClass}">Steps: ${steps.length} • Status: ${statusText}</div>
@@ -1093,8 +1116,8 @@ export class SkillsTab extends BaseTab {
     } else if (tool) {
       tags.push(`<span class="step-tag tool">🔧 ${tool}</span>`);
     }
-    if (step.compute) tags.push(`<span class="step-tag compute">🐍 compute</span>`);
-    if (step.condition) tags.push(`<span class="step-tag condition">❓ conditional</span>`);
+    if (step.compute) tags.push(`<span class="dot step-tag compute">🐍 compute</span>`);
+    if (step.condition) tags.push(`<span class="dot step-tag condition">❓ conditional</span>`);
     if (step.on_error === "continue" || step.on_error === "retry") {
       tags.push(`<span class="step-tag can-retry">↩️ can retry</span>`);
     }
@@ -1105,13 +1128,13 @@ export class SkillsTab extends BaseTab {
     const searchTools = ["knowledge_query", "knowledge_search", "semantic_search", "code_search"];
 
     if (memoryReadTools.some(t => tool.includes(t))) {
-      tags.push(`<span class="step-tag memory-read">📖 memory read</span>`);
+      tags.push(`<span class="dot step-tag memory-read">📖 memory read</span>`);
     }
     if (memoryWriteTools.some(t => tool.includes(t))) {
-      tags.push(`<span class="step-tag memory-write">💾 memory write</span>`);
+      tags.push(`<span class="dot step-tag memory-write">💾 memory write</span>`);
     }
     if (searchTools.some(t => tool.includes(t))) {
-      tags.push(`<span class="step-tag semantic-search">🔍 search</span>`);
+      tags.push(`<span class="dot step-tag semantic-search">🔍 search</span>`);
     }
 
     const skillCallClass = isSkillCall ? "skill-call" : "";
@@ -1121,7 +1144,7 @@ export class SkillsTab extends BaseTab {
         ${!isLast ? '<div class="step-connector"></div>' : ''}
         <div class="step-icon">${isSkillCall ? "⚡" : stepNumber}</div>
         <div class="step-content">
-          <div class="step-header">
+          <div class="flex-between step-header">
             <span class="step-name">${this.escapeHtml(name)}</span>
           </div>
           ${step.description ? `<div class="step-desc">${this.escapeHtml(step.description)}</div>` : ""}
@@ -1214,7 +1237,7 @@ export class SkillsTab extends BaseTab {
 
     return `
       <div class="skill-yaml-view">
-        <div class="yaml-header">
+        <div class="flex-between yaml-header">
           <span class="yaml-title">${this.escapeHtml(skill.name)}.yaml</span>
           <button class="btn btn-xs" data-action="openSkillFile" data-skill="${skill.name}">📄 Open in Editor</button>
         </div>
@@ -1295,7 +1318,7 @@ export class SkillsTab extends BaseTab {
 
         <!-- Graph Container -->
         <div class="mindmap-graph" id="mindmapGraph">
-          <svg id="mindmapSvg" style="width: 100%; height: 100%;">
+          <svg id="mindmapSvg" class="svg-full">
             <defs>
               <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
@@ -1313,9 +1336,9 @@ export class SkillsTab extends BaseTab {
 
         <!-- Legend (compact, bottom-left) -->
         <div class="mindmap-legend-compact">
-          <span class="legend-item-compact"><span class="legend-dot" style="background: #667eea"></span>Skill</span>
-          <span class="legend-item-compact"><span class="legend-dot" style="background: #4ecdc4"></span>Tool</span>
-          <span class="legend-item-compact"><span class="legend-dot" style="background: #ffe66d"></span>Intent</span>
+          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Skill</span>
+          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-tool"></span>Tool</span>
+          <span class="legend-item-compact"><span class="dot legend-dot legend-dot-intent"></span>Intent</span>
         </div>
       </div>
 
@@ -1391,734 +1414,6 @@ export class SkillsTab extends BaseTab {
     // Mind map styles are now in unified.css
     return "";
   }
-
-  // Large block of inline styles removed - they are now in skills.css
-  // The following is a minimal placeholder to maintain file structure
-  private _legacyStylesRemoved = `
-      .skills-main {
-        /* styles moved to skills.css */
-      }
-
-      .skills-main-header {
-        padding: 16px;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-
-      .skills-main-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-      }
-
-      .skills-main-content {
-        flex: 1;
-        padding: 16px;
-      }
-
-      .skill-info-view {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 8px 0;
-      }
-
-      .skill-info-card {
-        background: var(--bg-tertiary);
-        border-radius: 8px;
-        padding: 16px;
-        border-left: 3px solid var(--accent);
-      }
-
-      .skill-info-title {
-        font-weight: 600;
-        margin-bottom: 8px;
-        color: var(--text-primary);
-      }
-
-      .skill-info-desc {
-        color: var(--text-secondary);
-        font-size: 0.9rem;
-        line-height: 1.5;
-      }
-
-      .skill-inputs-section {
-        background: var(--bg-tertiary);
-        border-radius: 8px;
-        padding: 16px;
-      }
-
-      .skill-inputs-title {
-        font-weight: 600;
-        margin-bottom: 12px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .skill-input-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 8px 12px;
-        background: var(--bg-secondary);
-        border-radius: 6px;
-        margin-bottom: 8px;
-      }
-
-      .skill-input-name {
-        font-weight: 600;
-        color: var(--text-primary);
-        min-width: 120px;
-      }
-
-      .skill-input-type {
-        font-size: 0.75rem;
-        padding: 2px 6px;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
-        color: var(--text-muted);
-      }
-
-      .skill-input-desc {
-        flex: 1;
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-      }
-
-      .skill-stats-section {
-        background: var(--bg-tertiary);
-        border-radius: 8px;
-        padding: 16px;
-      }
-
-      .skill-stats-title {
-        font-weight: 600;
-        margin-bottom: 12px;
-        color: var(--text-primary);
-      }
-
-      .skill-stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-        gap: 12px;
-      }
-
-      .skill-stat {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 12px;
-        background: var(--bg-secondary);
-        border-radius: 6px;
-      }
-
-      .skill-stat .stat-value {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: var(--text-primary);
-      }
-
-      .skill-stat .stat-label {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        margin-top: 4px;
-      }
-
-      .skill-yaml-view {
-        background: var(--bg-tertiary);
-        border-radius: 8px;
-        padding: 16px;
-      }
-
-      .yaml-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .yaml-title {
-        font-family: var(--font-mono);
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .yaml-content {
-        font-family: var(--font-mono);
-        font-size: 0.8rem;
-        line-height: 1.5;
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        background: var(--bg-secondary);
-        padding: 16px;
-        border-radius: 6px;
-      }
-
-      .yaml-content code {
-        background: transparent;
-        padding: 0;
-        font-family: inherit;
-        font-size: inherit;
-        color: inherit;
-      }
-
-      .yaml-loading {
-        text-align: center;
-        padding: 40px;
-        color: var(--text-muted);
-      }
-
-      /* Workflow View Styles */
-      .skill-workflow-view {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-      }
-
-      .workflow-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--border);
-      }
-
-      .workflow-header-right {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-      }
-
-      .workflow-title {
-        font-size: 1.1rem;
-        font-weight: 600;
-      }
-
-      .workflow-meta {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-      }
-
-      .workflow-meta.status-running {
-        color: #8b5cf6;
-        font-weight: 500;
-        animation: pulse-text 1.5s ease-in-out infinite;
-      }
-
-      @keyframes pulse-text {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
-      }
-
-      .workflow-legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        padding: 12px;
-        background: var(--bg-tertiary);
-        border-radius: 8px;
-        font-size: 0.8rem;
-      }
-
-      .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: var(--text-secondary);
-        cursor: help;
-      }
-
-      .legend-icon {
-        font-size: 1rem;
-      }
-
-      .workflow-empty {
-        text-align: center;
-        padding: 40px;
-        color: var(--text-muted);
-      }
-
-      .workflow-empty p {
-        margin-bottom: 16px;
-      }
-
-      /* Horizontal Flowchart - Circles with connecting lines */
-      .flowchart-horizontal {
-        padding: 12px 0;
-        overflow: hidden;
-      }
-
-      .flowchart-wrap {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-start;
-        gap: 20px 0;
-        padding: 8px 0;
-      }
-
-      .step-node-h {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        width: 140px;
-        min-height: 100px;
-        position: relative;
-        flex-shrink: 0;
-        padding: 0 8px;
-      }
-
-      .step-connector-h {
-        position: absolute;
-        top: 24px;
-        left: 50%;
-        width: calc(100% - 16px);
-        height: 2px;
-        background: var(--border);
-        z-index: 0;
-      }
-
-      .step-node-h.row-last .step-connector-h {
-        display: none;
-      }
-
-      .step-icon-h {
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 18px;
-        font-weight: 700;
-        z-index: 1;
-        border: 2px solid var(--border);
-        background: var(--bg-card);
-        transition: all 0.3s;
-        margin-bottom: 8px;
-      }
-
-      .step-node-h.pending .step-icon-h {
-        border-color: #6b7280;
-        color: #6b7280;
-      }
-
-      .step-node-h.running .step-icon-h {
-        border-color: #8b5cf6;
-        color: #8b5cf6;
-        box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2);
-        animation: pulse-ring 1.5s ease-out infinite;
-      }
-
-      .step-node-h.success .step-icon-h {
-        border-color: #10b981;
-        background: #10b981;
-        color: white;
-      }
-
-      .step-node-h.failed .step-icon-h {
-        border-color: #ef4444;
-        background: #ef4444;
-        color: white;
-      }
-
-      .step-node-h.skill-call .step-icon-h {
-        border-width: 3px;
-        border-color: #f59e0b;
-        background: rgba(245, 158, 11, 0.15);
-        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
-      }
-
-      @keyframes pulse-ring {
-        0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
-        70% { box-shadow: 0 0 0 8px rgba(139, 92, 246, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
-      }
-
-      .step-content-h {
-        text-align: center;
-        padding: 0 4px;
-      }
-
-      .step-name-h {
-        font-weight: 600;
-        font-size: 11px;
-        margin-bottom: 4px;
-        word-wrap: break-word;
-        max-width: 130px;
-        line-height: 1.3;
-      }
-
-      .step-type-h {
-        font-size: 11px;
-        color: var(--text-muted);
-        display: flex;
-        justify-content: center;
-        gap: 5px;
-        flex-wrap: wrap;
-        margin-top: 2px;
-      }
-
-      .step-type-h .tag {
-        padding: 2px 5px;
-        border-radius: 3px;
-        background: var(--bg-secondary);
-        font-size: 10px;
-      }
-
-      .step-type-h .tag.tool { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-      .step-type-h .tag.compute { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
-      .step-type-h .tag.condition { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-
-      /* Lifecycle Indicators - Badges above circles */
-      .step-lifecycle-h {
-        position: absolute;
-        top: -8px;
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        gap: 2px;
-        z-index: 2;
-      }
-
-      .lifecycle-indicator {
-        font-size: 11px;
-        width: 18px;
-        height: 18px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 50%;
-        background: var(--bg-card);
-        border: 1px solid var(--border);
-        cursor: help;
-        transition: transform 0.2s;
-      }
-
-      .lifecycle-indicator:hover {
-        transform: scale(1.2);
-        z-index: 10;
-      }
-
-      .lifecycle-indicator.memory-read {
-        background: rgba(59, 130, 246, 0.2);
-        border-color: #3b82f6;
-      }
-
-      .lifecycle-indicator.memory-write {
-        background: rgba(16, 185, 129, 0.2);
-        border-color: #10b981;
-      }
-
-      .lifecycle-indicator.semantic-search {
-        background: rgba(139, 92, 246, 0.2);
-        border-color: #8b5cf6;
-      }
-
-      .lifecycle-indicator.auto-heal {
-        background: rgba(245, 158, 11, 0.2);
-        border-color: #f59e0b;
-      }
-
-      .lifecycle-indicator.can-retry {
-        background: rgba(139, 92, 246, 0.15);
-        border-color: #8b5cf6;
-      }
-
-      /* Skill call badge */
-      .skill-call-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        padding: 2px 6px;
-        background: rgba(245, 158, 11, 0.25);
-        border: 1px solid #f59e0b;
-        border-radius: 4px;
-        font-size: 9px;
-        color: #f59e0b;
-        margin-top: 4px;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .skill-call-badge:hover {
-        background: rgba(245, 158, 11, 0.35);
-      }
-
-      /* Vertical Flowchart */
-      .flowchart-vertical {
-        padding: 12px 0;
-      }
-
-      .step-node {
-        display: flex;
-        align-items: flex-start;
-        margin-bottom: 8px;
-        position: relative;
-        padding-left: 8px;
-      }
-
-      .step-connector {
-        position: absolute;
-        left: 23px;
-        top: 32px;
-        bottom: -8px;
-        width: 2px;
-        background: var(--border);
-      }
-
-      .step-node:last-child .step-connector {
-        display: none;
-      }
-
-      .step-icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 14px;
-        font-weight: 600;
-        flex-shrink: 0;
-        z-index: 1;
-        border: 2px solid var(--border);
-        background: var(--bg-card);
-        transition: all 0.3s;
-      }
-
-      .step-node.pending .step-icon {
-        border-color: #6b7280;
-        color: #6b7280;
-      }
-
-      .step-node.skill-call .step-icon {
-        border-width: 2px;
-        border-color: #f59e0b;
-        background: rgba(245, 158, 11, 0.15);
-      }
-
-      .step-content {
-        flex: 1;
-        margin-left: 12px;
-        min-width: 0;
-      }
-
-      .step-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 2px;
-      }
-
-      .step-name {
-        font-weight: 600;
-        font-size: 13px;
-      }
-
-      .step-desc {
-        font-size: 12px;
-        color: var(--text-secondary);
-        margin-bottom: 4px;
-      }
-
-      .step-meta {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-
-      .step-tag {
-        font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 4px;
-        background: var(--bg-secondary);
-        color: var(--text-secondary);
-        font-family: var(--font-mono);
-      }
-
-      .step-tag.tool { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-      .step-tag.compute { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
-      .step-tag.condition { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-      .step-tag.skill-call {
-        background: rgba(245, 158, 11, 0.3);
-        color: #f59e0b;
-        font-weight: 600;
-        border: 1px solid #f59e0b;
-        cursor: pointer;
-      }
-      .step-tag.memory-read { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
-      .step-tag.memory-write { background: rgba(16, 185, 129, 0.15); color: #10b981; }
-      .step-tag.semantic-search { background: rgba(139, 92, 246, 0.15); color: #8b5cf6; }
-      .step-tag.can-retry { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
-
-      /* Running Skills Panel */
-      .running-skills-panel {
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        margin-bottom: 20px;
-        overflow: hidden;
-      }
-
-      .running-skills-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 16px;
-        background: rgba(139, 92, 246, 0.1);
-        border-bottom: 1px solid var(--border);
-      }
-
-      .running-skills-title {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-
-      .running-indicator {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #10b981;
-        animation: pulse 1.5s ease-in-out infinite;
-      }
-
-      @keyframes pulse {
-        0%, 100% { opacity: 1; transform: scale(1); }
-        50% { opacity: 0.5; transform: scale(1.2); }
-      }
-
-      .running-skills-actions {
-        display: flex;
-        gap: 8px;
-      }
-
-      .running-skills-list {
-        padding: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-height: 300px;
-        overflow-y: auto;
-      }
-
-      .running-skill-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px;
-        background: var(--bg-card);
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .running-skill-item:hover {
-        border-color: var(--purple);
-        background: rgba(139, 92, 246, 0.05);
-      }
-
-      .running-skill-progress {
-        width: 60px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-      }
-
-      .running-skill-progress-bar {
-        width: 100%;
-        height: 4px;
-        background: var(--bg-secondary);
-        border-radius: 2px;
-        overflow: hidden;
-      }
-
-      .running-skill-progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #8b5cf6, #6366f1);
-        border-radius: 2px;
-        transition: width 0.3s ease;
-      }
-
-      .running-skill-progress-text {
-        font-size: 0.7rem;
-        color: var(--text-muted);
-        font-weight: 600;
-      }
-
-      .running-skill-info {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .running-skill-name {
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: var(--text-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .running-skill-source {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        margin-top: 2px;
-      }
-
-      .source-badge {
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.65rem;
-        font-weight: 600;
-        text-transform: uppercase;
-      }
-
-      .source-badge.chat { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-      .source-badge.cron { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-      .source-badge.slack { background: rgba(16, 185, 129, 0.2); color: #10b981; }
-      .source-badge.manual { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
-      .source-badge.api { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
-
-      .running-skill-elapsed {
-        font-size: 0.8rem;
-        color: var(--text-muted);
-        font-family: var(--font-mono);
-        min-width: 60px;
-        text-align: right;
-      }
-
-      .clear-skill-btn {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        border: none;
-        background: rgba(239, 68, 68, 0.1);
-        color: #ef4444;
-        cursor: pointer;
-        font-size: 14px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-      }
-
-      .clear-skill-btn:hover {
-        background: rgba(239, 68, 68, 0.2);
-      }
-    `;
 
   getScript(): string {
     // Use centralized event delegation system - handlers survive content updates
@@ -2262,44 +1557,44 @@ export class SkillsTab extends BaseTab {
 
         // Not on mind map view
         if (!dataScript || !svg) {
-          console.log('Mind map elements not found - not on mind map view');
+          console.log('[MindMap] Elements not found - not on mind map view');
           return;
         }
 
         try {
           const dataText = dataScript.textContent || dataScript.innerText;
           if (!dataText || dataText.trim() === '') {
-            console.warn('Mind map data script is empty');
+            console.warn('[MindMap] Data script is empty');
             return;
           }
 
           mindMapState.graphData = JSON.parse(dataText);
           if (!mindMapState.graphData || !mindMapState.graphData.nodes) {
-            console.warn('Mind map data has no nodes');
+            console.warn('[MindMap] Data has no nodes');
             return;
           }
 
-          console.log('Mind map data loaded:', mindMapState.graphData.nodes.length, 'nodes');
+          console.log('[MindMap] Data loaded: ' + mindMapState.graphData.nodes.length + ' nodes, ' + (mindMapState.graphData.links?.length || 0) + ' links');
 
           // Populate header controls
           populateHeaderControls();
 
           // Check if D3 is loaded
           if (typeof d3 === 'undefined') {
-            console.warn('D3.js not loaded yet, waiting...');
-            // D3 should be loaded via the webview - retry after a delay
+            console.warn('[MindMap] D3.js not loaded yet, retrying in 500ms...');
             setTimeout(initMindMap, 500);
             return;
           }
 
-          console.log('D3.js is loaded, creating graph...');
+          console.log('[MindMap] D3.js loaded, setting up filters and creating graph...');
 
           // Set up filter handlers (every time since DOM is recreated)
           setupMindMapFilters();
 
           createMindMapGraph(mindMapState.graphData);
+          console.log('[MindMap] initMindMap complete, simulation=' + !!mindMapState.simulation);
         } catch (e) {
-          console.error('Failed to initialize mind map:', e);
+          console.error('[MindMap] Failed to initialize mind map: ' + e);
         }
       }
 
@@ -2340,6 +1635,13 @@ export class SkillsTab extends BaseTab {
       }
 
       function setupMindMapFilters() {
+        // Guard: prevent duplicate handler registration when initMindMap() is
+        // called multiple times for the same DOM (e.g. from both rAF and setTimeout).
+        // Stacked toggle handlers cancel each other out, making buttons appear dead.
+        var svg = document.getElementById('mindmapSvg');
+        if (svg && svg.dataset.filtersInit) return;
+        if (svg) svg.dataset.filtersInit = '1';
+
         // Persona select
         const personaSelect = document.getElementById('personaSelect');
         if (personaSelect) {
@@ -2507,16 +1809,26 @@ export class SkillsTab extends BaseTab {
           slider.addEventListener('input', function() {
             var v = parseFloat(this.value);
             if (valueEl) valueEl.textContent = formatFn(v);
+            console.log('[MindMap] Slider ' + sliderId + ' = ' + v + ', sim=' + !!mindMapState.simulation);
             onUpdate(v);
           });
+        } else {
+          console.log('[MindMap] Slider not found: ' + sliderId);
         }
       }
 
       function updateSimulationForce(forceName, updateFn) {
-        if (mindMapState.simulation && mindMapState.simulation.force(forceName)) {
-          updateFn(mindMapState.simulation);
-          mindMapState.simulation.alpha(0.3).restart();
+        if (!mindMapState.simulation) {
+          console.log('[MindMap] updateSimulationForce(' + forceName + '): no simulation');
+          return;
         }
+        var force = mindMapState.simulation.force(forceName);
+        if (!force) {
+          console.log('[MindMap] updateSimulationForce(' + forceName + '): force not found');
+          return;
+        }
+        updateFn(mindMapState.simulation);
+        mindMapState.simulation.alpha(0.3).restart();
       }
 
       function resetPhysicsDefaults() {
@@ -2688,19 +2000,19 @@ export class SkillsTab extends BaseTab {
       }
 
       function createMindMapGraph(graphData) {
-        console.log('createMindMapGraph called with', graphData.nodes?.length, 'nodes');
+        console.log('[MindMap] createMindMapGraph called with ' + (graphData.nodes?.length || 0) + ' nodes, ' + (graphData.links?.length || 0) + ' links');
 
         const svgEl = d3.select('#mindmapSvg');
         const container = document.querySelector('.mindmap-graph');
         if (!container) {
-          console.error('Mind map container not found');
+          console.error('[MindMap] .mindmap-graph container not found');
           return;
         }
 
         const width = container.clientWidth || 800;
         const height = container.clientHeight || 600;
 
-        console.log('Mind map container size:', width, 'x', height);
+        console.log('[MindMap] container size: ' + width + 'x' + height);
 
         // Clear existing
         svgEl.selectAll('g').remove();
@@ -2774,6 +2086,7 @@ export class SkillsTab extends BaseTab {
 
         // Store simulation reference for live controls
         mindMapState.simulation = simulation;
+        console.log('[MindMap] Simulation created and stored, forces: link=' + !!simulation.force('link') + ' charge=' + !!simulation.force('charge') + ' center=' + !!simulation.force('center') + ' collision=' + !!simulation.force('collision'));
 
         // Draw links
         const link = g.append('g')
@@ -2798,7 +2111,7 @@ export class SkillsTab extends BaseTab {
             .on('drag', dragged)
             .on('end', dragended));
 
-        console.log('Created', node.size(), 'nodes and', link.size(), 'links');
+        console.log('[MindMap] Created ' + node.size() + ' D3 nodes and ' + link.size() + ' D3 links (filtered from ' + filteredNodes.length + ' nodes, ' + filteredLinks.length + ' links)');
 
         // Glow ring
         node.append('circle')

@@ -1086,17 +1086,16 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         logger.info("Config daemon stopped")
 
     async def health_check(self) -> dict:
-        """Perform a health check on the config daemon."""
+        """Perform a health check on the config daemon.
+
+        Cache fields are intentionally set to None during invalidation
+        (lazy reload), so their presence is informational only -- not
+        a reason to fail the watchdog.
+        """
         self._last_health_check = time.time()
 
         checks = {
             "running": self.is_running,
-            "skills_loaded": self._skills_cache is not None
-            or self._skills_list_cache is not None,
-            "personas_loaded": self._personas_cache is not None
-            or self._personas_list_cache is not None,
-            "tool_modules_loaded": self._tool_modules_cache is not None,
-            "config_loaded": self._config_cache is not None,
         }
 
         healthy = all(checks.values())
@@ -1105,7 +1104,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             "healthy": healthy,
             "checks": checks,
             "message": (
-                "Config daemon is healthy" if healthy else "Some caches not loaded"
+                "Config daemon is healthy" if healthy else "Config daemon has issues"
             ),
             "timestamp": self._last_health_check,
         }

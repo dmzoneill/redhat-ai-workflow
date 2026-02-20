@@ -229,7 +229,14 @@ steps:
     tool: memory_session_log
     args:
       action: "Meeting notes review"
-      details: "meeting_id={{ inputs.meeting_id }}, search={{ inputs.search_query }}, export={{ inputs.export_format }}"
+      details: >-
+        meeting_id={{ inputs.meeting_id }},
+        search={{ inputs.search_query }},
+        export={{ inputs.export_format }},
+        has_transcript: {{ 'yes' if transcript_raw else 'no' }},
+        has_summary: {{ 'yes' if summary_raw else 'no' }},
+        has_action_items: {{ 'yes' if classification_raw else 'no' }},
+        gdrive_results: {{ 'yes' if gdrive_results_raw else 'no' }}
     on_error: continue
 
 outputs:

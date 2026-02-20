@@ -184,6 +184,92 @@ steps:
       result = current_work
     output: memory_work
 
+  # ==================== TODAY'S SESSION ACTIVITY ====================
+
+  - name: load_today_session
+    description: "Parse today's enriched session log for daily report"
+    compute: |
+      from datetime import datetime
+      from pathlib import Path
+      import yaml
+      import re
+      from collections import defaultdict
+
+      today = datetime.now().strftime("%Y-%m-%d")
+      session_file = Path.home() / "src/redhat-ai-workflow/memory/sessions" / f"{today}.yaml"
+
+      entries = []
+      if session_file.exists():
+          with open(session_file) as f:
+              data = yaml.safe_load(f) or {}
+          entries = data.get("entries", [])
+
+      issue_re = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
+
+      summaries = []
+      skills_run = []
+      tools_logged = []
+      manual_logs = []
+      all_issues = set()
+      all_accomplished = []
+      all_decisions = []
+      all_next_steps = []
+
+      # Per-issue activity tracking for Jira comments
+      issue_activity = defaultdict(list)
+
+      for e in entries:
+          etype = e.get("type", "manual")
+          action = e.get("action", "")
+          details = e.get("details", "")
+          time_str = e.get("time", "")
+
+          entry_issues = set()
+          for text in [action, details]:
+              entry_issues.update(issue_re.findall(text))
+          if e.get("issues"):
+              entry_issues.update(e["issues"])
+          all_issues.update(entry_issues)
+
+          activity_line = f"[{time_str}] {action}"
+          if details:
+              activity_line += f" - {details[:100]}"
+
+          for issue_key in entry_issues:
+              issue_activity[issue_key].append(activity_line)
+
+          if etype == "summary":
+              summaries.append(e)
+              all_accomplished.extend(e.get("accomplished", []))
+              all_decisions.extend(e.get("decisions", []))
+              all_next_steps.extend(e.get("next_steps", []))
+              for issue_key in entry_issues:
+                  for item in e.get("accomplished", []):
+                      issue_activity[issue_key].append(f"  Accomplished: {item}")
+          elif etype == "skill":
+              skills_run.append(e)
+          elif etype == "tool":
+              tools_logged.append(e)
+          elif etype == "manual":
+              manual_logs.append(e)
+
+      result = {
+          "has_session": bool(entries),
+          "entry_count": len(entries),
+          "summaries": summaries,
+          "skills_run": skills_run,
+          "tools_logged": tools_logged,
+          "manual_logs": manual_logs,
+          "all_issues": sorted(all_issues),
+          "all_accomplished": all_accomplished,
+          "all_decisions": all_decisions,
+          "all_next_steps": all_next_steps,
+          "issue_activity": dict(issue_activity),
+          "session_count": len([e for e in entries if e.get("type") == "session" and "started" in e.get("action", "").lower()]),
+          "date": today,
+      }
+    output: today_session
+
   # ==================== TODAY'S COMMITS ====================
 
   - name: get_todays_commits
@@ -712,6 +798,43 @@ steps:
           lines.append(f"- {emoji} {task}{due_str}")
         lines.append("")
 
+      # Today's Session Activity (from enriched session logs)
+      if today_session and today_session.get('has_session'):
+        ts = today_session
+        lines.append("## 📊 Session Activity")
+
+        stats_parts = []
+        if ts.get('session_count'):
+          stats_parts.append(f"{ts['session_count']} sessions")
+        if ts.get('skills_run'):
+          successful = len([s for s in ts['skills_run'] if s.get('result') == 'success'])
+          stats_parts.append(f"{len(ts['skills_run'])} skills ({successful} ok)")
+        if ts.get('tools_logged'):
+          stats_parts.append(f"{len(ts['tools_logged'])} significant actions")
+        if ts.get('manual_logs'):
+          stats_parts.append(f"{len(ts['manual_logs'])} manual logs")
+        if stats_parts:
+          lines.append(f"**Activity:** {', '.join(stats_parts)} ({ts.get('entry_count', 0)} total entries)")
+
+        if ts.get('all_accomplished'):
+          lines.append("**Accomplished (from session summaries):**")
+          for item in ts['all_accomplished'][:8]:
+            lines.append(f"- {item}")
+
+        if ts.get('all_issues'):
+          issue_links = []
+          for key in ts['all_issues'][:10]:
+            url = f"https://issues.redhat.com/browse/{key}"
+            issue_links.append(build_link(url, key))
+          lines.append(f"**Issues touched:** {', '.join(issue_links)}")
+
+        if ts.get('all_decisions'):
+          lines.append("**Decisions made:**")
+          for item in ts['all_decisions'][:5]:
+            lines.append(f"- {item}")
+
+        lines.append("")
+
       # Standup Notes
       if standup_notes:
         lines.append("## 📝 Tomorrow's Standup (ready to paste)")
@@ -735,6 +858,172 @@ steps:
 
       result = '\n'.join(lines)
     output: briefing
+
+  # ==================== JIRA DAILY UPDATE (WITH CONFIRMATION) ====================
+
+  - name: draft_jira_comments
+    description: "Draft Jira comments for each issue worked on today"
+    condition: "today_session and today_session.get('all_issues')"
+    compute: |
+      from datetime import datetime
+
+      issue_activity = today_session.get('issue_activity', {})
+      accomplished = today_session.get('all_accomplished', [])
+      today_str = datetime.now().strftime("%Y-%m-%d")
+
+      drafts = []
+      for issue_key in today_session.get('all_issues', []):
+          activities = issue_activity.get(issue_key, [])
+          if not activities and not accomplished:
+              continue
+
+          comment_lines = [f"AI Work Summary for {today_str}:"]
+          if activities:
+              for act in activities[:10]:
+                  comment_lines.append(f"- {act}")
+          elif accomplished:
+              for item in accomplished[:5]:
+                  comment_lines.append(f"- {item}")
+
+          drafts.append({
+              "issue_key": issue_key,
+              "comment": "\n".join(comment_lines),
+          })
+
+      result = drafts
+    output: jira_drafts
+
+  - name: confirm_jira_updates
+    description: "Show Jira comment drafts and ask for confirmation"
+    condition: "jira_drafts and len(jira_drafts) > 0"
+    compute: |
+      lines = ["## Jira Comment Drafts\n"]
+      lines.append(f"The following comments will be posted to **{len(jira_drafts)}** Jira issues:\n")
+      for draft in jira_drafts:
+          lines.append(f"### {draft['issue_key']}")
+          lines.append("```")
+          lines.append(draft['comment'])
+          lines.append("```")
+          lines.append("")
+      lines.append("**Post these comments to Jira?**")
+      result = "\n".join(lines)
+    output: jira_confirmation_prompt
+
+  - name: ask_jira_confirmation
+    description: "Ask user to confirm Jira updates"
+    condition: "jira_drafts and len(jira_drafts) > 0"
+    tool: ask_question
+    args:
+      question: "{{ jira_confirmation_prompt }}"
+      options: "yes,no"
+    output: jira_confirmed
+    on_error: continue
+
+  - name: post_jira_comments
+    description: "Post confirmed Jira comments"
+    condition: "jira_confirmed and 'yes' in str(jira_confirmed).lower() and jira_drafts"
+    compute: |
+      posted = []
+      errors = []
+
+      for draft in jira_drafts:
+          try:
+              tool_result = tools.call("jira_add_comment",
+                  issue_key=draft["issue_key"],
+                  comment=draft["comment"]
+              )
+              posted.append(draft["issue_key"])
+          except Exception as e:
+              errors.append(f"{draft['issue_key']}: {e}")
+
+      result = {
+          "posted": posted,
+          "errors": errors,
+          "skipped": not bool(posted) and not bool(errors),
+      }
+    output: jira_post_result
+    on_error: continue
+
+  # ==================== SLACK DAILY SUMMARY (WITH CONFIRMATION) ====================
+
+  - name: draft_slack_summary
+    description: "Draft a Slack summary of the day for team chat"
+    condition: "today_session and today_session.get('has_session')"
+    compute: |
+      from datetime import datetime
+
+      ts = today_session
+      today_str = datetime.now().strftime("%Y-%m-%d")
+      day_name = ctx.get('day_name', '')
+
+      slack_lines = [f"*Daily Update - {day_name} {today_str}*\n"]
+
+      if todays_work and todays_work.get('count', 0) > 0:
+          slack_lines.append(f"*Commits:* {todays_work['count']}")
+
+      if merged_today:
+          slack_lines.append(f"*Merged:* {len(merged_today)} MR(s)")
+
+      if ts.get('all_accomplished'):
+          slack_lines.append("\n*Accomplished:*")
+          for item in ts['all_accomplished'][:5]:
+              slack_lines.append(f"  - {item}")
+
+      if ts.get('all_issues'):
+          issue_links = [f"<https://issues.redhat.com/browse/{k}|{k}>" for k in ts['all_issues'][:8]]
+          slack_lines.append(f"\n*Issues:* {', '.join(issue_links)}")
+
+      if ts.get('all_decisions'):
+          slack_lines.append("\n*Key decisions:*")
+          for item in ts['all_decisions'][:3]:
+              slack_lines.append(f"  - {item}")
+
+      if ts.get('all_next_steps'):
+          slack_lines.append("\n*Tomorrow:*")
+          for item in ts['all_next_steps'][:3]:
+              slack_lines.append(f"  - {item}")
+
+      result = "\n".join(slack_lines)
+    output: slack_draft
+
+  - name: confirm_slack_post
+    description: "Show Slack draft and ask for confirmation"
+    condition: "slack_draft"
+    compute: |
+      lines = ["## Slack Summary Draft\n"]
+      lines.append("The following will be posted to the team channel:\n")
+      lines.append("```")
+      lines.append(slack_draft)
+      lines.append("```")
+      lines.append("\n**Post this to Slack?**")
+      result = "\n".join(lines)
+    output: slack_confirmation_prompt
+
+  - name: ask_slack_confirmation
+    description: "Ask user to confirm Slack post"
+    condition: "slack_draft"
+    tool: ask_question
+    args:
+      question: "{{ slack_confirmation_prompt }}"
+      options: "yes,no"
+    output: slack_confirmed
+    on_error: continue
+
+  - name: post_slack_summary
+    description: "Post confirmed Slack summary to team channel"
+    condition: "slack_confirmed and 'yes' in str(slack_confirmed).lower() and slack_draft"
+    compute: |
+      try:
+          channel = ctx.get('config', {}).get('slack', {}).get('team_channel', 'aa-api-team')
+          tool_result = tools.call("slack_send_message",
+              channel=channel,
+              message=slack_draft
+          )
+          result = {"posted": True, "channel": channel}
+      except Exception as e:
+          result = {"posted": False, "error": str(e)}
+    output: slack_post_result
+    on_error: continue
 
   # ==================== MEMORY UPDATES ====================
 
@@ -939,7 +1228,11 @@ steps:
     tool: memory_session_log
     args:
       action: "EOD wrap-up completed"
-      details: "{{ todays_work.count if todays_work else 0 }} commits, {{ my_prs | length if my_prs else 0 }} open PRs"
+      details: >-
+        {{ todays_work.count if todays_work else 0 }} commits,
+        {{ my_prs | length if my_prs else 0 }} open PRs,
+        {{ today_session.entry_count if today_session else 0 }} session entries,
+        {{ today_session.all_issues | length if today_session and today_session.all_issues else 0 }} issues touched
     on_error: continue
 
 outputs:

@@ -450,6 +450,18 @@ steps:
         mr_url: "{{ extract_mr_info.mr_url }}"
     on_error: continue
 
+  - name: log_session_autopilot
+    description: "Log sprint autopilot execution to session"
+    tool: memory_session_log
+    args:
+      action: "Sprint autopilot: {{ inputs.issue_key }}"
+      details: >-
+        MR: {{ extract_mr_info.mr_url if extract_mr_info and extract_mr_info.mr_url else 'none' }},
+        Branch: {{ extract_branch_name.branch_name if extract_branch_name and extract_branch_name.branch_name else 'none' }},
+        Waiting: {{ check_clarity.needs_clarification if check_clarity else false }},
+        Has changes: {{ has_changes_to_commit.has_changes if has_changes_to_commit else false }}
+    on_error: continue
+
   - name: final_summary
     description: Prepare final summary
     compute: |

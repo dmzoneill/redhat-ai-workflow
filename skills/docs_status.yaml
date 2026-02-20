@@ -1,0 +1,98 @@
+# Skill: Show documentation project status
+
+name: docs_status
+description: |
+  Show the current status of the documentation project:
+  - Git status (uncommitted changes)
+  - Last sync timestamps (Jira, Drive, Git)
+  - Page counts
+  - Recent notes
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by: []
+  chains_to:
+    - docs_sync
+    - docs_build
+    - docs_deploy
+  provides_context_for:
+    - docs_sync
+    - docs_deploy
+
+inputs: []
+
+steps:
+  - name: gather_status
+    description: "Collect status from all sources"
+    compute: |
+      from pathlib import Path
+      import yaml, subprocess
+      from datetime import datetime
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      lines = ["# 📄 Documentation Status\n"]
+
+      # Git status
+      git = subprocess.run(["git", "status", "--porcelain"], cwd=project, capture_output=True, text=True)
+      changed = len([l for l in git.stdout.strip().split("\n") if l.strip()]) if git.stdout.strip() else 0
+      lines.append(f"**Git:** {'🟢 Clean' if changed == 0 else f'🟡 {changed} uncommitted changes'}")
+
+      # Jira sync state
+      jira_state = project / "data" / "cache" / "jira_sync_state.yaml"
+      if jira_state.exists():
+          state = yaml.safe_load(jira_state.read_text()) or {}
+          last = state.get("last_sync", "never")
+          lines.append(f"**Jira last sync:** {last}")
+      else:
+          lines.append("**Jira:** Not synced yet")
+
+      # Jira cache
+      jira_cache = project / "data" / "cache" / "jira_issues.yaml"
+      if jira_cache.exists():
+          issues = yaml.safe_load(jira_cache.read_text()) or {}
+          lines.append(f"**Jira issues cached:** {len(issues)}")
+
+      # Drive metadata
+      drive_meta = project / "drive_metadata.yaml"
+      if drive_meta.exists():
+          meta = yaml.safe_load(drive_meta.read_text()) or {}
+          files = meta.get("files", {})
+          lines.append(f"**Drive files tracked:** {len(files)}")
+
+      # Git commits metadata
+      commits_meta = project / "commits_metadata.yaml"
+      if commits_meta.exists():
+          meta = yaml.safe_load(commits_meta.read_text()) or {}
+          repos = meta.get("repositories", {})
+          total = sum(r.get("total_commits", 0) for r in repos.values())
+          lines.append(f"**Git commits tracked:** {total} across {len(repos)} repos")
+
+      # Page counts
+      docs_dir = project / "docs"
+      if docs_dir.exists():
+          md_files = list(docs_dir.rglob("*.md"))
+          lines.append(f"\n**Pages:** {len(md_files)} Markdown files in docs/")
+
+      # Static sections
+      static_dir = project / "data" / "static"
+      if static_dir.exists():
+          yamls = [f for f in static_dir.glob("*.yaml") if f.name != "_template.yaml"]
+          lines.append(f"**Static sections:** {len(yamls)} ({', '.join(f.stem for f in yamls)})")
+
+      # Notes
+      notes_dir = project / "data" / "notes"
+      if notes_dir.exists():
+          notes = [f for f in notes_dir.glob("*.md")]
+          lines.append(f"**Conversation notes:** {len(notes)}")
+          for n in sorted(notes, key=lambda f: f.stat().st_mtime, reverse=True)[:5]:
+              lines.append(f"  - `{n.name}`")
+
+      result = "\n".join(lines)
+    output: status
+
+outputs:
+  - name: summary
+    value: "{{ status }}"

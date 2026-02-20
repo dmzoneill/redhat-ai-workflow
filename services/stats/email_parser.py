@@ -150,7 +150,6 @@ def parse_email_text(text: str) -> dict:
 
     # Try to extract sender and date from text
     sender = ""
-    email_date = ""
     sender_match = re.search(r"^(.+?)\s*<([^>]+)>", text)
     if sender_match:
         sender = sender_match.group(1).strip()
@@ -168,23 +167,48 @@ def parse_email_text(text: str) -> dict:
     }
 
 
-def get_executive_senders() -> list[str]:
-    """Load executive_senders from config.json."""
-    config_paths = [
+def _get_config_path() -> Path | None:
+    """Return the first existing config.json path."""
+    for cfg_path in [
         Path(__file__).parent.parent.parent / "config.json",
         AA_CONFIG_DIR / "config.json",
-    ]
-    for cfg_path in config_paths:
-        try:
-            if cfg_path.exists():
-                with open(cfg_path, encoding="utf-8") as f:
-                    config = json.load(f)
-                senders = config.get("performance", {}).get("executive_senders", [])
-                if senders:
-                    return senders
-        except Exception:
-            continue
-    return []
+    ]:
+        if cfg_path.exists():
+            return cfg_path
+    return None
+
+
+def get_executive_senders() -> list[str]:
+    """Load executive_senders from config.json."""
+    cfg_path = _get_config_path()
+    if not cfg_path:
+        return []
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            config = json.load(f)
+        return config.get("performance", {}).get("executive_senders", [])
+    except Exception:
+        return []
+
+
+def set_executive_senders(senders: list[str]) -> bool:
+    """Write executive_senders back to config.json, preserving other keys."""
+    cfg_path = _get_config_path()
+    if not cfg_path:
+        return False
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            config = json.load(f)
+        if "performance" not in config:
+            config["performance"] = {}
+        config["performance"]["executive_senders"] = senders
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        return True
+    except Exception:
+        logger.exception("Failed to write executive_senders to %s", cfg_path)
+        return False
 
 
 def get_executive_emails_dir(perf_dir: Path) -> Path:

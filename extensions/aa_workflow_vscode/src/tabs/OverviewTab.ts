@@ -61,6 +61,20 @@ export class OverviewTab extends BaseTab {
     });
   }
 
+  protected computeDataFingerprint(): string {
+    const lifetime = this.stats?.lifetime;
+    const parts = [
+      lifetime?.tool_calls ?? 0,
+      lifetime?.skill_executions ?? 0,
+      lifetime?.sessions ?? 0,
+      this.toolSuccessRate,
+      this.skillSuccessRate,
+      this.currentWork?.activeIssue ? 1 : 0,
+      this.currentWork?.totalActiveIssues ?? 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     try {
       // Load agent stats via D-Bus - use stats_getAgentStats, not stats_getState
@@ -155,25 +169,25 @@ export class OverviewTab extends BaseTab {
       <div class="section">
         <div class="section-title">Lifetime Statistics</div>
         <div class="grid-4">
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${lifetime.tool_calls.toLocaleString()}</div>
-            <div class="stat-label">Tool Calls</div>
-            <div class="stat-sub">${this.toolSuccessRate}% success</div>
+            <div class="label-sm text-meta stat-label">Tool Calls</div>
+            <div class="label-sm text-meta stat-sub">${this.toolSuccessRate}% success</div>
           </div>
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${lifetime.skill_executions.toLocaleString()}</div>
-            <div class="stat-label">Skills Run</div>
-            <div class="stat-sub">${this.skillSuccessRate}% success</div>
+            <div class="label-sm text-meta stat-label">Skills Run</div>
+            <div class="label-sm text-meta stat-sub">${this.skillSuccessRate}% success</div>
           </div>
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${(lifetime.memory_reads + lifetime.memory_writes).toLocaleString()}</div>
-            <div class="stat-label">Memory Ops</div>
-            <div class="stat-sub">${lifetime.memory_reads} reads, ${lifetime.memory_writes} writes</div>
+            <div class="label-sm text-meta stat-label">Memory Ops</div>
+            <div class="label-sm text-meta stat-sub">${lifetime.memory_reads} reads, ${lifetime.memory_writes} writes</div>
           </div>
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${lifetime.sessions.toLocaleString()}</div>
-            <div class="stat-label">Sessions</div>
-            <div class="stat-sub">${lifetime.lines_written.toLocaleString()} lines written</div>
+            <div class="label-sm text-meta stat-label">Sessions</div>
+            <div class="label-sm text-meta stat-sub">${lifetime.lines_written.toLocaleString()} lines written</div>
           </div>
         </div>
       </div>
@@ -182,18 +196,18 @@ export class OverviewTab extends BaseTab {
       <div class="section">
         <div class="section-title">Today's Activity</div>
         <div class="grid-3">
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${todayStats.tool_calls}</div>
-            <div class="stat-label">Tool Calls Today</div>
+            <div class="label-sm text-meta stat-label">Tool Calls Today</div>
           </div>
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${todayStats.skill_executions}</div>
-            <div class="stat-label">Skills Today</div>
+            <div class="label-sm text-meta stat-label">Skills Today</div>
           </div>
-          <div class="stat-card">
+          <div class="card stat-card">
             <div class="stat-value">${session.tool_calls}</div>
-            <div class="stat-label">This Session</div>
-            <div class="stat-sub">${session.started ? "Started " + this.formatRelativeTime(session.started) : "No active session"}</div>
+            <div class="label-sm text-meta stat-label">This Session</div>
+            <div class="label-sm text-meta stat-sub">${session.started ? "Started " + this.formatRelativeTime(session.started) : "No active session"}</div>
           </div>
         </div>
       </div>
@@ -226,13 +240,13 @@ export class OverviewTab extends BaseTab {
     html += '<div class="rh-category">Active Issue</div>';
     if (activeIssue) {
       html += `<div class="card-title">${activeIssue.key}</div>`;
-      html += `<div class="card-content-primary" style="margin-top:8px">${this.escapeHtml(activeIssue.summary)}</div>`;
-      html += `<div class="card-content-secondary" style="margin-top:4px">Status: ${activeIssue.status}</div>`;
+      html += `<div class="card-content-primary mt-8">${this.escapeHtml(activeIssue.summary)}</div>`;
+      html += `<div class="card-content-secondary mt-4">Status: ${activeIssue.status}</div>`;
     } else {
       html += '<div class="loading-placeholder">No active issue</div>';
     }
     if (totalActiveIssues > 1) {
-      html += `<div class="card-content-more" style="margin-top:8px">+${totalActiveIssues - 1} more issues</div>`;
+      html += `<div class="card-content-more mt-8">+${totalActiveIssues - 1} more issues</div>`;
     }
     html += "</div>";
 
@@ -241,13 +255,13 @@ export class OverviewTab extends BaseTab {
     html += '<div class="rh-category">Active Merge Request</div>';
     if (activeMR) {
       html += `<div class="card-title">!${activeMR.id}</div>`;
-      html += `<div class="card-content-primary" style="margin-top:8px">${this.escapeHtml(activeMR.title)}</div>`;
-      html += `<div class="card-content-secondary" style="margin-top:4px">Project: ${activeMR.project}</div>`;
+      html += `<div class="card-content-primary mt-8">${this.escapeHtml(activeMR.title)}</div>`;
+      html += `<div class="card-content-secondary mt-4">Project: ${activeMR.project}</div>`;
     } else {
       html += '<div class="loading-placeholder">No active MR</div>';
     }
     if (totalActiveMRs > 1) {
-      html += `<div class="card-content-more" style="margin-top:8px">+${totalActiveMRs - 1} more MRs</div>`;
+      html += `<div class="card-content-more mt-8">+${totalActiveMRs - 1} more MRs</div>`;
     }
     html += "</div>";
 
@@ -255,13 +269,13 @@ export class OverviewTab extends BaseTab {
 
     // Follow-ups
     if (followUps.length > 0) {
-      html += '<div class="card" style="margin-top:16px">';
+      html += '<div class="card mt-16">';
       html += '<div class="rh-category">Follow-ups</div>';
       html += '<div class="follow-up-list">';
       followUps.slice(0, 5).forEach((fu) => {
         const priorityDot = fu.priority === "high" ? "error" : fu.priority === "medium" ? "warning" : "success";
         html += `<div class="follow-up-item">
-          <span class="status-dot ${priorityDot}"></span>
+          <span class="dot status-dot ${priorityDot}"></span>
           <span>${this.escapeHtml(fu.task)}</span>
         </div>`;
       });
@@ -284,7 +298,7 @@ export class OverviewTab extends BaseTab {
       const dayLabel = new Date(day.date).toLocaleDateString("en-US", { weekday: "short" });
 
       barsHtml += `
-        <div class="history-bar-container">
+        <div class="flex-col history-bar-container">
           <div class="history-bar-value">${day.tool_calls}</div>
           <div class="history-bar ${isToday ? "today" : ""}" style="height: ${height}px;" title="${day.date}: ${day.tool_calls} tool calls, ${day.skill_executions} skills"></div>
           <div class="history-bar-label">${dayLabel}</div>
@@ -298,7 +312,7 @@ export class OverviewTab extends BaseTab {
       </div>
       <div class="history-legend">
         <div class="history-legend-item">
-          <span class="legend-dot red"></span>
+          <span class="dot legend-dot red"></span>
           <span>Tool Calls</span>
         </div>
       </div>

@@ -236,67 +236,151 @@ async def _get_bootstrap_context(
             ],
         }
 
-        # Map intents to suggested skills for direct execution
+        # Map intents to suggested skills for direct execution (10 per intent)
         skill_map = {
             "code_lookup": [
                 "explain_code",
                 "find_similar_code",
                 "gather_context",
+                "learn_architecture",
+                "review_local_changes",
+                "slop_scan",
+                "check_my_prs",
+                "start_work",
+                "create_mr",
+                "plan_implementation",
             ],
             "troubleshooting": [
                 "debug_prod",
                 "investigate_alert",
                 "check_ci_health",
+                "investigate_slack_alert",
+                "environment_overview",
+                "check_integration_tests",
+                "investigate_service_issues",
+                "silence_alert",
+                "rollout_restart",
+                "check_secrets",
             ],
             "status_check": [
                 "environment_overview",
                 "check_my_prs",
                 "konflux_status",
+                "check_ci_health",
+                "check_mr_feedback",
+                "check_integration_tests",
+                "work_analysis",
+                "weekly_summary",
+                "coffee",
+                "sprint_planning",
             ],
             "issue_context": [
                 "start_work",
                 "jira_hygiene",
                 "close_issue",
+                "create_mr",
+                "sprint_autopilot",
+                "sprint_planning",
+                "check_mr_feedback",
+                "attach_session_to_jira",
+                "plan_implementation",
+                "sync_discovered_work",
             ],
             "documentation": [
                 "learn_architecture",
                 "explain_code",
                 "update_docs",
+                "docs_sync",
+                "docs_build",
+                "docs_serve",
+                "docs_deploy",
+                "docs_status",
+                "docs_add_note",
+                "docs_add_section",
             ],
             "deployment": [
                 "deploy_to_ephemeral",
                 "test_mr_ephemeral",
                 "environment_overview",
+                "extend_ephemeral",
+                "check_secrets",
+                "rollout_restart",
+                "scale_deployment",
+                "appinterface_check",
+                "scan_vulnerabilities",
+                "check_ci_health",
             ],
             "gitlab": [
                 "check_ci_health",
                 "review_pr",
                 "check_my_prs",
                 "create_mr",
+                "check_mr_feedback",
+                "ci_retry",
+                "mark_mr_ready",
+                "notify_mr",
+                "rebase_pr",
+                "pr_jira_audit",
             ],
             "calendar": [
                 "schedule_meeting",
                 "sync_pto_calendar",
+                "meeting_notes_review",
+                "coffee",
+                "beer",
+                "weekly_summary",
+                "standup_summary",
+                "work_analysis",
+                "submit_expense",
+                "reward_zone",
             ],
             "planning": [
                 "sprint_planning",
                 "plan_implementation",
                 "work_analysis",
+                "weekly_summary",
+                "research_topic",
+                "compare_options",
+                "gather_context",
+                "start_work",
+                "jira_hygiene_all",
+                "sync_discovered_work",
             ],
             "review": [
                 "review_pr",
                 "review_local_changes",
                 "check_mr_feedback",
+                "check_my_prs",
+                "slop_scan",
+                "pr_jira_audit",
+                "mark_mr_ready",
+                "notify_mr",
+                "create_mr",
+                "rebase_pr",
             ],
             "release": [
                 "release_to_prod",
                 "release_aa_backend_prod",
                 "konflux_status",
+                "scan_vulnerabilities",
+                "environment_overview",
+                "appinterface_check",
+                "check_ci_health",
+                "check_integration_tests",
+                "deploy_to_ephemeral",
+                "cancel_pipeline",
             ],
             "alert": [
                 "investigate_alert",
                 "investigate_slack_alert",
                 "silence_alert",
+                "debug_prod",
+                "environment_overview",
+                "investigate_service_issues",
+                "rollout_restart",
+                "check_ci_health",
+                "check_secrets",
+                "scale_deployment",
             ],
         }
 
@@ -1242,7 +1326,25 @@ async def _session_start_impl(  # noqa: C901
 
         lines.append("")
 
-    # Log session start (if function provided)
+    # Log session start to daily session file (always, with locking)
+    try:
+        from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+        project_info = f", Project: {detected_project}" if detected_project else ""
+        entry = {
+            "type": "session",
+            "action": "Session started",
+            "details": f"Persona: {agent or 'none'}{project_info}",
+        }
+        if workspace and workspace.get_active_session(refresh_tools=False):
+            entry["session_id"] = workspace.get_active_session(
+                refresh_tools=False
+            ).session_id
+        append_session_entry(entry)
+    except Exception as e:
+        logger.debug("Failed to log session start: %s", e)
+
+    # Legacy callback (kept for backwards compat)
     if memory_session_log_fn:
         project_info = f", Project: {detected_project}" if detected_project else ""
         await memory_session_log_fn(
@@ -1857,6 +1959,107 @@ def register_session_tools(  # noqa: C901
                     text=f"# Error\n\n**Error:** {e}\n```\n{traceback.format_exc()}\n```",
                 )
             ]
+
+    @auto_heal()
+    @registry.tool()
+    async def session_close(
+        ctx: Context,
+        issues: str = "",
+        accomplished: str = "",
+        decisions: str = "",
+        next_steps: str = "",
+        files_changed: str = "",
+    ) -> list[TextContent]:
+        """
+        Close the current session with a structured summary.
+
+        MUST be called before ending any session where real work was done.
+        This writes a 'summary' entry to the daily session log that the
+        beer/coffee skills use for daily reports, Jira updates, and Slack posts.
+
+        Args:
+            issues: Comma-separated Jira issue keys touched (e.g. "AAP-12345, AAP-12346")
+            accomplished: Newline-separated bullets of what was done
+            decisions: Newline-separated key decisions made (optional)
+            next_steps: Newline-separated unfinished work items (optional)
+            files_changed: Comma-separated key files modified (optional)
+
+        Returns:
+            Confirmation that the session summary was logged.
+        """
+        from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+        def _split_lines(text: str) -> list[str]:
+            return [
+                s.strip().lstrip("- ") for s in text.strip().splitlines() if s.strip()
+            ]
+
+        def _split_csv(text: str) -> list[str]:
+            return [s.strip() for s in text.split(",") if s.strip()]
+
+        entry: dict = {
+            "type": "summary",
+            "action": "Session closed",
+        }
+
+        issue_list = _split_csv(issues) if issues else []
+        accomplished_list = _split_lines(accomplished) if accomplished else []
+        decisions_list = _split_lines(decisions) if decisions else []
+        next_steps_list = _split_lines(next_steps) if next_steps else []
+        files_list = _split_csv(files_changed) if files_changed else []
+
+        if issue_list:
+            entry["issues"] = issue_list
+        if accomplished_list:
+            entry["accomplished"] = accomplished_list
+        if decisions_list:
+            entry["decisions"] = decisions_list
+        if next_steps_list:
+            entry["next_steps"] = next_steps_list
+        if files_list:
+            entry["files_changed"] = files_list
+
+        # Build human-readable details
+        details_parts = []
+        if accomplished_list:
+            details_parts.append("Done: " + "; ".join(accomplished_list[:3]))
+        if issue_list:
+            details_parts.append("Issues: " + ", ".join(issue_list))
+        entry["details"] = (
+            " | ".join(details_parts) if details_parts else "Session ended"
+        )
+
+        # Attach session_id
+        try:
+            from server.workspace_state import WorkspaceRegistry
+
+            workspace = await WorkspaceRegistry.get_for_ctx(ctx, ensure_session=False)
+            if workspace:
+                session = workspace.get_active_session(refresh_tools=False)
+                if session:
+                    entry["session_id"] = session.session_id
+        except Exception:
+            pass
+
+        append_session_entry(entry)
+
+        summary_parts = ["## Session Summary Logged\n"]
+        if issue_list:
+            summary_parts.append(f"**Issues:** {', '.join(issue_list)}")
+        if accomplished_list:
+            summary_parts.append("**Accomplished:**")
+            for item in accomplished_list:
+                summary_parts.append(f"- {item}")
+        if decisions_list:
+            summary_parts.append("**Decisions:**")
+            for item in decisions_list:
+                summary_parts.append(f"- {item}")
+        if next_steps_list:
+            summary_parts.append("**Next steps:**")
+            for item in next_steps_list:
+                summary_parts.append(f"- {item}")
+
+        return [TextContent(type="text", text="\n".join(summary_parts))]
 
     return registry.count
 

@@ -452,6 +452,26 @@ steps:
       }
     output: save_result
 
+  # Tag events to quarterly questions
+  - name: tag_questions
+    description: "Tag collected events to quarterly questions"
+    compute: |
+      import sys
+      from pathlib import Path
+
+      perf_dir = Path(save_result["file"]).parent.parent
+      sys.path.insert(0, str(Path.home() / "src" / "redhat-ai-workflow" / "tool_modules" / "aa_performance" / "src"))
+      from question_manager import QuestionManager
+
+      qm = QuestionManager(perf_dir)
+      tagged = 0
+      for event in mapped_events:
+          tagged += len(qm.tag_event_to_questions(event))
+
+      result = {"tagged": tagged, "questions": len(qm.get_questions())}
+    output: tag_result
+    on_error: continue
+
   # Update summary
   - name: update_summary
     description: "Recalculate and update quarter summary"

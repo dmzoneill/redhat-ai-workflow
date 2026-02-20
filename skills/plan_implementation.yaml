@@ -258,7 +258,13 @@ steps:
     tool: memory_session_log
     args:
       action: "Created implementation plan"
-      details: "Goal: {{ inputs.goal }}{% if inputs.issue_key %}, Issue: {{ inputs.issue_key }}{% endif %}"
+      details: >-
+        Goal: {{ inputs.goal }},
+        {% if inputs.issue_key %}Issue: {{ inputs.issue_key }},{% endif %}
+        Project: {{ project }},
+        Files to modify: {{ candidate_files | length if candidate_files else 0 }},
+        Has patterns: {{ 'yes' if patterns_raw else 'no' }},
+        Has gotchas: {{ 'yes' if gotchas_raw else 'no' }}
     on_error: continue
 
 outputs:

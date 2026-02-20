@@ -1622,7 +1622,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-02-09T23:28:48.244139'
   total_combinations: 140
-last_updated: '2026-02-19T00:01:39.517821'
+last_updated: '2026-02-20T21:01:15.020385'
 popular_queries:
 - avg_results: 0.0
   first_searched: '2026-02-07T20:58:16.717532'
@@ -1631,6 +1631,12 @@ popular_queries:
   query: test
   query_normalized: test
   search_count: 218
+scheduled_meetings:
+- auto_selected_time: false
+  duration_minutes: 30
+  has_attendees: true
+  timestamp: '2026-02-20T00:01:42.871944'
+  title: Monthly 1:1 with Nigel Weather
 slack_notifications:
 - channel: aa-api-team-test
   has_context: false
@@ -1643,6 +1649,18 @@ slack_notifications:
   has_mention: false
   threaded: false
   timestamp: '2026-02-10T00:04:24.373568'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-02-19T18:01:42.061246'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-02-19T18:02:49.825704'
   type: info
 vector_reindexes:
 - errors: 4
@@ -1729,3 +1747,33 @@ vector_reindexes:
   timestamp: '2026-02-19T00:01:39.503843'
   total_chunks: 1476
   total_files: 235
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-19T09:02:09.805869'
+  total_chunks: 329
+  total_files: 21
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-19T12:01:04.478614'
+  total_chunks: 877
+  total_files: 20
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-19T18:01:25.316900'
+  total_chunks: 554
+  total_files: 13
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-20T00:01:05.797633'
+  total_chunks: 1054
+  total_files: 16
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-20T21:01:15.005451'
+  total_chunks: 3032
+  total_files: 94

@@ -187,6 +187,17 @@ class QuestionManager:
                     return q
         return None
 
+    def remove_question(self, question_id: str) -> bool:
+        """Remove a question by ID from either questions or custom_questions."""
+        for list_key in ["questions", "custom_questions"]:
+            q_list = self.questions_data.get(list_key, [])
+            for i, q in enumerate(q_list):
+                if q.get("id") == question_id:
+                    q_list.pop(i)
+                    self._save_questions()
+                    return True
+        return False
+
     def add_note(self, question_id: str, note: str) -> bool:
         """Add a manual note to a question."""
         for q_list in [
@@ -326,10 +337,14 @@ class QuestionManager:
                 {
                     "id": q.get("id"),
                     "text": q.get("text"),
+                    "subtext": q.get("subtext"),
                     "evidence_count": len(q.get("auto_evidence", [])),
                     "notes_count": len(q.get("manual_notes", [])),
                     "has_summary": q.get("llm_summary") is not None,
+                    "llm_summary": q.get("llm_summary"),
                     "last_evaluated": q.get("last_evaluated"),
+                    "evidence_ids": q.get("auto_evidence", []),
+                    "manual_notes": q.get("manual_notes", []),
                 }
             )
         return summaries
@@ -352,10 +367,17 @@ async def evaluate_question_with_llm(
     Returns:
         Generated summary text
     """
-    # Build evidence list
+    # Sort by total points descending so the strongest evidence is kept
+    sorted_events = sorted(
+        evidence_events,
+        key=lambda e: sum(e.get("points", {}).values()),
+        reverse=True,
+    )
+    top_events = sorted_events[:20]
+
     evidence_text = "\n".join(
         f"- [{e.get('source', '')}] {e.get('title', '')} (Points: {sum(e.get('points', {}).values())})"
-        for e in evidence_events[:20]  # Limit to 20 events
+        for e in top_events
     )
 
     # Build competency summary
@@ -373,7 +395,7 @@ async def evaluate_question_with_llm(
 QUESTION: {question.get('text', '')}
 {question.get('subtext', '') or ''}
 
-EVIDENCE FROM THIS QUARTER ({len(evidence_events)} items):
+EVIDENCE FROM THIS QUARTER (top {len(top_events)} of {len(evidence_events)} items, sorted by points):
 {evidence_text or 'No automatic evidence collected'}
 
 MANUAL NOTES:

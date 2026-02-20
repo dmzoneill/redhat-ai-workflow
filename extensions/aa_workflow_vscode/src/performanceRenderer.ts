@@ -363,7 +363,7 @@ function renderQuestions(questions: QuestionSummary[] | undefined): string {
             <span>📊 ${q.evidence_count} evidence</span>
             <span>📝 ${q.notes_count} notes</span>
           </div>
-          <div class="question-actions">
+          <div class="actions-row question-actions">
             <button class="question-btn" data-action="viewSummary" data-question="${escapeHtml(q.id)}">View Summary</button>
             <button class="question-btn" data-action="addNote" data-question="${escapeHtml(q.id)}">Add Note</button>
             <button class="question-btn" data-action="evaluate" data-question="${escapeHtml(q.id)}">Evaluate</button>

@@ -48,6 +48,17 @@ export class SprintTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.issueCount,
+      this.pendingCount,
+      this.inProgressCount,
+      this.toolGapRequests.length,
+      this.sprintHistory.length,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {

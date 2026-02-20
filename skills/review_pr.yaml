@@ -1707,7 +1707,13 @@ steps:
     tool: memory_session_log
     args:
       action: "Reviewed MR !{{ memory_context.mr_id }} ({{ memory_context.action }})"
-      details: "Author: {{ memory_context.author }}, Jira: {{ jira_key }}"
+      details: >-
+        Author: {{ memory_context.author }},
+        Jira: {{ jira_key }},
+        Verdict: {{ review_action.get('action', 'unknown') if review_action else 'unknown' }},
+        Reason: {{ review_action.get('reason', '') if review_action else '' }},
+        Code issues: {{ code_issues | length if code_issues else 0 }},
+        Format issues: {{ format_issues | length if format_issues and format_issues != ['Format OK'] else 0 }}
     on_error: continue
 
   - name: track_review_given

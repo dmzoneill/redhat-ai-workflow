@@ -50,6 +50,17 @@ export class CreateTab extends BaseTab {
     });
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.personas.length,
+      this.skills.length,
+      this.activeLoops.length,
+      this.selectedPersona ?? "",
+      this.ralphEnabled ? 1 : 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -125,12 +136,12 @@ export class CreateTab extends BaseTab {
         <div class="section-title">Context Builder</div>
         <div class="create-context-builder">
           <!-- Skills & Tools Column -->
-          <div class="create-context-column">
+          <div class="flex-col create-context-column">
             <div class="create-context-group">
               <div class="create-context-title">⚡ Skills (${this.skills.length})</div>
-              <div class="create-context-list" id="skillSourceList">
+              <div class="flex-col create-context-list" id="skillSourceList">
                 ${this.skills.slice(0, 20).map((s) => `
-                  <div class="create-context-item" data-source="skill" data-skill-id="${s.id}">
+                  <div class="flex-row create-context-item" data-source="skill" data-skill-id="${s.id}">
                     <input type="checkbox" />
                     <span class="create-context-name">${this.escapeHtml(s.name)}</span>
                     <span class="create-context-meta">${this.escapeHtml(s.category)}</span>
@@ -142,30 +153,30 @@ export class CreateTab extends BaseTab {
 
             <div class="create-context-group">
               <div class="create-context-title">🔧 Tools</div>
-              <div class="create-context-list" id="toolSourceList">
+              <div class="flex-col create-context-list" id="toolSourceList">
                 <div class="empty-state-mini" id="toolsPlaceholder">Select a persona to load tools</div>
               </div>
             </div>
           </div>
 
           <!-- Memory, Slack, Code Column -->
-          <div class="create-context-column">
+          <div class="flex-col create-context-column">
             <div class="create-context-group">
               <div class="create-context-title">🧠 Memory</div>
-              <div class="create-context-list" id="memorySourceList">
-                <div class="create-context-item selected" data-source="memory" data-path="state/current_work">
+              <div class="flex-col create-context-list" id="memorySourceList">
+                <div class="flex-row create-context-item selected" data-source="memory" data-path="state/current_work">
                   <input type="checkbox" checked />
                   <span class="create-context-name">Current Work</span>
                 </div>
-                <div class="create-context-item selected" data-source="memory" data-path="learned/patterns">
+                <div class="flex-row create-context-item selected" data-source="memory" data-path="learned/patterns">
                   <input type="checkbox" checked />
                   <span class="create-context-name">Learned Patterns</span>
                 </div>
-                <div class="create-context-item" data-source="memory" data-path="state/environments">
+                <div class="flex-row create-context-item" data-source="memory" data-path="state/environments">
                   <input type="checkbox" />
                   <span class="create-context-name">Environments</span>
                 </div>
-                <div class="create-context-item" data-source="memory" data-path="state/session_history">
+                <div class="flex-row create-context-item" data-source="memory" data-path="state/session_history">
                   <input type="checkbox" />
                   <span class="create-context-name">Session History</span>
                 </div>
@@ -197,7 +208,7 @@ export class CreateTab extends BaseTab {
       <div class="section">
         <div class="section-title">Ralph Wiggum Loop</div>
         <div class="create-ralph-config">
-          <div class="create-ralph-toggle">
+          <div class="item-row create-ralph-toggle">
             <div class="toggle-switch ${this.ralphEnabled ? "active" : ""}" id="ralphToggle" data-action="toggleRalph"></div>
             <span class="create-ralph-label">Enable Autonomous Loop</span>
           </div>
@@ -234,31 +245,31 @@ export class CreateTab extends BaseTab {
         <div class="section-title">Session Inspector</div>
         <div class="create-session-inspector">
           <div class="create-session-source">
-            <div class="create-session-header">
+            <div class="flex-row create-session-header">
               <span class="create-session-icon">🟣</span>
               <span>Cursor Chats</span>
             </div>
-            <div class="create-session-list" id="cursorSessionList">
+            <div class="flex-col create-session-list" id="cursorSessionList">
               <div class="empty-state-mini">Loading...</div>
             </div>
           </div>
 
           <div class="create-session-source">
-            <div class="create-session-header">
+            <div class="flex-row create-session-header">
               <span class="create-session-icon">🟠</span>
               <span>Claude Code</span>
             </div>
-            <div class="create-session-list" id="claudeSessionList">
+            <div class="flex-col create-session-list" id="claudeSessionList">
               <div class="empty-state-mini">No sessions found</div>
             </div>
           </div>
 
           <div class="create-session-source">
-            <div class="create-session-header">
+            <div class="flex-row create-session-header">
               <span class="create-session-icon">🔵</span>
               <span>Gemini</span>
             </div>
-            <div class="create-session-list" id="geminiSessionList">
+            <div class="flex-col create-session-list" id="geminiSessionList">
               <div class="empty-state-mini">No sessions found</div>
             </div>
             <button class="btn btn-xs" data-action="importGemini">📥 Import</button>
@@ -270,7 +281,7 @@ export class CreateTab extends BaseTab {
       <div class="section">
         <div class="section-title">Preview</div>
         <div class="create-prompt-preview">
-          <div class="create-prompt-header">
+          <div class="flex-between create-prompt-header">
             <span>Super Prompt Preview</span>
             <div class="create-token-count">
               <span>Estimated:</span>

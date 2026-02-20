@@ -103,7 +103,7 @@ steps:
 
       for date_str in missing_info.get("to_process", []):
           try:
-              collect_result = run_skill("performance/collect_daily", {"date": date_str})
+              collect_result = run_skill("performance_collect_daily", {"date": date_str})
               results.append({
                   "date": date_str,
                   "success": collect_result.get("success", False),
@@ -162,5 +162,5 @@ outputs:
       ---
 
       ⚠️ {{ missing_info.remaining }} days still need backfilling.
-      Run again to continue: `skill_run("performance/backfill_missing")`
+      Run again to continue: `skill_run("performance_backfill_missing")`
       {% endif %}

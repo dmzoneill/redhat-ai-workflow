@@ -1,0 +1,50 @@
+# Skill: Preview documentation site locally
+
+name: docs_serve
+description: |
+  Start a local MkDocs development server for previewing the documentation.
+  The server auto-reloads on file changes.
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates:
+    - docs_build
+  validated_by: []
+  chains_to: []
+  provides_context_for: []
+
+inputs:
+  - name: port
+    type: integer
+    required: false
+    default: 8001
+    description: "Port to serve on (default 8001)"
+
+steps:
+  - name: start_server
+    description: "Start mkdocs serve in background"
+    compute: |
+      import subprocess, sys
+      from pathlib import Path
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      port = inputs.get("port", 8001)
+      cmd = [sys.executable, "-m", "mkdocs", "serve", "--dev-addr", f"127.0.0.1:{port}"]
+
+      proc = subprocess.Popen(cmd, cwd=project, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+      import time
+      time.sleep(3)
+
+      if proc.poll() is not None:
+          stderr = proc.stderr.read().decode()
+          result = f"❌ Server failed to start:\n```\n{stderr[-1000:]}\n```"
+      else:
+          result = f"✅ Docs preview running at http://127.0.0.1:{port}\n\nPID: {proc.pid}\nStop with: `kill {proc.pid}`"
+    output: server_result
+
+outputs:
+  - name: summary
+    value: "{{ server_result }}"

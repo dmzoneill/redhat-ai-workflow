@@ -35,6 +35,72 @@ from server.error_patterns import (
     VPN_PATTERNS,
 )
 
+# Tools whose execution gets auto-logged to the daily session file.
+# Only mutating / high-value actions -- not read-only queries.
+SIGNIFICANT_TOOLS: set[str] = {
+    # Git
+    "git_commit",
+    "git_push",
+    "git_merge",
+    "git_rebase",
+    "git_cherry_pick",
+    "git_add",
+    "git_stash",
+    # GitLab
+    "gitlab_create_mr",
+    "gitlab_mr_merge",
+    "gitlab_mr_approve",
+    "gitlab_mr_close",
+    "gitlab_mr_reopen",
+    "gitlab_mr_comment",
+    "gitlab_mr_update",
+    "gitlab_mr_rebase",
+    "gitlab_ci_cancel",
+    "gitlab_ci_retry",
+    "gitlab_ci_run",
+    "gitlab_issue_create",
+    # GitHub
+    "gh_pr_create",
+    "gh_pr_merge",
+    "gh_pr_close",
+    "gh_pr_comment",
+    # Jira
+    "jira_transition",
+    "jira_add_comment",
+    "jira_create_issue",
+    "jira_update_issue",
+    "jira_attach_session",
+    "jira_assign",
+    "jira_clone_issue",
+    "jira_set_priority",
+    "jira_add_link",
+    "jira_add_to_sprint",
+    # Slack
+    "slack_send_message",
+    "slack_reply_to_thread",
+    "slack_post_message",
+    # Deployments
+    "bonfire_deploy",
+    "bonfire_namespace_reserve",
+    "bonfire_namespace_release",
+    # K8s mutations
+    "kubectl_apply",
+    "kubectl_delete",
+    "kubectl_rollout_restart",
+    "kubectl_scale",
+    "kubectl_exec",
+    # Docker
+    "docker_compose_up",
+    "docker_compose_down",
+    # Releases
+    "konflux_trigger_release",
+    "quay_tag_image",
+    # Calendar
+    "google_calendar_schedule_meeting",
+    # Alertmanager
+    "alertmanager_create_silence",
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -570,8 +636,8 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                 logger.debug("Suppressed error: %s", exc)
 
             # Track activity in session (for UI display)
+            session_id = None
             try:
-                # Try to get ctx from args (first arg is usually ctx for async tools)
                 ctx = None
                 if args and hasattr(args[0], "session"):
                     ctx = args[0]
@@ -587,10 +653,39 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                     session = workspace.get_active_session(refresh_tools=False)
                     if session:
                         session.touch(tool_name=_name)
-                        # Save periodically (every 10 calls) to avoid too many writes
+                        session_id = session.session_id
                         if session.tool_call_count % 10 == 0:
                             WorkspaceRegistry.save_to_disk()
             except Exception as exc:
                 logger.debug("Suppressed error: %s", exc)
+
+            # Log significant tool calls to daily session file
+            if _name in SIGNIFICANT_TOOLS:
+                try:
+                    from tool_modules.aa_workflow.src.memory_tools import (
+                        append_session_entry,
+                    )
+
+                    details = ""
+                    if isinstance(result, list) and result:
+                        first = result[0]
+                        text = first.text if hasattr(first, "text") else str(first)
+                        details = text[:200].split("\n")[0]
+                    elif isinstance(result, str):
+                        details = result[:200].split("\n")[0]
+
+                    entry = {
+                        "type": "tool",
+                        "action": _name,
+                        "details": details,
+                        "tool_name": _name,
+                        "result": "success" if success else "failure",
+                        "duration_ms": duration_ms,
+                    }
+                    if session_id:
+                        entry["session_id"] = session_id
+                    append_session_entry(entry)
+                except Exception as exc:
+                    logger.debug("Suppressed session log error: %s", exc)
 
     return wrapper

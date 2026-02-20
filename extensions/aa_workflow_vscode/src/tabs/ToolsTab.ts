@@ -53,6 +53,17 @@ export class ToolsTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.modules.length,
+      this.totalTools,
+      this.selectedModule ?? "",
+      this.selectedTool ?? "",
+      this.searchQuery,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -134,27 +145,27 @@ export class ToolsTab extends BaseTab {
       <div class="section">
         <div class="section-title">Tool Modules</div>
         <div class="grid-3">
-          <div class="stat-card blue">
+          <div class="card stat-card blue">
             <div class="stat-icon">📦</div>
             <div class="stat-value">${this.modules.length}</div>
-            <div class="stat-label">Modules</div>
+            <div class="text-meta stat-label">Modules</div>
           </div>
-          <div class="stat-card purple">
+          <div class="card stat-card purple">
             <div class="stat-icon">🔧</div>
             <div class="stat-value">${this.totalTools}</div>
-            <div class="stat-label">Total Tools</div>
+            <div class="text-meta stat-label">Total Tools</div>
           </div>
-          <div class="stat-card cyan">
+          <div class="card stat-card cyan">
             <div class="stat-icon">📊</div>
             <div class="stat-value">${this.getCategoryCount()}</div>
-            <div class="stat-label">Categories</div>
+            <div class="text-meta stat-label">Categories</div>
           </div>
         </div>
       </div>
 
       <!-- Search and Controls -->
       <div class="section">
-        <div class="tools-controls">
+        <div class="flex-between tools-controls">
           <div class="tools-search">
             <input type="text" placeholder="Search tools..." id="toolSearch" value="${this.escapeHtml(this.searchQuery)}" />
           </div>
@@ -192,9 +203,9 @@ export class ToolsTab extends BaseTab {
         html += `
           <div class="tools-module-item ${isSelected ? "selected" : ""}" data-module="${module.name}">
             <span class="tools-module-icon">${module.icon || "📦"}</span>
-            <div class="tools-module-info">
+            <div class="label-sm text-meta tools-module-info">
               <div class="tools-module-name">${this.escapeHtml(module.displayName || module.name)}</div>
-              <div class="tools-module-count">${module.toolCount} tools</div>
+              <div class="text-muted-sm tools-module-count">${module.toolCount} tools</div>
             </div>
           </div>
         `;
@@ -220,7 +231,7 @@ export class ToolsTab extends BaseTab {
     if (!module.tools || module.tools.length === 0) {
       return `
         <div class="tools-module-header">
-          <div class="tools-module-title">
+          <div class="flex-row tools-module-title">
             <span>${module.icon || "📦"}</span>
             ${this.escapeHtml(module.displayName || module.name)}
           </div>
@@ -234,7 +245,7 @@ export class ToolsTab extends BaseTab {
 
     return `
       <div class="tools-module-header">
-        <div class="tools-module-title">
+        <div class="flex-row tools-module-title">
           <span>${module.icon || "📦"}</span>
           ${this.escapeHtml(module.displayName || module.name)}
         </div>
@@ -251,8 +262,8 @@ export class ToolsTab extends BaseTab {
     const paramCount = tool.parameters?.length || 0;
 
     return `
-      <div class="tool-item ${isSelected ? "selected" : ""}" data-tool="${tool.name}">
-        <div class="tool-item-header">
+      <div class="card tool-item ${isSelected ? "selected" : ""}" data-tool="${tool.name}">
+        <div class="flex-between tool-item-header">
           <div class="tool-item-name">${this.escapeHtml(tool.name)}</div>
           <div class="tool-item-params">${paramCount} params</div>
         </div>

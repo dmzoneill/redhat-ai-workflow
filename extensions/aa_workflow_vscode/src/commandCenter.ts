@@ -125,6 +125,16 @@ export class CommandCenterPanel {
   // Throttle for tab re-renders to prevent flickering during rapid skill updates
   private _rerenderThrottleTimer: ReturnType<typeof setTimeout> | null = null;
   private _rerenderThrottleMs = 200; // Max ~5 re-renders/sec
+  private _forceNextRerender = false; // Persists force-render across throttle boundary
+
+  // Content hash per tab - skip postMessage when HTML is identical to last send
+  private _lastContentHash = new Map<string, number>();
+
+  // Tracks when the user last interacted with each tab (epoch ms).
+  // Re-renders are suppressed for a cooldown period after interaction.
+  // With morphdom the cooldown can be short since DOM patching is non-destructive.
+  private _tabLastInteraction = new Map<string, number>();
+  private readonly _interactionCooldownMs = 5000;
 
   // Message router for handling webview messages
   private _messageRouter: MessageRouter;
@@ -559,16 +569,28 @@ export class CommandCenterPanel {
     });
     // Set up render callback so tabs can trigger re-renders when their state changes
     this._tabManager.setRenderCallback(() => {
-      // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
+      // Skip re-render if a mind map is active (D3 simulation would restart),
+      // UNLESS a force-render was requested (e.g., user switching TO/FROM mind map view).
       const skillsTab = this._tabManager.getTab("skills") as any;
-      const skipRerender = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+      const perfTab = this._tabManager.getTab("performance") as any;
+      const forceRender = (skillsTab?.consumeForceRender?.() ?? false) ||
+        (perfTab?.consumeForceRender?.() ?? false);
+      const skipRerender = !forceRender && (
+        (this._currentTab === "skills" && skillsTab?.isMindMapActive?.()) ||
+        (this._currentTab === "performance" && perfTab?.isMindMapActive?.())
+      );
 
       if (skipRerender) {
         debugLog("Tab requested re-render - SKIPPED (mind map active)");
         return;
       }
 
-      debugLog("Tab requested re-render");
+      if (forceRender) {
+        this._forceNextRerender = true;
+        debugLog("Tab requested re-render (forced - mind map skip overridden)");
+      } else {
+        debugLog("Tab requested re-render");
+      }
       this._triggerTabRerender();
     });
     debugLog("Constructor - TabManager initialized");
@@ -600,9 +622,19 @@ export class CommandCenterPanel {
           return;
         }
 
+        // Track user interaction on any tab to suppress background re-renders
+        if (msgType === 'userInteracting' && message.tabId) {
+          this._tabLastInteraction.set(message.tabId, Date.now());
+          return;
+        }
+
         // First, try to handle via TabManager (for tab-specific messages)
         const handledByTab = await this._tabManager.handleMessage(message);
         if (handledByTab) {
+          // Any user-initiated action counts as interaction for the active tab
+          if (this._currentTab) {
+            this._tabLastInteraction.set(this._currentTab, Date.now());
+          }
           debugLog(`Message handled by TabManager: ${msgType}`);
           return;
         }
@@ -2902,7 +2934,7 @@ print(result[0].text if result else '[]')
 
           const collectCommand = `Run the daily performance collection skill:
 
-skill_run("performance/collect_daily")
+skill_run("performance_collect_daily")
 
 This will fetch today's work from Jira, GitLab, and local git repos, map to competencies, and save the daily data.`;
 
@@ -2922,7 +2954,7 @@ This will fetch today's work from Jira, GitLab, and local git repos, map to comp
 
           const backfillCommand = `Run the backfill skill to fill in missing days:
 
-skill_run("performance/backfill_missing")
+skill_run("performance_backfill_missing")
 
 This will find any missing weekdays this quarter and collect data for them.`;
 
@@ -2945,7 +2977,7 @@ This will find any missing weekdays this quarter and collect data for them.`;
           const evalInput = questionId ? `'{"question_id": "${questionId}"}'` : "";
           const evalCommand = `Run the question evaluation skill:
 
-skill_run("performance/evaluate_questions"${evalInput ? `, ${evalInput}` : ""})
+skill_run("performance_evaluate_questions"${evalInput ? `, ${evalInput}` : ""})
 
 This will use AI to generate summaries for ${evalTarget} based on collected evidence.`;
 
@@ -2965,7 +2997,7 @@ This will use AI to generate summaries for ${evalTarget} based on collected evid
 
           const exportCommand = `Run the report export skill:
 
-skill_run("performance/export_report")
+skill_run("performance_export_report")
 
 This will generate a comprehensive quarterly report in markdown format.`;
 
@@ -3045,6 +3077,34 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
             await this.sleep(200);
             await vscode.commands.executeCommand("composer.submitChat");
+          }
+          break;
+
+        case "saveQuestion":
+          if (description) {
+            const addResult = await dbus.stats_addQuestion(description);
+            if (addResult.success) {
+              vscode.window.showInformationMessage("Question added.");
+              const pTab = this._tabManager.getTab("performance") as any;
+              if (pTab?.loadData) { await pTab.loadData(); }
+              this._triggerTabRerender();
+            } else {
+              vscode.window.showErrorMessage(`Failed to add question: ${addResult.error || "Unknown error"}`);
+            }
+          }
+          break;
+
+        case "removeQuestion":
+          if (questionId) {
+            const removeResult = await dbus.stats_removeQuestion(questionId);
+            if (removeResult.success) {
+              vscode.window.showInformationMessage("Question removed.");
+              const pTab2 = this._tabManager.getTab("performance") as any;
+              if (pTab2?.loadData) { await pTab2.loadData(); }
+              this._triggerTabRerender();
+            } else {
+              vscode.window.showErrorMessage(`Failed to remove question: ${removeResult.error || "Unknown error"}`);
+            }
           }
           break;
       }
@@ -3616,7 +3676,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const noSkills = persona.skills.length === 0 ? '<span class="persona-tag empty">all skills</span>' : '';
 
       return `
-      <div class="persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
+      <div class="card persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
         <div class="persona-header">
           <div class="persona-icon ${this._getPersonaColor(persona.name)}">
             ${this._getPersonaIcon(persona.name)}
@@ -3920,9 +3980,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const activeTab = this._tabManager.getTab(this._currentTab);
       if (activeTab) {
         const skillsTab = this._tabManager.getTab("skills") as any;
+        const perfTab = this._tabManager.getTab("performance") as any;
 
-        // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
-        const skipForMindMap = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+        // Skip re-render if a mind map is active (D3 simulation would restart)
+        const skipForMindMap = (this._currentTab === "skills" && skillsTab?.isMindMapActive?.()) ||
+          (this._currentTab === "performance" && perfTab?.isMindMapActive?.());
 
         // Skip FULL re-render if Skills tab is showing a running workflow.
         // The workflow uses incremental CSS updates for step progress -
@@ -3931,16 +3993,38 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           skillsTab?.skillView === "workflow" &&
           skillsTab?.detailedExecution?.status === "running";
 
+        // Skip re-render if the Performance tab is on the Settings sub-tab.
+        // Auto-refreshing loadData() overwrites the local scoring_config state,
+        // destroying form values the user is actively editing (dropdowns, inputs).
+        const skipForSettings = this._currentTab === "performance" &&
+          perfTab?.isSettingsActive?.();
+
+        // Skip re-render if the user recently interacted with the active tab.
+        // Even with morphdom, brief cooldown avoids updating the DOM while the
+        // user is actively clicking/typing/scrolling.
+        const lastInteraction = this._tabLastInteraction.get(this._currentTab) || 0;
+        const skipForInteraction = (Date.now() - lastInteraction) < this._interactionCooldownMs;
+
         if (skipForMindMap) {
           debugLog("Tiered sync: Skipping re-render - mind map is active");
           this._updateAllTabBadges();
         } else if (skipForWorkflow) {
           debugLog("Tiered sync: Skipping full re-render - workflow using incremental updates");
           this._updateAllTabBadges();
+        } else if (skipForSettings) {
+          debugLog("Tiered sync: Skipping re-render - settings form is active");
+          this._updateAllTabBadges();
+        } else if (skipForInteraction) {
+          debugLog(`Tiered sync: Skipping re-render - user recently interacted with ${this._currentTab}`);
+          this._updateAllTabBadges();
         } else {
-          this._logActivity(`Refreshing ${this._currentTab}`);
           activeTab.loadData().then(() => {
-            this._triggerTabRerender();
+            if (activeTab.hasDataChanged()) {
+              debugLog(`Tiered sync: Data changed for ${this._currentTab}, re-rendering`);
+              this._triggerTabRerender();
+            } else {
+              debugLog(`Tiered sync: No data change for ${this._currentTab}, skipping re-render`);
+            }
             this._updateAllTabBadges();
           }).catch(e => {
             debugLog(`Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`);
@@ -4054,14 +4138,31 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * No file watching or sync processes are used.
    */
   private _backgroundSync(): void {
-    this._logActivity("Background sync");
+    debugLog("Background sync: infrastructure checks only");
 
     // Clear personas cache to ensure fresh data on next access
     this._personasCache = null;
 
-    // Just reload from file and update UI - no sync process spawning
+    // Reload workspace state (lightweight file read)
     this._loadWorkspaceState();
-    this.update(false);
+
+    // Update header stats without reloading active tab data.
+    // Active tab data is handled by the tiered sync (Tier 2) with
+    // hasDataChanged() gating - we must not bypass that here.
+    this.loadStatsAsync().then(stats => {
+      if (stats && this._panel?.webview) {
+        const lifetime = stats.lifetime || { tool_calls: 0, skill_executions: 0, sessions: 0 };
+        this._panel.webview.postMessage({
+          type: "dataUpdate",
+          stats: {
+            toolCalls: lifetime.tool_calls,
+            skillExecutions: lifetime.skill_executions,
+            sessions: lifetime.sessions,
+          },
+          badges: this._tabManager.getAllBadges(),
+        });
+      }
+    }).catch(() => {});
     this.getInferenceStats();
 
     // Also refresh service status via D-Bus
@@ -4203,6 +4304,24 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       return;
     }
 
+    // Final guard: skip re-render if a mind map is active (D3 simulation would restart)
+    // BUT respect the _forceNextRerender flag (set by render callback when user initiates a view change)
+    const skillsTab = this._tabManager.getTab("skills") as any;
+    const perfTab = this._tabManager.getTab("performance") as any;
+    const mindMapActive = (this._currentTab === "skills" && skillsTab?.isMindMapActive?.()) ||
+        (this._currentTab === "performance" && perfTab?.isMindMapActive?.());
+    if (mindMapActive) {
+      if (this._forceNextRerender) {
+        this._forceNextRerender = false;
+        debugLog("_doTabRerender: Mind map active but force-render requested");
+      } else {
+        debugLog("_doTabRerender: Skipping - mind map is active");
+        return;
+      }
+    } else {
+      this._forceNextRerender = false;
+    }
+
     // Get the active tab's content and send it to the webview
     const activeTabId = this._tabManager.getActiveTabId();
     const activeTab = this._tabManager.getActiveTab();
@@ -4218,22 +4337,25 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
 
     try {
-      // Use getContent() to get just the inner content, not the wrapper div
-      // The webview already has the wrapper div with id="${tabId}"
       const content = targetTab.getContent();
       const styles = targetTab.getStyles();
       const script = targetTab.getScript();
+      const tabId = targetTab.getId();
 
-      debugLog(`_doTabRerender: Tab ${targetTab.getId()}, content length: ${content?.length || 0}, script length: ${script?.length || 0}`);
-
-      // Log first 200 chars of content for debugging
-      if (content) {
-        debugLog(`_doTabRerender: Content preview: ${content.substring(0, 200).replace(/\n/g, ' ')}...`);
+      // Layer 2: skip postMessage when content is identical to last send
+      const hash = this._djb2Hash(content || "");
+      const prevHash = this._lastContentHash.get(tabId);
+      if (hash === prevHash) {
+        debugLog(`_doTabRerender: Content hash unchanged for ${tabId}, skipping postMessage`);
+        return;
       }
+      this._lastContentHash.set(tabId, hash);
+
+      debugLog(`_doTabRerender: Tab ${tabId}, content length: ${content?.length || 0}`);
 
       this._panel.webview.postMessage({
         type: "tabContentUpdate",
-        tabId: targetTab.getId(),
+        tabId,
         content,
         styles,
         script,
@@ -4242,6 +4364,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     } catch (err) {
       debugLog(`_doTabRerender: Error - ${err}`);
     }
+  }
+
+  /** Fast djb2 string hash for content-change detection. */
+  private _djb2Hash(s: string): number {
+    let hash = 5381;
+    for (let i = 0; i < s.length; i++) {
+      hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
+    }
+    return hash;
   }
 
   private _updateWorkspacesTab(): void {
@@ -4659,8 +4790,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       : "";
 
     return `
-      <div class="session-card ${activeClass}" data-session-id="${sessionId}">
-        <div class="session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat session">
+      <div class="card session-card ${activeClass}" data-session-id="${sessionId}">
+        <div class="flex-between session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat session">
           <div class="session-icon ${personaColor}">${personaIcon}</div>
           <div class="session-info">
             <div class="session-name">${sessionName}</div>
@@ -5211,6 +5342,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Call this instead of update() to use the modular system.
    */
   public async updateModular(forceFullRender: boolean = false) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'commandCenter.ts:updateModular',message:'updateModular called',data:{forceFullRender,hasHtml:!!this._panel?.webview?.html},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     debugLog("updateModular() starting...");
 
     // Load stats via D-Bus
@@ -5223,6 +5357,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       debugLog(`Generating full HTML (forceFullRender: ${forceFullRender}, hasHtml: ${!!this._panel.webview.html})`);
       try {
         const html = await this._getHtmlForWebviewModular(stats);
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'commandCenter.ts:updateModular:htmlGen',message:'HTML generated',data:{htmlLen:html?.length,hasTabContent:html?.includes('tab-content'),hasSwitchTab:html?.includes('switchTab'),first500:html?.substring(0,500)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
         debugLog(`Got HTML from generator, length: ${html?.length ?? 'undefined'}`);
         if (html && html.length > 0) {
           this._panel.webview.html = html;
@@ -5273,7 +5410,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       await this._tabManager.loadAllData();
       debugLog("Tab data loaded successfully");
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'commandCenter.ts:loadAllData:success',message:'Tab data loaded OK',data:{},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'commandCenter.ts:loadAllData:error',message:'Tab data load FAILED',data:{error:String(err)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       debugLog(`Error loading tab data: ${err}`);
     }
 

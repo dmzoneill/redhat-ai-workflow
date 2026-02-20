@@ -12,6 +12,13 @@ import { createLogger } from "../logger";
 
 const logger = createLogger("ServicesTab");
 
+const OLLAMA_INSTANCES = [
+  { name: "NPU", device: "Intel NPU", port: 11434, unit: "ollama-npu.service", model: "qwen2.5:0.5b" },
+  { name: "iGPU", device: "Intel iGPU", port: 11435, unit: "ollama-igpu.service", model: "llama3.2:3b" },
+  { name: "NVIDIA", device: "NVIDIA GPU", port: 11436, unit: "ollama-nvidia.service", model: "llama3:7b" },
+  { name: "CPU", device: "CPU", port: 11437, unit: "ollama-cpu.service", model: "qwen2.5:0.5b" },
+];
+
 interface ServiceInfo {
   name: string;
   displayName: string;
@@ -148,6 +155,19 @@ export class ServicesTab extends BaseTab {
     return { text: "●", class: "status-green" };
   }
 
+  protected computeDataFingerprint(): string {
+    const serviceStatuses = this.serviceList.map((s) => s.status).join(",");
+    const ollamaStatuses = this.ollamaInstances.map((i) => i.status).join(",");
+    const parts = [
+      this.onlineCount,
+      this.offlineCount,
+      serviceStatuses,
+      ollamaStatuses,
+      this.slackStatus?.connected ? 1 : 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -189,6 +209,9 @@ export class ServicesTab extends BaseTab {
         }
       }
 
+      // Load Ollama instance status
+      await this.loadOllamaInstances();
+
       // Clear error on success
       this.lastError = null;
       logger.log("loadData() complete");
@@ -207,20 +230,20 @@ export class ServicesTab extends BaseTab {
       <div class="section">
         <div class="section-title">Service Status</div>
         <div class="grid-3">
-          <div class="stat-card green">
+          <div class="card stat-card green">
             <div class="stat-icon">✓</div>
             <div class="stat-value">${this.onlineCount}</div>
-            <div class="stat-label">Online</div>
+            <div class="label-sm text-meta stat-label">Online</div>
           </div>
-          <div class="stat-card ${this.offlineCount > 0 ? "red" : "green"}">
+          <div class="card stat-card ${this.offlineCount > 0 ? "red" : "green"}">
             <div class="stat-icon">${this.offlineCount > 0 ? "✕" : "✓"}</div>
             <div class="stat-value">${this.offlineCount}</div>
-            <div class="stat-label">Offline</div>
+            <div class="label-sm text-meta stat-label">Offline</div>
           </div>
-          <div class="stat-card blue">
+          <div class="card stat-card blue">
             <div class="stat-icon">⟳</div>
             <div class="stat-value">${this.serviceList.length}</div>
-            <div class="stat-label">Total</div>
+            <div class="label-sm text-meta stat-label">Total</div>
           </div>
         </div>
       </div>
@@ -237,7 +260,7 @@ export class ServicesTab extends BaseTab {
       ${this.slackStatus ? this.getSlackStatusHtml() : ""}
 
       <!-- Ollama Instances -->
-      ${this.ollamaInstances.length > 0 ? this.getOllamaStatusHtml() : ""}
+      ${this.getOllamaStatusHtml()}
     `;
   }
 
@@ -246,14 +269,14 @@ export class ServicesTab extends BaseTab {
     const statusText = service.status === "online" ? "Online" : "Offline";
 
     return `
-      <div class="service-card ${service.status === "offline" ? "service-offline" : ""}">
-        <div class="service-header">
-          <div class="service-title">
+      <div class="card service-card ${service.status === "offline" ? "service-offline" : ""}">
+        <div class="flex-between service-header">
+          <div class="flex-row service-title">
             <span>${service.icon}</span>
             ${service.displayName}
           </div>
           <div class="service-status">
-            <span class="status-dot ${statusClass}"></span>
+            <span class="dot status-dot ${statusClass}"></span>
             ${statusText}
           </div>
         </div>
@@ -285,14 +308,14 @@ export class ServicesTab extends BaseTab {
     return `
       <div class="section">
         <div class="section-title">Slack Bot</div>
-        <div class="service-card">
-          <div class="service-header">
-            <div class="service-title">
+        <div class="card service-card">
+          <div class="flex-between service-header">
+            <div class="flex-row service-title">
               <span>💬</span>
               Slack Integration
             </div>
             <div class="service-status">
-              <span class="status-dot ${this.slackStatus.connected ? "online" : "offline"}"></span>
+              <span class="dot status-dot ${this.slackStatus.connected ? "online" : "offline"}"></span>
               ${this.slackStatus.connected ? "Connected" : "Disconnected"}
             </div>
           </div>
@@ -318,43 +341,36 @@ export class ServicesTab extends BaseTab {
   }
 
   private getOllamaStatusHtml(): string {
+    const ollamaOnline = this.ollamaInstances.filter((i) => i.status === "online").length;
     return `
       <div class="section">
-        <div class="section-title">Ollama Instances</div>
-        <div class="grid-2">
+        <div class="section-title">Ollama Instances
+          <span class="text-sm text-secondary font-normal" style="margin-left: 8px;">
+            ${ollamaOnline}/${this.ollamaInstances.length} online
+          </span>
+        </div>
+        <div class="inference-ollama-grid">
           ${this.ollamaInstances.map((instance) => `
-            <div class="service-card">
-              <div class="service-header">
-                <div class="service-title">
-                  <span>🤖</span>
-                  ${instance.name}
-                </div>
-                <div class="service-status">
-                  <span class="status-dot ${instance.status}"></span>
-                  ${instance.status === "online" ? "Online" : "Offline"}
-                </div>
+            <div class="card inference-ollama-card ${instance.status}">
+              <div class="flex-between inference-ollama-header">
+                <span class="font-semibold inference-ollama-name">${this.escapeHtml(instance.name)}</span>
+                <span class="inference-ollama-status status-${instance.status}">${instance.status}</span>
               </div>
-              <div class="service-content">
-                <div class="service-row">
-                  <span>URL</span>
-                  <span>${instance.url}</span>
-                </div>
-                <div class="service-row">
-                  <span>Device</span>
-                  <span>${instance.device}</span>
-                </div>
-                ${instance.model ? `
-                  <div class="service-row">
-                    <span>Model</span>
-                    <span>${instance.model}</span>
-                  </div>
-                ` : ""}
-              </div>
-              <div class="service-actions">
-                <button class="btn btn-xs btn-flex" data-action="testOllama" data-instance="${instance.name}">🔍 Test</button>
+              <div class="inference-ollama-device">${this.escapeHtml(instance.device)}</div>
+              <div class="inference-ollama-url">${this.escapeHtml(instance.url)}</div>
+              ${instance.model ? `<div class="inference-ollama-model">Model: ${this.escapeHtml(instance.model)}</div>` : ""}
+              <div class="inference-ollama-actions">
+                <button class="btn btn-xs" data-action="testOllama" data-instance="${this.escapeHtml(instance.name)}">Test</button>
               </div>
             </div>
           `).join("")}
+          ${this.ollamaInstances.length === 0 ? `
+            <div class="inference-ollama-empty">
+              <div class="inference-ollama-empty-icon">🦙</div>
+              <div class="inference-ollama-empty-title">No Ollama Instances</div>
+              <div class="inference-ollama-empty-text">Checking systemd service status...</div>
+            </div>
+          ` : ""}
         </div>
       </div>
     `;
@@ -440,25 +456,61 @@ export class ServicesTab extends BaseTab {
     await this.refresh();
   }
 
+  private async loadOllamaInstances(): Promise<void> {
+    try {
+      const units = OLLAMA_INSTANCES.map((i) => i.unit).join(" ");
+      const { stdout } = await execAsync(
+        `systemctl is-active ${units} 2>/dev/null || true`
+      );
+      const states = stdout.trim().split("\n");
+
+      this.ollamaInstances = OLLAMA_INSTANCES.map((inst, idx) => ({
+        name: inst.name,
+        url: `http://localhost:${inst.port}`,
+        device: inst.device,
+        status: (states[idx] === "active" ? "online" : "offline") as "online" | "offline",
+        model: inst.model,
+      }));
+
+      const onlineCount = this.ollamaInstances.filter((i) => i.status === "online").length;
+      logger.log(`Loaded ${this.ollamaInstances.length} Ollama instances (${onlineCount} online)`);
+    } catch (error) {
+      logger.error("Failed to load Ollama instances", error);
+      this.ollamaInstances = OLLAMA_INSTANCES.map((inst) => ({
+        name: inst.name,
+        url: `http://localhost:${inst.port}`,
+        device: inst.device,
+        status: "offline" as const,
+        model: inst.model,
+      }));
+    }
+  }
+
   private async testOllamaInstance(instanceName: string): Promise<void> {
     const instance = this.ollamaInstances.find((i) => i.name === instanceName);
     if (!instance) return;
 
     try {
-      const response = await fetch(`${instance.url}/api/tags`);
-      if (response.ok) {
-        vscode.window.showInformationMessage(
-          `Ollama instance ${instanceName} is responding`
-        );
+      vscode.window.showInformationMessage(`Testing ${instanceName}...`);
+      const { stdout } = await execAsync(
+        `curl -s -o /dev/null -w "%{http_code}" ${instance.url}/api/tags 2>/dev/null || echo "000"`,
+        { timeout: 5000 }
+      );
+      const statusCode = stdout.trim();
+      if (statusCode === "200") {
+        vscode.window.showInformationMessage(`${instanceName} is healthy`);
+        instance.status = "online";
       } else {
-        vscode.window.showWarningMessage(
-          `Ollama instance ${instanceName} returned status ${response.status}`
-        );
+        vscode.window.showWarningMessage(`${instanceName} returned status ${statusCode}`);
+        instance.status = "offline";
       }
+      this.notifyNeedsRender();
     } catch (error) {
       vscode.window.showErrorMessage(
-        `Failed to connect to Ollama instance ${instanceName}: ${error}`
+        `${instanceName} test failed: ${error instanceof Error ? error.message : String(error)}`
       );
+      instance.status = "offline";
+      this.notifyNeedsRender();
     }
   }
 }

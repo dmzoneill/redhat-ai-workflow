@@ -776,6 +776,27 @@ class CronScheduler:
             ),
         )
 
+        # Log to daily session file
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            retry_detail = ""
+            if retry_info["attempts"] > 1:
+                retry_detail = f", {retry_info['attempts']} attempts"
+            append_session_entry(
+                {
+                    "type": "cron",
+                    "action": f"cron: {job_name}",
+                    "details": f"skill={skill}, {'success' if success else 'failed'}, {duration_ms}ms{retry_detail}",
+                    "skill_name": skill,
+                    "result": "success" if success else "failure",
+                    "duration_ms": duration_ms,
+                    "source": "cron",
+                }
+            )
+        except Exception:
+            pass
+
         # Send notifications
         if notify and self.notification_callback:
             await self._send_notifications(

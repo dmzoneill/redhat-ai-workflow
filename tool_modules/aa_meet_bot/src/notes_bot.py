@@ -1334,7 +1334,7 @@ class NotesBot:
 
         logger.info("Browser health monitor stopped")
 
-    async def _cleanup_stale_meeting(self) -> None:
+    async def _cleanup_stale_meeting(self) -> None:  # noqa: C901
         """Clean up state from a meeting where the browser was closed unexpectedly.
 
         This is called when:
@@ -1476,7 +1476,30 @@ class NotesBot:
         if cleanup_result.get("errors"):
             cleanup_errors.extend(cleanup_result["errors"])
 
-        # 9. Reset state
+        # 9. Log stale cleanup to daily session file
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            duration_min = 0
+            if self.state.joined_at:
+                duration_min = round(
+                    (datetime.now() - self.state.joined_at).total_seconds() / 60, 1
+                )
+            append_session_entry(
+                {
+                    "type": "meet",
+                    "action": f"Meeting ended (stale cleanup): {self.state.title or 'Unknown'}",
+                    "details": (
+                        f"{self.state.captions_captured} captions, {duration_min} min, "
+                        f"{len(cleanup_errors)} cleanup errors"
+                    ),
+                    "source": "meet",
+                }
+            )
+        except Exception:
+            pass
+
+        # 10. Reset state
         self.state.status = "idle"
         self.state.meeting_id = None
         self.state.meet_url = ""
@@ -1495,7 +1518,7 @@ class NotesBot:
         logger.info("CLEANUP: Ready for new meeting")
         logger.info("=" * 60)
 
-    async def leave_meeting(self, generate_summary: bool = True) -> dict:
+    async def leave_meeting(self, generate_summary: bool = True) -> dict:  # noqa: C901
         """
         Leave the meeting and finalize notes.
 
@@ -1644,10 +1667,28 @@ class NotesBot:
         except Exception:
             pass
 
-        # 10. FINAL: Clean up any orphaned devices (safety net)
+        # 10. Log meeting to daily session file
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            append_session_entry(
+                {
+                    "type": "meet",
+                    "action": f"Meeting completed: {result.get('title', 'Meeting')}",
+                    "details": (
+                        f"{result.get('captions_captured', 0)} captions, "
+                        f"{result.get('duration_minutes', 0)} min"
+                    ),
+                    "source": "meet",
+                }
+            )
+        except Exception:
+            pass
+
+        # 11. FINAL: Clean up any orphaned devices (safety net)
         await self._run_orphan_cleanup("POST-LEAVE")
 
-        # 11. Reset state
+        # 12. Reset state
         self.state = NotesBotState()
 
         logger.info("=" * 60)

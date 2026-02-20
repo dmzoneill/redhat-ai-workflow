@@ -234,9 +234,12 @@ async def _journalctl_unit_impl(
     lines: int = 100,
     since: str = "",
     follow: bool = False,
+    user: bool = False,
 ) -> str:
     """View logs for specific unit."""
     cmd = ["journalctl", "--no-pager", "-u", unit, "-n", str(lines)]
+    if user:
+        cmd.insert(1, "--user")
     if since:
         cmd.extend(["--since", since])
 
@@ -442,15 +445,18 @@ def register_tools(server: FastMCP) -> int:
 
     @auto_heal()
     @registry.tool()
-    async def journalctl_unit(unit: str, lines: int = 100, since: str = "") -> str:
+    async def journalctl_unit(
+        unit: str, lines: int = 100, since: str = "", user: bool = False
+    ) -> str:
         """View logs for specific unit.
 
         Args:
             unit: Service/unit name
             lines: Number of lines to show
             since: Show logs since
+            user: Use user session (for --user services)
         """
-        return await _journalctl_unit_impl(unit, lines, since)
+        return await _journalctl_unit_impl(unit, lines, since, user=user)
 
     @auto_heal()
     @registry.tool()

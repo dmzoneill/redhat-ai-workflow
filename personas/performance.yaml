@@ -19,12 +19,12 @@ tools:
 
 skills:
   # Daily collection
-  - performance/collect_daily    # Collect daily performance data from all sources
-  - performance/backfill_missing # Backfill missing weekdays
+  - performance_collect_daily    # Collect daily performance data from all sources
+  - performance_backfill_missing # Backfill missing weekdays
 
   # Quarterly review
-  - performance/evaluate_questions # AI evaluation of quarterly questions
-  - performance/export_report      # Export quarterly report for manager review
+  - performance_evaluate_questions # AI evaluation of quarterly questions
+  - performance_export_report      # Export quarterly report for manager review
 
   # Analysis
   - coffee              # Morning briefing includes performance summary

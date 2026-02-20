@@ -119,16 +119,67 @@ steps:
     output: memory_work
 
   - name: load_yesterday_session
-    description: "Load yesterday's session log for context"
+    description: "Load and parse yesterday's enriched session log"
     compute: |
       from datetime import datetime, timedelta
+      from pathlib import Path
+      import yaml
+      import re
 
       yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-      session_log = memory.read_memory(f"sessions/{yesterday}")
+      session_file = Path.home() / "src/redhat-ai-workflow/memory/sessions" / f"{yesterday}.yaml"
+
+      entries = []
+      if session_file.exists():
+          with open(session_file) as f:
+              data = yaml.safe_load(f) or {}
+          entries = data.get("entries", [])
+
+      issue_re = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
+
+      # Parse by type
+      summaries = []
+      skills_run = []
+      tools_logged = []
+      manual_logs = []
+      all_issues = set()
+      all_next_steps = []
+      all_accomplished = []
+
+      for e in entries:
+          etype = e.get("type", "manual")
+          action = e.get("action", "")
+          details = e.get("details", "")
+
+          # Collect issues from all entries
+          for text in [action, details]:
+              all_issues.update(issue_re.findall(text))
+          if e.get("issues"):
+              all_issues.update(e["issues"])
+
+          if etype == "summary":
+              summaries.append(e)
+              all_accomplished.extend(e.get("accomplished", []))
+              all_next_steps.extend(e.get("next_steps", []))
+          elif etype == "skill":
+              skills_run.append(e)
+          elif etype == "tool":
+              tools_logged.append(e)
+          elif etype == "manual":
+              manual_logs.append(e)
 
       result = {
-          "has_session": bool(session_log),
-          "actions": session_log.get("actions", [])[-10:] if session_log else [],
+          "has_session": bool(entries),
+          "entry_count": len(entries),
+          "summaries": summaries,
+          "skills_run": skills_run,
+          "tools_logged": tools_logged,
+          "manual_logs": manual_logs,
+          "all_issues": sorted(all_issues),
+          "all_accomplished": all_accomplished,
+          "all_next_steps": all_next_steps,
+          "session_count": len([e for e in entries if e.get("type") == "session" and "started" in e.get("action", "").lower()]),
+          "date": yesterday,
       }
     output: yesterday_session
 
@@ -1256,6 +1307,42 @@ steps:
             priority = fu.get('priority', 'normal')
             emoji = "🔴" if priority == "high" else "🟡" if priority == "medium" else "⚪"
             lines.append(f"- {emoji} {task}")
+        lines.append("")
+
+      # Yesterday's Session Highlights (from enriched session logs)
+      if yesterday_session and yesterday_session.get('has_session'):
+        lines.append("## 📊 Yesterday's Highlights")
+        ys = yesterday_session
+
+        if ys.get('all_accomplished'):
+          lines.append("**Accomplished:**")
+          for item in ys['all_accomplished'][:8]:
+            lines.append(f"- {item}")
+
+        if ys.get('all_issues'):
+          issue_links = []
+          for key in ys['all_issues'][:10]:
+            url = f"https://issues.redhat.com/browse/{key}"
+            issue_links.append(build_link(url, key))
+          lines.append(f"**Issues touched:** {', '.join(issue_links)}")
+
+        stats_parts = []
+        if ys.get('session_count'):
+          stats_parts.append(f"{ys['session_count']} sessions")
+        if ys.get('skills_run'):
+          stats_parts.append(f"{len(ys['skills_run'])} skills run")
+        if ys.get('tools_logged'):
+          stats_parts.append(f"{len(ys['tools_logged'])} significant actions")
+        if ys.get('manual_logs'):
+          stats_parts.append(f"{len(ys['manual_logs'])} manual logs")
+        if stats_parts:
+          lines.append(f"**Activity:** {', '.join(stats_parts)} ({ys.get('entry_count', 0)} total entries)")
+
+        if ys.get('all_next_steps'):
+          lines.append("**Carry-over (suggested for today):**")
+          for item in ys['all_next_steps'][:5]:
+            lines.append(f"- ➡️ {item}")
+
         lines.append("")
 
       # Calendar

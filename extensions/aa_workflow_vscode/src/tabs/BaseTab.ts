@@ -61,6 +61,8 @@ export abstract class BaseTab {
   private _renderDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   private _renderDebounceMs = 150; // Debounce renders to max ~7/sec
 
+  private _lastDataFingerprint: string = "";
+
   /**
    * Service container for domain services.
    * Tabs should use these services instead of calling D-Bus directly.
@@ -87,6 +89,41 @@ export abstract class BaseTab {
    */
   setRenderCallback(callback: RenderCallback): void {
     this._onNeedsRender = callback;
+  }
+
+  /**
+   * Compute a fingerprint of the tab's current data state.
+   * Override in subclasses to return a string that changes only when
+   * the tab's rendered output would actually differ.
+   *
+   * Default returns Date.now() so tabs that haven't opted in always
+   * report "changed" (backwards-compatible).
+   */
+  protected computeDataFingerprint(): string {
+    return String(Date.now());
+  }
+
+  /**
+   * Check whether loadData() produced data that differs from the last render.
+   * Called by the tiered sync after loadData() to decide whether to re-render.
+   * Returns true on the first call (no previous fingerprint).
+   */
+  public hasDataChanged(): boolean {
+    const current = this.computeDataFingerprint();
+    if (current === this._lastDataFingerprint) {
+      return false;
+    }
+    this._lastDataFingerprint = current;
+    return true;
+  }
+
+  /**
+   * Reset the fingerprint so the next hasDataChanged() returns true.
+   * Call this when UI-only state changes (e.g. user switches sub-tab)
+   * that don't go through loadData().
+   */
+  protected invalidateFingerprint(): void {
+    this._lastDataFingerprint = "";
   }
 
   /**
@@ -347,7 +384,7 @@ export abstract class BaseTab {
    */
   protected getErrorHtml(message: string): string {
     return `
-      <div class="error-message">
+      <div class="flex-row error-message">
         <span class="error-icon">❌</span>
         <span>${this.escapeHtml(message)}</span>
       </div>

@@ -3,13 +3,142 @@ import logging
 import os
 import re
 import subprocess
-from datetime import date
 from pathlib import Path
 
-from server.paths import AA_CONFIG_DIR
 from services.stats.scorer import COMPETENCY_DEFS
 
 logger = logging.getLogger(__name__)
+
+STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "are",
+    "with",
+    "this",
+    "that",
+    "from",
+    "not",
+    "has",
+    "was",
+    "will",
+    "can",
+    "all",
+    "been",
+    "have",
+    "into",
+    "new",
+    "use",
+    "its",
+    "may",
+    "our",
+    "but",
+    "also",
+    "any",
+    "each",
+    "than",
+}
+
+
+def build_strategy_context_index(emails_dir: Path) -> dict:
+    """Load all cached executive emails and build a fast lookup structure.
+
+    Returns a dict with:
+      - priorities: list of {name, context, issue_keys, text_keywords}
+      - all_issue_keys: {issue_key: [priority_name, ...]}
+    """
+    if not emails_dir.exists():
+        return {"priorities": [], "all_issue_keys": {}}
+
+    all_priorities: dict[str, dict] = {}
+    for f in sorted(emails_dir.glob("*.json"), key=lambda p: p.stat().st_mtime):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception:
+            continue
+
+        for prio in data.get("priorities", []):
+            name = prio.get("name", "")
+            if not name:
+                continue
+            key = name.lower()
+            if key not in all_priorities:
+                combined = f"{name} {prio.get('context', '')}".lower()
+                text_keywords = {
+                    w for w in re.findall(r"[a-z]{3,}", combined) if w not in STOP_WORDS
+                }
+                all_priorities[key] = {
+                    "name": name,
+                    "context": prio.get("context", "")[:300],
+                    "issue_keys": list(prio.get("issue_keys", [])),
+                    "text_keywords": text_keywords,
+                }
+            else:
+                existing = all_priorities[key]
+                for ik in prio.get("issue_keys", []):
+                    if ik not in existing["issue_keys"]:
+                        existing["issue_keys"].append(ik)
+
+    issue_key_index: dict[str, list[str]] = {}
+    for prio in all_priorities.values():
+        for ik in prio["issue_keys"]:
+            issue_key_index.setdefault(ik, [])
+            if prio["name"] not in issue_key_index[ik]:
+                issue_key_index[ik].append(prio["name"])
+
+    return {
+        "priorities": list(all_priorities.values()),
+        "all_issue_keys": issue_key_index,
+    }
+
+
+def match_event_to_strategy(
+    item_id: str,
+    hierarchy: dict,
+    classification_text: str,
+    strategy_index: dict,
+    min_overlap_words: int = 3,
+) -> tuple[bool, list[str]]:
+    """Check if an event matches any strategy priority.
+
+    Returns (is_aligned, list_of_matched_priority_names).
+    Uses issue-key matching first, then falls back to text overlap.
+    """
+    if not strategy_index or not strategy_index.get("priorities"):
+        return False, []
+
+    matched_names: list[str] = []
+    issue_key_index = strategy_index.get("all_issue_keys", {})
+
+    keys_to_check = [item_id]
+    epic_key = hierarchy.get("epic_key", "")
+    anstrat_key = hierarchy.get("anstrat_key", "")
+    if epic_key:
+        keys_to_check.append(epic_key)
+    if anstrat_key:
+        keys_to_check.append(anstrat_key)
+
+    for k in keys_to_check:
+        for pname in issue_key_index.get(k, []):
+            if pname not in matched_names:
+                matched_names.append(pname)
+
+    if matched_names:
+        return True, matched_names
+
+    text_words = {
+        w
+        for w in re.findall(r"[a-z]{3,}", classification_text.lower())
+        if w not in STOP_WORDS
+    }
+    for prio in strategy_index.get("priorities", []):
+        overlap = len(text_words & prio.get("text_keywords", set()))
+        if overlap >= min_overlap_words:
+            if prio["name"] not in matched_names:
+                matched_names.append(prio["name"])
+
+    return bool(matched_names), matched_names
 
 
 def enrich_user_issues_from_jira(
@@ -176,13 +305,26 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 _add_mrs(json.loads(resp.read()), repo_name)
         except Exception as e:
-            logger.debug(f"GitLab MR fetch for {repo_name}: {e}")
+            logger.debug(f"GitLab MR fetch (open) for {repo_name}: {e}")
+
+        # MRs merged during the quarter regardless of creation date
+        url_merged = (
+            f"https://{gitlab_host}/api/v4/projects/{encoded}/merge_requests"
+            f"?scope=all&author_username={username}"
+            f"&state=merged&updated_after={q_start}&updated_before={q_end}&per_page=100"
+        )
+        req = urllib.request.Request(url_merged, headers={"PRIVATE-TOKEN": token})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                _add_mrs(json.loads(resp.read()), repo_name)
+        except Exception as e:
+            logger.debug(f"GitLab MR fetch (merged) for {repo_name}: {e}")
 
     logger.info(f"Loaded {len(all_mrs)} GitLab MRs for Q{quarter} {year}")
     return all_mrs
 
 
-def build_strategy_alignment(
+def build_strategy_alignment(  # noqa: C901
     year: int,
     quarter: int,
     cumulative_points: dict[str, int],
@@ -284,7 +426,7 @@ def build_strategy_alignment(
                 anstrat_to_user_issues.setdefault(epic_pi, []).append(ukey)
 
     pillar_keywords = {
-        "Technical Excellence": [
+        "Technical Contribution": [
             "python",
             "django",
             "build",
@@ -308,31 +450,41 @@ def build_strategy_alignment(
             "api",
             "redis",
             "migration",
+            "innovation",
+            "poc",
+            "prototype",
         ],
-        "Leadership & Influence": [
-            "customer",
-            "partner",
-            "cisco",
-            "telstra",
-            "azure",
-            "f2f",
-            "kudos",
-            "onboard",
-            "hiring",
+        "Leadership": [
+            "leadership",
             "team",
             "peer",
-            "leadership",
-            "associate",
-            "intern",
-            "mentor",
             "collaborate",
             "recognition",
             "community",
             "present",
             "speak",
             "blog",
+            "portfolio",
+            "cross-team",
+            "cross-functional",
+            "strategy",
+            "process",
+            "improvement",
         ],
-        "Delivery & Impact": [
+        "Mentorship": [
+            "mentor",
+            "onboard",
+            "hiring",
+            "associate",
+            "intern",
+            "coach",
+            "training",
+            "knowledge share",
+            "teach",
+            "newcomer",
+            "growth",
+        ],
+        "End-to-End Delivery": [
             "deliver",
             "release",
             "deploy",
@@ -348,6 +500,13 @@ def build_strategy_alignment(
             "sprint",
             "backlog",
             "plan",
+            "customer",
+            "partner",
+            "cisco",
+            "telstra",
+            "azure",
+            "f2f",
+            "kudos",
             "ai",
             "llm",
             "lightspeed",
@@ -413,14 +572,18 @@ def build_strategy_alignment(
             w for w in re.findall(r"[a-z]{3,}", prio_text) if w not in stop_words
         }
 
-        def _text_matches(text: str) -> bool:
+        def _text_matches(
+            text: str,
+            _prio_phrases=prio_phrases,
+            _prio_words=prio_words,
+        ) -> bool:
             text_lower = text.lower()
-            for phrase in prio_phrases:
+            for phrase in _prio_phrases:
                 normalized = re.sub(r"\s+", " ", phrase).strip()
                 if normalized in text_lower:
                     return True
             text_words = set(re.findall(r"[a-z]{3,}", text_lower))
-            return len(prio_words & text_words) >= 3
+            return len(_prio_words & text_words) >= 3
 
         if not matched_user_issues:
             for ukey, uinfo in user_issues.items():
@@ -446,7 +609,7 @@ def build_strategy_alignment(
         name_lower = name.lower()
         context_lower = prio_data.get("context", "").lower()
         combined = f"{name_lower} {context_lower}"
-        pillar = "Delivery & Impact"
+        pillar = "End-to-End Delivery"
         best_score = 0
         for pname, kws in pillar_keywords.items():
             score = sum(1 for kw in kws if kw in combined)
@@ -483,9 +646,10 @@ def build_strategy_alignment(
 
     pillar_summary: dict[str, dict] = {}
     for pname in [
-        "Technical Excellence",
-        "Leadership & Influence",
-        "Delivery & Impact",
+        "Technical Contribution",
+        "Leadership",
+        "Mentorship",
+        "End-to-End Delivery",
     ]:
         cat_points = sum(
             v

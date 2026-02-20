@@ -5,7 +5,7 @@
   Compatible with: Claude Code, Cursor, Codex, Gemini, Copilot, OpenCode, Amp, and others.
 
   Source: docs/ai-rules/
-  Generated: 2026-02-07 11:54:28
+  Generated: 2026-02-20 10:40:23
 -->
 
 
@@ -238,6 +238,18 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "clean memory" / "memory cleanup" | `memory_cleanup` | `{}` |
 | "edit memory" / "update memory" | `memory_edit` | `{"file": "...", "action": "..."}` |
 
+### Documentation Site
+
+| User Says | Skill | inputs JSON |
+|-----------|-------|-------------|
+| "sync docs" / "update docs data" | `docs_sync` | `{}` |
+| "build docs" / "build site" | `docs_build` | `{}` |
+| "preview docs" / "serve docs" | `docs_serve` | `{}` |
+| "deploy docs" / "publish docs" | `docs_deploy` | `{"message": "..."}` |
+| "docs status" / "what's synced" | `docs_status` | `{}` |
+| "add a note" / "capture this" | `docs_add_note` | `{"title": "...", "content": "...", "tags": "..."}` |
+| "new section" / "add docs section" | `docs_add_section` | `{"section": "...", "title": "..."}` |
+
 ## Intent → Persona Mapping
 
 If no skill matches, load the right persona for the domain:
@@ -284,16 +296,51 @@ skill_list()              // See available workflows
 
 Before ending a session or when work is complete:
 
-1. **Log session**: `memory_session_log("Session ended", "summary of work done")`
+1. **MANDATORY: Close session with summary**: `session_close(issues, accomplished, decisions, next_steps, files_changed)` - This writes a structured summary to the daily session log. The beer/coffee skills depend on this data for daily reports, Jira updates, and Slack posts.
 2. **Save learnings**: If you discovered a fix, call `learn_tool_fix()`
 3. **Update work state**: If work is in progress, call `memory_update("state/current_work", ...)`
 4. **Update Jira**: If working on an issue, update its status (see 55-work-completion.md)
 
 ```json
-// Example closing sequence
-memory_session_log("Completed AAP-12345", "Fixed auth bug, created MR !1234")
+// Example closing sequence - session_close is MANDATORY
+session_close(
+  issues="AAP-12345, AAP-12346",
+  accomplished="Fixed auth token expiry bug\nAdded unit tests for refresh flow",
+  decisions="Chose JWT refresh over session extension",
+  next_steps="Address review comments on MR !1234",
+  files_changed="src/auth/middleware.py, tests/test_auth.py"
+)
 learn_tool_fix("bonfire_deploy", "manifest unknown", "Short SHA", "Use full 40-char SHA")
 ```
+
+**NEVER skip session_close if you did real work.** Even for short sessions, call it with what was accomplished.
+
+## What Gets Auto-Logged (No Action Needed)
+
+The system automatically logs these to the daily session file:
+
+| Event | Logged By | Entry Type |
+|-------|-----------|------------|
+| Session start | `session_tools.py` | `session` |
+| Skill completions | `skill_engine.py` | `skill` |
+| Significant tool calls (git_commit, jira_transition, slack_send_message, etc.) | `debuggable.py` | `tool` |
+
+You do NOT need to manually log these. They are captured automatically.
+
+## What YOU Must Log (Mid-Session)
+
+Since the system only captures structured events, the LLM must log **context, narrative, and decisions** -- things only a human+LLM conversation produces:
+
+| What to Log | Example |
+|-------------|---------|
+| Investigation findings | `memory_session_log("Investigated auth failure", "Root cause: expired JWT key rotation")` |
+| Meeting notes | `memory_session_log("Meeting: Sprint planning", "Agreed to prioritize AAP-12345")` |
+| Architecture decisions | `memory_session_log("Decision: Use Redis for caching", "Evaluated vs memcached, Redis chosen for pub/sub support")` |
+| Debugging outcomes | `memory_session_log("Fixed deployment failure", "Missing env var REDIS_URL in ClowdApp")` |
+| Alert investigations | `memory_session_log("Alert: ProcessorStopped", "Pods healthy, issue was upstream traffic")` |
+| Code review findings | `memory_session_log("Reviewed MR !1234", "Suggested error handling improvements in 3 files")` |
+
+**Rule of thumb:** If it would be useful in tomorrow's morning briefing or today's end-of-day report, log it.
 
 ## Mid-Session Actions
 
@@ -301,7 +348,7 @@ During a session, keep context updated:
 
 | Action | Tool |
 |--------|------|
-| Log important action | `memory_session_log(action, details)` |
+| Log context/decisions/findings | `memory_session_log(action, details)` |
 | Save a pattern/fix | `learn_tool_fix(tool, pattern, cause, fix)` |
 | Check for known fixes | `check_known_issues(tool, error)` |
 | Update work state | `memory_update("state/current_work", path, value)` |
@@ -700,7 +747,8 @@ memory_ask("Where is the billing calculation?")
 | `memory_write(key, content)` | Replace entire file |
 | `memory_update(key, path, value)` | Update specific field |
 | `memory_append(key, list_path, item)` | Add to a list |
-| `memory_session_log(action, details)` | Log to today's session |
+| `memory_session_log(action, details)` | Log context/decisions to today's session |
+| `session_close(issues, accomplished, ...)` | **MANDATORY** structured session summary at end |
 
 ### Examples
 
@@ -711,9 +759,53 @@ memory_update("state/current_work", "active_issues[0].status", '"In Progress"')
 # Append to a list
 memory_append("state/current_work", "follow_ups", '{"task": "Review MR", "priority": "high"}')
 
-# Log an action
-memory_session_log("Created MR !1234", "For AAP-12345, fixes auth bug")
+# Log context/narrative (things only the LLM knows)
+memory_session_log("Investigated auth failure", "Root cause: JWT key rotation expired")
+
+# Close session with structured summary (MANDATORY before ending)
+session_close(
+    issues="AAP-12345, AAP-12346",
+    accomplished="Fixed auth bug\nAdded tests",
+    decisions="Chose JWT refresh approach",
+    next_steps="Address MR review comments"
+)
 ```
+
+## Session Log Format
+
+Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) use an enriched entry format.
+Each entry has a `type` field indicating its source:
+
+| Type | Source | Description |
+|------|--------|-------------|
+| `session` | Auto (session_tools.py) | Session start/end events |
+| `skill` | Auto (skill_engine.py) | Skill execution completions |
+| `tool` | Auto (debuggable.py) | Significant tool calls (commits, MR creation, Jira transitions) |
+| `manual` | LLM (memory_session_log) | Context, decisions, findings logged by the LLM |
+| `summary` | LLM (session_close) | Structured session summary with issues, accomplished, next_steps |
+| `cron` | Auto (cron jobs) | Scheduled task results |
+
+### Entry Fields
+
+All entries have: `time`, `action`, `type`. Additional fields by type:
+
+| Field | Types | Description |
+|-------|-------|-------------|
+| `session_id` | all | Which chat session produced this entry |
+| `details` | all | Human-readable description |
+| `issues` | all | Jira issue keys (auto-extracted from text) |
+| `skill_name` | skill | Name of the skill that ran |
+| `tool_name` | tool | Name of the tool that was called |
+| `result` | skill, tool | `success` or `failure` |
+| `duration_ms` | skill, tool | Execution time in milliseconds |
+| `accomplished` | summary | List of what was done |
+| `decisions` | summary | List of key decisions |
+| `next_steps` | summary | List of unfinished work |
+| `files_changed` | summary | List of key files modified |
+
+### Concurrency
+
+Multiple sessions can write to the same daily file safely -- all writes use `fcntl.flock` file locking.
 
 ## Learning from Errors
 
@@ -786,7 +878,7 @@ memory/
 │   ├── tool_fixes.yaml        # Tool-specific fixes
 │   └── runbooks.yaml          # Procedures that worked
 └── sessions/
-    └── YYYY-MM-DD.yaml        # Daily session logs
+    └── YYYY-MM-DD.yaml        # Daily session logs (enriched format)
 ```
 
 ## Common Patterns
@@ -813,17 +905,16 @@ learn_tool_fix(
 )
 ```
 
-### End of Day Summary
+### End of Session (MANDATORY)
 
 ```python
-memory_session_log("End of day", '''
-  Completed:
-  - Fixed AAP-12345 (MR !1234)
-  - Reviewed AAP-12346
-  Tomorrow:
-  - Deploy to stage
-  - Address review comments
-''')
+session_close(
+    issues="AAP-12345",
+    accomplished="Fixed auth bug in middleware\nAdded 3 unit tests",
+    decisions="Used JWT refresh instead of session extension",
+    next_steps="Deploy to stage\nAddress review comments on MR !1234",
+    files_changed="src/auth/middleware.py, tests/test_auth.py"
+)
 ```
 
 

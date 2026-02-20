@@ -95,6 +95,19 @@ export class SlopTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.state?.running ? 1 : 0,
+      this.state?.scan_in_progress ? 1 : 0,
+      this.findings.length,
+      this.filter.loop ?? "",
+      this.filter.severity ?? "",
+      this.filter.status ?? "",
+      this.findingsLimit,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     let hasAnyData = false;
@@ -210,32 +223,32 @@ export class SlopTab extends BaseTab {
       <div class="section">
         <div class="section-title">Code Quality Overview</div>
         <div class="grid-4">
-          <div class="stat-card ${scan_in_progress ? "blue" : "green"}">
+          <div class="card stat-card ${scan_in_progress ? "blue" : "green"}">
             <div class="stat-icon">${scan_in_progress ? "⟳" : "✓"}</div>
             <div class="stat-value">${scan_in_progress ? "Scanning" : "Idle"}</div>
-            <div class="stat-label">Status</div>
+            <div class="text-meta stat-label">Status</div>
           </div>
-          <div class="stat-card ${runningLoops > 0 ? "blue" : "cyan"}">
+          <div class="card stat-card ${runningLoops > 0 ? "blue" : "cyan"}">
             <div class="stat-icon">🔄</div>
             <div class="stat-value">${runningLoops}/${loopsList.length}</div>
-            <div class="stat-label">Active Loops</div>
+            <div class="text-meta stat-label">Active Loops</div>
           </div>
-          <div class="stat-card ${criticalFindings > 0 ? "red" : openFindings > 0 ? "orange" : "green"}">
+          <div class="card stat-card ${criticalFindings > 0 ? "red" : openFindings > 0 ? "orange" : "green"}">
             <div class="stat-icon">⚠️</div>
             <div class="stat-value">${openFindings}</div>
-            <div class="stat-label">Open Issues</div>
+            <div class="text-meta stat-label">Open Issues</div>
           </div>
-          <div class="stat-card purple">
+          <div class="card stat-card purple">
             <div class="stat-icon">📊</div>
             <div class="stat-value">${scan_count || 0}</div>
-            <div class="stat-label">Total Scans</div>
+            <div class="text-meta stat-label">Total Scans</div>
           </div>
         </div>
       </div>
 
       <!-- Controls -->
       <div class="section">
-        <div class="controls">
+        <div class="flex-row controls">
           <button class="btn btn-sm btn-primary" data-action="scanNow" ${scan_in_progress ? "disabled" : ""}>
             ${scan_in_progress ? "⟳ Scanning..." : "▶ Scan Now"}
           </button>
@@ -285,7 +298,7 @@ export class SlopTab extends BaseTab {
 
     return `
       <div class="card loop-card ${statusClass}" data-loop="${loop.name}">
-        <div class="card-header">
+        <div class="item-row card-header">
           <div class="card-icon ${borderColor || "purple"}">${this.getLoopEmoji(loop.name)}</div>
           <div>
             <div class="card-title">${this.escapeHtml(loop.display_name)}</div>
@@ -350,7 +363,7 @@ export class SlopTab extends BaseTab {
     const loops = this.state?.priority_order || [];
 
     return `
-      <div class="controls mb-12">
+      <div class="flex-row controls mb-12">
         <select data-filter="loop">
           <option value="">All Loops</option>
           ${loops.map((l) => `<option value="${l}" ${this.filter.loop === l ? "selected" : ""}>${this.getLoopEmoji(l)} ${l.toUpperCase()}</option>`).join("")}
@@ -450,7 +463,7 @@ export class SlopTab extends BaseTab {
   private getSeverityBreakdownHtml(stats: SlopStats): string {
     const severities = ["critical", "high", "medium", "low"];
     const total = stats.total || 1;
-    const colors: Record<string, string> = {
+    const colorClasses: Record<string, string> = {
       critical: "red",
       high: "orange",
       medium: "cyan",
@@ -460,17 +473,20 @@ export class SlopTab extends BaseTab {
     return `
       <div class="section">
         <div class="section-title">Severity Breakdown</div>
-        <div class="severity-breakdown">
+        <div class="grid-4">
           ${severities.map((s) => {
             const count = stats.by_severity?.[s] || 0;
             const pct = Math.round((count / total) * 100);
+            const color = colorClasses[s];
             return `
-              <div class="severity-row">
-                <span class="severity-label">${this.getSeverityIcon(s)} ${s.charAt(0).toUpperCase() + s.slice(1)}</span>
-                <div class="progress-bar flex-1">
-                  <div class="progress-fill ${colors[s]}" style="width: ${pct}%"></div>
+              <div class="card stat-card ${color}">
+                <div class="stat-icon">${this.getSeverityIcon(s)}</div>
+                <div class="stat-value">${count}</div>
+                <div class="text-meta stat-label">${s.charAt(0).toUpperCase() + s.slice(1)}</div>
+                <div class="progress-bar my-12">
+                  <div class="progress-fill ${color}" style="width: ${pct}%"></div>
                 </div>
-                <span class="severity-count">${count} (${pct}%)</span>
+                <div class="severity-pct">${pct}% of total</div>
               </div>
             `;
           }).join("")}
@@ -515,131 +531,8 @@ export class SlopTab extends BaseTab {
   }
 
   getStyles(): string {
-    return `
-      /* Loop card customizations */
-      .loop-card {
-        min-width: 240px;
-      }
-      .loop-card.running {
-        border-color: var(--info);
-        box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
-      }
-      .loop-card.done {
-        border-color: var(--success);
-      }
-      .loop-card.error {
-        border-color: var(--error);
-      }
-      .loop-stats {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 8px;
-      }
-
-      /* Progress fill colors for severity breakdown */
-      .progress-fill.red { background: var(--error); }
-      .progress-fill.orange { background: var(--warning); }
-      .progress-fill.cyan { background: var(--cyan); }
-      .progress-fill.green { background: var(--success); }
-      .progress-fill.blue { background: var(--info); }
-      .progress-fill.purple { background: var(--purple); }
-
-      /* Severity breakdown */
-      .severity-breakdown {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-      .severity-row {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .severity-label {
-        width: 100px;
-        font-size: 0.85rem;
-        font-weight: 500;
-      }
-      .severity-count {
-        width: 80px;
-        text-align: right;
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-      }
-
-      /* Table container for scrolling */
-      .table-container {
-        overflow-x: auto;
-        margin: 0 -16px;
-        padding: 0 16px;
-      }
-
-      /* Button group for actions */
-      .btn-group {
-        display: flex;
-        gap: 4px;
-      }
-
-      /* Text utilities */
-      .text-primary { color: var(--text-primary); }
-      .text-secondary { color: var(--text-secondary); }
-      .text-sm { font-size: 0.8rem; }
-
-      /* Link styling */
-      .link {
-        color: var(--accent);
-        text-decoration: none;
-      }
-      .link:hover {
-        text-decoration: underline;
-      }
-
-      /* Error state styling */
-      .error-state {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 48px 24px;
-        text-align: center;
-        gap: 12px;
-      }
-      .error-state-icon {
-        font-size: 48px;
-        opacity: 0.8;
-      }
-      .error-state-title {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: var(--error);
-      }
-      .error-state-message {
-        font-size: 0.9rem;
-        color: var(--text-secondary);
-        max-width: 400px;
-        word-break: break-word;
-      }
-      .error-retry-info {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        opacity: 0.7;
-      }
-      .error-state-actions {
-        margin-top: 8px;
-      }
-      .error-state-hint {
-        margin-top: 16px;
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        opacity: 0.7;
-      }
-      .error-state-hint code {
-        background: var(--bg-secondary);
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-family: monospace;
-      }
-    `;
+    // All styles are in unified.css
+    return "";
   }
 
   getScript(): string {

@@ -10,7 +10,7 @@ The `export_report` skill generates a comprehensive quarterly performance report
 
 ```bash
 # Export current quarter report
-skill_run("performance/export_report")
+skill_run("performance_export_report")
 
 # Or use the Cursor command
 /performance-report
@@ -20,16 +20,16 @@ skill_run("performance/export_report")
 
 ```bash
 # Export current quarter as Markdown (default)
-skill_run("performance/export_report")
+skill_run("performance_export_report")
 
 # Export as JSON
-skill_run("performance/export_report", '{"format": "json"}')
+skill_run("performance_export_report", '{"format": "json"}')
 
 # Export specific quarter
-skill_run("performance/export_report", '{"quarter": "Q4 2025"}')
+skill_run("performance_export_report", '{"quarter": "Q4 2025"}')
 
 # Export Q1 2026 as JSON
-skill_run("performance/export_report", '{"quarter": "Q1 2026", "format": "json"}')
+skill_run("performance_export_report", '{"quarter": "Q1 2026", "format": "json"}')
 ```
 
 ## Parameters

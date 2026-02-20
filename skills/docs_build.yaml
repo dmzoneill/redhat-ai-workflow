@@ -1,0 +1,42 @@
+# Skill: Build documentation site
+
+name: docs_build
+description: |
+  Build the MkDocs documentation site into static HTML.
+  Runs mkdocs build --strict to catch any warnings as errors.
+
+version: "1.0"
+
+links:
+  depends_on:
+    - docs_sync
+  validates: []
+  validated_by: []
+  chains_to:
+    - docs_serve
+  provides_context_for: []
+
+inputs: []
+
+steps:
+  - name: build_site
+    description: "Run mkdocs build"
+    compute: |
+      import subprocess, sys
+      from pathlib import Path
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      cmd = [sys.executable, str(project / "scripts" / "generate_all.py"), "--build-only"]
+      proc = subprocess.run(cmd, cwd=project, capture_output=True, text=True, timeout=120)
+
+      if proc.returncode != 0:
+          result = f"❌ Build failed:\n```\n{proc.stderr[-2000:]}\n```"
+      else:
+          site = project / "site"
+          page_count = len(list(site.rglob("*.html"))) if site.exists() else 0
+          result = f"✅ Site built successfully\n\n- Output: `{site}`\n- Pages: {page_count} HTML files"
+    output: build_result
+
+outputs:
+  - name: summary
+    value: "{{ build_result }}"

@@ -2,14 +2,18 @@ import json
 import logging
 from pathlib import Path
 
+import yaml
+
 from server.paths import PERFORMANCE_DIR
 
 logger = logging.getLogger(__name__)
 
+COMPETENCIES_YAML = Path(__file__).parent / "competencies.yaml"
+
 COMPETENCY_DEFS: dict[str, dict] = {
     "technical_contribution": {
         "name": "Technical Contribution",
-        "category": "Technical Excellence",
+        "category": "Technical Contribution",
         "goal": "Deliver high-quality code through commits, merge requests, and bug fixes.",
         "description": (
             "Measures direct code contributions: commits, MRs merged, bugs fixed, "
@@ -18,10 +22,12 @@ COMPETENCY_DEFS: dict[str, dict] = {
         "base_points": 2,
         "event_types": [
             "mr_merged",
+            "mr_opened",
             "issue_resolved",
             "commit",
             "pr_opened",
             "pr_merged",
+            "debugging_outcome",
         ],
         "phrases": [
             "fix:",
@@ -44,14 +50,14 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "technical_knowledge": {
         "name": "Technical Knowledge",
-        "category": "Technical Excellence",
+        "category": "Technical Contribution",
         "goal": "Build and share technical knowledge through documentation and knowledge articles.",
         "description": (
             "Captures documentation work: READMEs, architecture docs, runbooks, "
             "knowledge-base articles, and technical blog posts."
         ),
         "base_points": 3,
-        "event_types": [],
+        "event_types": ["commit", "alert_investigated", "architecture_decision"],
         "phrases": [
             "update readme",
             "add documentation",
@@ -64,6 +70,21 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "onboarding doc",
             "technical blog",
             "wiki update",
+            "docs(",
+            "doc:",
+            "update doc",
+            "changelog",
+            "release notes",
+            "comment",
+            "annotation",
+            "type hint",
+            "docstring",
+            "swagger",
+            "openapi spec",
+            "config doc",
+            "readme",
+            "yaml",
+            "schema doc",
         ],
         "keywords": [
             "doc",
@@ -73,18 +94,30 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "guide",
             "runbook",
             "adr",
+            "changelog",
+            "annotation",
+            "docstring",
+            "swagger",
+            "schema",
+            "yaml",
+            "config",
         ],
     },
     "creativity_innovation": {
         "name": "Creativity & Innovation",
-        "category": "Technical Excellence",
+        "category": "Technical Contribution",
         "goal": "Drive innovation through prototypes, AI experiments, and creative solutions.",
         "description": (
             "Recognises work on proof-of-concepts, AI/ML experiments, novel tooling, "
             "and creative problem solving that goes beyond routine tasks."
         ),
         "base_points": 4,
-        "event_types": [],
+        "event_types": [
+            "pr_opened",
+            "commit",
+            "architecture_decision",
+            "process_improvement",
+        ],
         "phrases": [
             "proof of concept",
             "poc",
@@ -104,6 +137,21 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "langchain",
             "embedding",
             "vector search",
+            "workflow",
+            "automation",
+            "bot",
+            "mcp",
+            "tool",
+            "plugin",
+            "extension",
+            "openai",
+            "openvino",
+            "npu",
+            "inference",
+            "model",
+            "neural",
+            "data pipeline",
+            "etl",
         ],
         "keywords": [
             "poc",
@@ -117,18 +165,32 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "novel",
             "spike",
             "research",
+            "workflow",
+            "automation",
+            "bot",
+            "plugin",
+            "extension",
+            "openvino",
+            "npu",
+            "inference",
+            "neural",
+            "etl",
         ],
     },
     "continuous_improvement": {
         "name": "Continuous Improvement",
-        "category": "Technical Excellence",
+        "category": "Leadership",
         "goal": "Improve engineering processes, CI/CD, automation, and code quality.",
         "description": (
             "Tracks process improvements: CI/CD pipeline enhancements, automation, "
             "refactoring for maintainability, linting, test coverage, and tooling upgrades."
         ),
         "base_points": 3,
-        "event_types": [],
+        "event_types": [
+            "alert_investigated",
+            "debugging_outcome",
+            "process_improvement",
+        ],
         "phrases": [
             "ci/cd",
             "pipeline",
@@ -165,14 +227,18 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "leadership": {
         "name": "Leadership",
-        "category": "Leadership & Influence",
+        "category": "Leadership",
         "goal": "Lead cross-team initiatives, architecture decisions, and design reviews.",
         "description": (
             "Recognises leadership actions: driving architecture decisions, leading "
             "design reviews, cross-team coordination, and setting technical direction."
         ),
         "base_points": 3,
-        "event_types": [],
+        "event_types": [
+            "meeting_participated",
+            "architecture_decision",
+            "collaboration_activity",
+        ],
         "phrases": [
             "cross-team",
             "lead",
@@ -202,14 +268,21 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "collaboration": {
         "name": "Collaboration",
-        "category": "Leadership & Influence",
+        "category": "Leadership",
         "goal": "Strengthen team collaboration through code reviews, pair programming, and feedback.",
         "description": (
             "Measures collaborative work: reviewing others' code, pair programming, "
             "providing constructive feedback, and contributing to team discussions."
         ),
         "base_points": 2,
-        "event_types": ["review_given", "pr_reviewed"],
+        "event_types": [
+            "review_given",
+            "pr_reviewed",
+            "mr_review_given",
+            "meeting_participated",
+            "collaboration_activity",
+            "recognition_given",
+        ],
         "phrases": [
             "review",
             "pair program",
@@ -228,14 +301,14 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "mentorship": {
         "name": "Mentorship",
-        "category": "Leadership & Influence",
+        "category": "Mentorship",
         "goal": "Grow others through mentoring, onboarding, training, and knowledge sharing.",
         "description": (
             "Captures mentoring activities: onboarding new hires, running training "
             "sessions, knowledge-sharing talks, and supporting junior team members."
         ),
         "base_points": 3,
-        "event_types": [],
+        "event_types": ["mr_review_given", "recognition_given"],
         "phrases": [
             "mentor",
             "onboard",
@@ -264,7 +337,7 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "speaking_publicity": {
         "name": "Speaking & Publicity",
-        "category": "Leadership & Influence",
+        "category": "Technical Contribution",
         "goal": "Represent the team through presentations, blog posts, and public speaking.",
         "description": (
             "Tracks public-facing activities: conference talks, team demos, blog posts, "
@@ -286,6 +359,15 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "published",
             "article",
             "show and tell",
+            "sprint demo",
+            "tech talk",
+            "team update",
+            "share findings",
+            "knowledge session",
+            "retrospective",
+            "retro",
+            "standup presentation",
+            "quarterly review",
         ],
         "keywords": [
             "presentation",
@@ -296,11 +378,14 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "meetup",
             "webinar",
             "published",
+            "retro",
+            "slides",
+            "recording",
         ],
     },
     "portfolio_impact": {
         "name": "Portfolio Impact",
-        "category": "Delivery & Impact",
+        "category": "Leadership",
         "goal": "Deliver cross-cutting impact through APIs, schemas, and service integrations.",
         "description": (
             "Measures work that spans multiple services or products: API design, "
@@ -335,14 +420,19 @@ COMPETENCY_DEFS: dict[str, dict] = {
     },
     "planning_execution": {
         "name": "Planning & Execution",
-        "category": "Delivery & Impact",
+        "category": "Technical Contribution",
         "goal": "Plan and break down work into well-defined, actionable tasks.",
         "description": (
             "Recognises planning work: creating Jira issues with clear acceptance "
             "criteria, sprint planning, roadmap contributions, and task breakdown."
         ),
         "base_points": 2,
-        "event_types": ["issue_created", "issue_opened", "issue_closed"],
+        "event_types": [
+            "issue_created",
+            "issue_opened",
+            "issue_closed",
+            "session_documented",
+        ],
         "phrases": [
             "planning",
             "roadmap",
@@ -357,6 +447,20 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "scope",
             "requirement",
             "specification",
+            "issue",
+            "task",
+            "ticket",
+            "jira",
+            "created",
+            "opened",
+            "closed",
+            "assigned",
+            "priority",
+            "milestone",
+            "due date",
+            "grooming",
+            "refinement",
+            "triage",
         ],
         "keywords": [
             "planning",
@@ -367,18 +471,28 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "requirement",
             "specification",
             "estimate",
+            "issue",
+            "task",
+            "ticket",
+            "jira",
+            "created",
+            "opened",
+            "closed",
+            "triage",
+            "grooming",
+            "milestone",
         ],
     },
     "end_to_end_delivery": {
         "name": "End-to-End Delivery",
-        "category": "Delivery & Impact",
+        "category": "End-to-End Delivery",
         "goal": "Ship features from development all the way to production.",
         "description": (
             "Tracks full delivery lifecycle: releasing to production, deploying "
             "and validating, customer-facing fixes, and closing delivery loops."
         ),
         "base_points": 3,
-        "event_types": ["pr_merged"],
+        "event_types": ["pr_merged", "mr_merged", "issue_resolved", "issue_closed"],
         "phrases": [
             "release",
             "deploy",
@@ -393,6 +507,18 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "merged to main",
             "hotfix",
             "incident fix",
+            "merge",
+            "merged",
+            "pipeline",
+            "ci pass",
+            "tested",
+            "validated",
+            "approved",
+            "ready for merge",
+            "konflux",
+            "quay",
+            "image",
+            "container",
         ],
         "keywords": [
             "release",
@@ -403,18 +529,25 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "rollout",
             "promote",
             "hotfix",
+            "merge",
+            "merged",
+            "pipeline",
+            "validated",
+            "quay",
+            "konflux",
+            "container",
         ],
     },
     "opportunity_recognition": {
         "name": "Opportunity Recognition",
-        "category": "Delivery & Impact",
+        "category": "Technical Contribution",
         "goal": "Identify opportunities and contribute beyond assigned work, including open-source.",
         "description": (
             "Measures proactive contributions: open-source work on GitHub, identifying "
             "improvement opportunities, proposing new features, and self-directed initiatives."
         ),
         "base_points": 4,
-        "event_types": [],
+        "event_types": ["issue_opened", "issue_created", "pr_opened", "mr_opened"],
         "phrases": [
             "open source",
             "github",
@@ -427,6 +560,15 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "proposed feature",
             "new idea",
             "side project",
+            "contribution",
+            "feature request",
+            "enhancement",
+            "improvement",
+            "proactive",
+            "self-initiated",
+            "hackathon",
+            "20% time",
+            "personal project",
         ],
         "keywords": [
             "open-source",
@@ -436,6 +578,210 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "volunteer",
             "initiative",
             "opportunity",
+            "contribution",
+            "enhancement",
+            "improvement",
+            "proactive",
+            "hackathon",
+        ],
+    },
+    "customer_focus": {
+        "name": "Customer Involvement & Focus",
+        "category": "End-to-End Delivery",
+        "goal": "Engage with customers and stakeholders to understand and deliver value.",
+        "description": (
+            "Tracks customer-facing work: stakeholder engagement, customer issue resolution, "
+            "field escalations, customer demos, and product feedback incorporation."
+        ),
+        "base_points": 3,
+        "event_types": [
+            "issue_resolved",
+            "issue_closed",
+            "issue_opened",
+            "alert_investigated",
+        ],
+        "phrases": [
+            "customer",
+            "stakeholder",
+            "field escalation",
+            "customer demo",
+            "customer feedback",
+            "user request",
+            "customer issue",
+            "support case",
+            "account",
+            "use case",
+            "customer engagement",
+            "sla",
+            "customer-reported",
+            "field issue",
+            "production issue",
+            "user-facing",
+            "user experience",
+            "ux",
+            "end user",
+            "tenant",
+            "billing",
+            "subscription",
+        ],
+        "keywords": [
+            "customer",
+            "stakeholder",
+            "escalation",
+            "account",
+            "field",
+            "user request",
+            "sla",
+            "tenant",
+            "billing",
+            "ux",
+            "user-facing",
+            "subscription",
+        ],
+    },
+    "scope": {
+        "name": "Scope",
+        "category": "Technical Contribution",
+        "goal": "Demonstrate breadth and depth of technical scope in contributions.",
+        "description": (
+            "Measures the scope of work: from task-level to subsystem-level design, "
+            "cross-component integration, and architectural coordination."
+        ),
+        "base_points": 3,
+        "event_types": [
+            "mr_merged",
+            "mr_opened",
+            "pr_merged",
+            "pr_opened",
+            "issue_closed",
+            "issue_created",
+            "commit",
+        ],
+        "phrases": [
+            "subsystem",
+            "cross-component",
+            "architectural",
+            "system design",
+            "platform",
+            "full stack",
+            "end-to-end",
+            "multi-service",
+            "infrastructure",
+            "framework",
+            "refactor",
+            "migration",
+            "database",
+            "schema change",
+            "config change",
+            "multiple services",
+            "across repos",
+            "cluster",
+            "namespace",
+            "deployment",
+            "service",
+            "backend",
+            "frontend",
+        ],
+        "keywords": [
+            "subsystem",
+            "platform",
+            "architecture",
+            "infrastructure",
+            "framework",
+            "system",
+            "migration",
+            "database",
+            "cluster",
+            "deployment",
+            "namespace",
+            "backend",
+            "frontend",
+            "service",
+            "config",
+        ],
+    },
+    "evidence_record": {
+        "name": "Evidence & Record",
+        "category": "Technical Contribution",
+        "goal": "Build a consistent track record of delivery and contribution.",
+        "description": (
+            "Tracks delivery consistency: on-time task completion, scoping accuracy, "
+            "decomposition of complex work, and sustained contribution over time."
+        ),
+        "base_points": 2,
+        "event_types": [
+            "issue_resolved",
+            "issue_closed",
+            "mr_merged",
+            "pr_merged",
+            "meeting_participated",
+            "session_documented",
+        ],
+        "phrases": [
+            "delivered",
+            "completed",
+            "shipped",
+            "on time",
+            "acceptance criteria met",
+            "resolved",
+            "closed",
+            "done",
+            "finished",
+            "ready for release",
+        ],
+        "keywords": [
+            "delivered",
+            "completed",
+            "shipped",
+            "resolved",
+            "closed",
+            "done",
+        ],
+    },
+    "execution_as_mentee": {
+        "name": "Execution as Mentee",
+        "category": "Mentorship",
+        "goal": "Grow through mentoring relationships and expand scope through guidance.",
+        "description": (
+            "Tracks growth as a mentee: seeking mentors, acting on feedback, "
+            "expanding scope through guidance, and building professional networks."
+        ),
+        "base_points": 2,
+        "event_types": ["pr_reviewed", "mr_review_received"],
+        "phrases": [
+            "learned from",
+            "mentor session",
+            "1:1",
+            "feedback received",
+            "growth area",
+            "stretch assignment",
+            "professional development",
+            "career growth",
+            "skill building",
+            "review comment",
+            "suggestion",
+            "requested changes",
+            "fix review",
+            "address feedback",
+            "follow-up",
+            "iteration",
+            "v2",
+            "revision",
+            "update per",
+            "nit",
+        ],
+        "keywords": [
+            "mentor",
+            "feedback",
+            "growth",
+            "learning",
+            "development",
+            "1:1",
+            "suggestion",
+            "revision",
+            "iteration",
+            "follow-up",
+            "nit",
         ],
     },
 }
@@ -444,6 +790,36 @@ DEFAULT_GLOBALS = {
     "min_signals": 2,
     "daily_cap": 15,
     "target_per_competency": 100,
+    "engineering_level": "sse",
+    "scope_multipliers": {
+        "commit": 1,
+        "story": 2,
+        "epic": 4,
+        "anstrat": 7,
+        "strategy": 10,
+    },
+    "strategy_alignment": {
+        "enabled": True,
+        "bonus_multiplier": 1.5,
+        "enrich_classification": True,
+        "min_text_overlap_words": 3,
+    },
+    "npu_settings": {
+        "enabled": False,
+        "device": "CPU",
+        "confidence_threshold": 0.35,
+        "bonus_signals": 2,
+    },
+    "session_integration": {
+        "enabled": True,
+        "noise_skip_patterns": [
+            "hello_world",
+            "vector_reindex",
+            "vector reindex",
+        ],
+        "noise_skip_types": ["session"],
+        "min_details_length": 10,
+    },
 }
 
 SCORING_CONFIG_FILE = PERFORMANCE_DIR / "scoring_config.json"
@@ -474,7 +850,10 @@ def get_merged_config() -> dict:
     merged_globals = {**DEFAULT_GLOBALS}
     for k in DEFAULT_GLOBALS:
         if k in user:
-            merged_globals[k] = user[k]
+            if isinstance(DEFAULT_GLOBALS[k], dict) and isinstance(user[k], dict):
+                merged_globals[k] = {**DEFAULT_GLOBALS[k], **user[k]}
+            else:
+                merged_globals[k] = user[k]
 
     merged_comps: dict[str, dict] = {}
     user_comps = user.get("competencies", {})
@@ -517,21 +896,135 @@ def get_effective_defs() -> tuple[dict[str, dict], int, int, int]:
     )
 
 
-def map_competencies(title: str, source: str, event_type: str) -> dict[str, int]:
-    """Map an event to competency points using configurable scoring.
+def get_scope_multipliers() -> dict[str, int]:
+    """Return the scope multiplier mapping from config."""
+    cfg = get_merged_config()
+    return cfg.get("scope_multipliers", DEFAULT_GLOBALS["scope_multipliers"])
 
-    An event must accumulate at least min_signals distinct indicator
-    matches against a competency before any points are awarded.
+
+def get_strategy_alignment_config() -> dict:
+    """Return strategy alignment configuration."""
+    cfg = get_merged_config()
+    return cfg.get("strategy_alignment", DEFAULT_GLOBALS["strategy_alignment"])
+
+
+def get_npu_settings() -> dict:
+    """Return NPU classification settings."""
+    cfg = get_merged_config()
+    return cfg.get("npu_settings", DEFAULT_GLOBALS["npu_settings"])
+
+
+def get_session_integration_config() -> dict:
+    """Return session integration settings."""
+    cfg = get_merged_config()
+    return cfg.get("session_integration", DEFAULT_GLOBALS["session_integration"])
+
+
+def get_level_weights(level: str | None = None) -> dict:
+    """Return level weight configuration for a specific engineering level.
+
+    Loads from competencies.yaml level_weights section. Returns empty dict
+    if level not found.
+    """
+    if not level:
+        cfg = get_merged_config()
+        level = cfg.get("engineering_level", "sse")
+    data = _load_competencies_yaml()
+    all_weights = data.get("level_weights", {})
+    return all_weights.get(level, {})
+
+
+def map_competencies(
+    classification_text: str,
+    source: str,
+    event_type: str,
+    scope: str = "story",
+    role: str = "assignee",
+    *,
+    effective_defs: dict[str, dict] | None = None,
+    min_signals: int | None = None,
+    level: str | None = None,
+    strategy_aligned: bool = False,
+    npu_classifier: object | None = None,
+    contribution_type: str | None = None,
+    is_cross_team: bool = False,
+    review_decision: str | None = None,
+) -> dict[str, int]:
+    """Map an event to competency points using the full scoring formula.
+
+    Formula: base_points * scope_mult * role_weight * pillar_weight * strategy_bonus
 
     Signal types counted (each distinct hit = 1 signal):
       - event_type match: 1 signal
       - each matching phrase: 1 signal per phrase
       - each matching keyword: 1 signal per keyword
       - source-level rule: 1 signal
+      - NPU bonus signals (if classifier provided)
+      - contribution_type bonus (fork/upstream/cross-org)
+      - cross-team Jira bonus
+      - review_decision bonus (CHANGES_REQUESTED = mentorship)
     """
-    defs, min_sig, _, _ = get_effective_defs()
+    if effective_defs is not None and min_signals is not None:
+        defs, min_sig = effective_defs, min_signals
+    else:
+        defs, min_sig, _, _ = get_effective_defs()
+
+    cfg = get_merged_config()
+    if not level:
+        level = cfg.get("engineering_level", "sse")
+
+    scope_multipliers = cfg.get(
+        "scope_multipliers", DEFAULT_GLOBALS["scope_multipliers"]
+    )
+    scope_mult = scope_multipliers.get(scope, 1)
+
+    lw = get_level_weights(level)
+    user_cfg = load_scoring_config()
+    user_lw = user_cfg.get("level_weight_overrides", {}).get(level, {})
+    if user_lw.get("role_weights"):
+        merged_rw = dict(lw.get("role_weights", {}))
+        for s, roles in user_lw["role_weights"].items():
+            if isinstance(roles, dict):
+                merged_rw[s] = {**merged_rw.get(s, {}), **roles}
+        role_weights_table = merged_rw
+    else:
+        role_weights_table = lw.get("role_weights", {})
+    if user_lw.get("pillar_weights"):
+        pillar_weights = {**lw.get("pillar_weights", {}), **user_lw["pillar_weights"]}
+    else:
+        pillar_weights = lw.get("pillar_weights", {})
+
+    strategy_cfg = cfg.get("strategy_alignment", DEFAULT_GLOBALS["strategy_alignment"])
+    strategy_bonus = 1.0
+    if strategy_aligned and strategy_cfg.get("enabled", True):
+        strategy_bonus = strategy_cfg.get("bonus_multiplier", 1.5)
+
+    npu_bonus: dict[str, int] = {}
+    if npu_classifier is not None and hasattr(npu_classifier, "get_bonus_signals"):
+        try:
+            npu_bonus = npu_classifier.get_bonus_signals(classification_text)
+        except Exception:
+            pass
+
     points: dict[str, int] = {}
-    text = title.lower()
+    text = classification_text.lower()
+
+    # Pre-compute bonus signal sets based on event metadata
+    _contrib_bonus_comps: set[str] = set()
+    if contribution_type in ("upstream", "fork"):
+        _contrib_bonus_comps.update(("opportunity_recognition", "scope"))
+    if contribution_type == "cross-org":
+        _contrib_bonus_comps.update(("scope", "collaboration"))
+    _cross_team_bonus_comps: set[str] = set()
+    if is_cross_team:
+        _cross_team_bonus_comps.update(("scope", "collaboration", "leadership"))
+    _review_decision_bonus: dict[str, set[str]] = {}
+    if review_decision:
+        rd = review_decision.upper()
+        if rd == "CHANGES_REQUESTED":
+            _review_decision_bonus = {"mentorship": {rd}, "collaboration": {rd}}
+        elif rd == "APPROVED":
+            _review_decision_bonus = {"collaboration": {rd}}
 
     for comp_id, defn in defs.items():
         signals = 0
@@ -547,10 +1040,27 @@ def map_competencies(title: str, source: str, event_type: str) -> dict[str, int]
             if kw in text:
                 signals += 1
 
-        if signals >= min_sig:
-            points[comp_id] = defn["base_points"]
+        signals += npu_bonus.get(comp_id, 0)
 
-    if source == "github" and "opportunity_recognition" in defs:
+        if comp_id in _contrib_bonus_comps:
+            signals += 1
+        if comp_id in _cross_team_bonus_comps:
+            signals += 1
+        if comp_id in _review_decision_bonus:
+            signals += 1
+
+        if signals >= min_sig:
+            base = defn["base_points"]
+            scope_role_weights = role_weights_table.get(scope, {})
+            role_weight = scope_role_weights.get(role, 1.0)
+            category = defn.get("category", "")
+            pillar_weight = pillar_weights.get(category, 1.0)
+            final = round(
+                base * scope_mult * role_weight * pillar_weight * strategy_bonus
+            )
+            points[comp_id] = max(final, 1)
+
+    if source in ("github", "gitlab") and "opportunity_recognition" in defs:
         comp_id = "opportunity_recognition"
         defn = defs[comp_id]
         extra_signals = 1
@@ -562,24 +1072,91 @@ def map_competencies(title: str, source: str, event_type: str) -> dict[str, int]
         for kw in defn.get("keywords", []):
             if kw in text:
                 extra_signals += 1
+        extra_signals += npu_bonus.get(comp_id, 0)
+        if comp_id in _contrib_bonus_comps:
+            extra_signals += 1
         if extra_signals >= min_sig:
+            base = defn["base_points"]
+            scope_role_weights = role_weights_table.get(scope, {})
+            role_weight = scope_role_weights.get(role, 1.0)
+            category = defn.get("category", "")
+            pillar_weight = pillar_weights.get(category, 1.0)
+            final = round(
+                base * scope_mult * role_weight * pillar_weight * strategy_bonus
+            )
             points[comp_id] = max(
                 points.get(comp_id, 0),
-                defn["base_points"],
+                max(final, 1),
             )
 
     return points
 
 
-def get_competency_meta(comp_id: str) -> dict:
-    """Return competency goal, description, and category for display."""
+_competencies_yaml_cache: dict | None = None
+
+
+def _load_competencies_yaml() -> dict:
+    """Load and cache the engineering competencies YAML."""
+    global _competencies_yaml_cache
+    if _competencies_yaml_cache is not None:
+        return _competencies_yaml_cache
+    try:
+        if COMPETENCIES_YAML.exists():
+            with open(COMPETENCIES_YAML, encoding="utf-8") as f:
+                _competencies_yaml_cache = yaml.safe_load(f) or {}
+        else:
+            _competencies_yaml_cache = {}
+    except Exception as e:
+        logger.warning(f"Failed to load competencies YAML: {e}")
+        _competencies_yaml_cache = {}
+    return _competencies_yaml_cache
+
+
+def get_engineering_levels() -> list[dict]:
+    """Return the list of engineering levels from the competencies YAML."""
+    data = _load_competencies_yaml()
+    return data.get("engineering_levels", [])
+
+
+_SCORING_TO_YAML_ALIASES = {
+    "technical_contribution": "business_impact",
+    "leadership": "work_impact",
+    "mentorship": "growth_impact",
+    "end_to_end_delivery": "product_delivery_lifecycle",
+}
+
+
+def get_level_description(comp_id: str, level: str) -> dict:
+    """Return title and description for a competency at a specific level."""
+    data = _load_competencies_yaml()
+    comps = data.get("competencies", {})
+    comp_data = comps.get(comp_id, {})
+    if not comp_data and comp_id in _SCORING_TO_YAML_ALIASES:
+        comp_data = comps.get(_SCORING_TO_YAML_ALIASES[comp_id], {})
+    levels = comp_data.get("levels", {})
+    return levels.get(level, {"title": "", "description": ""})
+
+
+def get_competency_meta(comp_id: str, level: str | None = None) -> dict:
+    """Return competency goal, description, and category for display.
+
+    If level is provided, includes level-specific title and description
+    from the engineering competencies YAML.
+    """
     defn = COMPETENCY_DEFS.get(comp_id, {})
-    return {
+    meta = {
         "name": defn.get("name", comp_id.replace("_", " ").title()),
         "category": defn.get("category", "Other"),
         "goal": defn.get("goal", ""),
         "description": defn.get("description", ""),
     }
+    if level:
+        level_data = get_level_description(comp_id, level)
+        if level_data.get("title"):
+            meta["level_title"] = level_data["title"]
+        if level_data.get("description"):
+            meta["level_description"] = level_data["description"]
+    return meta
 
 
 def get_gap_suggestions(comp_id: str) -> list[str]:

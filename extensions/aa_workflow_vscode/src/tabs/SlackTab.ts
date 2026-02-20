@@ -213,6 +213,21 @@ export class SlackTab extends BaseTab {
     return { text: "○", class: "status-red" };
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.status?.connected ? 1 : 0,
+      this.channels.length,
+      this.pendingMessages.length,
+      this.history.length,
+      this.selectedChannel ?? "",
+      this.searchQuery,
+      this.showAdvanced ? 1 : 0,
+      this.dms.length,
+      this.threadView ? 1 : 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     let hasAnyData = false;
@@ -375,25 +390,25 @@ export class SlackTab extends BaseTab {
       <div class="section">
         <div class="section-title">Slack Bot Status</div>
         <div class="grid-4">
-          <div class="stat-card ${this.status.connected ? "green" : "red"}">
+          <div class="card stat-card ${this.status.connected ? "green" : "red"}">
             <div class="stat-icon">${this.status.connected ? "✓" : "✕"}</div>
             <div class="stat-value">${this.status.connected ? "Connected" : "Offline"}</div>
-            <div class="stat-label">Status</div>
+            <div class="text-meta stat-label">Status</div>
           </div>
-          <div class="stat-card blue">
+          <div class="card stat-card blue">
             <div class="stat-icon">📢</div>
             <div class="stat-value">${this.status.channels_count}</div>
-            <div class="stat-label">Channels</div>
+            <div class="text-meta stat-label">Channels</div>
           </div>
-          <div class="stat-card ${this.status.pending_count > 0 ? "yellow" : "green"}">
+          <div class="card stat-card ${this.status.pending_count > 0 ? "yellow" : "green"}">
             <div class="stat-icon">⏳</div>
             <div class="stat-value">${this.status.pending_count}</div>
-            <div class="stat-label">Pending</div>
+            <div class="text-meta stat-label">Pending</div>
           </div>
-          <div class="stat-card purple">
+          <div class="card stat-card purple">
             <div class="stat-icon">📊</div>
             <div class="stat-value">${this.status.processed_today}</div>
-            <div class="stat-label">Today</div>
+            <div class="text-meta stat-label">Today</div>
           </div>
         </div>
       </div>
@@ -452,7 +467,7 @@ export class SlackTab extends BaseTab {
       <!-- Message History -->
       <div class="section">
         <div class="section-title">Recent Messages (${this.history.length})</div>
-        <div class="slack-history-list">
+        <div class="flex-col slack-history-list">
           ${this.history.length > 0 ? this.history.map((msg) => this.getHistoryItemHtml(msg)).join("") : this.getEmptyStateHtml("📜", "No message history")}
         </div>
         ${this.history.length >= this.historyLimit ? `
@@ -532,7 +547,7 @@ export class SlackTab extends BaseTab {
         <!-- Compose Message -->
         <div class="slack-subsection">
           <div class="slack-subsection-title">Send Message</div>
-          <div class="slack-compose">
+          <div class="flex-col slack-compose">
             <select class="slack-channel-select" data-action="selectChannel">
               <option value="">Select channel...</option>
               ${this.channels.map(ch => `<option value="${ch.channel_id}">#${this.escapeHtml(ch.name)}</option>`).join("")}
@@ -549,11 +564,11 @@ export class SlackTab extends BaseTab {
         ${this.commands.length > 0 ? `
         <div class="slack-subsection">
           <div class="slack-subsection-title">Available @me Commands (${this.commands.length})</div>
-          <div class="slack-commands-list">
+          <div class="flex-col slack-commands-list">
             ${this.commands.slice(0, 10).map(cmd => `
-              <div class="slack-command-item">
+              <div class="item-row slack-command-item">
                 <span class="slack-command-name">@me ${this.escapeHtml(cmd.name)}</span>
-                <span class="slack-command-desc">${this.escapeHtml(cmd.description || "")}</span>
+                <span class="text-meta slack-command-desc">${this.escapeHtml(cmd.description || "")}</span>
               </div>
             `).join("")}
             ${this.commands.length > 10 ? `<div class="slack-command-more">...and ${this.commands.length - 10} more</div>` : ""}
@@ -619,8 +634,8 @@ export class SlackTab extends BaseTab {
         <div class="context-sources-grid">
 
           <!-- Slack Vector DB -->
-          <div class="context-source-card purple">
-            <div class="card-header">
+          <div class="card context-source-card purple">
+            <div class="item-row card-header">
               <span class="card-icon">💬</span>
               <div>
                 <div class="card-title">Slack History</div>
@@ -634,8 +649,8 @@ export class SlackTab extends BaseTab {
           </div>
 
           <!-- Code Vector DB -->
-          <div class="context-source-card blue">
-            <div class="card-header">
+          <div class="card context-source-card blue">
+            <div class="item-row card-header">
               <span class="card-icon">📁</span>
               <div>
                 <div class="card-title">Code Search</div>
@@ -649,8 +664,8 @@ export class SlackTab extends BaseTab {
           </div>
 
           <!-- InScope AI -->
-          <div class="context-source-card pink">
-            <div class="card-header">
+          <div class="card context-source-card pink">
+            <div class="item-row card-header">
               <span class="card-icon">🤖</span>
               <div>
                 <div class="card-title">InScope AI</div>
@@ -664,8 +679,8 @@ export class SlackTab extends BaseTab {
           </div>
 
           <!-- Jira -->
-          <div class="context-source-card orange">
-            <div class="card-header">
+          <div class="card context-source-card orange">
+            <div class="item-row card-header">
               <span class="card-icon">🎫</span>
               <div>
                 <div class="card-title">Jira Issues</div>
@@ -681,8 +696,8 @@ export class SlackTab extends BaseTab {
           </div>
 
           <!-- Memory -->
-          <div class="context-source-card green">
-            <div class="card-header">
+          <div class="card context-source-card green">
+            <div class="item-row card-header">
               <span class="card-icon">🧠</span>
               <div>
                 <div class="card-title">Memory</div>
@@ -887,7 +902,7 @@ export class SlackTab extends BaseTab {
             <span class="text-success">${item.relevance || 0}%</span>
           </div>
           <div class="text-secondary mb-4">${item.type || ""} <code>${this.escapeHtml(item.name || "")}</code></div>
-          ${item.preview ? `<pre class="code-preview m-0 p-8 text-2xs">${this.escapeHtml((item.preview || "").substring(0, 200))}</pre>` : ""}
+          ${item.preview ? `<pre class="code-preview m-0 p-8 text-xs">${this.escapeHtml((item.preview || "").substring(0, 200))}</pre>` : ""}
         </div>
       `;
     } else if (source === "jira") {
@@ -925,9 +940,9 @@ export class SlackTab extends BaseTab {
       if (sources.length > 0) {
         sourcesHtml = `
           <div class="mt-8 pt-8 border-t">
-            <div class="text-2xs text-secondary mb-4">Sources:</div>
+            <div class="text-xs text-secondary mb-4">Sources:</div>
             ${sources.map((s: any) => `
-              <div class="text-2xs">
+              <div class="text-xs">
                 ${s.url ? `<a href="${this.escapeHtml(s.url)}" class="link">${this.escapeHtml(s.title || s.url)}</a>` : this.escapeHtml(s.title || "")}
               </div>
             `).join("")}
@@ -1002,7 +1017,7 @@ export class SlackTab extends BaseTab {
         <div class="slack-persona-source card mb-12 p-12">
           <div class="flex-between mb-8">
             <span class="font-bold">${sourceConfig.icon} ${sourceConfig.name}</span>
-            <span class="text-2xs text-secondary">
+            <span class="text-xs text-secondary">
               ${source.found ? `${source.count} results` : `❌ ${source.error || "No results"}`}
               ${source.latency_ms ? ` (${Math.round(source.latency_ms)}ms)` : ""}
             </span>
@@ -1031,7 +1046,7 @@ export class SlackTab extends BaseTab {
                   <span class="text-success">${item.relevance || 0}%</span>
                 </div>
                 <div class="text-secondary">${item.type || ""} <code>${this.escapeHtml(item.name || "")}</code></div>
-                ${item.preview ? `<div class="mt-4 mono text-2xs text-secondary overflow-hidden max-h-60 whitespace-pre-wrap">${this.escapeHtml((item.preview || "").substring(0, 150))}</div>` : ""}
+                ${item.preview ? `<div class="mt-4 mono text-xs text-secondary overflow-hidden max-h-60 whitespace-pre-wrap">${this.escapeHtml((item.preview || "").substring(0, 150))}</div>` : ""}
               </div>
             `;
           } else if (source.source === "jira") {
@@ -1076,14 +1091,14 @@ export class SlackTab extends BaseTab {
 
   private getUserSearchResultsHtml(): string {
     return `
-      <div class="slack-user-results">
+      <div class="flex-col slack-user-results">
         ${this.userSearchResults.map(user => `
-          <div class="slack-user-item">
+          <div class="item-row slack-user-item">
             <div class="slack-user-avatar">👤</div>
             <div class="slack-user-info">
               <div class="slack-user-name">${this.escapeHtml(user.display_name || user.real_name || user.name)}</div>
               <div class="slack-user-handle">@${this.escapeHtml(user.name)}</div>
-              ${user.email ? `<div class="slack-user-email">${this.escapeHtml(user.email)}</div>` : ""}
+              ${user.email ? `<div class="text-muted-sm slack-user-email">${this.escapeHtml(user.email)}</div>` : ""}
             </div>
             <button class="btn btn-xs" data-action="viewUserProfile" data-user-id="${user.user_id}">View</button>
           </div>
@@ -1107,10 +1122,10 @@ export class SlackTab extends BaseTab {
       : msg.timestamp;
 
     return `
-      <div class="slack-search-item">
-        <div class="slack-search-header">
+      <div class="card slack-search-item">
+        <div class="flex-row slack-search-header">
           <span class="slack-search-channel">#${this.escapeHtml(msg.channel_name || "unknown")}</span>
-          <span class="slack-search-user">@${this.escapeHtml(msg.user_name || "unknown")}</span>
+          <span class="text-meta slack-search-user">@${this.escapeHtml(msg.user_name || "unknown")}</span>
           <span class="slack-search-time">${this.formatRelativeTime(timeValue)}</span>
         </div>
         <div class="slack-search-text">${this.escapeHtml(msg.text || "")}</div>
@@ -1127,13 +1142,13 @@ export class SlackTab extends BaseTab {
           💬 Thread View
           <button class="btn btn-xs btn-danger ml-auto" data-action="closeThread">✕ Close</button>
         </div>
-        <div class="slack-thread-replies">
+        <div class="flex-col slack-thread-replies">
           ${this.threadView.replies.length > 0
             ? this.threadView.replies.map(reply => `
               <div class="slack-thread-reply">
-                <div class="slack-thread-reply-header">
+                <div class="flex-row slack-thread-reply-header">
                   <span class="slack-thread-reply-user">@${this.escapeHtml(reply.user_name || reply.user)}</span>
-                  <span class="slack-thread-reply-time">${this.formatRelativeTime(reply.ts)}</span>
+                  <span class="text-muted-sm slack-thread-reply-time">${this.formatRelativeTime(reply.ts)}</span>
                 </div>
                 <div class="slack-thread-reply-text">${this.escapeHtml(reply.text)}</div>
               </div>
@@ -1147,11 +1162,11 @@ export class SlackTab extends BaseTab {
 
   private getDMCardHtml(dm: SlackDM): string {
     return `
-      <div class="slack-dm-card" data-channel-id="${dm.channel_id}">
+      <div class="card slack-dm-card" data-channel-id="${dm.channel_id}">
         <div class="slack-dm-icon">💬</div>
-        <div class="slack-dm-info">
+        <div class="label-sm text-meta slack-dm-info">
           <div class="slack-dm-name">${this.escapeHtml(dm.display_name || dm.name)}</div>
-          <div class="slack-dm-type">${dm.type === "im" ? "Direct Message" : "Group DM"}</div>
+          <div class="text-muted-sm slack-dm-type">${dm.type === "im" ? "Direct Message" : "Group DM"}</div>
         </div>
         <button class="btn btn-xs" data-action="openSlackChannel" data-channel="${dm.channel_id}">Open</button>
       </div>
@@ -1162,7 +1177,7 @@ export class SlackTab extends BaseTab {
     return `
       <div class="section">
         <div class="section-title">Pending Approval (${this.pendingMessages.length})</div>
-        <div class="slack-pending-list">
+        <div class="flex-col slack-pending-list">
           ${this.pendingMessages.map((msg) => this.getPendingMessageHtml(msg)).join("")}
         </div>
       </div>
@@ -1176,16 +1191,16 @@ export class SlackTab extends BaseTab {
       : msg.timestamp;
 
     return `
-      <div class="slack-pending-item" data-message-id="${msg.id}">
-        <div class="slack-pending-header">
+      <div class="card slack-pending-item" data-message-id="${msg.id}">
+        <div class="flex-row slack-pending-header">
           <div class="slack-pending-channel">#${this.escapeHtml(msg.channel_name || "unknown")}</div>
-          <div class="slack-pending-user">@${this.escapeHtml(msg.user_name || "unknown")}</div>
+          <div class="text-meta slack-pending-user">@${this.escapeHtml(msg.user_name || "unknown")}</div>
           ${msg.intent ? `<div class="slack-pending-intent">${this.escapeHtml(msg.intent)}</div>` : ""}
           <div class="slack-pending-time">${this.formatRelativeTime(timeValue)}</div>
         </div>
         <div class="slack-pending-text">${this.escapeHtml(msg.text || "")}</div>
         ${msg.response ? `<div class="slack-pending-response">Proposed response: ${this.escapeHtml(msg.response)}</div>` : ""}
-        <div class="slack-pending-actions">
+        <div class="actions-row slack-pending-actions">
           <button class="btn btn-xs btn-success" data-action="approveSlackMessage" data-message-id="${msg.id}">✓ Approve</button>
           <button class="btn btn-xs btn-danger" data-action="rejectSlackMessage" data-message-id="${msg.id}">✕ Reject</button>
           <button class="btn btn-xs" data-action="viewSlackThread" data-channel="${msg.channel_id}" data-thread="${msg.thread_ts || msg.timestamp}">💬 View Thread</button>
@@ -1200,11 +1215,11 @@ export class SlackTab extends BaseTab {
     const displayName = channel.display_name || channel.name;
 
     return `
-      <div class="slack-channel-card ${isSelected ? "selected" : ""}" data-channel-id="${channelId}">
+      <div class="card slack-channel-card ${isSelected ? "selected" : ""}" data-channel-id="${channelId}">
         <div class="slack-channel-icon">${channel.is_private ? "🔒" : "#"}</div>
-        <div class="slack-channel-info">
+        <div class="label-sm text-meta slack-channel-info">
           <div class="slack-channel-name">${this.escapeHtml(displayName)}</div>
-          ${channel.num_members ? `<div class="slack-channel-members">${channel.num_members} members</div>` : ""}
+          ${channel.num_members ? `<div class="text-muted-sm slack-channel-members">${channel.num_members} members</div>` : ""}
         </div>
         <button class="btn btn-xs" data-action="openSlackChannel" data-channel="${channelId}">Open</button>
       </div>
@@ -1246,16 +1261,16 @@ export class SlackTab extends BaseTab {
     return `
       <div class="slack-history-item ${statusClass}">
         <div class="slack-history-status ${statusClass}">${statusIcon}</div>
-        <div class="slack-history-info">
-          <div class="slack-history-header">
-            <span class="slack-history-channel">#${this.escapeHtml(msg.channel_name || "unknown")}</span>
-            <span class="slack-history-user">@${this.escapeHtml(msg.user_name || "unknown")}</span>
+        <div class="label-sm text-meta slack-history-info">
+          <div class="flex-row slack-history-header">
+            <span class="dot slack-history-channel">#${this.escapeHtml(msg.channel_name || "unknown")}</span>
+            <span class="text-meta slack-history-user">@${this.escapeHtml(msg.user_name || "unknown")}</span>
             ${msg.intent ? `<span class="slack-history-intent">${this.escapeHtml(msg.intent)}</span>` : ""}
           </div>
           <div class="slack-history-text">${this.escapeHtml(msg.text || "").substring(0, 100)}${(msg.text || "").length > 100 ? "..." : ""}</div>
           ${msg.response ? `<div class="slack-history-response">↳ ${this.escapeHtml(msg.response).substring(0, 80)}${msg.response.length > 80 ? "..." : ""}</div>` : ""}
         </div>
-        <div class="slack-history-time">${this.formatRelativeTime(timeValue)}</div>
+        <div class="text-muted-sm slack-history-time">${this.formatRelativeTime(timeValue)}</div>
       </div>
     `;
   }

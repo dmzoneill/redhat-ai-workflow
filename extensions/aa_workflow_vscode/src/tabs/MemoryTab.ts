@@ -96,6 +96,19 @@ export class MemoryTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.memoryFiles.length,
+      this.sessionLogs.length,
+      this.learnedPatterns.length,
+      this.toolFixes.length,
+      this.selectedCategory,
+      this.selectedFile ?? "",
+      this.totalSize,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -328,7 +341,7 @@ export class MemoryTab extends BaseTab {
       <!-- Session Logs -->
       <div class="section">
         <div class="section-title">Session Logs</div>
-        <div class="session-logs-list">
+        <div class="flex-col session-logs-list">
           ${this.sessionLogs.length > 0 ? this.sessionLogs.map((log) => this.getSessionLogHtml(log)).join("") : this.getEmptyStateHtml("📜", "No session logs")}
         </div>
       </div>
@@ -368,7 +381,7 @@ export class MemoryTab extends BaseTab {
     return categories
       .map(
         (cat) => `
-        <button class="memory-tab ${this.selectedCategory === cat.id ? "active" : ""}"
+        <button class="flex-row memory-tab ${this.selectedCategory === cat.id ? "active" : ""}"
                 data-category="${cat.id}"
                 title="${cat.description}">
           <span class="memory-tab-icon">${cat.icon}</span>
@@ -390,7 +403,7 @@ export class MemoryTab extends BaseTab {
     const files = this.memoryFiles
       .map(
         (file) => `
-        <div class="memory-file ${this.selectedFile === file.path ? "selected" : ""}"
+        <div class="flex-row memory-file ${this.selectedFile === file.path ? "selected" : ""}"
              data-file="${file.path}">
           <span class="memory-file-icon">${file.type === "directory" ? "📁" : "📄"}</span>
           <span class="memory-file-name">${this.escapeHtml(file.name)}</span>
@@ -412,7 +425,7 @@ export class MemoryTab extends BaseTab {
     }
 
     return `
-      <div class="memory-file-header">
+      <div class="flex-between memory-file-header">
         <span class="memory-file-path">${this.escapeHtml(this.selectedFile)}</span>
         <button class="btn btn-xs" data-action="editMemoryFile" data-file="${this.selectedFile}">✏️ Edit</button>
       </div>
@@ -423,8 +436,8 @@ export class MemoryTab extends BaseTab {
   private getSessionLogHtml(log: SessionLog): string {
     return `
       <div class="session-log-item">
-        <div class="session-log-time">${this.formatRelativeTime(log.timestamp)}</div>
-        <div class="session-log-action">${this.escapeHtml(log.action)}</div>
+        <div class="text-muted-sm session-log-time">${this.formatRelativeTime(log.timestamp)}</div>
+        <div class="dot session-log-action">${this.escapeHtml(log.action)}</div>
         <div class="session-log-details">${this.escapeHtml(log.details)}</div>
         ${log.session_name ? `<div class="session-log-session">${this.escapeHtml(log.session_name)}</div>` : ""}
       </div>
@@ -438,13 +451,13 @@ export class MemoryTab extends BaseTab {
     const learnedAt = pattern.learned_at ?? pattern.lastUsed ?? "";
 
     return `
-      <div class="learned-pattern-item">
-        <div class="pattern-header">
-          <span class="pattern-name">${this.escapeHtml(pattern.pattern || "Unknown pattern")}</span>
+      <div class="card learned-pattern-item">
+        <div class="flex-between pattern-header">
+          <span class="font-semibold pattern-name">${this.escapeHtml(pattern.pattern || "Unknown pattern")}</span>
           <span class="pattern-usage">Used ${usageCount}x</span>
         </div>
         <div class="pattern-context">${this.escapeHtml(context)}</div>
-        <div class="pattern-time">Learned ${learnedAt ? this.formatRelativeTime(learnedAt) : "unknown"}</div>
+        <div class="text-muted-sm pattern-time">Learned ${learnedAt ? this.formatRelativeTime(learnedAt) : "unknown"}</div>
       </div>
     `;
   }
@@ -455,15 +468,15 @@ export class MemoryTab extends BaseTab {
     const verified = fix.verified ? "✓ Verified" : "";
 
     return `
-      <div class="tool-fix-item">
-        <div class="fix-header">
+      <div class="card tool-fix-item">
+        <div class="flex-between fix-header">
           <span class="fix-tool">${this.escapeHtml(fix.tool_name || "Unknown tool")}</span>
           <span class="fix-applied">${verified} ${appliedCount > 0 ? `Applied ${appliedCount}x` : ""}</span>
         </div>
         <div class="fix-error">${this.escapeHtml(fix.error_pattern || "")}</div>
         <div class="fix-description">${this.escapeHtml(fix.fix_description || "")}</div>
         ${fix.root_cause ? `<div class="fix-root-cause">Root cause: ${this.escapeHtml(fix.root_cause)}</div>` : ""}
-        <div class="fix-time">${learnedAt ? `Learned ${this.formatRelativeTime(learnedAt)}` : ""}</div>
+        <div class="text-muted-sm fix-time">${learnedAt ? `Learned ${this.formatRelativeTime(learnedAt)}` : ""}</div>
       </div>
     `;
   }
@@ -476,9 +489,9 @@ export class MemoryTab extends BaseTab {
     return `
       <div class="vector-databases-grid">
         ${this.vectorDatabases.map((db) => `
-          <div class="vector-db-card ${db.status}">
-            <div class="vector-db-header">
-              <span class="vector-db-name">${this.escapeHtml(db.name)}</span>
+          <div class="card vector-db-card ${db.status}">
+            <div class="flex-between vector-db-header">
+              <span class="font-semibold vector-db-name">${this.escapeHtml(db.name)}</span>
               <span class="vector-db-status status-${db.status}">${db.status}</span>
             </div>
             <div class="vector-db-type">${this.escapeHtml(db.type)}</div>
@@ -487,7 +500,7 @@ export class MemoryTab extends BaseTab {
               ${db.size ? `<span>💾 ${db.size}</span>` : ""}
             </div>
             ${db.last_updated ? `<div class="vector-db-updated">Updated ${this.formatRelativeTime(db.last_updated)}</div>` : ""}
-            <div class="vector-db-actions">
+            <div class="actions-row vector-db-actions">
               <button class="btn btn-xs" data-action="reindexVectorDb" data-db="${this.escapeHtml(db.name)}">🔄 Reindex</button>
               <button class="btn btn-xs" data-action="searchVectorDb" data-db="${this.escapeHtml(db.name)}">🔍 Search</button>
             </div>
@@ -504,29 +517,29 @@ export class MemoryTab extends BaseTab {
 
     const db = this.slackDatabase;
     return `
-      <div class="slack-db-card">
+      <div class="card slack-db-card">
         <div class="slack-db-stats">
           <div class="slack-db-stat">
             <div class="slack-db-stat-value">${db.channels_count.toLocaleString()}</div>
-            <div class="slack-db-stat-label">Channels</div>
+            <div class="label-sm text-meta slack-db-stat-label">Channels</div>
           </div>
           <div class="slack-db-stat">
             <div class="slack-db-stat-value">${db.users_count.toLocaleString()}</div>
-            <div class="slack-db-stat-label">Users</div>
+            <div class="label-sm text-meta slack-db-stat-label">Users</div>
           </div>
           <div class="slack-db-stat">
             <div class="slack-db-stat-value">${db.messages_count.toLocaleString()}</div>
-            <div class="slack-db-stat-label">Messages</div>
+            <div class="label-sm text-meta slack-db-stat-label">Messages</div>
           </div>
           ${db.size ? `
             <div class="slack-db-stat">
               <div class="slack-db-stat-value">${db.size}</div>
-              <div class="slack-db-stat-label">Size</div>
+              <div class="label-sm text-meta slack-db-stat-label">Size</div>
             </div>
           ` : ""}
         </div>
         ${db.last_sync ? `<div class="slack-db-sync">Last synced ${this.formatRelativeTime(db.last_sync)}</div>` : ""}
-        <div class="slack-db-actions">
+        <div class="actions-row slack-db-actions">
           <button class="btn btn-xs btn-primary" data-action="syncSlackDb">🔄 Sync Now</button>
           <button class="btn btn-xs" data-action="searchSlackDb">🔍 Search Messages</button>
         </div>

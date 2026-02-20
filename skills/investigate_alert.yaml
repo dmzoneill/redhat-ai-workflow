@@ -775,7 +775,14 @@ steps:
     tool: memory_session_log
     args:
       action: "Investigated alerts in {{ target.environment }}/{{ target.namespace }}"
-      details: "Severity: {{ assessment.severity }}, Alerts: {{ memory_context.alert_summary }}"
+      details: >-
+        Severity: {{ assessment.severity }},
+        Alerts: {{ memory_context.alert_summary }},
+        Pods healthy: {{ pod_health.healthy }},
+        Error trend: {{ error_trend.trend if error_trend else 'unknown' }},
+        Known patterns: {{ pattern_matches | length if pattern_matches else 0 }},
+        Escalated: {{ 'yes' if assessment.needs_escalation else 'no' }},
+        Recommendation: {{ assessment.reason }}
     on_error: continue
 
   - name: update_environment_status

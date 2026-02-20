@@ -1,0 +1,609 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   D3 CHART STYLES
+   All styles for D3.js-powered visualizations:
+   - Performance Issue Mindmap (force-directed graph)
+   - Performance Sunburst Chart
+   - Performance Pipeline Diagram
+   - Performance Treemap
+   - Skills Mind Map (force-directed graph)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* --- D3 INTERACTIVE STATES (shared across all D3 charts) --- */
+
+.perf-mindmap-d3-graph:active,
+.mindmap-graph svg:active { cursor: grabbing; }
+.perf-mm-node.perf-mm-dimmed,
+.mindmap-graph .node.dimmed { opacity: 0.15; }
+.perf-mm-node:hover .perf-mm-circle,
+.perf-mm-node--root .perf-mm-circle { filter: url(#perfGlow); }
+.perf-mm-anstrat-rect,
+.perf-mm-diamond { transition: opacity 0.15s, filter 0.2s; }
+
+/* ═══════════════════════════════════════════════════════════════
+   PERFORMANCE: SUNBURST CHART
+   ═══════════════════════════════════════════════════════════════ */
+
+.perf-sunburst-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+}
+
+.perf-sunburst-svg { max-width: 100%; height: auto; }
+
+.perf-sunburst-ring-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.perf-sunburst-ring-item {
+  font-size: var(--text-lg);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.perf-sunburst-ring-item .ring-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  font-size: var(--text-md);
+  font-weight: 700;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PERFORMANCE: ISSUE MINDMAP (D3 Force-Directed Graph)
+   ═══════════════════════════════════════════════════════════════ */
+
+.perf-mindmap-container {
+  display: flex;
+  justify-content: center;
+  padding: 0;
+  width: 100%;
+}
+
+.perf-mindmap-d3-wrapper {
+  position: relative;
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+.perf-mindmap-d3-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.perf-mindmap-d3-stats {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.perf-mindmap-d3-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.perf-mindmap-toggle {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.perf-mindmap-d3-graph {
+  width: 100%;
+  height: 1140px;
+  position: relative;
+  cursor: grab;
+}
+.perf-mindmap-d3-graph svg { background: transparent; }
+
+/* Links */
+.perf-mm-link { transition: stroke-opacity 0.2s; }
+.perf-mm-link.perf-mm-dimmed { stroke-opacity: 0.08 !important; }
+
+/* Nodes */
+.perf-mm-node { cursor: pointer; transition: opacity 0.2s; }
+.perf-mm-circle { transition: r 0.15s, filter 0.2s; }
+
+/* Labels */
+.perf-mm-label { pointer-events: none; user-select: none; }
+.perf-mm-label--root { font-weight: 700; font-size: var(--text-md); }
+.perf-mm-opt-label {
+  pointer-events: none;
+  user-select: none;
+  font-size: var(--text-sm);
+}
+
+/* Tooltip */
+.perf-mindmap-d3-tooltip {
+  display: none;
+  position: absolute;
+  pointer-events: none;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  max-width: 280px;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  line-height: 1.4;
+}
+
+.perf-mm-tt-type {
+  display: inline-block;
+  font-size: var(--text-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--rh-white);
+  font-weight: 600;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+
+.perf-mm-tt-summary {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.perf-mm-tt-meta {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* Legend */
+.perf-mindmap-d3-legend {
+  display: flex;
+  gap: 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  font-size: var(--text-sm);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.perf-pillar-filter input { accent-color: currentColor; }
+.perf-mindmap-d3-sep {
+  color: var(--border-color);
+  font-size: var(--text-md);
+  user-select: none;
+}
+
+/* Competency view: dashed evidence links */
+.perf-mm-link--evidence { stroke-dasharray: 6, 4; }
+
+/* Pillar-to-Strategy dashed links */
+.perf-mm-link--pillar-strategy {
+  stroke-dasharray: 6, 3, 2, 3;
+}
+
+/* Pillar ring nodes */
+.perf-mm-ring { transition: stroke-opacity 0.2s, filter 0.2s; }
+.perf-mm-node--pillar:hover .perf-mm-ring { filter: url(#perfGlow); stroke-opacity: 1; }
+
+/* Heat glow backgrounds */
+.perf-mm-heat-glow { pointer-events: none; }
+
+/* Diamond legend dot */
+.perf-mm-diamond-legend {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 0 !important;
+  transform: rotate(45deg);
+}
+
+/* Triangle legend dot (epic) */
+.perf-mm-legend-triangle {
+  width: 0 !important;
+  height: 0 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid var(--warning);
+}
+
+/* Square legend dot (issue) */
+.perf-mm-legend-square { border-radius: 1px !important; }
+
+/* Rounded rect legend dot (ANSTRAT) */
+.perf-mm-legend-roundrect {
+  border-radius: 2px !important;
+  width: 12px !important;
+  height: 7px !important;
+}
+
+/* Ring legend dot (pillar) */
+.perf-mm-legend-ring {
+  background: transparent !important;
+  border: 2px solid var(--info);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PERFORMANCE: PIPELINE DIAGRAM (D3 SVG)
+   ═══════════════════════════════════════════════════════════════ */
+
+.perf-help-pipeline-container { min-height: 320px; }
+.perf-help-pipeline-container svg { width: 100%; }
+.perf-help-pipeline-node rect { rx: 6; ry: 6; }
+.perf-help-pipeline-node text {
+  font-size: var(--text-sm);
+  fill: var(--text-primary);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.perf-help-pipeline-edge {
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  fill: none;
+  marker-end: url(#pipeline-arrow);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PERFORMANCE: TREEMAP (D3 SVG)
+   ═══════════════════════════════════════════════════════════════ */
+
+.perf-help-treemap-container { min-height: 250px; }
+.perf-help-treemap-container svg { width: 100%; height: 250px; }
+.perf-help-treemap-cell rect { stroke: var(--bg-primary); stroke-width: 1; }
+.perf-help-treemap-cell text {
+  font-size: var(--text-sm);
+  fill: var(--rh-white);
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SKILLS: MIND MAP (D3 Force-Directed Graph)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Mind Map Container */
+.mindmap-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 200px);
+  min-height: 500px;
+  background: var(--bg-secondary);
+}
+
+.mindmap-header-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+.mindmap-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.mindmap-title-text {
+  font-weight: 600;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.mindmap-stats-inline {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.mindmap-select {
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-width: 120px;
+}
+.mindmap-toggles input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+/* Compact legend */
+.mindmap-legend-compact {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.mindmap-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.mindmap-wrapper {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Physics Controls Panel */
+.mindmap-physics-panel {
+  padding: 10px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  animation: slideDown 0.15s ease-out;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.physics-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.physics-row > .physics-control { flex: 1; min-width: 120px; }
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to   { opacity: 1; transform: translateY(0);    max-height: 200px; }
+}
+
+.physics-control label {
+  font-size: var(--text-xs);
+  margin-bottom: 2px;
+  white-space: nowrap;
+}
+
+.physics-value {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs);
+  color: var(--accent);
+  min-width: 38px;
+  text-align: right;
+}
+
+.physics-control input[type="range"] {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+}
+
+.physics-control input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 4px rgba(0, 102, 204, 0.4);
+  transition: transform 0.1s;
+}
+
+.physics-control input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+.physics-control input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--bg-primary);
+  box-shadow: 0 0 4px rgba(0, 102, 204, 0.4);
+}
+
+.physics-actions {
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.physics-actions .btn { font-size: var(--text-xs); padding: 3px 10px; }
+
+.mindmap-physics-toggle {
+  font-size: var(--text-md) !important;
+  padding: 2px 6px !important;
+  line-height: 1;
+  min-width: unset;
+}
+
+/* Graph Container */
+.mindmap-graph {
+  flex: 1;
+  width: 100%;
+  height: calc(100% - 120px);
+  min-height: 400px;
+  position: relative;
+  overflow: hidden;
+}
+
+.mindmap-graph svg {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+
+/* Node styles */
+.mindmap-graph .node { cursor: pointer; transition: all 0.3s ease; }
+.mindmap-graph .node circle.main { stroke-width: 2px; transition: all 0.3s ease; }
+.mindmap-graph .node circle.glow-ring {
+  fill: none;
+  stroke-width: 0;
+  opacity: 0;
+  transition: all 0.4s ease;
+}
+.mindmap-graph .node:hover circle.main { stroke-width: 4px; filter: drop-shadow(0 0 12px currentColor); }
+.mindmap-graph .node.highlighted circle.main {
+  stroke-width: 4px;
+  filter: drop-shadow(0 0 20px currentColor);
+}
+.mindmap-graph .node.persona-active circle.glow-ring {
+  stroke-width: 4px;
+  opacity: 0.8;
+  animation: persona-pulse 2s ease-in-out infinite;
+}
+.mindmap-graph .node.persona-active circle.main { filter: drop-shadow(0 0 15px var(--accent)); }
+.mindmap-graph .node.persona-inactive { opacity: 0.25; }
+
+@keyframes persona-pulse {
+  0%, 100% { stroke-width: 4px; opacity: 0.6; }
+}
+
+/* Link styles */
+.mindmap-graph .link {
+  fill: none;
+  stroke-opacity: 0.3;
+  transition: all 0.4s ease;
+}
+.mindmap-graph .link.dimmed { stroke-opacity: 0.05; }
+.mindmap-graph .link.highlighted { stroke-opacity: 0.8; stroke-width: 3px; }
+.mindmap-graph .link.calls { stroke: var(--error); stroke-dasharray: 5,3; }
+.mindmap-graph .link.uses { stroke: var(--success); }
+.mindmap-graph .link.triggers { stroke: var(--warning); stroke-dasharray: 2,2; }
+.mindmap-graph .link.persona-active {
+  stroke-opacity: 0.9;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 4px var(--accent));
+}
+.mindmap-graph .link.persona-inactive { stroke-opacity: 0.08; }
+
+/* Tooltip */
+.mindmap-tooltip {
+  position: absolute;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  max-width: 300px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1000;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.mindmap-tooltip h3 {
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+
+.mindmap-tooltip .type-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-left: 6px;
+  color: var(--rh-white);
+}
+.mindmap-tooltip .meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.mindmap-tooltip .meta-tag {
+  font-size: var(--text-xs);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+/* Legend */
+.mindmap-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+/* Loading state */
+.mindmap-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.mindmap-loading-hint {
+  font-size: var(--text-md);
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.mindmap-loading .loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: var(--radius-full);
+  animation: mindmap-spin 1s linear infinite;
+}
+
+@keyframes mindmap-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --- SCATTERED D3 PROPERTIES (extracted from consolidated groups) --- */
+
+.perf-mindmap-d3-filters { display: flex; align-items: center; gap: 12px; }
+.mindmap-toggles .toggle-label { display: flex; align-items: center; gap: 4px; }
+.mindmap-header-top { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.perf-sunburst-ring-item b { color: var(--text-primary); }
+.perf-mindmap-toggle input { cursor: pointer; }
+.mindmap-graph .node.highlighted { opacity: 1; }
+.perf-mindmap-d3-filters, .mindmap-header-controls { flex-wrap: wrap; }
+.perf-mm-link--comp-anstrat, .perf-mm-link--anstrat-strategy { stroke-dasharray: none; }

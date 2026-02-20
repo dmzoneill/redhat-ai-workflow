@@ -1,0 +1,87 @@
+# Skill: Add a new section to the docs project
+
+name: docs_add_section
+description: |
+  Create a new documentation section by generating a YAML file in data/static/.
+  The section will be processed by static_ingest.py into docs/ pages
+  on the next build.
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  validated_by:
+    - docs_build
+  chains_to:
+    - docs_sync
+    - docs_build
+  provides_context_for: []
+
+inputs:
+  - name: section
+    type: string
+    required: true
+    description: "Section slug (directory name under docs/, e.g. 'runbooks')"
+
+  - name: title
+    type: string
+    required: true
+    description: "Human-readable section title"
+
+  - name: description
+    type: string
+    required: false
+    default: ""
+    description: "Section description for the index page"
+
+  - name: pages_yaml
+    type: string
+    required: false
+    description: |
+      YAML string defining pages. Each entry needs slug, title, content.
+      If omitted, creates a single placeholder page.
+
+steps:
+  - name: create_section
+    description: "Create the static YAML file"
+    compute: |
+      from pathlib import Path
+      import yaml
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      static_dir = project / "data" / "static"
+      static_dir.mkdir(parents=True, exist_ok=True)
+
+      section = inputs["section"]
+      filepath = static_dir / f"{section}.yaml"
+
+      if filepath.exists():
+          result = f"⚠️ Section already exists: `data/static/{section}.yaml`\nEdit the existing file instead."
+      else:
+          data = {
+              "section": section,
+              "title": inputs["title"],
+              "description": inputs.get("description", f"Documentation for {inputs['title']}."),
+          }
+
+          pages_yaml = inputs.get("pages_yaml")
+          if pages_yaml:
+              import io
+              data["pages"] = yaml.safe_load(io.StringIO(pages_yaml))
+          else:
+              data["pages"] = [{
+                  "slug": "overview",
+                  "title": "Overview",
+                  "weight": 10,
+                  "content": f"# {inputs['title']}\n\nContent goes here.\n",
+              }]
+
+          filepath.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False, allow_unicode=True))
+
+          result = f"✅ Section created: `data/static/{section}.yaml`\n\nPages: {', '.join(p['title'] for p in data['pages'])}\n\nRun `docs_sync` then `docs_build` to generate, or `docs_deploy` to publish."
+    output: section_result
+
+outputs:
+  - name: summary
+    value: "{{ section_result }}"

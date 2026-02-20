@@ -10,7 +10,7 @@ The `collect_daily` skill automatically gathers work evidence from multiple sour
 
 ```bash
 # Collect for today
-skill_run("performance/collect_daily")
+skill_run("performance_collect_daily")
 
 # Or use the Cursor command
 /performance-daily
@@ -20,13 +20,13 @@ skill_run("performance/collect_daily")
 
 ```bash
 # Collect for today (default)
-skill_run("performance/collect_daily")
+skill_run("performance_collect_daily")
 
 # Collect for a specific date
-skill_run("performance/collect_daily", '{"date": "2026-01-15"}')
+skill_run("performance_collect_daily", '{"date": "2026-01-15"}')
 
 # Backfill yesterday
-skill_run("performance/collect_daily", '{"date": "2026-01-25"}')
+skill_run("performance_collect_daily", '{"date": "2026-01-25"}')
 ```
 
 ## Parameters

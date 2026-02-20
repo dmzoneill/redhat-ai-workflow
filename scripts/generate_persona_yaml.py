@@ -105,30 +105,18 @@ def get_all_module_names() -> set[str]:
 
 
 def discover_skills() -> list[str]:
-    """Discover all available skills from skills/*.yaml and skills/**/*.yaml.
-
-    Handles both flat skills (skills/coffee.yaml) and nested skills
-    (skills/performance/collect_daily.yaml -> "performance/collect_daily").
+    """Discover all available skills from skills/*.yaml.
 
     Returns:
-        Sorted list of skill names/paths (without .yaml extension).
+        Sorted list of skill names (without .yaml extension).
     """
     if not SKILLS_DIR.exists():
         print(f"Warning: Skills directory not found: {SKILLS_DIR}")
         return []
 
     skills = []
-
-    # Top-level skills
     for skill_file in SKILLS_DIR.glob("*.yaml"):
         skills.append(skill_file.stem)
-
-    # Nested skills (e.g., performance/collect_daily)
-    for subdir in SKILLS_DIR.iterdir():
-        if subdir.is_dir() and not subdir.name.startswith("."):
-            for skill_file in subdir.glob("*.yaml"):
-                # Format as "subdir/skill_name"
-                skills.append(f"{subdir.name}/{skill_file.stem}")
 
     return sorted(skills)
 

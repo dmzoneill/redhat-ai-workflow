@@ -111,6 +111,18 @@ export class InferenceTab extends BaseTab {
     });
   }
 
+  protected computeDataFingerprint(): string {
+    const ollamaStatuses = this.ollamaInstances.map((i) => i.status).join(",");
+    const parts = [
+      ollamaStatuses,
+      this.personaStats.length,
+      this.config.primaryEngine,
+      this.testResult ? 1 : 0,
+      this.isRunningTest ? 1 : 0,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -158,12 +170,12 @@ export class InferenceTab extends BaseTab {
           Preview the full context that would be sent to Claude for any message. Shows persona, memory, tools, and semantic knowledge.
         </p>
         <div class="card">
-          <div class="inspector-form">
-            <div class="form-row">
+          <div class="flex-col inspector-form">
+            <div class="flex-row form-row">
               <label>Test Message</label>
               <input type="text" id="inferenceTestMessage" class="form-input" placeholder="deploy MR 1459 to ephemeral" value="Deploy my MR to ephemeral and check the pods" />
             </div>
-            <div class="form-row grid-2">
+            <div class="flex-row form-row grid-2">
               <div>
                 <label>Persona (Auto-detect)</label>
                 <select id="inferenceTestPersona" class="inference-select">
@@ -192,7 +204,7 @@ export class InferenceTab extends BaseTab {
           </div>
 
           <!-- Quick Tests -->
-          <div class="quick-tests mt-16 pt-12 border-t">
+          <div class="flex-row quick-tests mt-16 pt-12 border-t">
             <span class="text-sm text-muted">Quick Tests:</span>
             <button class="btn btn-sm btn-ghost" data-quick-test="hello">hello</button>
             <button class="btn btn-sm btn-ghost" data-quick-test="MR 1459">MR 1459</button>
@@ -209,7 +221,7 @@ export class InferenceTab extends BaseTab {
         <div class="section-title">Tool Filtering Configuration</div>
         <div class="card">
           <div class="grid-3">
-            <div class="inference-config-item">
+            <div class="flex-col inference-config-item">
               <label>Primary Engine</label>
               <select id="inferenceEngine" class="inference-select">
                 <option value="npu" ${this.config.primaryEngine === "npu" ? "selected" : ""}>NPU (qwen2.5:0.5b)</option>
@@ -218,7 +230,7 @@ export class InferenceTab extends BaseTab {
                 <option value="cpu" ${this.config.primaryEngine === "cpu" ? "selected" : ""}>CPU (qwen2.5:0.5b)</option>
               </select>
             </div>
-            <div class="inference-config-item">
+            <div class="flex-col inference-config-item">
               <label>Fallback Strategy</label>
               <select id="fallbackStrategy" class="inference-select">
                 <option value="keyword_match" ${this.config.fallbackStrategy === "keyword_match" ? "selected" : ""}>Keyword Match</option>
@@ -226,7 +238,7 @@ export class InferenceTab extends BaseTab {
                 <option value="all_tools" ${this.config.fallbackStrategy === "all_tools" ? "selected" : ""}>All Tools (No Filter)</option>
               </select>
             </div>
-            <div class="inference-config-item">
+            <div class="flex-col inference-config-item">
               <label>Max Categories</label>
               <select id="maxCategories" class="inference-select">
                 <option value="2" ${this.config.maxCategories === 2 ? "selected" : ""}>2</option>
@@ -237,15 +249,15 @@ export class InferenceTab extends BaseTab {
             </div>
           </div>
           <div class="inference-toggles">
-            <label class="inference-toggle-label">
+            <label class="flex-row inference-toggle-label">
               <input type="checkbox" id="enableFiltering" ${this.config.enableFiltering ? "checked" : ""}>
               <span>Enable Tool Pre-filtering</span>
             </label>
-            <label class="inference-toggle-label">
+            <label class="flex-row inference-toggle-label">
               <input type="checkbox" id="enableNpu" ${this.config.enableNpu ? "checked" : ""}>
               <span>Enable NPU (Layer 4)</span>
             </label>
-            <label class="inference-toggle-label">
+            <label class="flex-row inference-toggle-label">
               <input type="checkbox" id="enableCache" ${this.config.enableCache ? "checked" : ""}>
               <span>Enable Cache</span>
             </label>
@@ -258,10 +270,10 @@ export class InferenceTab extends BaseTab {
         <div class="section-title">Persona Statistics</div>
         <div class="inference-persona-grid">
           ${this.personaStats.map((p) => `
-            <div class="inference-persona-card">
+            <div class="card inference-persona-card">
               <div class="inference-persona-name">${this.getPersonaIcon(p.name)} ${this.escapeHtml(p.name)}</div>
-              <div class="inference-persona-tools">${p.toolCount} tools</div>
-              ${p.lastUsed ? `<div class="inference-persona-used">Last: ${this.formatRelativeTime(p.lastUsed)}</div>` : ""}
+              <div class="text-muted-sm inference-persona-tools">${p.toolCount} tools</div>
+              ${p.lastUsed ? `<div class="label-sm text-meta inference-persona-used">Last: ${this.formatRelativeTime(p.lastUsed)}</div>` : ""}
             </div>
           `).join("")}
           ${this.personaStats.length === 0 ? '<div class="empty-state">No persona statistics available</div>' : ""}
@@ -273,9 +285,9 @@ export class InferenceTab extends BaseTab {
         <div class="section-title">Ollama Instances</div>
         <div class="inference-ollama-grid">
           ${this.ollamaInstances.map((instance) => `
-            <div class="inference-ollama-card ${instance.status}">
-              <div class="inference-ollama-header">
-                <span class="inference-ollama-name">${this.escapeHtml(instance.name)}</span>
+            <div class="card inference-ollama-card ${instance.status}">
+              <div class="flex-between inference-ollama-header">
+                <span class="font-semibold inference-ollama-name">${this.escapeHtml(instance.name)}</span>
                 <span class="inference-ollama-status status-${instance.status}">${instance.status}</span>
               </div>
               <div class="inference-ollama-device">${this.escapeHtml(instance.device)}</div>
@@ -291,7 +303,7 @@ export class InferenceTab extends BaseTab {
       </div>
 
       <!-- Save Configuration -->
-      <div class="inference-save-actions">
+      <div class="actions-row inference-save-actions">
         <button class="btn btn-sm btn-danger" data-action="resetConfig">Reset to Defaults</button>
         <button class="btn btn-sm btn-primary" data-action="saveConfig">💾 Save Configuration</button>
       </div>
@@ -345,13 +357,13 @@ export class InferenceTab extends BaseTab {
     const personaReason = data.persona_detection_reason || "passed_in";
 
     html += `<div class="context-section green">
-      <div class="section-header">${personaIcons[data.persona] || "👤"} System Prompt (Persona: ${this.escapeHtml(data.persona)})
-        ${personaAutoDetected ? `<span class="chip green text-2xs font-normal">🔍 Auto-detected via ${this.escapeHtml(personaReason)}</span>` : ""}
+      <div class="flex-between section-header">${personaIcons[data.persona] || "👤"} System Prompt (Persona: ${this.escapeHtml(data.persona)})
+        ${personaAutoDetected ? `<span class="chip green text-xs font-normal">🔍 Auto-detected via ${this.escapeHtml(personaReason)}</span>` : ""}
       </div>
       ${personaCategories.length > 0
         ? `<div class="text-sm text-secondary mb-8">Tool Categories: <span class="text-primary">${personaCategories.map((c) => this.escapeHtml(c)).join(", ")}</span></div>`
         : `<div class="text-sm text-secondary mb-8">Tool Categories: <span class="opacity-50">none configured</span></div>`}
-      ${personaPrompt ? `<div class="text-2xs text-secondary p-8 rounded scroll-container short" style="font-style: italic;">"${this.escapeHtml(personaPrompt.substring(0, 300))}${personaPrompt.length > 300 ? '..."' : '"'}</div>` : ""}
+      ${personaPrompt ? `<div class="text-xs text-secondary p-8 rounded scroll-container short text-italic">"${this.escapeHtml(personaPrompt.substring(0, 300))}${personaPrompt.length > 300 ? '..."' : '"'}</div>` : ""}
     </div>`;
 
     // === 2. MEMORY STATE SECTION (with inline environment status) ===
@@ -360,7 +372,7 @@ export class InferenceTab extends BaseTab {
     html += `<div class="context-section purple">
       <div class="flex-between mb-8">
         <span class="font-bold">🧠 Memory State</span>
-        <span class="text-2xs d-flex gap-8">
+        <span class="text-xs d-flex gap-8">
           <span>${env.vpn_connected ? "🟢" : "🔴"} VPN</span>
           <span>${kubeconfigs.stage ? "🟢" : "⚪"} Stage</span>
           <span>${kubeconfigs.prod ? "🟢" : "⚪"} Prod</span>
@@ -376,16 +388,16 @@ export class InferenceTab extends BaseTab {
           <div class="d-flex flex-wrap gap-4 mt-4">
             ${activeIssues.map((i) => `<span class="chip purple">${this.escapeHtml(typeof i === "string" ? i : i.key)}</span>`).join("")}
           </div></div>`
-        : `<div class="mt-8 text-2xs text-secondary">No active issues</div>`}
-      ${mem.notes ? `<div class="mt-8 text-2xs p-6 rounded dark-bg"><strong>Notes:</strong> ${this.escapeHtml(mem.notes)}</div>` : ""}
+        : `<div class="mt-8 text-xs text-secondary">No active issues</div>`}
+      ${mem.notes ? `<div class="mt-8 text-xs p-6 rounded dark-bg"><strong>Notes:</strong> ${this.escapeHtml(mem.notes)}</div>` : ""}
     </div>`;
 
     // === 3. SESSION LOG SECTION ===
     const sessionLog = data.session_log || [];
     if (sessionLog.length > 0) {
       html += `<div class="context-section indigo">
-        <div class="section-header">📝 Session Log (Recent Actions)</div>
-        <div class="text-2xs d-flex flex-col gap-4 scroll-container">
+        <div class="flex-between section-header">📝 Session Log (Recent Actions)</div>
+        <div class="text-xs d-flex flex-col gap-4 scroll-container">
           ${sessionLog.map((a) => `<div class="action-log-item">
             <span class="text-secondary">${this.escapeHtml((a.time || "").substring(11, 19))}</span> ${this.escapeHtml(a.action)}
           </div>`).join("")}
@@ -401,7 +413,7 @@ export class InferenceTab extends BaseTab {
         skillDesc = skillDesc.substring(0, 500) + "...";
       }
       html += `<div class="context-section violet">
-        <div class="section-header">🎯 Detected Skill: ${this.escapeHtml(ctx.skill.name)}</div>
+        <div class="flex-between section-header">🎯 Detected Skill: ${this.escapeHtml(ctx.skill.name)}</div>
         ${skillDesc ? `<div class="text-sm mb-8 scroll-container tall p-8 rounded dark-bg">${this.escapeHtml(skillDesc)}</div>` : ""}
         ${ctx.skill.inputs && ctx.skill.inputs.length > 0
           ? `<div class="text-sm text-secondary mb-6">Inputs: ${ctx.skill.inputs.map((i) => `<code class="code-inline purple">${i.name || i}${i.required ? "*" : ""}</code>`).join(", ")}</div>`
@@ -411,10 +423,10 @@ export class InferenceTab extends BaseTab {
           ${(ctx.skill.tools || []).map((t) => `<span class="chip purple">${t}</span>`).join("")}
         </div>
         ${memOps.reads.length > 0 || memOps.writes.length > 0
-          ? `<div class="text-2xs mt-8 pt-8 border-t">
+          ? `<div class="text-xs mt-8 pt-8 border-t">
             <div class="text-secondary mb-4">Memory Operations:</div>
-            ${memOps.reads.length > 0 ? `<div class="mb-4">📖 Reads: ${memOps.reads.map((r: any) => `<code class="code-inline green text-2xs">${r.key || r.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
-            ${memOps.writes.length > 0 ? `<div>✏️ Writes: ${memOps.writes.map((w: any) => `<code class="code-inline orange text-2xs">${w.key || w.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
+            ${memOps.reads.length > 0 ? `<div class="mb-4">📖 Reads: ${memOps.reads.map((r: any) => `<code class="code-inline green text-xs">${r.key || r.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
+            ${memOps.writes.length > 0 ? `<div>✏️ Writes: ${memOps.writes.map((w: any) => `<code class="code-inline orange text-xs">${w.key || w.tool || "unknown"}</code>`).join(" ")}</div>` : ""}
           </div>`
           : ""}
       </div>`;
@@ -424,8 +436,8 @@ export class InferenceTab extends BaseTab {
     const learnedPatterns = data.learned_patterns || [];
     if (learnedPatterns.length > 0) {
       html += `<div class="context-section pink">
-        <div class="section-header">💡 Learned Patterns</div>
-        <div class="text-2xs d-flex flex-col gap-6">
+        <div class="flex-between section-header">💡 Learned Patterns</div>
+        <div class="text-xs d-flex flex-col gap-6">
           ${learnedPatterns.map((p) => `<div class="pattern-item">
             <div class="text-error">Pattern: ${this.escapeHtml((p.pattern || "").substring(0, 50))}</div>
             <div class="text-success">Fix: ${this.escapeHtml((p.fix || "").substring(0, 100))}</div>
@@ -438,7 +450,7 @@ export class InferenceTab extends BaseTab {
     const tools = data.tools || [];
     if (tools.length > 0) {
       html += `<div class="context-section blue">
-        <div class="section-header">🔧 Filtered Tools (${tools.length})</div>
+        <div class="flex-between section-header">🔧 Filtered Tools (${tools.length})</div>
         <div class="d-flex flex-wrap gap-4">
           ${tools.slice(0, 30).map((t) => `<span class="chip blue">${this.escapeHtml(t)}</span>`).join("")}
           ${tools.length > 30 ? `<span class="chip text-secondary">+${tools.length - 30} more</span>` : ""}

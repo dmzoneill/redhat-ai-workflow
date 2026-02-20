@@ -13,7 +13,8 @@ Provides:
 - performance_question_edit: Edit a question
 - performance_question_add: Add custom question
 - performance_question_note: Add manual note
-- performance_evaluate: LLM evaluation of questions
+- performance_evaluate: Gather evidence and build evaluation prompts
+- performance_save_evaluation: Save LLM-generated evaluation for a question
 - performance_export: Export quarterly report
 """
 
@@ -32,14 +33,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
+def register_tools(server: "FastMCP") -> int:  # noqa: C901
     """Register performance tracking tools with the MCP server."""
     registry = ToolRegistry(server)
 
     # Import local modules
-    from .competency_mapper import CompetencyMapper
-    from .question_manager import QuestionManager
-    from .scoring_engine import ScoringEngine, get_performance_dir, get_quarter_info
+    from tool_modules.aa_performance.src.competency_mapper import CompetencyMapper
+    from tool_modules.aa_performance.src.question_manager import QuestionManager
+    from tool_modules.aa_performance.src.scoring_engine import (
+        ScoringEngine,
+        get_performance_dir,
+        get_quarter_info,
+    )
 
     @registry.tool()
     async def performance_status(quarter: str = "") -> list[TextContent]:
@@ -161,7 +166,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
         lines.append("")
         lines.append("```")
         lines.append(
-            'skill_run("performance/collect_daily", \'{{"date": "{dt.isoformat()}"}}\')'
+            'skill_run("performance_collect_daily", \'{{"date": "{dt.isoformat()}"}}\')'
         )
         lines.append("```")
 
@@ -208,7 +213,7 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
             lines.append("")
             lines.append("To backfill, run:")
             lines.append("```")
-            lines.append('skill_run("performance/backfill_missing")')
+            lines.append('skill_run("performance_backfill_missing")')
             lines.append("```")
 
         return [TextContent(type="text", text="\n".join(lines))]
@@ -655,33 +660,153 @@ def register_performance_tools(server: "FastMCP") -> int:  # noqa: C901
     @registry.tool()
     async def performance_evaluate(question_id: str = "") -> list[TextContent]:
         """
-        Run AI evaluation on quarterly questions.
+        Gather evidence and build evaluation prompts for quarterly questions.
+
+        Initializes questions if needed, tags evidence, and returns prompts
+        for the LLM to evaluate. After generating a response, save it with
+        performance_save_evaluation(question_id, summary).
 
         Args:
             question_id: Specific question to evaluate (empty for all)
 
         Returns:
-            Evaluation results or instructions.
+            Evidence and prompts for each question.
         """
-        lines = ["## 🤖 Question Evaluation\n"]
-        lines.append("To evaluate questions with AI, run the evaluation skill:")
-        lines.append("")
-        lines.append("```")
+        year, quarter, _, _, _ = get_quarter_info()
+        perf_dir = get_performance_dir(year, quarter)
+        daily_dir = perf_dir / "daily"
+        question_mgr = QuestionManager(perf_dir)
+
+        # Ensure evidence is tagged
+        questions = question_mgr.get_questions()
+        total_evidence = sum(len(q.get("auto_evidence", [])) for q in questions)
+        if total_evidence == 0 and daily_dir.exists():
+            for daily_file in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(daily_file, encoding="utf-8") as f:
+                        data = json.load(f)
+                    for event in data.get("events", []):
+                        question_mgr.tag_event_to_questions(event)
+                except Exception:
+                    pass
+            questions = question_mgr.get_questions()
+
         if question_id:
-            lines.append(
-                'skill_run("performance/evaluate_questions", \'{{"question_id": "{question_id}"}}\')'
+            questions = [q for q in questions if q.get("id") == question_id]
+
+        if not questions:
+            return [TextContent(type="text", text="No matching questions found.")]
+
+        # Load all events for evidence lookup
+        all_events: dict[str, dict] = {}
+        if daily_dir.exists():
+            for daily_file in daily_dir.glob("*.json"):
+                try:
+                    with open(daily_file, encoding="utf-8") as f:
+                        data = json.load(f)
+                    for event in data.get("events", []):
+                        all_events[event.get("id", "")] = event
+                except Exception:
+                    pass
+
+        # Load competency summary
+        summary_file = perf_dir / "summary.json"
+        comp_summary: dict[str, int] = {}
+        if summary_file.exists():
+            try:
+                with open(summary_file, encoding="utf-8") as f:
+                    summary = json.load(f)
+                comp_summary = summary.get("cumulative_percentage", {})
+            except Exception:
+                pass
+
+        comp_text = "\n".join(f"- {k}: {v}%" for k, v in comp_summary.items())
+
+        lines = [f"## Quarterly Question Evaluation - Q{quarter} {year}\n"]
+
+        for q in questions:
+            evidence_ids = q.get("auto_evidence", [])
+            evidence_events = [
+                all_events[eid] for eid in evidence_ids if eid in all_events
+            ]
+            evidence_events.sort(
+                key=lambda e: sum(e.get("points", {}).values()), reverse=True
             )
-        else:
-            lines.append('skill_run("performance/evaluate_questions")')
-        lines.append("```")
-        lines.append("")
-        lines.append("This will:")
-        lines.append("1. Gather evidence for each question")
-        lines.append("2. Build a prompt with the evidence")
-        lines.append("3. Generate a summary using Claude")
-        lines.append("4. Save the summary to the question")
+            top = evidence_events[:20]
+
+            ev_lines = []
+            for e in top:
+                pts = sum(e.get("points", {}).values())
+                comps = ", ".join(f"{k}:{v}" for k, v in e.get("points", {}).items())
+                ev_lines.append(
+                    f"- [{e.get('source', '')}] {e.get('title', '')} ({pts} pts: {comps})"
+                )
+            ev_text = "\n".join(ev_lines) if ev_lines else "No evidence"
+
+            notes = q.get("manual_notes", [])
+            notes_text = (
+                "\n".join(f"- {n.get('text', '')}" for n in notes) if notes else "None"
+            )
+
+            lines.append(f"### {q.get('text', '')}")
+            if q.get("subtext"):
+                lines.append(f"*{q['subtext']}*")
+            lines.append(f"\n**Evidence** (top {len(top)} of {len(evidence_events)}):")
+            lines.append(ev_text)
+            lines.append(f"\n**Manual Notes:** {notes_text}")
+            lines.append(f"\n**Competency Scores:**\n{comp_text}")
+            lines.append(
+                "\nWrite a 2-3 paragraph first-person response highlighting "
+                "significant accomplishments with specific examples and metrics."
+            )
+            lines.append(
+                f'\nSave with: `performance_save_evaluation("{q.get("id")}", "<response>")`'
+            )
+            lines.append("")
 
         return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def performance_save_evaluation(
+        question_id: str, summary: str
+    ) -> list[TextContent]:
+        """
+        Save an LLM-generated evaluation for a quarterly question.
+
+        Args:
+            question_id: The question ID (e.g. "accomplishments")
+            summary: The evaluation text to save
+
+        Returns:
+            Confirmation of saved evaluation.
+        """
+        if not question_id or not summary:
+            return [
+                TextContent(
+                    type="text",
+                    text="Both question_id and summary are required.",
+                )
+            ]
+
+        year, quarter, _, _, _ = get_quarter_info()
+        perf_dir = get_performance_dir(year, quarter)
+        question_mgr = QuestionManager(perf_dir)
+
+        if question_mgr.set_evaluation(question_id, summary):
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Saved evaluation for '{question_id}' ({len(summary)} chars). "
+                    f"Refresh the QC tab to see the result.",
+                )
+            ]
+        else:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Question '{question_id}' not found.",
+                )
+            ]
 
     @registry.tool()
     async def performance_export(format: str = "markdown") -> list[TextContent]:

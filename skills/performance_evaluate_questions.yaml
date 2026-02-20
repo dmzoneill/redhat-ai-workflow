@@ -1,0 +1,248 @@
+# Skill: Evaluate Quarterly Questions with AI
+# Gathers evidence and builds prompts for the calling LLM to evaluate
+
+name: evaluate_questions
+description: |
+  Evaluate quarterly performance questions using AI.
+
+  For each question (or a specific one):
+  1. Ensures questions.json exists (creates from template if needed)
+  2. Tags events to questions if evidence is missing
+  3. Gathers auto-evidence from daily events
+  4. Includes manual notes and competency context
+  5. Builds an evaluation prompt
+
+  The calling LLM generates the response and saves it via
+  performance_save_evaluation(question_id, summary).
+
+version: "1.1"
+
+links:
+  depends_on:
+    - collect_daily
+  validates:
+    - collect_daily
+  validated_by:
+    - export_report
+  chains_to:
+    - export_report
+  provides_context_for:
+    - export_report
+
+inputs:
+  - name: question_id
+    type: string
+    required: false
+    default: ""
+    description: "Specific question ID to evaluate (empty for all)"
+  - name: exclude_evidence
+    type: list
+    required: false
+    default: []
+    description: "List of evidence IDs to exclude from the prompt"
+
+steps:
+  # Load performance persona so performance_save_evaluation is available
+  - name: load_persona
+    description: "Load performance persona for save_evaluation tool"
+    tool: persona_load
+    args:
+      persona_name: "performance"
+
+  # Get current quarter info
+  - name: get_quarter
+    description: "Determine current quarter"
+    compute: |
+      from datetime import date
+
+      today = date.today()
+      year = today.year
+      quarter = (today.month - 1) // 3 + 1
+
+      result = {
+          "year": year,
+          "quarter": quarter,
+          "quarter_str": f"Q{quarter} {year}",
+      }
+    output: quarter_info
+
+  # Load questions, ensure they exist, tag evidence if needed
+  - name: load_questions
+    description: "Load questions and gather evidence, initializing if needed"
+    compute: |
+      import json
+      import sys
+      from pathlib import Path
+
+      year = quarter_info["year"]
+      quarter = quarter_info["quarter"]
+
+      # Get data directory from config or use default
+      def get_perf_data_dir():
+          try:
+              config_file = Path.home() / ".config" / "aa-workflow" / "config.json"
+              if config_file.exists():
+                  with open(config_file) as f:
+                      config = json.load(f)
+                  data_dir = config.get("performance", {}).get("data_dir", "")
+                  if data_dir:
+                      return Path(data_dir).expanduser()
+          except Exception:
+              pass
+          return Path.home() / "src" / "redhat-quarterly-connection"
+
+      perf_dir = get_perf_data_dir() / str(year) / f"q{quarter}" / "performance"
+      questions_file = perf_dir / "questions.json"
+      daily_dir = perf_dir / "daily"
+      summary_file = perf_dir / "summary.json"
+
+      # Use QuestionManager to ensure questions.json exists
+      sys.path.insert(0, str(Path.home() / "src" / "redhat-ai-workflow" / "tool_modules" / "aa_performance" / "src"))
+      from question_manager import QuestionManager
+      qm = QuestionManager(perf_dir)
+
+      # If questions have no evidence yet, tag all events
+      questions = qm.get_questions()
+      total_evidence = sum(len(q.get("auto_evidence", [])) for q in questions)
+      if total_evidence == 0 and daily_dir.exists():
+          for daily_file in sorted(daily_dir.glob("*.json")):
+              try:
+                  with open(daily_file) as f:
+                      data = json.load(f)
+                  for event in data.get("events", []):
+                      qm.tag_event_to_questions(event)
+              except Exception:
+                  pass
+          # Reload after tagging
+          questions = qm.get_questions()
+
+      # Filter to specific question if provided
+      if inputs.question_id:
+          questions = [q for q in questions if q.get("id") == inputs.question_id]
+
+      if not questions:
+          error_msg = f"Question '{inputs.question_id}' not found" if inputs.question_id else "No questions configured"
+          raise ValueError(error_msg)
+
+      # Build set of excluded evidence IDs
+      exclude_set = set(inputs.get("exclude_evidence", []) if hasattr(inputs, 'get') else getattr(inputs, 'exclude_evidence', []) or [])
+
+      # Load all events for evidence lookup
+      all_events = {}
+      if daily_dir.exists():
+          for daily_file in daily_dir.glob("*.json"):
+              try:
+                  with open(daily_file) as f:
+                      data = json.load(f)
+                      for event in data.get("events", []):
+                          all_events[event.get("id", "")] = event
+              except Exception:
+                  pass
+
+      # Load competency summary
+      comp_summary = {}
+      if summary_file.exists():
+          with open(summary_file) as f:
+              summary = json.load(f)
+              comp_summary = summary.get("cumulative_percentage", {})
+
+      # Build evaluation data for each question
+      to_evaluate = []
+      for q in questions:
+          evidence_ids = [eid for eid in q.get("auto_evidence", []) if eid not in exclude_set]
+          evidence_events = [all_events[eid] for eid in evidence_ids if eid in all_events]
+
+          # Sort by total points descending, take top 20
+          evidence_events.sort(key=lambda e: sum(e.get("points", {}).values()), reverse=True)
+          top_events = evidence_events[:20]
+
+          to_evaluate.append({
+              "id": q.get("id"),
+              "text": q.get("text"),
+              "subtext": q.get("subtext"),
+              "evidence_count": len(evidence_events),
+              "top_evidence": top_events,
+              "manual_notes": q.get("manual_notes", []),
+          })
+
+      result = {
+          "questions": to_evaluate,
+          "comp_summary": comp_summary,
+          "perf_dir": str(perf_dir),
+      }
+    output: eval_data
+
+  # Build evaluation prompts
+  - name: build_prompts
+    description: "Build evaluation prompts for each question"
+    compute: |
+      prompts = []
+
+      for q in eval_data["questions"]:
+          # Build evidence text
+          evidence_lines = []
+          for e in q["top_evidence"]:
+              pts = sum(e.get("points", {}).values()) if isinstance(e.get("points"), dict) else 0
+              comps = ", ".join(f"{k}:{v}" for k, v in e.get("points", {}).items())
+              evidence_lines.append(f"- [{e.get('source', '')}] {e.get('title', '')} ({pts} pts: {comps})")
+
+          evidence_text = "\n".join(evidence_lines) if evidence_lines else "No automatic evidence collected"
+
+          # Build notes text
+          notes_text = "\n".join(f"- {n.get('text', '')}" for n in q["manual_notes"]) if q["manual_notes"] else "None"
+
+          # Build competency text
+          comp_text = "\n".join(f"- {k}: {v}%" for k, v in eval_data["comp_summary"].items())
+
+          q_text = q['text']
+          q_subtext = q['subtext'] or ''
+
+          prompt = f"""QUESTION: {q_text}
+      {q_subtext}
+
+      EVIDENCE FROM THIS QUARTER (top {len(q['top_evidence'])} of {q['evidence_count']} items, sorted by points):
+      {evidence_text}
+
+      MANUAL NOTES:
+      {notes_text}
+
+      COMPETENCY SCORES:
+      {comp_text}"""
+
+          prompts.append({
+              "id": q["id"],
+              "text": q["text"],
+              "prompt": prompt,
+              "evidence_count": q["evidence_count"],
+              "notes_count": len(q["manual_notes"]),
+          })
+
+      result = prompts
+    output: prompts
+
+outputs:
+  - name: summary
+    value: |
+      ## Quarterly Question Evaluation - {{ quarter_info.quarter_str }}
+
+      {% for p in prompts %}
+      ---
+
+      ### {{ p.text }}
+      **Evidence:** {{ p.evidence_count }} items | **Notes:** {{ p.notes_count }}
+
+      {{ p.prompt }}
+
+      ---
+
+      Based on this evidence, write a 2-3 paragraph response that:
+      1. Highlights the most significant accomplishments/points
+      2. Provides specific examples with metrics where available
+      3. Frames the response in first person ("I accomplished...")
+
+      Focus on impact and the "how" not just the "what". Be specific and quantitative where possible.
+
+      **After generating the response, save it with:**
+      `performance_save_evaluation("{{ p.id }}", "<your generated response>")`
+
+      {% endfor %}

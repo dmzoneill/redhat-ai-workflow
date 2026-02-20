@@ -81,6 +81,16 @@ export class CronTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.state?.enabled ? 1 : 0,
+      this.state?.jobs?.length ?? 0,
+      this.state?.history?.length ?? 0,
+      this.historyLimit,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -123,32 +133,32 @@ export class CronTab extends BaseTab {
       <div class="section">
         <div class="section-title">Scheduler Status</div>
         <div class="grid-4">
-          <div class="stat-card ${enabled ? "green" : "red"}">
+          <div class="card stat-card ${enabled ? "green" : "red"}">
             <div class="stat-icon">${enabled ? "▶" : "⏸"}</div>
             <div class="stat-value">${enabled ? "Running" : "Paused"}</div>
-            <div class="stat-label">Status</div>
+            <div class="text-meta stat-label">Status</div>
           </div>
-          <div class="stat-card blue">
+          <div class="card stat-card blue">
             <div class="stat-icon">📋</div>
             <div class="stat-value">${enabledJobs}/${jobs.length}</div>
-            <div class="stat-label">Active Jobs</div>
+            <div class="text-meta stat-label">Active Jobs</div>
           </div>
-          <div class="stat-card purple">
+          <div class="card stat-card purple">
             <div class="stat-icon">📊</div>
             <div class="stat-value">${successRate}%</div>
-            <div class="stat-label">Success Rate</div>
+            <div class="text-meta stat-label">Success Rate</div>
           </div>
-          <div class="stat-card cyan">
+          <div class="card stat-card cyan">
             <div class="stat-icon">🌍</div>
             <div class="stat-value">${timezone || "Local"}</div>
-            <div class="stat-label">Timezone</div>
+            <div class="text-meta stat-label">Timezone</div>
           </div>
         </div>
       </div>
 
       <!-- Scheduler Controls -->
       <div class="section">
-        <div class="cron-controls">
+        <div class="actions-row cron-controls">
           <button class="btn btn-xs ${enabled ? "btn-danger" : "btn-success"}" data-action="toggleScheduler">
             ${enabled ? "⏸ Pause Scheduler" : "▶ Start Scheduler"}
           </button>
@@ -158,7 +168,7 @@ export class CronTab extends BaseTab {
       <!-- Cron Jobs -->
       <div class="section">
         <div class="section-title">Scheduled Jobs</div>
-        <div class="cron-jobs-list">
+        <div class="flex-col cron-jobs-list">
           ${jobs.length > 0 ? jobs.map((job) => this.getCronJobHtml(job)).join("") : this.getEmptyStateHtml("📋", "No cron jobs configured")}
         </div>
       </div>
@@ -166,7 +176,7 @@ export class CronTab extends BaseTab {
       <!-- Execution History -->
       <div class="section">
         <div class="section-title">Execution History</div>
-        <div class="cron-history-list">
+        <div class="flex-col cron-history-list">
           ${history.length > 0 ? history.slice(0, this.historyLimit).map((entry) => this.getHistoryEntryHtml(entry)).join("") : this.getEmptyStateHtml("📜", "No execution history")}
         </div>
         ${history.length > this.historyLimit ? `
@@ -188,22 +198,22 @@ export class CronTab extends BaseTab {
       : job.trigger === "poll" ? "Poll-based" : "No schedule";
 
     return `
-      <div class="cron-job-item ${!job.enabled ? "disabled" : ""}">
+      <div class="card item-row cron-job-item ${!job.enabled ? "disabled" : ""}">
         <div class="cron-job-status ${statusClass}">${statusIcon}</div>
-        <div class="cron-job-info">
+        <div class="label-sm text-meta cron-job-info">
           <div class="cron-job-name">${this.escapeHtml(job.name)}</div>
-          <div class="cron-job-details">
-            <span class="cron-job-skill">⚡ ${this.escapeHtml(job.skill)}</span>
+          <div class="flex-row cron-job-details">
+            <span class="text-muted-sm cron-job-skill">⚡ ${this.escapeHtml(job.skill)}</span>
             ${job.persona ? this.getPersonaBadgeHtml(job.persona) : ""}
           </div>
-          <div class="cron-job-schedule-row">
-            <span class="cron-job-schedule" title="${job.cron || ''}">🕐 ${this.escapeHtml(scheduleDisplay)}</span>
+          <div class="flex-row cron-job-schedule-row">
+            <span class="text-meta cron-job-schedule" title="${job.cron || ''}">🕐 ${this.escapeHtml(scheduleDisplay)}</span>
           </div>
         </div>
         <div class="cron-job-timing">
-          ${job.next_run ? `<div class="cron-job-next">Next: ${this.formatRelativeTime(job.next_run)}</div>` : ""}
+          ${job.next_run ? `<div class="text-muted-sm cron-job-next">Next: ${this.formatRelativeTime(job.next_run)}</div>` : ""}
         </div>
-        <div class="cron-job-actions">
+        <div class="flex-row cron-job-actions">
           <button class="btn btn-xs btn-icon" data-action="runCronJobNow" data-job="${job.name}" title="Run Now">▶</button>
           <label class="toggle-switch">
             <input type="checkbox" ${job.enabled ? "checked" : ""} data-action="toggleCronJob" data-job="${job.name}" />
@@ -272,13 +282,13 @@ export class CronTab extends BaseTab {
     const outputPreview = entry.output_preview || "";
 
     return `
-      <div class="cron-history-item ${statusClass}" data-entry-id="${entry.id || ''}">
+      <div class="card item-row cron-history-item ${statusClass}" data-entry-id="${entry.id || ''}">
         <div class="cron-history-status ${statusClass}">${statusIcon}</div>
-        <div class="cron-history-info">
-          <div class="cron-history-header">
-            <span class="cron-history-job">${this.escapeHtml(entry.job_name)}</span>
-            <span class="cron-history-skill">⚡ ${this.escapeHtml(entry.skill)}</span>
-            ${entry.session_name ? `<span class="cron-history-session">📋 ${this.escapeHtml(entry.session_name)}</span>` : ""}
+        <div class="label-sm text-meta cron-history-info">
+          <div class="flex-row cron-history-header">
+            <span class="font-semibold cron-history-job">${this.escapeHtml(entry.job_name)}</span>
+            <span class="text-muted-sm cron-history-skill">⚡ ${this.escapeHtml(entry.skill)}</span>
+            ${entry.session_name ? `<span class="text-muted-sm cron-history-session">📋 ${this.escapeHtml(entry.session_name)}</span>` : ""}
           </div>
           ${outputPreview ? `
             <div class="cron-history-output" title="${this.escapeHtml(entry.output_preview || '')}">
@@ -292,7 +302,7 @@ export class CronTab extends BaseTab {
           ` : ""}
         </div>
         <div class="cron-history-timing">
-          <div class="cron-history-time">${this.formatRelativeTime(entry.timestamp)}</div>
+          <div class="text-muted-sm cron-history-time">${this.formatRelativeTime(entry.timestamp)}</div>
           <div class="cron-history-duration">${duration}</div>
         </div>
       </div>

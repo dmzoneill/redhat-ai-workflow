@@ -10,7 +10,7 @@ The `backfill_missing` skill identifies gaps in daily performance data collectio
 
 ```bash
 # Backfill missing days (up to 10)
-skill_run("performance/backfill_missing")
+skill_run("performance_backfill_missing")
 
 # Or use the Cursor command
 /performance-backfill
@@ -20,13 +20,13 @@ skill_run("performance/backfill_missing")
 
 ```bash
 # Backfill up to 10 missing days (default)
-skill_run("performance/backfill_missing")
+skill_run("performance_backfill_missing")
 
 # Backfill more days in one run
-skill_run("performance/backfill_missing", '{"max_days": 30}')
+skill_run("performance_backfill_missing", '{"max_days": 30}')
 
 # Backfill just 5 days
-skill_run("performance/backfill_missing", '{"max_days": 5}')
+skill_run("performance_backfill_missing", '{"max_days": 5}')
 ```
 
 ## Parameters
@@ -118,7 +118,7 @@ stateDiagram-v2
 ---
 
 2 days still need backfilling.
-Run again to continue: `skill_run("performance/backfill_missing")`
+Run again to continue: `skill_run("performance_backfill_missing")`
 ```
 
 ## No Missing Days Output

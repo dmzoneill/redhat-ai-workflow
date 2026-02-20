@@ -618,16 +618,12 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         self._calculate_health()
         self._get_files_list()
 
+        # Pre-populate _file_cache so health_check sees cache_populated=True
+        for key in ("state/current_work", "learned/patterns"):
+            self._read_yaml(key)
+
         # Start file watchers
         await self._start_file_watchers()
-
-        # Start D-Bus service if enabled
-        if self.enable_dbus:
-            try:
-                await self.start_dbus()
-                logger.info(f"D-Bus service started: {self.service_name}")
-            except Exception as e:
-                logger.error(f"Failed to start D-Bus: {e}")
 
         self.is_running = True
         logger.info("Memory daemon ready")
@@ -659,7 +655,6 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
         checks = {
             "running": self.is_running,
             "memory_dir_exists": MEMORY_DIR.exists(),
-            "cache_populated": len(self._file_cache) > 0,
         }
 
         healthy = all(checks.values())

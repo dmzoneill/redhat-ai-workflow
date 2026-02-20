@@ -67,12 +67,17 @@ export class HtmlGenerator {
       vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'js', 'd3.v7.min.js')
     );
 
+    // morphdom for efficient DOM patching (replaces innerHTML in tabContentUpdate)
+    const morphdomUri = this.context.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'js', 'morphdom.min.js')
+    );
+
     const html = `<!DOCTYPE html>
     <html lang="en">
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.cdnfonts.com; font-src https://fonts.cdnfonts.com; script-src 'nonce-${nonce}' 'unsafe-inline' ${this.context.webview.cspSource}; img-src ${this.context.webview.cspSource} https: data:; connect-src ws://localhost:* wss://localhost:*;">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.cdnfonts.com; font-src https://fonts.cdnfonts.com; script-src 'nonce-${nonce}' 'unsafe-inline' ${this.context.webview.cspSource}; img-src ${this.context.webview.cspSource} https: data:; connect-src ws://localhost:* wss://localhost:* http://127.0.0.1:*;">
       <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/red-hat-display">
       <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/red-hat-text">
       <link rel="stylesheet" href="https://fonts.cdnfonts.com/css/red-hat-mono">
@@ -82,8 +87,11 @@ export class HtmlGenerator {
       </style>
       <!-- D3.js for visualizations (mind map) - loaded from local resources -->
       <script nonce="${nonce}" src="${d3Uri}"></script>
+      <!-- morphdom for efficient DOM patching -->
+      <script nonce="${nonce}" src="${morphdomUri}"></script>
     </head>
     <body>
+      <script nonce="${nonce}">fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:sentinel-A',message:'Sentinel A: script at body start',data:{ts:Date.now()},timestamp:Date.now(),hypothesisId:'H7'})}).catch(function(){});</script>
       <div class="main-content">
         ${header}
         ${tabs}
@@ -109,10 +117,22 @@ export class HtmlGenerator {
         })();
         ${scripts}
       </script>
+      <script nonce="${nonce}">fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:sentinel-B',message:'Sentinel B: script after main block',data:{ts:Date.now()},timestamp:Date.now(),hypothesisId:'H7'})}).catch(function(){});</script>
     </body>
     </html>`;
 
     logger.log(`generateHtml() - total HTML length: ${html.length} chars`);
+
+    // #region agent log
+    // Dump combined scripts to a file for offline syntax checking
+    try {
+      const fs = require('fs');
+      const dumpPath = '/tmp/webview-scripts-df259b.js';
+      fs.writeFileSync(dumpPath, scripts, 'utf8');
+      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:scriptDump',message:'Scripts dumped to file',data:{path:dumpPath,len:scripts.length},timestamp:Date.now(),hypothesisId:'H7'})}).catch(()=>{});
+    } catch(e) {}
+    // #endregion
+
     return html;
   }
 
@@ -125,7 +145,9 @@ export class HtmlGenerator {
   private getAllStyles(): string {
     const css = this.loadCssFile("unified.css");
     logger.log(`unified.css loaded: ${css.length} chars`);
-    return css;
+    const d3Css = this.loadCssFile("d3-charts.css");
+    logger.log(`d3-charts.css loaded: ${d3Css.length} chars`);
+    return css + "\n" + d3Css;
   }
 
   /**
@@ -273,6 +295,10 @@ export class HtmlGenerator {
    */
   private getInitScript(): string {
     return `
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:initScriptStart',message:'Init script STARTING',data:{initTabsDefined:typeof initTabs==='function',switchTabDefined:typeof switchTab==='function',vscodeApiDefined:typeof vscode!=='undefined',bodyChildCount:document.body?document.body.childElementCount:0},timestamp:Date.now(),hypothesisId:'H6'})}).catch(function(){});
+      // #endregion
+
       // Initialize tabs
       if (typeof initTabs === 'function') {
         initTabs();
@@ -280,9 +306,72 @@ export class HtmlGenerator {
 
       // Set initial active tab
       const initialTab = '${this.context.currentTab}';
+      // #region agent log
+      (function() {
+        var tabContents = document.querySelectorAll('.tab-content');
+        var tabBtns = document.querySelectorAll('.tab');
+        var ids = [];
+        tabContents.forEach(function(tc) { ids.push(tc.id); });
+        fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:initScript',message:'Before switchTab',data:{initialTab:initialTab,tabContentCount:tabContents.length,tabBtnCount:tabBtns.length,tabContentIds:ids,switchTabDefined:typeof switchTab === 'function',initTabsDefined:typeof initTabs === 'function'},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
+      })();
+      // #endregion
       if (typeof switchTab === 'function') {
-        switchTab(initialTab);
+        try {
+          switchTab(initialTab);
+          // #region agent log
+          (function() {
+            var activeContents = document.querySelectorAll('.tab-content.active');
+            var allContents = document.querySelectorAll('.tab-content');
+            var activeIds = []; allContents.forEach(function(c) { if (c.classList.contains('active')) activeIds.push(c.id); });
+            var firstContentStyle = allContents.length > 0 ? window.getComputedStyle(allContents[0]).display : 'N/A';
+            var activeContentStyle = activeContents.length > 0 ? window.getComputedStyle(activeContents[0]).display : 'N/A';
+            var activeContentLen = activeContents.length > 0 ? activeContents[0].innerHTML.length : 0;
+            fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:afterSwitchTab',message:'After switchTab',data:{initialTab:initialTab,activeContentCount:activeContents.length,totalContentCount:allContents.length,activeIds:activeIds,firstContentDisplay:firstContentStyle,activeContentDisplay:activeContentStyle,activeContentLen:activeContentLen},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
+          })();
+          // #endregion
+        } catch(e) {
+          // #region agent log
+          fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:switchTabError',message:'switchTab CRASHED',data:{error:e.message,stack:e.stack},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
+          // #endregion
+        }
+      } else {
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:noSwitchTab',message:'switchTab NOT defined',data:{},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
+        // #endregion
       }
+
+      // Track user interaction on tab content areas.
+      // When the user scrolls, focuses an input, types, or clicks within a tab,
+      // notify the extension so it can suppress disruptive full re-renders.
+      (function() {
+        var _interactionTimer = null;
+        function notifyInteraction(tabId) {
+          if (_interactionTimer) return;
+          _interactionTimer = setTimeout(function() { _interactionTimer = null; }, 500);
+          vscode.postMessage({ command: 'userInteracting', tabId: tabId });
+        }
+        function getTabId(el) {
+          var tc = el.closest ? el.closest('.tab-content') : null;
+          return tc ? tc.id : null;
+        }
+        document.addEventListener('focusin', function(e) {
+          var tid = getTabId(e.target);
+          if (tid) notifyInteraction(tid);
+        }, true);
+        document.addEventListener('input', function(e) {
+          var tid = getTabId(e.target);
+          if (tid) notifyInteraction(tid);
+        }, true);
+        document.addEventListener('scroll', function(e) {
+          var el = e.target;
+          var tid = (el === document || el === document.documentElement) ? null : getTabId(el);
+          if (tid) notifyInteraction(tid);
+        }, true);
+        document.addEventListener('mousedown', function(e) {
+          var tid = getTabId(e.target);
+          if (tid) notifyInteraction(tid);
+        }, true);
+      })();
 
       // Handle messages from extension
       window.addEventListener('message', event => {
@@ -316,198 +405,91 @@ export class HtmlGenerator {
             }
             break;
           case 'tabContentUpdate':
-            // Update tab content without full page reload
-            // Note: We can't use new Function() due to CSP, so we use event delegation instead
             if (message.tabId && message.content) {
               const tabContent = document.getElementById(message.tabId);
               if (tabContent) {
-                // Preserve sub-tab state for tabs that have sub-tabs (like meetings)
-                let activeSubTab = null;
-                if (message.tabId === 'meetings') {
-                  const activeSubTabBtn = tabContent.querySelector('.meetings-subtab.active');
-                  if (activeSubTabBtn) {
-                    activeSubTab = activeSubTabBtn.dataset.tab;
+                // Capture focus state before morphdom (morphdom preserves most state
+                // but we need to handle text cursor position explicitly)
+                var focusedEl = document.activeElement;
+                var focusedId = null;
+                var focusedSelStart = null;
+                var focusedSelEnd = null;
+                if (focusedEl && tabContent.contains(focusedEl) && focusedEl.id) {
+                  focusedId = focusedEl.id;
+                  if (typeof focusedEl.selectionStart === 'number') {
+                    focusedSelStart = focusedEl.selectionStart;
+                    focusedSelEnd = focusedEl.selectionEnd;
                   }
                 }
 
-                // Preserve search input values to prevent clearing user input during refresh
-                const searchInputs = {};
-                tabContent.querySelectorAll('input[type="text"][id*="Search"], input[type="text"][id*="search"]').forEach(input => {
-                  if (input.value) {
-                    searchInputs[input.id] = input.value;
-                  }
-                });
+                // Build a temporary wrapper matching tabContent's structure
+                var tempWrapper = document.createElement('div');
+                tempWrapper.innerHTML = message.content;
 
-                // Preserve scroll positions for the tab content and all scrollable children
-                const scrollPositions = [];
-
-                // Save main tab content scroll position
-                scrollPositions.push({
-                  selector: null, // null means the tabContent itself
-                  scrollTop: tabContent.scrollTop,
-                  scrollLeft: tabContent.scrollLeft
-                });
-
-                // Save scroll positions of all scrollable elements with IDs or data-scroll-preserve
-                tabContent.querySelectorAll('[id], [data-scroll-preserve]').forEach(el => {
-                  if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) {
-                    const identifier = el.id || el.dataset.scrollPreserve;
-                    if (identifier && (el.scrollTop > 0 || el.scrollLeft > 0)) {
-                      scrollPositions.push({
-                        selector: el.id ? '#' + el.id : '[data-scroll-preserve="' + el.dataset.scrollPreserve + '"]',
-                        scrollTop: el.scrollTop,
-                        scrollLeft: el.scrollLeft
-                      });
-                    }
-                  }
-                });
-
-                // Also save scroll position of common scrollable containers by class
-                // Include all known scrollable containers in the UI
-                // IMPORTANT: Include both sidebar containers AND their inner lists
-                const scrollableClasses = [
-                  // Skills tab - sidebar is the main scrollable container
-                  '.skills-sidebar',
-                  '.skills-list',
-                  '.skills-main-content',
-                  '.skill-workflow-view',
-                  '.skill-workflow-horizontal',
-                  '.skill-workflow-vertical',
-                  '.running-skills-list',
-                  '.skill-info-content',
-                  '.skill-detail-content',
-                  // Tools tab - sidebar is the main scrollable container
-                  '.tools-sidebar',
-                  '.tools-list',
-                  '.tools-main',
-                  // Sessions tab
-                  '.sessions-list',
-                  '.sessions-sidebar',
-                  // Slack tab
-                  '.slack-messages',
-                  '.slack-channel-list',
-                  '.slack-sidebar',
-                  // Memory tab
-                  '.memory-content',
-                  '.memory-sidebar',
-                  // Personas tab
-                  '.personas-list',
-                  '.personas-sidebar',
-                  // Cron tab
-                  '.cron-list',
-                  '.cron-sidebar',
-                  // Services tab
-                  '.services-list',
-                  '.services-sidebar',
-                  // Meetings tab
-                  '.meetings-list',
-                  '.meetings-sidebar',
-                  // Sprint tab
-                  '.sprint-content',
-                  '.sprint-sidebar',
-                  // Slop tab
-                  '.slop-content',
-                  '.slop-sidebar'
-                ];
-                scrollableClasses.forEach(className => {
-                  // Use querySelectorAll to handle multiple elements with same class
-                  tabContent.querySelectorAll(className).forEach((el, index) => {
-                    if (el.scrollTop > 0 || el.scrollLeft > 0) {
-                      // Use index suffix if multiple elements have the same class
-                      const selectorKey = index === 0 ? className : className + ':nth-of-type(' + (index + 1) + ')';
-                      scrollPositions.push({
-                        selector: className, // Use simple selector for restore (will get first match)
-                        index: index,
-                        scrollTop: el.scrollTop,
-                        scrollLeft: el.scrollLeft
-                      });
-                    }
-                  });
-                });
-
-                // Also save the main document/body scroll position
-                const mainScrollTop = document.documentElement.scrollTop || document.body.scrollTop;
-                const mainScrollLeft = document.documentElement.scrollLeft || document.body.scrollLeft;
-
-                tabContent.innerHTML = message.content;
-
-                // Restore scroll positions after DOM layout is complete
-                // Use double requestAnimationFrame to ensure layout is fully calculated
-                requestAnimationFrame(() => {
-                  requestAnimationFrame(() => {
-                    // Restore scroll positions
-                    scrollPositions.forEach(pos => {
-                      let el;
-                      if (pos.selector === null) {
-                        el = tabContent;
-                      } else if (pos.index !== undefined && pos.index > 0) {
-                        // Handle multiple elements with same class
-                        const elements = tabContent.querySelectorAll(pos.selector);
-                        el = elements[pos.index];
-                      } else {
-                        el = tabContent.querySelector(pos.selector);
+                // Use morphdom to patch only the changed DOM nodes.
+                // Unchanged elements keep their scroll positions, form values,
+                // event listeners, and D3 visualizations intact.
+                if (typeof morphdom === 'function') {
+                  morphdom(tabContent, tempWrapper, {
+                    childrenOnly: true,
+                    onBeforeElUpdated: function(fromEl, toEl) {
+                      // Never touch the actively focused input/textarea/select -
+                      // the user may be typing or selecting.
+                      if (fromEl === document.activeElement) {
+                        var tag = fromEl.tagName;
+                        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                          return false;
+                        }
                       }
-                      if (el) {
-                        el.scrollTop = pos.scrollTop;
-                        el.scrollLeft = pos.scrollLeft;
+                      // Preserve scroll position on scrollable containers
+                      if (fromEl.scrollTop > 0) {
+                        toEl.setAttribute('data-morph-scrollTop', fromEl.scrollTop);
                       }
-                    });
-
-                    // Restore main document scroll position
-                    if (mainScrollTop > 0 || mainScrollLeft > 0) {
-                      document.documentElement.scrollTop = mainScrollTop;
-                      document.body.scrollTop = mainScrollTop;
-                      document.documentElement.scrollLeft = mainScrollLeft;
-                      document.body.scrollLeft = mainScrollLeft;
+                      if (fromEl.scrollLeft > 0) {
+                        toEl.setAttribute('data-morph-scrollLeft', fromEl.scrollLeft);
+                      }
+                      return true;
+                    },
+                    onElUpdated: function(el) {
+                      // Restore scroll positions saved during onBeforeElUpdated
+                      var st = el.getAttribute('data-morph-scrollTop');
+                      var sl = el.getAttribute('data-morph-scrollLeft');
+                      if (st) { el.scrollTop = parseInt(st, 10); el.removeAttribute('data-morph-scrollTop'); }
+                      if (sl) { el.scrollLeft = parseInt(sl, 10); el.removeAttribute('data-morph-scrollLeft'); }
                     }
                   });
-                });
+                } else {
+                  // Fallback if morphdom failed to load
+                  tabContent.innerHTML = message.content;
+                }
 
-                // Restore search input values and re-apply filtering
-                Object.entries(searchInputs).forEach(([id, value]) => {
-                  const input = document.getElementById(id);
-                  if (input) {
-                    input.value = value;
-                    // Trigger input event to re-apply any client-side filtering
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                  }
-                });
-
-                // Restore sub-tab state after content update
-                if (activeSubTab && message.tabId === 'meetings') {
-                  // Update tab buttons
-                  tabContent.querySelectorAll('.meetings-subtab').forEach(btn => {
-                    btn.classList.remove('active');
-                    if (btn.dataset.tab === activeSubTab) {
-                      btn.classList.add('active');
+                // Restore text cursor position if focus was preserved
+                if (focusedId) {
+                  var toFocus = document.getElementById(focusedId);
+                  if (toFocus && toFocus === document.activeElement && focusedSelStart !== null) {
+                    try { toFocus.setSelectionRange(focusedSelStart, focusedSelEnd); } catch(e) {}
+                  } else if (toFocus && toFocus !== document.activeElement) {
+                    toFocus.focus();
+                    if (focusedSelStart !== null && typeof toFocus.setSelectionRange === 'function') {
+                      try { toFocus.setSelectionRange(focusedSelStart, focusedSelEnd); } catch(e) {}
                     }
-                  });
-                  // Update content panels
-                  tabContent.querySelectorAll('.subtab-content').forEach(panel => {
-                    panel.classList.remove('active');
-                  });
-                  const targetPanel = document.getElementById('subtab-' + activeSubTab);
-                  if (targetPanel) {
-                    targetPanel.classList.add('active');
                   }
                 }
-                // Event delegation handles clicks - no need to re-run scripts
-                // EXCEPTION: Mind map needs D3 initialization after content update
-                if (message.tabId === 'skills') {
-                  console.log('[MindMap] tabContentUpdate for skills tab');
-                  console.log('[MindMap] typeof d3:', typeof d3);
-                  console.log('[MindMap] typeof initMindMap:', typeof initMindMap);
-                  console.log('[MindMap] mindmapSvg exists:', !!document.getElementById('mindmapSvg'));
-                  console.log('[MindMap] mindmapDataScript exists:', !!document.getElementById('mindmapDataScript'));
-                  if (typeof initMindMap === 'function') {
-                    setTimeout(function() {
-                      console.log('[MindMap] Calling initMindMap()...');
-                      initMindMap();
-                    }, 200);
-                  } else {
-                    console.warn('[MindMap] initMindMap is NOT defined - scripts may not have loaded');
+
+                // Re-initialize D3 visualizations only when their data elements changed
+                requestAnimationFrame(function() {
+                  if (message.tabId === 'skills' && document.getElementById('mindmapDataScript') && typeof initMindMap === 'function') {
+                    initMindMap();
                   }
-                }
+                  if (message.tabId === 'performance') {
+                    if (document.getElementById('perfMindmapData') && typeof window._initPerfMindmap === 'function') {
+                      setTimeout(function() { window._initPerfMindmap(); }, 200);
+                    }
+                    if (document.getElementById('perfHelpData') && typeof window._initPerfHelp === 'function') {
+                      setTimeout(function() { window._initPerfHelp(); }, 250);
+                    }
+                  }
+                });
               } else {
                 console.warn('[TabContentUpdate] Tab content element not found:', message.tabId);
               }

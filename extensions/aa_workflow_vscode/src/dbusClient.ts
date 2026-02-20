@@ -1704,17 +1704,31 @@ class DBusClient {
   }
 
   /**
-   * Get question summary statistics
+   * Get full evidence details for a question (sorted by points)
    */
-  async stats_getQuestionSummary(questionId?: string): Promise<DBusResult> {
-    return this.callMethod("stats", "get_question_summary", questionId ? { question_id: questionId } : undefined);
+  async stats_getQuestionDetail(questionId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_question_detail", { question_id: questionId });
   }
 
   /**
-   * Add a note to statistics
+   * Add a manual note to a specific question
    */
-  async stats_addNote(note: string, category?: string): Promise<DBusResult> {
-    return this.callMethod("stats", "add_note", { note, category: category || "" });
+  async stats_addQuestionNote(questionId: string, note: string): Promise<DBusResult> {
+    return this.callMethod("stats", "add_question_note", { question_id: questionId, note });
+  }
+
+  /**
+   * Add a custom quarterly question
+   */
+  async stats_addQuestion(text: string): Promise<DBusResult> {
+    return this.callMethod("stats", "add_question", { text });
+  }
+
+  /**
+   * Remove a quarterly question by ID
+   */
+  async stats_removeQuestion(questionId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "remove_question", { question_id: questionId });
   }
 
   /**
@@ -1820,6 +1834,20 @@ class DBusClient {
    */
   async stats_backfillExecutiveEmails(): Promise<DBusResult> {
     return this.callMethod("stats", "backfill_executive_emails", {});
+  }
+
+  /**
+   * Get the configured executive email senders list
+   */
+  async stats_getExecutiveSenders(): Promise<DBusResult<{ senders: string[] }>> {
+    return this.callMethod("stats", "get_executive_senders", {});
+  }
+
+  /**
+   * Update the executive email senders list
+   */
+  async stats_setExecutiveSenders(senders: string[]): Promise<DBusResult<{ senders: string[] }>> {
+    return this.callMethod("stats", "set_executive_senders", { senders });
   }
 
   // ==========================================================================

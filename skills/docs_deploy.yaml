@@ -1,0 +1,102 @@
+# Skill: Full docs pipeline - sync, build, commit, push
+
+name: docs_deploy
+description: |
+  Full documentation deployment pipeline:
+  1. Sync all data sources (Jira, Drive, Git, static)
+  2. Compose pages (expand COMPOSE markers)
+  3. Build HTML
+  4. Commit changes
+  5. Push to GitLab (triggers Pages deployment)
+
+version: "1.0"
+
+links:
+  depends_on:
+    - docs_sync
+    - docs_build
+  validates: []
+  validated_by: []
+  chains_to: []
+  provides_context_for: []
+
+inputs:
+  - name: message
+    type: string
+    required: false
+    default: "Update documentation"
+    description: "Git commit message"
+
+  - name: skip_jira
+    type: boolean
+    required: false
+    default: false
+    description: "Skip Jira sync"
+
+  - name: skip_drive
+    type: boolean
+    required: false
+    default: false
+    description: "Skip Google Drive sync"
+
+steps:
+  - name: full_pipeline
+    description: "Run full generate_all.py pipeline"
+    compute: |
+      import subprocess, sys
+      from pathlib import Path
+
+      project = Path.home() / "src" / "daoneill.pages.redhat.com"
+      cmd = [sys.executable, str(project / "scripts" / "generate_all.py")]
+
+      if inputs.get("skip_jira"):
+          cmd.append("--skip-jira")
+      if inputs.get("skip_drive"):
+          cmd.append("--skip-drive")
+
+      proc = subprocess.run(cmd, cwd=project, capture_output=True, text=True, timeout=600)
+
+      if proc.returncode != 0:
+          raise RuntimeError(f"Pipeline failed:\n{proc.stderr[-2000:]}")
+
+      lines = [l for l in proc.stdout.split("\n") if l.strip().startswith("[")]
+      result = "\n".join(lines) if lines else "Pipeline completed"
+    output: pipeline_result
+
+  - name: git_add_commit
+    description: "Stage and commit changes"
+    tool: git_add
+    args:
+      path: "."
+      cwd: "{{ project_dir or '/home/daoneill/src/daoneill.pages.redhat.com' }}"
+
+  - name: git_commit
+    description: "Commit with message"
+    tool: git_commit
+    args:
+      message: "{{ inputs.message | default('Update documentation') }}"
+      cwd: "{{ project_dir or '/home/daoneill/src/daoneill.pages.redhat.com' }}"
+    on_error: continue
+
+  - name: git_push
+    description: "Push to remote"
+    tool: git_push
+    args:
+      cwd: "{{ project_dir or '/home/daoneill/src/daoneill.pages.redhat.com' }}"
+    on_error: continue
+
+  - name: log_deploy
+    description: "Log the deployment"
+    tool: memory_session_log
+    args:
+      action: "Docs deployed"
+      details: "{{ pipeline_result }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ pipeline_result }}
+
+      ✅ Changes committed and pushed to GitLab.
+      GitLab Pages will rebuild automatically.

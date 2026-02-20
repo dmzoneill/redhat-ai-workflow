@@ -52,6 +52,17 @@ export class PersonasTab extends BaseTab {
     return null;
   }
 
+  protected computeDataFingerprint(): string {
+    const parts = [
+      this.personas.length,
+      this.activeAgent?.persona ?? "",
+      this.selectedPersona ?? "",
+      this.viewMode,
+      this.searchQuery,
+    ];
+    return parts.join("|");
+  }
+
   async loadData(): Promise<void> {
     logger.log("loadData() starting...");
     try {
@@ -130,7 +141,7 @@ export class PersonasTab extends BaseTab {
     return `
       <!-- Persona Controls -->
       <div class="section">
-        <div class="persona-controls">
+        <div class="flex-between persona-controls">
           <div class="persona-count">${this.personas.length} persona(s)</div>
           <div class="view-toggle">
             <button id="personaViewCard" data-action="viewCard" class="toggle-btn ${this.viewMode === "card" ? "active" : ""}">🗂️ Cards</button>
@@ -196,7 +207,7 @@ export class PersonasTab extends BaseTab {
     const color = this.getPersonaColor(persona.name);
 
     return `
-      <div class="persona-card ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}" data-persona="${persona.name}">
+      <div class="card persona-card ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}" data-persona="${persona.name}">
         <div class="persona-card-header">
           <div class="persona-card-icon">${persona.icon || "🎭"}</div>
           <div class="persona-card-name">${this.escapeHtml(persona.name)}</div>
@@ -251,7 +262,7 @@ export class PersonasTab extends BaseTab {
       <tr class="${isActive ? "active" : ""}" data-persona="${persona.name}">
         <td>
           <span class="persona-icon">${persona.icon || "🎭"}</span>
-          <span class="persona-name-text">${this.escapeHtml(persona.name)}</span>
+          <span class="font-semibold persona-name-text">${this.escapeHtml(persona.name)}</span>
           ${isActive ? '<span class="persona-active-badge">Active</span>' : ""}
         </td>
         <td>${persona.category || "-"}</td>

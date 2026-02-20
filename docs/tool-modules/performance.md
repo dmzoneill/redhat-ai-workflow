@@ -344,7 +344,7 @@ highlights:
 The performance module is used by scheduled skills:
 
 ```yaml
-# skills/performance/collect_daily.yaml
+# skills/performance_collect_daily.yaml
 name: collect_daily_performance
 description: Collect daily performance data
 trigger: scheduled

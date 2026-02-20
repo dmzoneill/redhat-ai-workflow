@@ -1565,6 +1565,24 @@ Also output the MR ID if found: [MR_ID: <number>]
                         },
                     )
                     self._issues_completed += 1
+
+                    # Log to daily session file
+                    try:
+                        from tool_modules.aa_workflow.src.memory_tools import (
+                            append_session_entry,
+                        )
+
+                        append_session_entry(
+                            {
+                                "type": "sprint",
+                                "action": f"Sprint: {issue_key} merged and closed",
+                                "details": f"MR !{mr_id} merged, issue transitioned to Done",
+                                "issues": [issue_key],
+                                "source": "sprint",
+                            }
+                        )
+                    except Exception:
+                        pass
                 else:
                     logger.warning(f"Merge/close failed for {issue_key}: {error}")
                     _add_timeline_event(
@@ -2319,6 +2337,22 @@ Also output the MR ID if found: [MR_ID: <number>]
         except Exception as exc:
             logger.debug("Suppressed error: %s", exc)
 
+        # Log to daily session file
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            append_session_entry(
+                {
+                    "type": "sprint",
+                    "action": f"Sprint: {issue_key} started",
+                    "details": issue.get("summary", "")[:100],
+                    "issues": [issue_key],
+                    "source": "sprint",
+                }
+            )
+        except Exception:
+            pass
+
         try:
             import shutil
 
@@ -2453,6 +2487,26 @@ Also output the MR ID if found: [MR_ID: <number>]
                     notify_sprint_issue_completed(issue_key)
                 except Exception as exc:
                     logger.debug("Suppressed error: %s", exc)
+
+                # Log to daily session file
+                try:
+                    from tool_modules.aa_workflow.src.memory_tools import (
+                        append_session_entry,
+                    )
+
+                    commits = work_log.get("outcome", {}).get("commits", [])
+                    append_session_entry(
+                        {
+                            "type": "sprint",
+                            "action": f"Sprint: {issue_key} completed",
+                            "details": f"{len(commits)} commits, background processing done",
+                            "issues": [issue_key],
+                            "source": "sprint",
+                        }
+                    )
+                except Exception:
+                    pass
+
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2490,6 +2544,25 @@ Also output the MR ID if found: [MR_ID: <number>]
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
                 except Exception as exc:
                     logger.debug("Suppressed error: %s", exc)
+
+                # Log to daily session file
+                try:
+                    from tool_modules.aa_workflow.src.memory_tools import (
+                        append_session_entry,
+                    )
+
+                    append_session_entry(
+                        {
+                            "type": "sprint",
+                            "action": f"Sprint: {issue_key} blocked",
+                            "details": blocked_reason[:200],
+                            "issues": [issue_key],
+                            "source": "sprint",
+                        }
+                    )
+                except Exception:
+                    pass
+
                 self._trace_step(
                     tracer,
                     "parse_result",

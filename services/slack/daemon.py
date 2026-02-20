@@ -457,6 +457,25 @@ Format the output for Slack (use *bold*, `code`, bullet points).
             response = await self.claude_agent.process_message(
                 prompt, context, conversation_id=conversation_id
             )
+
+            try:
+                from tool_modules.aa_workflow.src.memory_tools import (
+                    append_session_entry,
+                )
+
+                append_session_entry(
+                    {
+                        "type": "slack_command",
+                        "action": f"Slack skill: {skill_name}",
+                        "details": f"Triggered by {message.user_name} in #{message.channel_name}",
+                        "source": "slack",
+                        "skill_name": skill_name,
+                        "result": "success",
+                    }
+                )
+            except Exception:
+                pass
+
             return response
 
         except Exception as e:
@@ -1057,6 +1076,26 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                         f"Claude alert investigation returned no response for alert in {msg.channel_id}"
                     )
                     self.ui.print_info("⚠️ Alert investigation returned no response")
+
+                try:
+                    from tool_modules.aa_workflow.src.memory_tools import (
+                        append_session_entry,
+                    )
+
+                    append_session_entry(
+                        {
+                            "type": "slack_alert",
+                            "action": f"Slack alert investigated in {env}",
+                            "details": (
+                                f"Channel: #{msg.channel_name}, namespace: {namespace}, "
+                                f"response: {'sent' if response else 'none'}"
+                            ),
+                            "result": "success" if response else "failure",
+                            "source": "slack",
+                        }
+                    )
+                except Exception:
+                    pass
             else:
                 # Fallback: just acknowledge the alert
                 logger.warning("Claude agent not available for alert investigation")
@@ -1319,6 +1358,24 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
             )
 
         self.ui.print_response(response, success)
+
+        # Log response to daily session file
+        if status == "sent":
+            try:
+                from tool_modules.aa_workflow.src.memory_tools import (
+                    append_session_entry,
+                )
+
+                append_session_entry(
+                    {
+                        "type": "slack_response",
+                        "action": f"Slack: responded to {msg.user_name}",
+                        "details": f"Channel: #{msg.channel_name}, category: {classification.category.value}",
+                        "source": "slack",
+                    }
+                )
+            except Exception:
+                pass
 
         # Record sent message in D-Bus history
         if self._dbus_handler:

@@ -2843,6 +2843,31 @@ class SkillExecutor:
         except Exception as e:
             self._debug(f"Failed to record skill stats: {e}")
 
+        # Log skill completion to daily session file
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            overall_success = fail_count == 0
+            total_steps = len(self.skill.get("steps", []))
+            entry: dict[str, Any] = {
+                "type": "skill",
+                "action": f"skill: {skill_name}",
+                "details": (
+                    f"{'Success' if overall_success else 'Failed'} "
+                    f"({success_count}/{total_steps} steps, "
+                    f"{int(total_time * 1000)}ms)"
+                ),
+                "skill_name": skill_name,
+                "result": "success" if overall_success else "failure",
+                "duration_ms": int(total_time * 1000),
+                "source": self.source,
+            }
+            if self.session_id:
+                entry["session_id"] = self.session_id
+            append_session_entry(entry)
+        except Exception as e:
+            self._debug(f"Failed to log skill to session: {e}")
+
         # Extract and save learnings from successful skill execution
         if fail_count == 0:
             await self._extract_and_save_learnings(output_lines)

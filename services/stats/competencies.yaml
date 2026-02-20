@@ -1,0 +1,835 @@
+engineering_levels:
+- id: ase
+  name: Associate Software Engineer
+  short: ASE
+- id: se
+  name: Software Engineer
+  short: SE
+- id: sse
+  name: Senior Software Engineer
+  short: SSE
+- id: pse
+  name: Principal Software Engineer
+  short: PSE
+- id: spse
+  name: Senior Principal Software Engineer
+  short: SPSE
+- id: de
+  name: Distinguished Engineer
+  short: DE
+- id: sde
+  name: Senior Distinguished Engineer
+  short: SDE
+- id: fellow
+  name: Fellow
+  short: Fellow
+level_summaries:
+  ase: Learns and becomes proficient with the trade under the guidance of others.
+  se: Provides a continuous stream of solid contributions and performs well independently.
+  sse: Acts as an expert and owner of a specific area, recognized go-to person, enables others, and builds relationships across
+    teams and functions.
+  pse: Acts as an expert across a group of projects in a technical area. Steers collaboration across products.
+  spse: Acts as an expert in multiple technical areas. Has a clearly recognizable business impact.
+  de: Acts as a strategic influencer affecting changes in the industry.
+  sde: ''
+  fellow: ''
+competencies:
+  business_impact:
+    name: Business Impact
+    category: Technical Contribution
+    levels:
+      ase:
+        title: Incremental Impact
+        description: Contributions grow incrementally over time to play a supporting role, bringing fresh tools and perspective
+          from recent academic experiences, within the team that ultimately lead to a positive impact on business, cost reduction
+          and/or address unmet customer needs
+      se:
+        title: Supporting Impact
+        description: Contributions play a supporting role within the team that ultimately lead to a positive impact on business,
+          cost reduction and/or address unmet customer needs
+      sse:
+        title: Direct Impact
+        description: Contributions have direct technical impact on elements of business, cost reduction and/or address unmet
+          customer needs
+      pse:
+        title: Visible Impact
+        description: Contributions have visible (recognized outside of one’s immediate team)  technical impact on key elements
+          of business, strategic direction, improving time-to-market, cost reduction and/or address unmet customer needs
+      spse:
+        title: Revenue Impact
+        description: Contributions have a direct positive revenue impact. That typically translates into enhancements, fixes
+          or direct customer engagements that conclusively open new markets, get new deals, save renewals or dramatically
+          reduce costs
+      de:
+        title: Lasting Impact Across Products
+        description: 'Contributions have major lasting technical impact on business across multiple projects or products measured
+          by: direct revenue implications, changes in operational processes and/or changes in strategic direction'
+      sde:
+        title: Lasting Impact Across Business Units
+        description: Contributions have major lasting impact across multiple business units, primary research initiatives
+          and/or significant revenue impact on our businesses
+      fellow:
+        title: Leapfrogging Company Impact
+        description: Contributions have impact across multiple groups/divisions, are recognized within the industry as state-of-the-art
+          or have leapfrogged the group and/or company into the marketplace
+  scope:
+    name: Scope
+    category: Technical Contribution
+    levels:
+      ase:
+        title: Task
+        description: Delivers minor functional enhancements or tasks and effectively solves problems within assigned components
+      se:
+        title: Component
+        description: Able to design, implement, or operate software at the component level, and understands interaction with
+          other components within a subsystem. Regularly resolves issues that cross component boundaries. Contributes to the
+          upstream equivalent of their product
+      sse:
+        title: Technical Area
+        description: Highly experienced in a technical area. Able to design, implement, or operate software at the subsystem
+          level, with a deep understanding of the interaction with other subsystems and technologies and how their function
+          serves the encompassing project and/or product. Frequently contributes to the upstream equivalent of their product
+      pse:
+        title: Multiple Technical Areas
+        description: Has broad experience in multiple complex technical areas and contributes accordingly on complex problems/projects
+          where analysis of situations or data requires an in-depth evaluation of multiple factors – including system design
+          and inter-dependencies. Contribution scope encompasses design and architectural changes
+      spse:
+        title: Architectural Coordination
+        description: Contributions typically require coordinating architecture and dependencies with other teams in a broad
+          technical context, and demonstrates an understanding of the consequences of technological choices. Holds a leadership
+          position in upstream or across a group of internally focused projects (for SRE, EXD, UXD and similar teams), typically
+          a strategic owner, frequently defining direction of the project in matters of architecture, technology decisions,
+          CI setup, etc
+      de:
+        title: Department level influence
+        description: Significantly influences product direction and architecture at the departmental level; establishes multi-year
+          technology roadmaps – including development and delivery planning – at the team level. Effective at breaking down
+          complex problems to a level that groups can work on independently
+      sde:
+        title: Elevate Business Unit toward Market Leader
+        description: Contributions cause substantial change to the state of the art in a significant discipline and further
+          the strategic relevance of the business unit
+      fellow:
+        title: Create Company Business
+        description: Responsible for the creation of a new business group, product or venture or gets the company in a significantly
+          advantaged position in the industry
+  evidence_record:
+    name: Evidence/Record
+    category: Technical Contribution
+    levels:
+      ase:
+        title: Timely Contribution
+        description: Timely delivery of assignments, which fully meet task specifications
+      se:
+        title: Active Contribution
+        description: 'Track record of on-time delivery of tasks which fully meet task specifications. Is active and consistent
+          through time. Additionally, also provides accurate estimates and comprehensive contributions from ideation through
+          validation.
+
+          Examples: Developers should unit testing code,
+
+          UX Practitioners should solicit feedback from subject matter experts, sponsor users, or end users'
+      sse:
+        title: Consistent Large Scope Contribution
+        description: Accurately and consistently scopes out and decomposes large, complex development tasks. Delegates pieces
+          of the decomposed tasks and delivers the solutions in collaboration with other engineering teams
+      pse:
+        title: Consistent and High Value Contribution
+        description: Scopes out and decomposes large, complex engineering tasks. Utilizes cross team and cross-functional
+          collaboration to deliver these tasks, is consistent through time, demonstrating sustained high level of contribution
+      spse:
+        title: Broad Contribution
+        description: Significant, technically relevant, challenging, broad contributions demonstrating foresight/vision and
+          defining strategic engineering direction across several architectural generations of multiple subsystems or a product
+      de:
+        title: Broad Contribution
+        description: Significant, technically relevant, challenging, broad contributions demonstrating foresight/vision and
+          defining strategic engineering direction across several architectural generations of multiple subsystems or a product
+      sde:
+        title: Externally Influential Contribution
+        description: Impact is visible externally at the industry level, changing the behavior of key partners, competitors,
+          and/or customers
+      fellow:
+        title: Revolutionary Contribution
+        description: Contribution has significance that is far-reaching and revolutionary. For example, founder and lead of
+          a key technology platform that has strategic interest to the company
+  planning_execution:
+    name: Planning & Execution
+    category: Technical Contribution
+    levels:
+      ase:
+        title: N/A
+        description: ''
+      se:
+        title: Self Sufficient Execution and Estimation
+        description: Takes ownership of escalated issues impacting subsystem, accurately estimates scope of work, and carries
+          the issue forward through completion in a self sufficient fashion
+      sse:
+        title: Feature Planning and Execution
+        description: 'Collaborates on and often leads design of features in the best interest of customers and of the company,
+          given the overarching strategy, via collaborative efforts with the team. Acts as a subsystem owner/maintainer, and
+          is responsible for triaging, responding to, and coordinating the resolution of raised issues. Scopes work and provides
+          accurate estimates and comprehensive contributions from ideation through validation
+
+          Examples: Developers should unit test code,
+
+          UX Practitioners should solicit feedback from subject matter experts, sponsor users, or end users'
+      pse:
+        title: Forward Planning and Execution
+        description: Collaboration spans across multiple technical areas and teams. Uses experience and input to anticipate
+          future problems and needs before they occur and act on them when working with customers and/or other functions on
+          feature requests or changes
+      spse:
+        title: Product Scale Planning and Execution
+        description: Proven ability to produce comprehensive project/product plans and design documents. Leads a cross-functional
+          team to consistent and timely execution of plans
+      de:
+        title: Competitive Market Dynamics
+        description: Understands competitive market dynamics around a line of business, and the impact of contributions around
+          these aspects. Applies that understanding to drive innovative product plans and direction into new markets. Rallies
+          large teams in delivery
+      sde:
+        title: Global Market Dynamics
+        description: Understands the global market, industry and technology and how our contributions impact these. Repeated
+          history of leading productization efforts into successful new market segments resulting in large scale revenue generation
+      fellow:
+        title: Corporate Value Dynamics
+        description: Understands the corporate value dynamics including the sensitivity of the company’s financial state to
+          technological interactions
+  opportunity_recognition:
+    name: Opportunity Recognition
+    category: Technical Contribution
+    levels:
+      ase:
+        title: N/A
+        description: ''
+      se:
+        title: N/A
+        description: ''
+      sse:
+        title: N/A
+        description: ''
+      pse:
+        title: Opportunities Spanning a Technology Discipline
+        description: 'Identifies opportunities spanning a technical discipline and exploits them by implementing new customer
+          capabilities.
+
+          Patents, new technical standards or frameworks are often a side effect'
+      spse:
+        title: Energizing Emerging Technology Projects
+        description: Identifies opportunities spanning multiple technical disciplines, including important emerging technology
+          projects, leads in analysis of their impact. Conceives and is instrumental in creating new projects or programs
+      de:
+        title: Energizing Emerging Technology Initiatives
+        description: Identifies important emerging technology initiatives, leads in analysis of their impact.  Influences
+          department strategy and direction appropriately. Coordinates delivery across teams and products
+      sde:
+        title: Managing Emerging Technology Business
+        description: Identifies important emerging technology lines of business, directs the analysis of their impact, and
+          positions the department to effectively exploit them
+      fellow:
+        title: Managing Emerging Technology Business Portfolio
+        description: Provides pivotal guidance on how our contributions can impact the emerging technology business portfolio,
+          global market, industry, and technology
+  creativity_innovation:
+    name: Creativity & Innovation
+    category: Technical Contribution
+    levels:
+      ase:
+        title: N/A
+        description: ''
+      se:
+        title: Component Creativity
+        description: Creative improvements at the component level
+      sse:
+        title: Impactful Creativity
+        description: Work product includes impactful, concrete innovation within a technical area. This typically translates
+          to a shift from reactive engagement (taking things from backlog) to proactive engagement (generating the backlog,
+          designing and driving solutions to customer problems)
+      pse:
+        title: Recognized Creativity
+        description: Work product demonstrates technical creativity and innovation spanning multiple technical areas. Technical
+          innovations are concrete and recognized in the form of submitted patents, broadly accepted/adopted technical standards
+          or frameworks or unique capabilities to a project or product
+      spse:
+        title: Consistent Creativity
+        description: 'Consistent record of work demonstrating technical creativity and innovations affecting multiple products.
+
+          Technical innovations are concrete and recognized in the form of granted  patents, technical standards work, adopted
+          frameworks or substantial new innovative capabilities to a project or product'
+      de:
+        title: Multi-Product Creativity
+        description: Work product demonstrates technical creativity, and innovation affecting multiple products.  Many recognized
+          innovations crossing disciplines in the form of multiple mutually unrelated patents, broadly accepted/adopted standards
+          or frameworks, or created projects and products or developing of new technologies with high business value
+      sde:
+        title: Profitable Creativity
+        description: Creates, effectively promotes and drives delivery of major new technical and profitable opportunities
+          for new business areas and/or created technology which becomes the major component in allowing business units to
+          enter new markets
+      fellow:
+        title: Acclaimed Creativity
+        description: <tbd>
+  technical_knowledge:
+    name: Technical Knowledge
+    category: Technical Contribution
+    levels:
+      ase:
+        title: Entry
+        description: Has entry-level technical knowledge (design principles, technology, projects) sufficient for job function.
+          Builds knowledge through mentorship from experienced team members and by reviewing the work of others.
+      se:
+        title: Developing
+        description: Proactively develops knowledge, breadth and depth, as required through technical work
+      sse:
+        title: Practitioner of Technology
+        description: Knowledgeable practitioner in a technical area, particularly from work experience, effectively transforming
+          that knowledge into practical application. Keeps technical skills up-to-date with development of the industry
+      pse:
+        title: Proficient in Key Technology
+        description: Commands persuasive depth of knowledge in a key technology area. Effective collaborative role model in
+          applying this knowledge in shaping team activities
+      spse:
+        title: Authority of Key Technology
+        description: Internally and externally recognized authority in a key technology area. Effective collaborative role
+          model in applying this knowledge in shaping departmental activities
+      de:
+        title: Leading Authority of Key Technology
+        description: Recognized industry-wide as a lead authority in a key technology area. Effective collaborative role model
+          in applying this knowledge in shaping cross product activities
+      sde:
+        title: Technology and Business Interplay
+        description: Recognized industry-wide as an authority on numerous strategic technological areas, their interdependence
+          with each other, and the business impact of their evolution. Proven history of applying this knowledge resulting
+          in RH succeeding in new markets.
+      fellow:
+        title: Strategic Thinking
+        description: Demonstrates strategic thinking in how the company’s businesses relate and impact one another
+  speaking_publicity:
+    name: Speaking/Publicity
+    category: Technical Contribution
+    levels:
+      ase:
+        title: Tool/Team
+        description: Speaks, presents, and/or blogs where scope is a tool, practice, or use case; audience is team members
+      se:
+        title: Tool/Related Teams
+        description: Speaks, presents, and/or blogs where scope is a tool, practice, or use case; audience is related teams
+          within the same function
+      sse:
+        title: Functional/Wider Teams
+        description: Speaks, presents, and/or blogs where scope is functional; audience may be more than one function internally,
+          externally may be local or regional experts or potential contributors
+      pse:
+        title: Subsystem/Cross-functional Teams
+        description: Speaks, presents, and/or blogs where scope is a subsystem/technical area (e.g. storage, identity management,
+          etc.); audience is cross-functional internally, and/or externally may be international experts or potential contributors
+      spse:
+        title: Product/Industry Leaders
+        description: Speaks, presents, and/or blogs where scope is a product; audience is beyond experts and contributors
+          and touches industry, such as partners, customers, and recognized experts
+      de:
+        title: Multi-Product/Global Leaders
+        description: Speaks, presents, and/or blogs where scope is multi-product part of portfolio; audience is global industry-wide,
+          includes experts, contributors, partners, customers, etc.
+      sde:
+        title: ''
+        description: ''
+      fellow:
+        title: ''
+        description: ''
+  work_impact:
+    name: Work Impact
+    category: Leadership
+    levels:
+      ase:
+        title: Task
+        description: Owns their assigned tasks and responsibilities
+      se:
+        title: Manages Workload
+        description: Manages workload by taking ownership of multiple tasks, and is able to execute with limited guidance
+      sse:
+        title: Major Features
+        description: 'Proactively contributes major features to broader team efforts with little guidance. Known as a subject
+          matter expert in a specific technical area, project or component.
+
+          Provides technical leadership at the component level by proactively organizing efforts of the team members and ensuring
+          delivering customer value'
+      pse:
+        title: Functional Area
+        description: Often looked upon as the example or for guidance on technical, organizational, and process matters and
+          enables others to succeed through direction, influence, and empowerment. Provides technical leadership of a functional
+          area at the project or product level by proactively organizing efforts of other team members as well as teams and
+          ensuring customer value across those teams
+      spse:
+        title: Major Segment of a Product / Product Segment
+        description: Provides technical leadership and coordination across teams for a major segment of  product/project/program
+          work, enabling large scale customer success by way of producing detailed architectural specifications and/or detailed
+          project/feature proposals. Capable of successfully tackling projects and initiatives that can have company wide
+          scope. Applies technical excellence and leadership across engineering, business units, and the industry
+      de:
+        title: Product / Platform
+        description: Expertly builds relationships with customers, understanding needs and injecting that knowledge into product,
+          platform and technology direction and influencing customer's roadmap. Has industry level relationships, drives major
+          cross company initiatives
+      sde:
+        title: Across Platforms
+        description: Influences across the platform directions and senior management decisions at the corporate level resulting
+          in major new market successes
+      fellow:
+        title: Across Portfolio / Industry
+        description: Influences across the portfolio and/or industry for the benefit of the company business
+  continuous_improvement:
+    name: Continuous Improvement
+    category: Leadership
+    levels:
+      ase:
+        title: Following
+        description: Learns, understands and follows related processes
+      se:
+        title: Sharing
+        description: Shares best practices and skills, tips and tricks with others
+      sse:
+        title: Shaping
+        description: Proven track record of advancing process improvements via collecting and sharing feedback, shaping and
+          influencing a group of people working on a joint project. Espouses all core values of Red Hat culture, such as openness,
+          meritocracy, inclusiveness, and transparency
+      pse:
+        title: Steering
+        description: 'Initiates and steers new initiatives, improvement of existing processes, innovations, etc.
+
+          Directly involved in the department''s planning initiatives. Proven ability to accurately predict schedules and
+          independently lead an engineering team to on-time delivery'
+      spse:
+        title: Excellence at a Product Segment Level / Platform
+        description: Has a strong understanding of the business aspects, not just the bits and bytes. Is able to participate
+          and help shape excellence and improve broader product direction in a constructive manner with other teams, not just
+          engineering, but also cross-product/functional initiatives
+      de:
+        title: Expanded Impact Excellence across Major Product/Platforms
+        description: Has a strong understanding of the overall business value of the related company products and platforms.
+          Shapes the direction of the product family in a constructive collaboration with other product teams and leading
+          major cross-product and cross-functional initiatives
+      sde:
+        title: Excellence at a Cross- Product Level
+        description: "Helps to define and drive  cross-portfolio and cross functional initiatives covering different products\
+          \ within the portfolio. \nActively promotes and encourages others to follow our core values throughout their day\
+          \ to day work"
+      fellow:
+        title: Excellence at a Portfolio Level
+        description: "Participates in the definition of the portfolio direction as a whole and drives company-wide initiatives.\
+          \ \nEngages senior leadership and others in the company to help evolve our culture for the better, anticipating\
+          \ future needs as we continue to grow"
+  portfolio_impact:
+    name: Portfolio Impact
+    category: Leadership
+    levels:
+      ase:
+        title: Aware
+        description: Is aware of the products in portfolio through team and all hands + team meetings
+      se:
+        title: Applies
+        description: Understands and applies the role of their work area within the portfolio. Recognizes dependencies (layer
+          above and below) and works with their manager and/or technical leads to ensure changes / enhancements meet portfolio
+          requirements
+      sse:
+        title: Integrates
+        description: Performs regular hands-on installs and uses other layers of the portfolio (above and below) that have
+          direct dependencies. Collaborates and integrates with peers on other portfolio components to confirm cross product
+          requirements are met and address bugs / customer escalations. Raises interaction issues (i.e. upcoming changes in
+          APIs, behavior, compatibility, etc)
+      pse:
+        title: Influences
+        description: Leads component design with peers, influencing design and delivery of cross-product features and/or solutions.
+          Defines architectures and interfaces. Works with product management to get a clear understanding and refinement
+          of goals and deliverables. Engages in customer dialogs on topics that span portfolio boundaries
+      spse:
+        title: Impacts
+        description: Collaborates with fellow team leads and/or architects across the portfolio in designing and delivering
+          high impact spanning features. Typically this involves implementing a major new subsystem or capability, which is
+          often a new use case and/or market segment, in upstream communities that specifically addresses portfolio needs.
+          Requires very close involvement with product management, engineering peers on other products, partners and customers
+          to shape the requirements and then be a technical lead in team level implementation across departments. Customer
+          conversant across multiple products in the portfolio. A role model of across the aisle collaboration on complex
+          portfolio initiatives
+      de:
+        title: Energizes Teams and Technology
+        description: Successful leader in energizing major new market segment initiatives in upstream and internal productization
+          meeting portfolio requirements. Stretching the reach of the technology well beyond prior use case applicability.
+          Close collaboration with other industry partners in architectural approaches in multiple technology areas as needed
+          for a true end to end portfolio solution. Not viewed as an authority of only one product in portfolio, rather heavy
+          collaborative influence across. Strong public visibility across the portfolio. Frequent customer engagements on
+          evangelism, crisis resolution, and next gen feature feedback
+      sde:
+        title: Leading
+        description: Leads across engineering, product management, and community to allow the company to win in major new
+          market segments by driving major enhancements across the portfolio. Recognized as market segment leader internally
+          at the company. Driving discussions including top level management, sales, marketing in addition to engineering
+      fellow:
+        title: <TBD>
+        description: <tbd>
+  collaboration:
+    name: Collaboration
+    category: Leadership
+    levels:
+      ase:
+        title: Developing
+        description: Developing by communicating within a team and cross-functionally with peers, stakeholders, and upstream
+          community members by applying the value of transparency by making their daily work visible. Open to feedback. Aware
+          of the accepted behavioral and communication norms
+      se:
+        title: Proficient at Peer Level
+        description: Open to collaboration and respectful to others, transparently shares their work and ideas. Effectively
+          communicates with stakeholders. Proficient at a peer level in different roles and functions. Receives and provides
+          feedback. Holistically collaborates with upstream following project guidance and expectations while developing relationships.
+          Fully conscious of the communication best practices
+      sse:
+        title: Advancing a Product
+        description: 'Proactively advancing a product by collaborating with the upstream community and other cross-functional
+          groups within the company around complete product delivery activities, new technologies and innovation, and ensuring
+          that all aspects of the product are developed in a supportable manner and to optimize the out of the box customer
+          experience. Helps others to improve their skills, knowledge and understanding of technologies, processes and accepted
+          social norms.
+
+          Practices inclusion by actively listening and makes sure that others have an opportunity to speak and express their
+          opinions'
+      pse:
+        title: Advanced Cross-Functionally
+        description: Proven track record driving cross-functional teams and projects to make better technical and non-technical
+          choices. Identifies important emerging industry standards and adopts them. Cultivates a culture of inclusive meritocracy
+          within the organization by seeking out input from colleagues in other functions and from customers
+      spse:
+        title: Expert at Product/Platform Segment
+        description: Has a cross-functional network within and outside of the company that is used as a source of information
+          and context, plans actions and work to develop holistic solutions from inception to customer delivery and support
+          across the company’s product/platform segment. Constantly using that and a variety of other resources to steer cross
+          functional collaboration and complete work tasks with excellence. Visible participant in the company-wide discussion
+          related to promoting company culture and values, inspiring others to do the same
+      de:
+        title: Expert across Product/Platforms
+        description: Builds strong and lasting relationships with external partners and community/academic/research ecosystems.
+          Kick starts new and strategic product offerings/technologies by leveraging relationships,  seeding teams with strong
+          values around open collaboration and adoption of inclusive meritocracy with all stakeholders in the product, including
+          cross-functional teams, the upstream community, and current/prospective customers. Has a track record of resolving
+          conflicts and aligning diverse and sometimes contradictory opinions
+      sde:
+        title: Expert across Product/Platform Group Portfolio Industry
+        description: Constantly pushes the industry or community to higher levels and standards and influences them in new
+          directions important to strategic needs of the company. Expertly leads cross-product portfolio development and release
+          plans around strategic technology initiatives working across functional departments and product teams in collaboration
+          with senior management
+      fellow:
+        title: Expert across Pconverortfolio/Industry
+        description: Recognized leader and iconversanfluencer across the portfolio, industry, upstream, and research communities
+  growth_impact:
+    name: Growth Impact
+    category: Mentorship
+    levels:
+      ase:
+        title: Mentee
+        description: Supporting mentoring activities, such as student outreach. Is a participant empowering mentees to be
+          independent and active stewards of the team
+      se:
+        title: Team (Peers)
+        description: 'Actively pursues mentoring opportunities and is able to mentor students, team members: interns and/or
+          Associate Software Engineers. Is a participant in empowering mentees to be independent and active stewards of the
+          team'
+      sse:
+        title: Actively Mentors Team (Peers)
+        description: 'Seeks opportunities to mentor associates within their immediate team and able to actively mentor students,
+          interns and junior engineers on the team.
+
+          Understands the difference between coaching and mentoring. Empowers mentees to be independent and active stewards
+          of the team. Seeks and provides constructive feedback in both technical and development forums'
+      pse:
+        title: Key Mentor of Groups (Multiple Workgroups)
+        description: 'Seeks opportunities to mentor associates across multiple teams within the organization. Understands
+          the difference between coaching and mentoring and when to approach a situation as a mentor or a coach. Influences
+          engineering best practices for their immediate team. Is a key participant in empowering groups of mentees to be
+          independent and active stewards of the team. Develops a long-term mentor/mentee relationship.
+
+          Promotes a feedback culture'
+      spse:
+        title: Key Mentor of Multiple Teams (Engineering)
+        description: Seeks opportunities to mentor associates across multiple teams within and outside the organization. Understands
+          the difference between coaching and mentoring and acts as counsel to others when to approach a situation as a mentor
+          or a coach. Influences engineering best practices for multiple teams. Is a catalyst in empowering mentees to be
+          independent and active stewards of the team and organization. Actively pursues and develops long-term mentor/mentee
+          relationships
+      de:
+        title: Organization (PnT) & Community
+        description: Seeks opportunities to mentor associates within the organization and the external community. Understands
+          the difference between coaching and mentoring and teaches others when to approach a situation as a mentor or a coach.
+          Influences and directs engineering best practices for multiple teams across the organization. Actively empowers
+          mentees to be independent and active stewards of the team and organization. Regularly pursues and develops long-term
+          mentor/mentee relationships
+      sde:
+        title: Organizations (PnT/Other) & Communities
+        description: Seeks opportunities to mentor associates across multiple organizations and related external communities.
+          Understands the difference between coaching and mentoring and is a driving force behind teaching others when to
+          approach a situation as a mentor or a coach. Champions and directs engineering best practices for multiple teams
+          across the organization and related external communities. Responsible for teaching and empowering mentees to be
+          independent and active stewards of the team and organization. Is a champion for pursuing, supporting and developing
+          long-term mentor/mentee relationships
+      fellow:
+        title: Company & Entities
+        description: Seeks opportunities to mentor associates across the company and external entities. Understands the difference
+          between coaching and mentoring and actively works with and educates others  when to approach a situation as a mentor
+          or a coach. Leads by example and champions engineering best practices for Red Hat, the organization and related
+          external communities. A leader for teaching and empowering mentees to be independent and active stewards of the
+          team and organization. Is the company best practice for pursuing, supporting and developing long-term mentor/mentee
+          relationships
+  execution_as_mentee:
+    name: Execution as a Mentee
+    category: Mentorship
+    levels:
+      ase:
+        title: Guided Execution
+        description: With some guidance, able to network and build connections with the immediate team, and is eager to learn
+          and help
+      se:
+        title: Self Sufficient Execution and Estimation
+        description: Self sufficient execution and estimation of tasks and ability to network and build connections both within
+          and outside the immediate team as a mentee. Proactive participant in career and technical conversations and seeks
+          to share learnings as a mentee
+      sse:
+        title: Planning and Execution
+        description: Actively pursues mentors that can help the mentee expand their scope and impact. Uses mentors to understand
+          where they can be more proactive in their role through active planning and execution. Seeks guidance on when to
+          lead initiatives and how to handle both technical and human aspects of leadership
+      pse:
+        title: Forward Planning and Execution
+        description: Uses mentors to understand how to voice their ideas and have those ideas impact forward planning and
+          execution.  Nurtures relationships by actively engaging on email threads/lists and promoting a feedback culture
+      spse:
+        title: Connect Business Needs
+        description: Actively pursues mentors that can help the mentee influence the direction of the projects, technologies
+          and communities they are involved with. Uses mentors to help develop their understanding how the technical expertise
+          they possess meets the strategic direction and business opportunities to connect their technical leadership with
+          business needs
+      de:
+        title: Anticipate Business Needs
+        description: Actively pursues mentors who can help the mentee to expand on the broader understanding of the market
+          dynamics and Red Hat’s role in it. Uses this knowledge to anticipate business needs and generate concepts and projects
+          that lead to product innovation
+      sde:
+        title: Mastering Global Market Dynamics
+        description: Leads by example, looks for opportunities to develop, lead, delegate or pair on stretch assignments with
+          teammates and associates inside and outside the organization; able to grow other associates and their globalmen
+          market dynamics.
+      fellow:
+        title: Mastering Corporate Value Dynamics
+        description: Leads by example, looks for opportunities to develop, lead, delegate or pair on stretch assignments with
+          teammates and associates inside and outside the organization; able to coach and guide a community of leaders on
+          corporate value dynamics.
+  product_delivery_lifecycle:
+    name: Product Delivery Life Cycle
+    category: End-to-End Delivery
+    levels:
+      ase:
+        title: Following
+        description: Follows and shows willingness to up-skill on previously established workflows around the product delivery
+          pipeline used by their team
+      se:
+        title: Sharing
+        description: "Demonstrates proficiency with previously established workflows around the product delivery pipeline\
+          \ used by their team. \nModels good behavior in each stage of the life cycle.  This applies to areas such as story\
+          \ definition, test-driven development, test automation, design documentation, product documentation and customer\
+          \ focus, acting as a \"soft\" influencer, sharing through their actions"
+      sse:
+        title: Shaping
+        description: 'Demonstrates mastery of the established product delivery workflows, motivating and shaping incremental
+          improvements of these processes within and across teams. For example: Developers ensure a healthy upstream and downstream
+          development cycle feeding into product by curating public CI, nightly builds, availability etc. UX practitioners
+          know how to address complex goals from ideation through delivery and implementation'
+      pse:
+        title: Guiding
+        description: 'Recognizes good industry practices and guides team and department habits to innovate on product delivery
+          processes in order to increase quality and deliver the highest customer value, incorporating customer use cases
+          when appropriate.
+
+          For example: CI/CD/Automation, proper code/test coverage, validate code quality, documentation, quickstarts, user
+          centric design practice, etc'
+      spse:
+        title: Excellence at a Product Segment Level
+        description: 'Teaches and promotes a culture of continuous learning w.r.t. delivery of software end-to-end that results
+          in incremental improvements on how we deliver the highest quality products while providing the highest customer
+          value across a product segment. For example: sees a gap or potential for  improvement and initiates needed cross
+          organization conversations to drive process changes'
+      de:
+        title: Excellence at a Product Set Level
+        description: Teaches and promotes a culture of continuous learning w.r.t. delivery of software end-to-end that results
+          in incremental improvements on how we deliver the highest quality products while providing the highest customer
+          value across a product set
+      sde:
+        title: Excellence at a Portfolio Level
+        description: Teaches & promotes a culture of continuous learning w.r.t. delivery of software end-to-end that results
+          in incremental improvements on how we deliver the highest quality products while providing the highest customer
+          value across the entire portfolio
+      fellow:
+        title: Excellence across the Industry
+        description: 'Teaches & promotes a culture of continuous learning w.r.t. delivery of software end-to-end that results
+          in incremental improvements on how we deliver the highest quality products while providing the highest customer
+          value across portfolio level.
+
+          Leading Industry wide strategic initiatives. For example:defining new global standards and practices'
+  customer_focus:
+    name: Customer Involvement & Focus
+    category: End-to-End Delivery
+    levels:
+      ase:
+        title: Awareness
+        description: 'Demonstrates an awareness of how the work they are doing impacts the customer and other teams at the
+          company, including upstream.
+
+          Examples: Reports progress regularly to internal customers when fixing bugs, shares own design and research work
+          with internal customers'
+      se:
+        title: Attention/Consideration
+        description: 'Developing an understanding of the customer perspective and considers it in their daily work.  Regularly
+          engages in activities to gain customer experience.
+
+          Examples: Considers the customer when reviewing their peers’ code and software/technical designs, incorporating
+          product usage in their daily workflow, installing product and dependencies, etc'
+      sse:
+        title: Engagement
+        description: Participates in customer and stakeholder engagement  in an open collaborative process. Demonstrates understanding
+          of customer value of product features and subsystems. Coaches others on the team on customer value and how to engage
+          with customers and product stakeholders in an open collaborative process. Understands what the most frequently reported
+          / painful customer issues are and prioritizes resolution
+      pse:
+        title: Leads Engagement
+        description: 'Leads Engagement with product stakeholders and external customers to understand and extract use cases
+          as they design and implement software.
+
+          Can be deployed onsite to customer locations independently to assist with complex customer issues. Organizes prompt
+          remediation within their team. Understands and makes appropriate decisions based on their understanding of the risk
+          implications for the customer. Fluent in technical presentations on the products'
+      spse:
+        title: Mediator
+        description: 'Uses their earned credibility in their technical area to mediate complex customer situations. Frequently
+          requested by sales, field, product management to interact with customers. Red Hat Summit speaker. Drives improving
+          customer experience at the portfolio level. Fluent in technical presentations of not only their product, but also
+          adjacent products in portfolio.
+
+          Examples: Presents technical roadmaps, future design direction to customers'
+      de:
+        title: Advocacy
+        description: Leverages understanding of large customer’s Platform usage beyond the use of a single product and advocates
+          for customers in product decisions. Fluent in technical presentations across the portfolio. Frequently involved
+          (sought after) in customer engagements in enabling their success in their technical roadmap and follow through to
+          successful rollout
+      sde:
+        title: Trusted Advisor
+        description: Serves as a trusted advisor for all customer queries. Advises customers on their technical direction
+          and platform/design choices
+      fellow:
+        title: Authority in Demand
+        description: Technical authority in demand who is directly known to customers
+
+level_weights:
+  ase:
+    target_scale: 0.65
+    role_weights:
+      commit: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      story: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      epic: {reporter: 3.0, assignee: 2.0, contributor: 1.0}
+      anstrat: {reporter: 5.0, assignee: 4.0, contributor: 2.0}
+      strategy: {reporter: 6.0, assignee: 5.0, contributor: 2.5}
+    pillar_weights:
+      Technical Contribution: 1.3
+      Leadership: 0.5
+      Mentorship: 0.3
+      End-to-End Delivery: 0.8
+  se:
+    target_scale: 0.9
+    role_weights:
+      commit: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      story: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      epic: {reporter: 2.5, assignee: 1.8, contributor: 0.8}
+      anstrat: {reporter: 4.0, assignee: 3.0, contributor: 1.5}
+      strategy: {reporter: 5.0, assignee: 4.0, contributor: 2.0}
+    pillar_weights:
+      Technical Contribution: 1.2
+      Leadership: 0.7
+      Mentorship: 0.5
+      End-to-End Delivery: 1.0
+  sse:
+    target_scale: 1.25
+    role_weights:
+      commit: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
+      story: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
+      epic: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
+      anstrat: {reporter: 3.0, assignee: 2.0, contributor: 1.0}
+      strategy: {reporter: 4.0, assignee: 3.0, contributor: 1.5}
+    pillar_weights:
+      Technical Contribution: 1.0
+      Leadership: 1.0
+      Mentorship: 0.8
+      End-to-End Delivery: 1.0
+  pse:
+    target_scale: 1.6
+    role_weights:
+      commit: {reporter: 0.4, assignee: 0.4, contributor: 0.2}
+      story: {reporter: 0.5, assignee: 0.4, contributor: 0.2}
+      epic: {reporter: 1.0, assignee: 0.8, contributor: 0.4}
+      anstrat: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
+      strategy: {reporter: 2.0, assignee: 1.5, contributor: 0.8}
+    pillar_weights:
+      Technical Contribution: 0.8
+      Leadership: 1.3
+      Mentorship: 1.2
+      End-to-End Delivery: 1.2
+  spse:
+    target_scale: 2.0
+    role_weights:
+      commit: {reporter: 0.3, assignee: 0.3, contributor: 0.1}
+      story: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
+      epic: {reporter: 0.7, assignee: 0.5, contributor: 0.3}
+      anstrat: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      strategy: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
+    pillar_weights:
+      Technical Contribution: 0.7
+      Leadership: 1.4
+      Mentorship: 1.3
+      End-to-End Delivery: 1.3
+  de:
+    target_scale: 2.5
+    role_weights:
+      commit: {reporter: 0.2, assignee: 0.2, contributor: 0.1}
+      story: {reporter: 0.2, assignee: 0.2, contributor: 0.1}
+      epic: {reporter: 0.5, assignee: 0.4, contributor: 0.2}
+      anstrat: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
+      strategy: {reporter: 1.2, assignee: 1.0, contributor: 0.5}
+    pillar_weights:
+      Technical Contribution: 0.6
+      Leadership: 1.5
+      Mentorship: 1.4
+      End-to-End Delivery: 1.4
+  sde:
+    target_scale: 3.1
+    role_weights:
+      commit: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      story: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      epic: {reporter: 0.4, assignee: 0.3, contributor: 0.15}
+      anstrat: {reporter: 0.7, assignee: 0.7, contributor: 0.35}
+      strategy: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+    pillar_weights:
+      Technical Contribution: 0.5
+      Leadership: 1.5
+      Mentorship: 1.5
+      End-to-End Delivery: 1.5
+  fellow:
+    target_scale: 3.75
+    role_weights:
+      commit: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      story: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      epic: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
+      anstrat: {reporter: 0.6, assignee: 0.6, contributor: 0.3}
+      strategy: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+    pillar_weights:
+      Technical Contribution: 0.5
+      Leadership: 1.5
+      Mentorship: 1.5
+      End-to-End Delivery: 1.5
