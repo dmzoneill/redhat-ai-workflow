@@ -139,6 +139,41 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("collect_peer", self._handle_collect_peer)
         self.register_handler("get_peer_benchmarks", self._handle_get_peer_benchmarks)
 
+        # AI-powered analysis handlers
+        self.register_handler("get_peer_narrative", self._handle_get_peer_narrative)
+        self.register_handler(
+            "get_peer_differentiators", self._handle_get_peer_differentiators
+        )
+        self.register_handler("get_overview_digest", self._handle_get_overview_digest)
+        self.register_handler("get_gap_coach", self._handle_get_gap_coach)
+        self.register_handler(
+            "get_promotion_readiness", self._handle_get_promotion_readiness
+        )
+        self.register_handler(
+            "get_calendar_insights", self._handle_get_calendar_insights
+        )
+        self.register_handler("classify_log_entry", self._handle_classify_log_entry)
+        self.register_handler(
+            "get_issue_competency_tags", self._handle_get_issue_competency_tags
+        )
+        self.register_handler(
+            "rank_question_evidence", self._handle_rank_question_evidence
+        )
+        self.register_handler(
+            "evaluate_question_local", self._handle_evaluate_question_local
+        )
+        self.register_handler("ask_ai", self._handle_ask_ai)
+        self.register_handler(
+            "explain_competency_score", self._handle_explain_competency_score
+        )
+        self.register_handler("suggest_config_tune", self._handle_suggest_config_tune)
+        self.register_handler("get_peer_growth_data", self._handle_get_peer_growth_data)
+        self.register_handler(
+            "get_activity_patterns", self._handle_get_activity_patterns
+        )
+        self.register_handler("get_mindmap_clusters", self._handle_get_mindmap_clusters)
+        self.register_handler("detect_missing_links", self._handle_detect_missing_links)
+
         # Executive strategy mapping handlers
         self.register_handler(
             "parse_executive_email", self._handle_parse_executive_email
@@ -1039,6 +1074,736 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "benchmarks": {"levels": {}, "last_updated": None},
         }
 
+    # ==================== AI-Powered Analysis Handlers ====================
+
+    def _get_user_competency_pct(self) -> dict[str, int]:
+        """Load user's current competency percentages from summary."""
+        summary = self._load_file(get_performance_summary_path())
+        if summary:
+            return summary.get("cumulative_percentage", {})
+        return {}
+
+    def _get_user_event_counts(self) -> dict[str, int]:
+        """Count events by source from current quarter's daily files."""
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        daily_dir = perf_dir / "daily"
+        counts: dict[str, int] = {}
+        if daily_dir.exists():
+            for f in daily_dir.glob("*.json"):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    for ev in data.get("events", []):
+                        src = ev.get("source", "unknown")
+                        counts[src] = counts.get(src, 0) + 1
+                except Exception:
+                    continue
+        return counts
+
+    def _load_benchmarks_levels(self) -> dict:
+        """Load peer benchmark levels data."""
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        bf = perf_dir / "peers" / "benchmarks.json"
+        if bf.exists():
+            try:
+                with open(bf, encoding="utf-8") as f:
+                    return json.load(f).get("levels", {})
+            except Exception:
+                pass
+        return {}
+
+    async def _handle_get_peer_narrative(self, **kwargs) -> dict:
+        """Generate AI narrative comparing user to peer benchmarks."""
+        from services.stats.ai_handlers import generate_peer_narrative
+
+        user_pct = self._get_user_competency_pct()
+        summary = self._load_file(get_performance_summary_path()) or {}
+        user_overall = summary.get("overall_percentage", 0)
+        peer_levels = self._load_benchmarks_levels()
+        user_events = self._get_user_event_counts()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_peer_narrative(
+                user_pct,
+                user_overall,
+                peer_levels,
+                user_events,
+                engineering_level=kwargs.get("engineering_level", ""),
+            ),
+        )
+
+    async def _handle_get_peer_differentiators(self, **kwargs) -> dict:
+        """Compute competency differentiators across peer levels."""
+        from services.stats.ai_handlers import compute_peer_differentiators
+
+        user_pct = self._get_user_competency_pct()
+        peer_levels = self._load_benchmarks_levels()
+        target_level = kwargs.get("target_level", "")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: compute_peer_differentiators(user_pct, peer_levels, target_level),
+        )
+
+    async def _handle_get_overview_digest(self, **kwargs) -> dict:
+        """Generate AI weekly digest for overview tab."""
+        from services.stats.ai_handlers import generate_overview_digest
+
+        summary = self._load_file(get_performance_summary_path()) or {}
+        peer_levels = self._load_benchmarks_levels()
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        daily_dir = perf_dir / "daily"
+        daily_trend = []
+        if daily_dir.exists():
+            cumulative: dict[str, int] = {}
+            day_num = 0
+            for f in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    day_num += 1
+                    for comp_id, pts in data.get("daily_points", {}).items():
+                        cumulative[comp_id] = cumulative.get(comp_id, 0) + pts
+                    total_pct = sum(cumulative.values())
+                    daily_trend.append({"day": day_num, "cumulative_pct": total_pct})
+                except Exception:
+                    continue
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_overview_digest(summary, daily_trend, peer_levels),
+        )
+
+    async def _handle_get_gap_coach(self, **kwargs) -> dict:
+        """Generate AI coaching for a specific competency gap."""
+        from services.stats.ai_handlers import generate_gap_coach
+
+        comp_id = kwargs.get("competency_id", "")
+        if not comp_id:
+            return {"success": False, "error": "competency_id is required"}
+
+        comp_name = comp_id.replace("_", " ").title()
+        user_pct = self._get_user_competency_pct().get(comp_id, 0)
+        peer_levels = self._load_benchmarks_levels()
+        target_level = kwargs.get("target_level", "")
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        daily_dir = perf_dir / "daily"
+        user_events = []
+        if daily_dir.exists():
+            for f in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    for ev in data.get("events", []):
+                        if comp_id in ev.get("points", {}):
+                            user_events.append(ev)
+                except Exception:
+                    continue
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_gap_coach(
+                comp_id, comp_name, user_pct, user_events, peer_levels, target_level
+            ),
+        )
+
+    async def _handle_get_promotion_readiness(self, **kwargs) -> dict:
+        """Assess promotion readiness to next level."""
+        from services.stats.ai_handlers import generate_promotion_readiness
+
+        user_pct = self._get_user_competency_pct()
+        summary = self._load_file(get_performance_summary_path()) or {}
+        user_overall = summary.get("overall_percentage", 0)
+        peer_levels = self._load_benchmarks_levels()
+        current_level = kwargs.get("current_level", "")
+        if not current_level:
+            cfg = get_merged_config()
+            current_level = cfg.get("engineering_level", "sse")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_promotion_readiness(
+                user_pct, user_overall, peer_levels, current_level
+            ),
+        )
+
+    async def _handle_get_calendar_insights(self, **kwargs) -> dict:
+        """Get calendar pattern analysis and coverage forecast."""
+        from services.stats.ai_handlers import generate_calendar_insights
+
+        now = datetime.now()
+        year = kwargs.get("year") or now.year
+        quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
+        perf_dir = self._get_perf_dir(year, quarter)
+        daily_dir = perf_dir / "daily"
+
+        captured = []
+        if daily_dir.exists():
+            captured = sorted(f.stem for f in daily_dir.glob("*.json"))
+
+        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        sm, sd = quarter_starts.get(quarter, (1, 1))
+        q_start = date(year, sm, sd)
+        today = date.today()
+        total_weekdays = 0
+        current = q_start
+        while current <= today:
+            if current.weekday() < 5:
+                total_weekdays += 1
+            current += timedelta(days=1)
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: generate_calendar_insights(
+                captured, total_weekdays, f"Q{quarter} {year}"
+            ),
+        )
+
+    async def _handle_classify_log_entry(self, **kwargs) -> dict:
+        """Classify a manual log entry into a category."""
+        from services.stats.ai_handlers import classify_log_category
+
+        description = kwargs.get("description", "")
+        categories = kwargs.get("categories")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: classify_log_category(description, categories),
+        )
+
+    async def _handle_get_issue_competency_tags(self, **kwargs) -> dict:
+        """Tag an issue with top competency matches."""
+        from services.stats.ai_handlers import classify_issue_competencies
+
+        text = kwargs.get("text", "")
+        if not text:
+            return {"success": False, "error": "text is required"}
+
+        npu = self._collector.npu_classifier
+        loop = asyncio.get_event_loop()
+        tags = await loop.run_in_executor(
+            None,
+            lambda: classify_issue_competencies(
+                text, npu, top_n=kwargs.get("top_n", 3)
+            ),
+        )
+        return {"success": True, "tags": tags}
+
+    async def _handle_rank_question_evidence(self, **kwargs) -> dict:
+        """Rank evidence events by relevance to a question."""
+        from services.stats.ai_handlers import rank_evidence_for_question
+
+        question_id = kwargs.get("question_id", "")
+        if not question_id:
+            return {"success": False, "error": "question_id is required"}
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        qm = QuestionManager(perf_dir)
+        detail = qm.get_question_detail(question_id)
+        if not detail:
+            return {"success": False, "error": f"Question {question_id} not found"}
+
+        question_text = detail.get("text", "") + " " + detail.get("subtext", "")
+        daily_dir = perf_dir / "daily"
+        evidence = qm.get_evidence_details(question_id, daily_dir)
+
+        npu = self._collector.npu_classifier
+        loop = asyncio.get_event_loop()
+        ranked = await loop.run_in_executor(
+            None,
+            lambda: rank_evidence_for_question(question_text, evidence, npu),
+        )
+        return {"success": True, "ranked_evidence": ranked}
+
+    async def _handle_evaluate_question_local(self, **kwargs) -> dict:
+        """Evaluate a question using local LLM (Ollama NVIDIA)."""
+        question_id = kwargs.get("question_id", "")
+        if not question_id:
+            return {"success": False, "error": "question_id is required"}
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        qm = QuestionManager(perf_dir)
+        detail = qm.get_question_detail(question_id)
+        if not detail:
+            return {"success": False, "error": f"Question {question_id} not found"}
+
+        daily_dir = perf_dir / "daily"
+        evidence = qm.get_evidence_details(question_id, daily_dir)
+        summary = self._load_file(get_performance_summary_path()) or {}
+        comp_data = {}
+        for comp_id, pct in summary.get("cumulative_percentage", {}).items():
+            comp_data[comp_id] = {"percentage": pct}
+
+        try:
+            from tool_modules.aa_ollama.src.client import get_available_client
+
+            client = get_available_client(
+                primary="nvidia", fallback_chain=["igpu", "cpu"]
+            )
+            if not client:
+                return {
+                    "success": False,
+                    "error": "No Ollama instance available for evaluation.",
+                }
+
+            class _OllamaLLMAdapter:
+                """Adapter to match the llm_client.complete() interface."""
+
+                def __init__(self, ollama_client):
+                    self._client = ollama_client
+
+                async def complete(self, prompt: str) -> str:
+                    loop = asyncio.get_event_loop()
+                    return await loop.run_in_executor(
+                        None,
+                        lambda: self._client.generate(
+                            prompt=prompt,
+                            max_tokens=800,
+                            temperature=0.3,
+                        ),
+                    )
+
+            adapter = _OllamaLLMAdapter(client)
+            from tool_modules.aa_performance.src.question_manager import (
+                evaluate_question_with_llm,
+            )
+
+            result_text = await evaluate_question_with_llm(
+                question=detail,
+                evidence_events=evidence,
+                competency_summary=comp_data,
+                llm_client=adapter,
+            )
+
+            if result_text:
+                qm.set_evaluation(question_id, result_text)
+                return {
+                    "success": True,
+                    "summary": result_text,
+                    "model": client.default_model,
+                    "instance": client.name,
+                    "questions_summary": qm.get_questions_summary(),
+                }
+            return {"success": False, "error": "LLM returned empty response"}
+
+        except ImportError:
+            return {"success": False, "error": "Ollama client not available"}
+        except Exception as e:
+            logger.error(f"Local question evaluation failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_ask_ai(self, **kwargs) -> dict:
+        """Answer a question about the scoring system."""
+        from services.stats.ai_handlers import ask_ai_tutor
+
+        question = kwargs.get("question", "")
+        if not question:
+            return {"success": False, "error": "question is required"}
+
+        scoring_config = None
+        try:
+            scoring_config = get_merged_config()
+        except Exception:
+            pass
+
+        summary = self._load_file(get_performance_summary_path())
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: ask_ai_tutor(question, scoring_config, summary),
+        )
+
+    async def _handle_explain_competency_score(self, **kwargs) -> dict:
+        """Explain how a competency score was calculated."""
+        from services.stats.ai_handlers import explain_competency_score
+
+        comp_id = kwargs.get("competency_id", "")
+        if not comp_id:
+            return {"success": False, "error": "competency_id is required"}
+
+        comp_name = comp_id.replace("_", " ").title()
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        daily_dir = perf_dir / "daily"
+        events = []
+        if daily_dir.exists():
+            for f in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    for ev in data.get("events", []):
+                        if comp_id in ev.get("points", {}):
+                            events.append(ev)
+                except Exception:
+                    continue
+
+        scoring_config = None
+        try:
+            scoring_config = get_merged_config()
+        except Exception:
+            pass
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: explain_competency_score(
+                comp_id, comp_name, events, scoring_config
+            ),
+        )
+
+    async def _handle_suggest_config_tune(self, **kwargs) -> dict:
+        """Suggest scoring config adjustments."""
+        from services.stats.ai_handlers import suggest_config_tune
+
+        user_events = self._get_user_event_counts()
+        user_pct = self._get_user_competency_pct()
+        peer_levels = self._load_benchmarks_levels()
+        target_level = kwargs.get("target_level", "")
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: suggest_config_tune(
+                user_events, user_pct, peer_levels, target_level
+            ),
+        )
+
+    async def _handle_get_peer_growth_data(self, **kwargs) -> dict:
+        """Get time-series growth data for user and peers."""
+        from services.stats.ai_handlers import compute_peer_growth_data
+
+        now = datetime.now()
+        year = kwargs.get("year") or now.year
+        quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
+        perf_dir = self._get_perf_dir(year, quarter)
+        user_daily = perf_dir / "daily"
+        peers_dir = perf_dir / "peers"
+        peers_config = self._load_peers_config()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: compute_peer_growth_data(user_daily, peers_dir, peers_config),
+        )
+
+    async def _handle_get_activity_patterns(self, **kwargs) -> dict:
+        """Analyze activity patterns across peer levels."""
+        from services.stats.ai_handlers import analyze_activity_patterns
+
+        peer_levels = self._load_benchmarks_levels()
+        user_events = self._get_user_event_counts()
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: analyze_activity_patterns(peer_levels, user_events),
+        )
+
+    async def _handle_get_mindmap_clusters(self, **kwargs) -> dict:
+        """Generate AI-based clusters for the mindmap view."""
+        npu = self._collector.npu_classifier
+        if not npu or not npu.enabled or not npu.model:
+            return {"success": False, "error": "NPU classifier not available"}
+
+        now = datetime.now()
+        perf_dir = self._get_perf_dir(now.year, (now.month - 1) // 3 + 1)
+        daily_dir = perf_dir / "daily"
+        events = []
+        if daily_dir.exists():
+            for f in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(f, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    for ev in data.get("events", []):
+                        text = ev.get("classification_text", "") or ev.get("title", "")
+                        if text:
+                            events.append(
+                                {
+                                    "id": ev.get("id", ""),
+                                    "title": ev.get("title", ""),
+                                    "text": text,
+                                    "source": ev.get("source", ""),
+                                }
+                            )
+                except Exception:
+                    continue
+
+        if len(events) < 5:
+            return {
+                "success": True,
+                "clusters": [],
+                "message": "Not enough events to cluster",
+            }
+
+        try:
+            from sklearn.cluster import KMeans
+
+            texts = [e["text"] for e in events]
+            embeddings = npu.model.encode(texts, normalize_embeddings=True)
+
+            n_clusters = min(max(3, len(events) // 5), 8)
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            labels = kmeans.fit_predict(embeddings)
+
+            clusters: dict[int, list] = {}
+            for i, label in enumerate(labels):
+                clusters.setdefault(int(label), []).append(events[i])
+
+            result_clusters = []
+            for cluster_id, members in sorted(clusters.items()):
+                titles = [m["title"][:60] for m in members[:5]]
+                result_clusters.append(
+                    {
+                        "cluster_id": cluster_id,
+                        "size": len(members),
+                        "sample_titles": titles,
+                        "members": [m["id"] for m in members],
+                    }
+                )
+
+            return {
+                "success": True,
+                "clusters": result_clusters,
+                "n_clusters": n_clusters,
+            }
+
+        except ImportError as e:
+            return {"success": False, "error": f"sklearn not available: {e}"}
+        except Exception as e:
+            logger.error(f"Clustering failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_detect_missing_links(self, **kwargs) -> dict:
+        """Detect orphan issues that should be linked to an ANSTRAT."""
+        from services.stats.ai_handlers import detect_missing_links
+
+        npu = self._collector.npu_classifier
+        if not npu or not npu.enabled:
+            return {
+                "success": False,
+                "error": "NPU classifier not available for missing link detection",
+            }
+
+        hierarchy_result = await self._handle_get_issue_hierarchy()
+        if not hierarchy_result.get("success"):
+            return {"success": False, "error": "No issue hierarchy available"}
+
+        anstrats = hierarchy_result.get("anstrats", [])
+
+        linked_keys = set()
+        for a in anstrats:
+            linked_keys.add(a.get("key", ""))
+            for epic in a.get("children", []):
+                linked_keys.add(epic.get("key", ""))
+                for issue in epic.get("children", []):
+                    linked_keys.add(issue.get("key", ""))
+
+        all_keys = hierarchy_result.get("all_issue_keys", [])
+        orphans = []
+        for k_info in all_keys:
+            key = k_info if isinstance(k_info, str) else k_info.get("key", "")
+            if key not in linked_keys:
+                summary = (
+                    k_info.get("summary", key) if isinstance(k_info, dict) else key
+                )
+                orphans.append({"key": key, "summary": summary})
+
+        if not orphans:
+            return {
+                "success": True,
+                "suggestions": [],
+                "message": "No orphan issues found",
+            }
+
+        loop = asyncio.get_event_loop()
+        suggestions = await loop.run_in_executor(
+            None,
+            lambda: detect_missing_links(anstrats, orphans, npu),
+        )
+        return {"success": True, "suggestions": suggestions}
+
+    # ------------------------------------------------------------------
+    # Fast re-threshold helpers (avoid full re-enrich when only
+    # min_signals / daily_cap changed)
+    # ------------------------------------------------------------------
+
+    _FAST_RETHRESHOLD_FIELDS = {"min_signals", "daily_cap"}
+
+    @staticmethod
+    def _detect_config_changes(old_cfg: dict, new_cfg: dict) -> set[str]:
+        """Return the set of top-level config keys whose values differ."""
+        changed: set[str] = set()
+        all_keys = set(old_cfg) | set(new_cfg)
+        for key in all_keys:
+            if old_cfg.get(key) != new_cfg.get(key):
+                changed.add(key)
+        return changed
+
+    async def _fast_rethreshold(
+        self,
+        min_sig: int,
+        daily_cap: int,
+        year: int | None = None,
+        quarter: int | None = None,
+    ) -> dict:
+        """Re-threshold points using cached signal_counts -- no re-enrichment.
+
+        Much faster than _handle_evaluate_all because it skips scope/role
+        detection, text matching, NPU classification, and strategy alignment.
+        Only usable when the scoring weights have not changed (i.e. only
+        min_signals and/or daily_cap differ from the previous config).
+        """
+        now = datetime.now()
+        year = year or now.year
+        quarter = quarter or ((now.month - 1) // 3 + 1)
+        daily_dir = self._get_daily_dir(year, quarter)
+
+        if not daily_dir.exists():
+            return {"success": True, "files_updated": 0}
+
+        loop = asyncio.get_event_loop()
+
+        def _rethreshold() -> tuple[int, dict[str, int], int, list[str]]:
+            eff_defs, _, _, _ = get_effective_defs()
+            cfg = get_merged_config()
+            level = cfg.get("engineering_level", "sse")
+
+            scope_multipliers = cfg.get("scope_multipliers", {})
+            lw = get_level_weights(level)
+            user_cfg = load_scoring_config()
+            user_lw = user_cfg.get("level_weight_overrides", {}).get(level, {})
+            if user_lw.get("role_weights"):
+                merged_rw = dict(lw.get("role_weights", {}))
+                for s, roles in user_lw["role_weights"].items():
+                    if isinstance(roles, dict):
+                        merged_rw[s] = {**merged_rw.get(s, {}), **roles}
+                role_weights_table = merged_rw
+            else:
+                role_weights_table = lw.get("role_weights", {})
+            if user_lw.get("pillar_weights"):
+                pillar_weights = {
+                    **lw.get("pillar_weights", {}),
+                    **user_lw["pillar_weights"],
+                }
+            else:
+                pillar_weights = lw.get("pillar_weights", {})
+
+            strategy_cfg = cfg.get("strategy_alignment", {})
+
+            updated = 0
+            cumulative_points: dict[str, int] = {}
+            total_events = 0
+            highlights: list[str] = []
+
+            for daily_file in sorted(daily_dir.glob("*.json")):
+                try:
+                    with open(daily_file, encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue
+
+                events = data.get("events", [])
+                file_changed = False
+
+                for ev in events:
+                    sig_counts = ev.get("signal_counts")
+                    if not sig_counts:
+                        continue
+
+                    scope = ev.get("scope", "story")
+                    role = ev.get("role", "assignee")
+                    strategy_aligned = ev.get("strategy_aligned", False)
+
+                    scope_mult = scope_multipliers.get(scope, 1)
+                    strategy_bonus = 1.0
+                    if strategy_aligned and strategy_cfg.get("enabled", True):
+                        strategy_bonus = strategy_cfg.get("bonus_multiplier", 1.5)
+
+                    new_points: dict[str, int] = {}
+                    for comp_id, sig_count in sig_counts.items():
+                        if sig_count >= min_sig:
+                            defn = eff_defs.get(comp_id)
+                            if not defn:
+                                continue
+                            base = defn["base_points"]
+                            scope_role_weights = role_weights_table.get(scope, {})
+                            role_weight = scope_role_weights.get(role, 1.0)
+                            category = defn.get("category", "")
+                            pillar_weight = pillar_weights.get(category, 1.0)
+                            final = round(
+                                base
+                                * scope_mult
+                                * role_weight
+                                * pillar_weight
+                                * strategy_bonus
+                            )
+                            new_points[comp_id] = max(final, 1)
+
+                    if new_points != ev.get("points", {}):
+                        ev["points"] = new_points
+                        file_changed = True
+
+                daily_points: dict[str, int] = {}
+                for ev in events:
+                    for comp_id, pts in ev.get("points", {}).items():
+                        current = daily_points.get(comp_id, 0)
+                        daily_points[comp_id] = min(current + pts, daily_cap)
+
+                old_points = data.get("daily_points", {})
+                if daily_points != old_points or file_changed:
+                    data["daily_points"] = daily_points
+                    data["daily_total"] = sum(daily_points.values())
+                    data["re_evaluated_at"] = datetime.now().isoformat()
+                    with open(daily_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    updated += 1
+
+                for comp_id, pts in daily_points.items():
+                    cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
+                total_events += len(events)
+                for ev in events[:3]:
+                    if ev.get("title") and len(highlights) < 10:
+                        highlights.append(ev["title"][:80])
+
+            return updated, cumulative_points, total_events, highlights
+
+        result = await loop.run_in_executor(None, _rethreshold)
+        files_updated, cumulative_points, total_events, highlights = result
+        await loop.run_in_executor(
+            None,
+            self._update_summary_from_data,
+            cumulative_points,
+            total_events,
+            highlights,
+            year,
+            quarter,
+        )
+
+        return {
+            "success": True,
+            "files_updated": files_updated,
+            "quarter": f"Q{quarter} {year}",
+            "fast_path": True,
+        }
+
     async def _handle_evaluate_all(self, **kwargs) -> dict:
         """Re-score every event in the quarter using current scoring config.
 
@@ -1180,9 +1945,18 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         return {"success": True, "config": cfg}
 
     async def _handle_set_scoring_config(self, **kwargs) -> dict:
-        """Update scoring config with partial overrides, save, and re-evaluate."""
+        """Update scoring config with partial overrides, save, and re-evaluate.
+
+        Uses a fast re-threshold path when only min_signals and/or daily_cap
+        changed, avoiding expensive full re-enrichment of every event.
+        """
         try:
-            current = load_scoring_config()
+            import copy
+
+            old_config = load_scoring_config()
+            old_snapshot = copy.deepcopy(old_config)
+
+            current = old_config
 
             for key in ("min_signals", "daily_cap", "target_per_competency"):
                 if key in kwargs:
@@ -1241,11 +2015,20 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
             save_scoring_config(current)
 
-            result = await self._handle_evaluate_all(**kwargs)
+            changed = self._detect_config_changes(old_snapshot, current)
+            if changed and changed <= self._FAST_RETHRESHOLD_FIELDS:
+                result = await self._fast_rethreshold(
+                    min_sig=current.get("min_signals", 2),
+                    daily_cap=current.get("daily_cap", 25),
+                )
+            else:
+                result = await self._handle_evaluate_all(**kwargs)
+
             return {
                 "success": True,
                 "config_saved": True,
                 "re_evaluated": result.get("files_updated", 0),
+                "fast_path": result.get("fast_path", False),
             }
         except Exception as e:
             logger.error(f"Failed to set scoring config: {e}")

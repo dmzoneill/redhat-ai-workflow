@@ -1879,6 +1879,78 @@ class DBusClient {
   }
 
   // ==========================================================================
+  // AI-Powered Analysis Methods
+  // ==========================================================================
+
+  async stats_getPeerNarrative(engineeringLevel?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_peer_narrative", { engineering_level: engineeringLevel || "" });
+  }
+
+  async stats_getPeerDifferentiators(targetLevel?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_peer_differentiators", { target_level: targetLevel || "" });
+  }
+
+  async stats_getOverviewDigest(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_overview_digest");
+  }
+
+  async stats_getGapCoach(competencyId: string, targetLevel?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_gap_coach", { competency_id: competencyId, target_level: targetLevel || "" });
+  }
+
+  async stats_getPromotionReadiness(currentLevel?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "get_promotion_readiness", { current_level: currentLevel || "" });
+  }
+
+  async stats_getCalendarInsights(year?: number, quarter?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_calendar_insights", { year, quarter });
+  }
+
+  async stats_classifyLogEntry(description: string, categories?: string[]): Promise<DBusResult> {
+    return this.callMethod("stats", "classify_log_entry", { description, categories });
+  }
+
+  async stats_getIssueCompetencyTags(text: string, topN?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_issue_competency_tags", { text, top_n: topN || 3 });
+  }
+
+  async stats_rankQuestionEvidence(questionId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "rank_question_evidence", { question_id: questionId });
+  }
+
+  async stats_evaluateQuestionLocal(questionId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "evaluate_question_local", { question_id: questionId });
+  }
+
+  async stats_askAI(question: string): Promise<DBusResult> {
+    return this.callMethod("stats", "ask_ai", { question });
+  }
+
+  async stats_explainCompetencyScore(competencyId: string): Promise<DBusResult> {
+    return this.callMethod("stats", "explain_competency_score", { competency_id: competencyId });
+  }
+
+  async stats_suggestConfigTune(targetLevel?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "suggest_config_tune", { target_level: targetLevel || "" });
+  }
+
+  async stats_getPeerGrowthData(year?: number, quarter?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_peer_growth_data", { year, quarter });
+  }
+
+  async stats_getActivityPatterns(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_activity_patterns");
+  }
+
+  async stats_getMindmapClusters(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_mindmap_clusters");
+  }
+
+  async stats_detectMissingLinks(): Promise<DBusResult> {
+    return this.callMethod("stats", "detect_missing_links");
+  }
+
+  // ==========================================================================
   // Utility Methods
   // ==========================================================================
 

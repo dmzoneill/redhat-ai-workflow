@@ -1813,3 +1813,224 @@
   overflow: hidden;
   background: var(--bg);
 }
+
+/* ==================== AI Feature Styles ==================== */
+
+.ai-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #667eea33, #764ba233);
+  color: #667eea;
+  border: 1px solid #667eea44;
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+.ai-insight-card {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border-left: 3px solid #667eea;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.ai-trend-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ai-trend-badge.positive {
+  background: #10b98122;
+  color: #10b981;
+  border: 1px solid #10b98144;
+}
+.ai-trend-badge.neutral {
+  background: #f59e0b22;
+  color: #f59e0b;
+  border: 1px solid #f59e0b44;
+}
+.ai-trend-badge.negative {
+  background: #ef444422;
+  color: #ef4444;
+  border: 1px solid #ef444444;
+}
+
+/* AI Differentiator Grid */
+.ai-diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.ai-diff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-diff-header {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  text-align: center;
+}
+.ai-diff-header.ai-diff-positive {
+  background: #10b98118;
+  color: #10b981;
+}
+.ai-diff-header.ai-diff-negative {
+  background: #ef444418;
+  color: #ef4444;
+}
+.ai-diff-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+}
+.ai-diff-name {
+  color: var(--text-primary);
+}
+.ai-diff-delta {
+  font-weight: 600;
+  font-size: 11px;
+}
+.ai-diff-delta.positive { color: #10b981; }
+.ai-diff-delta.negative { color: #ef4444; }
+
+/* Promotion Readiness */
+.promo-summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.promo-assessments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.promo-assess-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-secondary);
+}
+.promo-assess-row.positive { border-left: 3px solid #10b981; }
+.promo-assess-row.neutral { border-left: 3px solid #f59e0b; }
+.promo-assess-row.negative { border-left: 3px solid #ef4444; }
+.promo-icon { font-size: 14px; }
+.promo-comp { flex: 1; color: var(--text-primary); }
+.promo-pct { color: var(--text-secondary); font-size: 11px; }
+.promo-delta { font-weight: 600; font-size: 11px; min-width: 45px; text-align: right; }
+.promo-assess-row.positive .promo-delta { color: #10b981; }
+.promo-assess-row.neutral .promo-delta { color: #f59e0b; }
+.promo-assess-row.negative .promo-delta { color: #ef4444; }
+
+/* Calendar AI Insights */
+.ai-forecast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.ai-pattern-item {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+  background: var(--bg-secondary);
+}
+.ai-pattern-item.positive { border-left: 3px solid #10b981; }
+.ai-pattern-item.neutral { border-left: 3px solid #667eea; }
+.ai-pattern-item.negative { border-left: 3px solid #f59e0b; }
+
+/* Issue Competency Tags */
+.issue-comp-tags {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.issue-comp-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 500;
+  background: #667eea22;
+  color: #667eea;
+  border: 1px solid #667eea33;
+}
+
+/* Help Ask AI */
+.ai-ask-container {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ai-ask-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.ai-ask-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+.ai-answer-card {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border-left: 3px solid #667eea;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+
+/* Peer Growth Sparklines */
+.peer-growth-container {
+  min-height: 60px;
+}
+.peer-sparkline-svg {
+  width: 100%;
+  max-width: 500px;
+  height: 80px;
+}
+.peer-sparkline-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  font-size: 11px;
+}
+.peer-spark-leg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+}
+.peer-spark-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}

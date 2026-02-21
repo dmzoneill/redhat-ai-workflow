@@ -18,7 +18,7 @@ from services.stats.scorer import (
     get_merged_config,
     get_session_integration_config,
     get_strategy_alignment_config,
-    map_competencies,
+    map_competencies_with_signals,
 )
 from services.stats.strategy import match_event_to_strategy
 
@@ -293,7 +293,7 @@ class DataCollector:
         event["strategy_aligned"] = strategy_aligned
         event["strategy_priorities"] = strategy_priorities
         event["hierarchy"] = hierarchy
-        event["points"] = map_competencies(
+        pts, sig_counts = map_competencies_with_signals(
             classification_text,
             source,
             event_type,
@@ -308,6 +308,8 @@ class DataCollector:
             is_cross_team=event.get("is_cross_team", False),
             review_decision=event.get("review_decision"),
         )
+        event["points"] = pts
+        event["signal_counts"] = sig_counts
         return event
 
     def get_perf_dir(self, year: int | None = None, quarter: int | None = None) -> Path:

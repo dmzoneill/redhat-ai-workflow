@@ -183,13 +183,15 @@
 /* Legend */
 .perf-mindmap-d3-legend {
   display: flex;
-  gap: 14px;
-  padding: 8px 14px;
+  gap: 8px 12px;
+  padding: 6px 14px;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  font-size: var(--text-sm);
-  flex-wrap: wrap;
+  font-size: var(--text-xs);
+  flex-wrap: nowrap;
   align-items: center;
+  white-space: nowrap;
+  overflow-x: auto;
 }
 
 .perf-pillar-filter input { accent-color: currentColor; }
@@ -214,12 +216,16 @@
 /* Heat glow backgrounds */
 .perf-mm-heat-glow { pointer-events: none; }
 
+/* Default legend shape fill */
+.legend-dot-default { background: var(--text-secondary); }
+
 /* Diamond legend dot */
 .perf-mm-diamond-legend {
   width: 8px !important;
   height: 8px !important;
   border-radius: 0 !important;
   transform: rotate(45deg);
+  background: var(--text-secondary);
 }
 
 /* Triangle legend dot (epic) */
@@ -234,19 +240,29 @@
 }
 
 /* Square legend dot (issue) */
-.perf-mm-legend-square { border-radius: 1px !important; }
+.perf-mm-legend-square {
+  border-radius: 1px !important;
+  background: var(--text-secondary);
+}
 
 /* Rounded rect legend dot (ANSTRAT) */
 .perf-mm-legend-roundrect {
   border-radius: 2px !important;
   width: 12px !important;
   height: 7px !important;
+  background: var(--info);
 }
 
 /* Ring legend dot (pillar) */
 .perf-mm-legend-ring {
   background: transparent !important;
   border: 2px solid var(--info);
+}
+
+/* Gap legend: dashed outline diamond */
+.perf-mm-diamond-legend.perf-help-dot-comparison {
+  background: transparent;
+  border: 1.5px dashed var(--text-secondary);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -403,39 +419,68 @@
 
 .physics-control input[type="range"] {
   width: 100%;
-  height: 4px;
+  height: 20px;
   -webkit-appearance: none;
   appearance: none;
-  background: var(--border);
-  border-radius: var(--radius-sm);
+  background: transparent;
   outline: none;
   cursor: pointer;
+  margin: 0;
+  padding: 0;
+}
+
+.physics-control input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.physics-control input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: var(--radius-sm);
+  border: none;
 }
 
 .physics-control input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-full);
   background: var(--accent);
-  cursor: pointer;
+  cursor: grab;
   border: 2px solid var(--bg-primary);
   box-shadow: 0 0 4px rgba(0, 102, 204, 0.4);
-  transition: transform 0.1s;
+  margin-top: -7px;
+  transition: box-shadow 0.15s;
 }
 
-.physics-control input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.physics-control input[type="range"]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 4px rgba(0, 102, 204, 0.2), 0 0 4px rgba(0, 102, 204, 0.4);
+}
+
+.physics-control input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; }
+
+.physics-control input[type="range"]:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.3), 0 0 4px rgba(0, 102, 204, 0.4);
+}
 
 .physics-control input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-full);
   background: var(--accent);
-  cursor: pointer;
+  cursor: grab;
   border: 2px solid var(--bg-primary);
   box-shadow: 0 0 4px rgba(0, 102, 204, 0.4);
 }
+
+.physics-control input[type="range"]::-moz-range-thumb:hover {
+  box-shadow: 0 0 0 4px rgba(0, 102, 204, 0.2), 0 0 4px rgba(0, 102, 204, 0.4);
+}
+
+.physics-control input[type="range"]:active::-moz-range-thumb { cursor: grabbing; }
 
 .physics-actions {
   gap: 8px;

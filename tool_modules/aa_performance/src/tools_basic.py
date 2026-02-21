@@ -1077,6 +1077,112 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
 
         return [TextContent(type="text", text="\n".join(lines))]
 
+    @registry.tool()
+    async def performance_peer_narrative() -> list[TextContent]:
+        """
+        Generate an AI narrative comparing your performance to peer benchmarks.
+
+        Uses local LLM to produce a 3-5 sentence summary highlighting strengths,
+        gaps, and which engineering level your profile most closely matches.
+        """
+        from services.stats.ai_handlers import generate_peer_narrative
+
+        year, quarter, _, _, _ = get_quarter_info()
+        perf_dir = get_performance_dir(year, quarter)
+        summary_file = perf_dir / "performance" / "summary.json"
+        if not summary_file.exists():
+            return [TextContent(type="text", text="No performance summary found.")]
+        with open(summary_file, encoding="utf-8") as f:
+            summary = json.load(f)
+        user_pct = summary.get("cumulative_percentage", {})
+        user_overall = summary.get("overall_percentage", 0)
+
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+        if not benchmarks_file.exists():
+            return [
+                TextContent(
+                    type="text",
+                    text="No peer benchmarks available. Run `collect_peers` first.",
+                )
+            ]
+        with open(benchmarks_file, encoding="utf-8") as f:
+            benchmarks = json.load(f)
+
+        peer_levels = benchmarks.get("levels", {})
+        result = generate_peer_narrative(user_pct, user_overall, peer_levels)
+
+        if result.get("success"):
+            source = result.get("source", "unknown")
+            return [
+                TextContent(
+                    type="text",
+                    text=f"**Peer Narrative** ({source}):\n\n{result['narrative']}",
+                )
+            ]
+        return [TextContent(type="text", text="Failed to generate narrative.")]
+
+    @registry.tool()
+    async def performance_promotion_readiness(
+        current_level: str = "",
+    ) -> list[TextContent]:
+        """
+        Assess your readiness for promotion to the next engineering level.
+
+        Compares your competency profile against the next level's peer averages
+        and generates a structured assessment.
+
+        Args:
+            current_level: Your current level (se, pse, spse). Auto-detected if empty.
+        """
+        from services.stats.ai_handlers import generate_promotion_readiness
+
+        year, quarter, _, _, _ = get_quarter_info()
+        perf_dir = get_performance_dir(year, quarter)
+        summary_file = perf_dir / "performance" / "summary.json"
+        if not summary_file.exists():
+            return [TextContent(type="text", text="No performance summary found.")]
+        with open(summary_file, encoding="utf-8") as f:
+            summary = json.load(f)
+        user_pct = summary.get("cumulative_percentage", {})
+        user_overall = summary.get("overall_percentage", 0)
+
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+        if not benchmarks_file.exists():
+            return [TextContent(type="text", text="No peer benchmarks available.")]
+        with open(benchmarks_file, encoding="utf-8") as f:
+            benchmarks = json.load(f)
+
+        peer_levels = benchmarks.get("levels", {})
+        result = generate_promotion_readiness(
+            user_pct, user_overall, peer_levels, current_level
+        )
+
+        if not result.get("success"):
+            return [
+                TextContent(
+                    type="text",
+                    text=result.get("error", "Cannot assess promotion readiness."),
+                )
+            ]
+
+        lines = [
+            f"## Promotion Readiness: {result['next_level_label']}",
+            "",
+            result.get("summary", ""),
+            "",
+            f"Meeting **{result['ready_count']}/{result['total_competencies']}** competency benchmarks.",
+            "",
+            "| Competency | You | Target | Delta | Status |",
+            "|------------|-----|--------|-------|--------|",
+        ]
+        for a in result.get("assessments", []):
+            icon = {"ready": "OK", "almost": "~", "gap": "GAP"}.get(a["status"], "?")
+            lines.append(
+                f"| {a['name']} | {a['user_pct']}% | {a['target_pct']}% | "
+                f"{a['delta']:+d}% | {icon} |"
+            )
+        return [TextContent(type="text", text="\n".join(lines))]
+
     return registry.count
 
 

@@ -197,6 +197,19 @@ interface PerformanceState {
   executive_emails: ExecutiveEmailSummary[];
   peer_benchmarks: PeerBenchmarks | null;
   competency_view: "sunburst" | "mindmap";
+  ai_peer_narrative: { narrative: string; source: string } | null;
+  ai_peer_differentiators: {
+    level_differentiators: Record<string, { competency: string; name: string; level_avg: number; others_avg: number; factor: number }[]>;
+    user_vs_target: { strengths: { name: string; user: number; target: number; delta: number }[]; gaps: { name: string; user: number; target: number; delta: number }[]; target_level: string; target_label: string };
+  } | null;
+  ai_overview_digest: { digest: string; trend: { projected_final: number | null; status: string }; source: string } | null;
+  ai_calendar_insights: { patterns: { type: string; message: string; severity: string }[]; forecast: { current_pct: number; projected_pct: number; remaining_weekdays: number } | null } | null;
+  ai_promotion_readiness: {
+    next_level: string; next_level_label: string; target_overall: number;
+    ready_count: number; total_competencies: number;
+    assessments: { name: string; user_pct: number; target_pct: number; delta: number; status: string }[];
+    summary: string; source: string;
+  } | null;
 }
 
 interface PeerLevelData {
@@ -357,12 +370,18 @@ export class PerformanceTab extends BaseTab {
     executive_emails: [],
     peer_benchmarks: null,
     competency_view: "sunburst",
+    ai_peer_narrative: null,
+    ai_peer_differentiators: null,
+    ai_overview_digest: null,
+    ai_calendar_insights: null,
+    ai_promotion_readiness: null,
   };
 
   private _scoringSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private _settingsDirty = false;
   private _settingsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   private _pendingLevelRefresh = false;
+  private _postSaveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   private _expandedQuestions = new Set<string>();
   private _questionEvidence = new Map<string, QuestionEvidence[]>();
@@ -449,38 +468,59 @@ export class PerformanceTab extends BaseTab {
 
   async loadData(): Promise<void> {
     try {
-      // Load performance state from stats daemon
-      const result = await dbus.stats_getState();
-      if (result.success && result.data) {
-        const statsState = result.data.state;
-        if (statsState?.performance) {
-          this.state = {
-            ...this.state,
-            ...statsState.performance,
-          };
-          logger.info(`Loaded performance data: ${this.state.overall_percentage}%`);
-        } else {
-          logger.warn("No performance data in stats state");
+      // Fire all D-Bus calls in parallel for speed
+      const [
+        stateResult,
+        capturedResult,
+        hierarchyResult,
+        evidenceResult,
+        cfgResult,
+        sendersResult,
+        emailsResult,
+        peerResult,
+      ] = await Promise.allSettled([
+        dbus.stats_getState(),
+        dbus.stats_getCapturedDays(),
+        dbus.stats_getIssueHierarchy(false),
+        dbus.stats_getCompetencyEvidence(),
+        dbus.stats_getScoringConfig(),
+        dbus.stats_getExecutiveSenders(),
+        dbus.stats_listExecutiveEmails(),
+        dbus.stats_getPeerBenchmarks(),
+      ]);
+
+      // Process results -- order matches the call order above
+
+      if (stateResult.status === "fulfilled") {
+        const r = stateResult.value;
+        if (r.success && r.data) {
+          const statsState = r.data.state;
+          if (statsState?.performance) {
+            this.state = { ...this.state, ...statsState.performance };
+            logger.info(`Loaded performance data: ${this.state.overall_percentage}%`);
+          } else {
+            logger.warn("No performance data in stats state");
+          }
         }
+      } else {
+        logger.warn(`Failed to load state: ${stateResult.reason}`);
       }
 
-      // Load captured days for calendar
-      try {
-        const capturedResult = await dbus.stats_getCapturedDays();
-        if (capturedResult.success && capturedResult.data) {
-          const data = capturedResult.data as any;
+      if (capturedResult.status === "fulfilled") {
+        const r = capturedResult.value;
+        if (r.success && r.data) {
+          const data = r.data as any;
           this.state.captured_days = Array.isArray(data.days) ? data.days : [];
           this.state.coverage = data.coverage || this.state.coverage;
         }
-      } catch (e) {
-        logger.warn(`Failed to load captured days: ${e}`);
+      } else {
+        logger.warn(`Failed to load captured days: ${capturedResult.reason}`);
       }
 
-      // Load issue hierarchy (from cache, no Jira refresh)
-      try {
-        const hierarchyResult = await dbus.stats_getIssueHierarchy(false);
-        if (hierarchyResult.success && hierarchyResult.data) {
-          const raw = hierarchyResult.data as any;
+      if (hierarchyResult.status === "fulfilled") {
+        const r = hierarchyResult.value;
+        if (r.success && r.data) {
+          const raw = r.data as any;
           this.state.issue_hierarchy = {
             strategies: Array.isArray(raw.strategies) ? raw.strategies : [],
             unattached_epics: Array.isArray(raw.unattached_epics) ? raw.unattached_epics : [],
@@ -489,72 +529,98 @@ export class PerformanceTab extends BaseTab {
             cached: raw.cached || false,
           };
         }
-      } catch (e) {
-        logger.warn(`Failed to load issue hierarchy: ${e}`);
+      } else {
+        logger.warn(`Failed to load issue hierarchy: ${hierarchyResult.reason}`);
       }
 
-      // Load competency evidence (for Competencies tab)
-      try {
-        const evidenceResult = await dbus.stats_getCompetencyEvidence();
-        if (evidenceResult.success && evidenceResult.data) {
-          const raw = evidenceResult.data as any;
+      if (evidenceResult.status === "fulfilled") {
+        const r = evidenceResult.value;
+        if (r.success && r.data) {
+          const raw = r.data as any;
           this.state.competency_evidence = raw.competency_evidence || {};
           this.state.competency_meta = raw.competency_meta || {};
           this.state.gap_suggestions = raw.gap_suggestions || {};
         }
-      } catch (e) {
-        logger.warn(`Failed to load competency evidence: ${e}`);
+      } else {
+        logger.warn(`Failed to load competency evidence: ${evidenceResult.reason}`);
       }
 
-      // Load scoring config (for Competencies settings panel)
-      try {
-        const cfgResult = await dbus.stats_getScoringConfig();
-        if (cfgResult.success && cfgResult.data) {
-          this.state.scoring_config = (cfgResult.data as any).config || null;
+      if (cfgResult.status === "fulfilled") {
+        const r = cfgResult.value;
+        if (r.success && r.data) {
+          this.state.scoring_config = (r.data as any).config || null;
         }
-      } catch (e) {
-        logger.warn(`Failed to load scoring config: ${e}`);
+      } else {
+        logger.warn(`Failed to load scoring config: ${cfgResult.reason}`);
       }
 
-      // Strategy alignment is loaded from the summary via stats_getState
-      // (summary.strategy_alignment is spread into this.state above)
-      // Ensure it's populated from the state data
       if (this.state.strategy_alignment === undefined) {
         this.state.strategy_alignment = null;
       }
 
-      // Load executive email senders from config
-      try {
-        const sendersResult = await dbus.stats_getExecutiveSenders();
-        if (sendersResult.success && sendersResult.data) {
-          this.state.executive_senders = (sendersResult.data as any).senders || [];
+      if (sendersResult.status === "fulfilled") {
+        const r = sendersResult.value;
+        if (r.success && r.data) {
+          this.state.executive_senders = (r.data as any).senders || [];
         }
-      } catch (e) {
-        logger.warn(`Failed to load executive senders: ${e}`);
+      } else {
+        logger.warn(`Failed to load executive senders: ${sendersResult.reason}`);
       }
 
-      // Load cached executive emails for the quarter
-      try {
-        const emailsResult = await dbus.stats_listExecutiveEmails();
-        if (emailsResult.success && emailsResult.data) {
-          this.state.executive_emails = (emailsResult.data as any).emails || [];
+      if (emailsResult.status === "fulfilled") {
+        const r = emailsResult.value;
+        if (r.success && r.data) {
+          this.state.executive_emails = (r.data as any).emails || [];
         }
-      } catch (e) {
-        logger.warn(`Failed to load executive emails: ${e}`);
+      } else {
+        logger.warn(`Failed to load executive emails: ${emailsResult.reason}`);
       }
 
-      // Load peer benchmarks
-      try {
-        const peerResult = await dbus.stats_getPeerBenchmarks();
-        if (peerResult.success && peerResult.data) {
-          this.state.peer_benchmarks = (peerResult.data as any).benchmarks || null;
+      if (peerResult.status === "fulfilled") {
+        const r = peerResult.value;
+        if (r.success && r.data) {
+          this.state.peer_benchmarks = (r.data as any).benchmarks || null;
         }
-      } catch (e) {
-        logger.warn(`Failed to load peer benchmarks: ${e}`);
+      } else {
+        logger.warn(`Failed to load peer benchmarks: ${peerResult.reason}`);
       }
+
+      // Load AI insights (non-blocking, fire-and-forget)
+      this._loadAIInsights(dbus);
     } catch (error) {
       logger.error("Error loading data", error);
     }
+  }
+
+  private async _loadAIInsights(dbus: any): Promise<void> {
+    const loads = [
+      (async () => {
+        try {
+          const r = await dbus.stats_getPeerNarrative();
+          if (r.success && r.data) this.state.ai_peer_narrative = r.data as any;
+        } catch { /* AI features are optional */ }
+      })(),
+      (async () => {
+        try {
+          const r = await dbus.stats_getPeerDifferentiators();
+          if (r.success && r.data) this.state.ai_peer_differentiators = r.data as any;
+        } catch { /* AI features are optional */ }
+      })(),
+      (async () => {
+        try {
+          const r = await dbus.stats_getOverviewDigest();
+          if (r.success && r.data) this.state.ai_overview_digest = r.data as any;
+        } catch { /* AI features are optional */ }
+      })(),
+      (async () => {
+        try {
+          const r = await dbus.stats_getCalendarInsights();
+          if (r.success && r.data) this.state.ai_calendar_insights = r.data as any;
+        } catch { /* AI features are optional */ }
+      })(),
+    ];
+    await Promise.allSettled(loads);
+    this.notifyNeedsRender();
   }
 
   // ============================================================
@@ -776,9 +842,28 @@ export class PerformanceTab extends BaseTab {
       `;
     }
 
+    // AI Digest
+    let digestHtml = "";
+    const digest = this.state.ai_overview_digest;
+    if (digest) {
+      const src = digest.source === "ai" ? "AI" : "Analysis";
+      let trendBadge = "";
+      if (digest.trend?.projected_final != null) {
+        const trendClass = digest.trend.status === "on_track" ? "positive" : digest.trend.status === "at_risk" ? "neutral" : "negative";
+        const trendLabel = digest.trend.status === "on_track" ? "On Track" : digest.trend.status === "at_risk" ? "At Risk" : "Behind";
+        trendBadge = `<span class="ai-trend-badge ${trendClass}">${trendLabel} &mdash; projected ${digest.trend.projected_final}%</span>`;
+      }
+      digestHtml = `
+        <div class="section">
+          <div class="section-title">Weekly Digest <span class="ai-badge">${this.escapeHtml(src)}</span> ${trendBadge}</div>
+          <div class="ai-insight-card">${this.escapeHtml(digest.digest)}</div>
+        </div>`;
+    }
+
     return `
       <div class="perf-tab-panel">
         ${quickStatsHtml}
+        ${digestHtml}
         ${pillarHtml}
         ${strategyHtml}
       </div>
@@ -799,8 +884,32 @@ export class PerformanceTab extends BaseTab {
 
         <!-- Day Detail (shown when a day is clicked) -->
         ${this.renderDayDetail()}
+
+        <!-- AI Calendar Insights -->
+        ${this._renderCalendarInsights()}
       </div>
     `;
+  }
+
+  private _renderCalendarInsights(): string {
+    const insights = this.state.ai_calendar_insights;
+    if (!insights) return "";
+
+    let html = "";
+    if (insights.patterns.length > 0 || insights.forecast) {
+      html += `<div class="section"><div class="section-title">AI Insights</div>`;
+      if (insights.forecast) {
+        const fc = insights.forecast;
+        const fcClass = fc.projected_pct >= 80 ? "positive" : fc.projected_pct >= 60 ? "neutral" : "negative";
+        html += `<div class="ai-forecast"><span class="ai-trend-badge ${fcClass}">Coverage forecast: ${fc.projected_pct}%</span> <span class="text-secondary text-sm">${fc.remaining_weekdays} weekdays remaining</span></div>`;
+      }
+      for (const p of insights.patterns) {
+        const cls = p.severity === "positive" ? "positive" : p.severity === "warning" ? "negative" : "neutral";
+        html += `<div class="ai-pattern-item ${cls}">${this.escapeHtml(p.message)}</div>`;
+      }
+      html += `</div>`;
+    }
+    return html;
   }
 
   private renderIssuesTab(): string {
@@ -809,10 +918,14 @@ export class PerformanceTab extends BaseTab {
         <div class="section">
           <div class="section-title">
             <span>Delivered Issues</span>
-            <button class="btn btn-xs" data-action="refreshHierarchy">Refresh from Jira</button>
+            <div class="d-flex gap-8">
+              <button class="btn btn-xs" data-action="detectMissingLinks">Detect Missing Links</button>
+              <button class="btn btn-xs" data-action="refreshHierarchy">Refresh from Jira</button>
+            </div>
           </div>
           ${this.renderIssueHierarchy()}
         </div>
+        <div id="missingLinksContainer"></div>
       </div>
     `;
   }
@@ -1773,6 +1886,7 @@ export class PerformanceTab extends BaseTab {
 
         <div class="scoring-actions">
           <button class="btn btn-sm" data-action="resetScoringConfig">Reset to Defaults</button>
+          <button class="btn btn-sm btn-secondary" data-action="suggestConfigTune">AI Auto-Tune Suggestions</button>
         </div>
       </div>
     `;
@@ -1928,18 +2042,62 @@ export class PerformanceTab extends BaseTab {
 
     const lastUpdated = benchmarks.last_updated ? new Date(benchmarks.last_updated).toLocaleString() : "Never";
 
+    // AI Narrative
+    let narrativeHtml = "";
+    if (this.state.ai_peer_narrative?.narrative) {
+      const src = this.state.ai_peer_narrative.source === "ai" ? "AI" : "Analysis";
+      narrativeHtml = `
+        <div class="section">
+          <div class="section-title">AI Insights <span class="ai-badge">${this.escapeHtml(src)}</span></div>
+          <div class="ai-insight-card">${this.escapeHtml(this.state.ai_peer_narrative.narrative)}</div>
+        </div>`;
+    }
+
+    // AI Differentiators
+    let diffHtml = "";
+    const diff = this.state.ai_peer_differentiators;
+    if (diff?.user_vs_target) {
+      const uvt = diff.user_vs_target;
+      if (uvt.strengths.length > 0 || uvt.gaps.length > 0) {
+        diffHtml = `<div class="section"><div class="section-title">vs ${this.escapeHtml(uvt.target_label)} Benchmarks</div><div class="ai-diff-grid">`;
+        if (uvt.strengths.length > 0) {
+          diffHtml += `<div class="ai-diff-col"><div class="ai-diff-header ai-diff-positive">Strengths</div>`;
+          for (const s of uvt.strengths.slice(0, 5)) {
+            diffHtml += `<div class="ai-diff-item"><span class="ai-diff-name">${this.escapeHtml(s.name)}</span><span class="ai-diff-delta positive">+${s.delta}%</span></div>`;
+          }
+          diffHtml += `</div>`;
+        }
+        if (uvt.gaps.length > 0) {
+          diffHtml += `<div class="ai-diff-col"><div class="ai-diff-header ai-diff-negative">Gaps</div>`;
+          for (const g of uvt.gaps.slice(0, 5)) {
+            diffHtml += `<div class="ai-diff-item"><span class="ai-diff-name">${this.escapeHtml(g.name)}</span><span class="ai-diff-delta negative">${g.delta}%</span></div>`;
+          }
+          diffHtml += `</div>`;
+        }
+        diffHtml += `</div></div>`;
+      }
+    }
+
+    // Promotion readiness button
+    const promoHtml = `<button class="btn btn-sm btn-secondary" data-action="loadPromotionReadiness">Promotion Readiness</button>`;
+
     return `
       <div class="perf-tab-panel">
         <div class="section">
           <div class="flex-between">
             <div class="section-title">Peer Comparison</div>
             <div class="d-flex gap-8">
+              ${promoHtml}
               <button class="btn btn-sm btn-primary" data-action="collectPeers">Collect Peers (Today)</button>
               <button class="btn btn-sm btn-secondary" data-action="collectPeersBackfill">Backfill Quarter</button>
             </div>
           </div>
           <div class="text-secondary text-xs mt-4">Last updated: ${this.escapeHtml(lastUpdated)}</div>
         </div>
+
+        ${narrativeHtml}
+        ${diffHtml}
+        ${this._renderPromotionReadiness()}
 
         <div class="section">
           <div class="section-title">Overall Score Comparison</div>
@@ -1960,6 +2118,35 @@ export class PerformanceTab extends BaseTab {
           <div class="section-title">Event Volume by Source</div>
           ${volumeHtml}
         </div>
+
+        <div class="section">
+          <div class="flex-between">
+            <div class="section-title">Growth Trajectory</div>
+            <button class="btn btn-xs" data-action="loadPeerGrowth">Load Growth Data</button>
+          </div>
+          <div id="peerGrowthContainer" class="peer-growth-container"></div>
+        </div>
+      </div>`;
+  }
+
+  private _renderPromotionReadiness(): string {
+    const promo = this.state.ai_promotion_readiness;
+    if (!promo) return "";
+
+    let assessHtml = "";
+    for (const a of promo.assessments) {
+      const cls = a.status === "ready" ? "positive" : a.status === "almost" ? "neutral" : "negative";
+      const icon = a.status === "ready" ? "\u2705" : a.status === "almost" ? "\u{1F7E1}" : "\u274C";
+      assessHtml += `<div class="promo-assess-row ${cls}"><span class="promo-icon">${icon}</span><span class="promo-comp">${this.escapeHtml(a.name)}</span><span class="promo-pct">${a.user_pct}% / ${a.target_pct}%</span><span class="promo-delta">${a.delta >= 0 ? "+" : ""}${a.delta}%</span></div>`;
+    }
+
+    const src = promo.source === "ai" ? "AI" : "Analysis";
+    return `
+      <div class="section">
+        <div class="section-title">Promotion Readiness: ${this.escapeHtml(promo.next_level_label)} <span class="ai-badge">${this.escapeHtml(src)}</span></div>
+        <div class="ai-insight-card">${this.escapeHtml(promo.summary)}</div>
+        <div class="promo-summary mt-8">Meeting ${promo.ready_count}/${promo.total_competencies} competency benchmarks</div>
+        <div class="promo-assessments mt-8">${assessHtml}</div>
       </div>`;
   }
 
@@ -2057,9 +2244,11 @@ export class PerformanceTab extends BaseTab {
               <option value="blog">Blog Post</option>
               <option value="other">Other</option>
             </select>
-            <input type="text" id="activityDescription" placeholder="Description of activity..." />
+            <input type="text" id="activityDescription" placeholder="Description of activity..."
+                   oninput="if(this.value.length>10){this.dispatchEvent(new CustomEvent('classify-log',{bubbles:true,detail:{description:this.value}}))}" />
             <button class="btn btn-sm btn-primary" data-action="logActivity">Log</button>
           </div>
+          <div class="text-secondary text-xs mt-4">AI auto-categorizes as you type</div>
         </div>
       </div>
     `;
@@ -3298,6 +3487,7 @@ export class PerformanceTab extends BaseTab {
               <ul>
                 ${gap.suggestions.map(s => `<li>${this.escapeHtml(s)}</li>`).join("")}
               </ul>
+              ${(gap as any).ai_suggestion ? `<div class="ai-insight-card mt-8">${this.escapeHtml((gap as any).ai_suggestion)}</div>` : `<button class="btn btn-xs mt-4" data-action="getGapCoach" data-competency="${this.escapeHtml(compId)}">AI Coach</button>`}
             </div>
             ${evidence.length > 0 ? `
               <div class="perf-gap-card-evidence">
@@ -3382,7 +3572,8 @@ export class PerformanceTab extends BaseTab {
 
           <div class="actions-row perf-question-actions">
             <button class="btn btn-xs" data-action="addNote" data-question="${this.escapeHtml(q.id)}">Add Note</button>
-            <button class="btn btn-xs btn-primary" data-action="evaluate" data-question="${this.escapeHtml(q.id)}">${q.has_summary ? "Re-evaluate" : "Evaluate"}</button>
+            <button class="btn btn-xs btn-primary" data-action="evaluateQuestionLocal" data-question="${this.escapeHtml(q.id)}">Evaluate (Local)</button>
+            <button class="btn btn-xs" data-action="evaluate" data-question="${this.escapeHtml(q.id)}">${q.has_summary ? "Re-evaluate (Chat)" : "Evaluate (Chat)"}</button>
           </div>
         </div>
       `;
@@ -3517,6 +3708,16 @@ export class PerformanceTab extends BaseTab {
     return `
       <div class="perf-tab-panel perf-help">
         <script id="perfHelpData" type="application/json">${helpData}</script>
+
+        <!-- Ask AI -->
+        <div class="section">
+          <div class="section-title">Ask AI <span class="ai-badge">AI</span></div>
+          <div class="ai-ask-container">
+            <input type="text" class="ai-ask-input" id="aiAskInput" placeholder="Ask about scoring, e.g. 'Why is my leadership score low?'" />
+            <button class="btn btn-sm btn-primary" data-action="askAI">Ask</button>
+          </div>
+          <div id="aiAnswerContainer"></div>
+        </div>
 
         <!-- ===== GROUP 1: How It Works ===== -->
         <details class="perf-help-group" open>
@@ -3942,6 +4143,22 @@ export class PerformanceTab extends BaseTab {
           } else if (action === 'clearDrafts') {
             if (confirm('Clear all AI-generated drafts? You can re-generate them later.')) {
               vscode.postMessage({ command: 'performanceAction', action: 'clearDrafts' });
+            }
+          } else if (action === 'askAI') {
+            var aiInput = document.getElementById('aiAskInput');
+            var aiQuestion = aiInput ? aiInput.value.trim() : '';
+            if (aiQuestion) {
+              vscode.postMessage({ command: 'performanceAction', action: 'askAI', question: aiQuestion });
+            }
+          } else if (action === 'getGapCoach') {
+            var compId = element.getAttribute('data-competency');
+            if (compId) {
+              vscode.postMessage({ command: 'performanceAction', action: 'getGapCoach', competencyId: compId });
+            }
+          } else if (action === 'explainScore') {
+            var compId2 = element.getAttribute('data-competency');
+            if (compId2) {
+              vscode.postMessage({ command: 'performanceAction', action: 'explainScore', competencyId: compId2 });
             }
           } else {
             var evidenceId = element.getAttribute('data-evidence');
@@ -5853,6 +6070,92 @@ export class PerformanceTab extends BaseTab {
             var traceContainer = document.getElementById('perf-help-trace');
             if (traceContainer) traceContainer.innerHTML = msg.html;
           }
+          if (msg && msg.command === 'aiAnswer' && msg.answer) {
+            var container = document.getElementById('aiAnswerContainer');
+            if (container) {
+              container.innerHTML = '<div class="ai-answer-card">' +
+                msg.answer.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>';
+            }
+          }
+          if (msg && msg.command === 'missingLinksResult' && msg.suggestions) {
+            var mlc = document.getElementById('missingLinksContainer');
+            if (mlc) {
+              var sug = msg.suggestions;
+              if (sug.length === 0) {
+                mlc.innerHTML = '';
+              } else {
+                var mlHtml = '<div class="section"><div class="section-title">Suggested Missing Links <span class="ai-badge">AI</span></div>';
+                for (var mi = 0; mi < sug.length; mi++) {
+                  var s = sug[mi];
+                  mlHtml += '<div class="ai-diff-item"><span class="ai-diff-name">' +
+                    (s.issue ? s.issue.key : '') + ': ' + (s.issue ? s.issue.summary : '').substring(0, 60) +
+                    '</span><span class="text-secondary text-xs"> &rarr; ' +
+                    (s.suggested_anstrat ? s.suggested_anstrat.key : '') + ' (' + (s.similarity * 100).toFixed(0) + '% match)</span></div>';
+                }
+                mlHtml += '</div>';
+                mlc.innerHTML = mlHtml;
+              }
+            }
+          }
+          if (msg && msg.command === 'peerGrowthData' && msg.data) {
+            var gc = document.getElementById('peerGrowthContainer');
+            if (gc) {
+              var d = msg.data;
+              var html = '';
+              var levelColors = { se: '#10b981', pse: '#3b82f6', spse: '#8b5cf6', de: '#f59e0b' };
+              var levelLabels = { se: 'Senior', pse: 'Principal', spse: 'Sr Principal', de: 'Distinguished' };
+              var userSeries = d.user_series || [];
+              if (userSeries.length > 0) {
+                var maxPts = 1;
+                for (var si = 0; si < userSeries.length; si++) {
+                  if (userSeries[si].total_points > maxPts) maxPts = userSeries[si].total_points;
+                }
+                for (var lk in (d.level_series || {})) {
+                  var ls = d.level_series[lk];
+                  for (var li = 0; li < ls.length; li++) {
+                    if (ls[li].total_points > maxPts) maxPts = ls[li].total_points;
+                  }
+                }
+                var w = 400, h = 80;
+                var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" class="peer-sparkline-svg">';
+                function toPath(series, color, dashed) {
+                  if (!series || series.length < 2) return '';
+                  var pts = [];
+                  for (var pi = 0; pi < series.length; pi++) {
+                    var x = (pi / (series.length - 1)) * w;
+                    var y = h - (series[pi].total_points / maxPts) * (h - 5);
+                    pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+                  }
+                  return '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + color + '" stroke-width="' + (dashed ? '1' : '2') + '"' + (dashed ? ' stroke-dasharray="4,3"' : '') + '/>';
+                }
+                svg += toPath(userSeries, '#667eea', false);
+                for (var lk2 in (d.level_series || {})) {
+                  svg += toPath(d.level_series[lk2], levelColors[lk2] || '#888', true);
+                }
+                svg += '</svg>';
+                var legend = '<div class="peer-sparkline-legend"><span class="peer-spark-leg"><span style="background:#667eea" class="peer-spark-dot"></span>You</span>';
+                for (var lk3 in (d.level_series || {})) {
+                  legend += '<span class="peer-spark-leg"><span style="background:' + (levelColors[lk3] || '#888') + '" class="peer-spark-dot"></span>' + (levelLabels[lk3] || lk3) + '</span>';
+                }
+                legend += '</div>';
+                html = svg + legend;
+              } else {
+                html = '<div class="text-secondary text-sm">No daily data available for growth trajectory.</div>';
+              }
+              gc.innerHTML = html;
+            }
+          }
+          if (msg && msg.command === 'aiLogCategory' && msg.category) {
+            var catSelect = document.getElementById('activityCategory');
+            if (catSelect) {
+              for (var i = 0; i < catSelect.options.length; i++) {
+                if (catSelect.options[i].value.toLowerCase() === msg.category.toLowerCase()) {
+                  catSelect.selectedIndex = i;
+                  break;
+                }
+              }
+            }
+          }
         });
 
         window._initPerfHelp = initPerfHelp;
@@ -5909,6 +6212,33 @@ export class PerformanceTab extends BaseTab {
         break;
       case "collectPeersBackfill":
         await this.collectPeers(true);
+        break;
+      case "loadPromotionReadiness":
+        await this._loadPromotionReadiness();
+        break;
+      case "loadPeerGrowth":
+        await this._loadPeerGrowth();
+        break;
+      case "evaluateQuestionLocal":
+        await this._evaluateQuestionLocal(message.questionId);
+        break;
+      case "classifyLogEntry":
+        await this._classifyLogEntry(message.description);
+        break;
+      case "askAI":
+        await this._askAI(message.question);
+        break;
+      case "getGapCoach":
+        await this._loadGapCoach(message.competencyId);
+        break;
+      case "explainScore":
+        await this._explainScore(message.competencyId);
+        break;
+      case "suggestConfigTune":
+        await this._suggestConfigTune();
+        break;
+      case "detectMissingLinks":
+        await this._detectMissingLinks();
         break;
       case "clearDrafts":
         await this.clearAllDrafts();
@@ -6242,6 +6572,148 @@ export class PerformanceTab extends BaseTab {
     }
   }
 
+  // ==================== AI Feature Handlers ====================
+
+  private async _loadPeerGrowth(): Promise<void> {
+    try {
+      const result = await dbus.stats_getPeerGrowthData();
+      if (result.success && result.data) {
+        const data = result.data as any;
+        this.services?.postMessage?.({ command: "peerGrowthData", data });
+      } else {
+        vscode.window.showWarningMessage("No growth data available.");
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to load growth data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async _loadPromotionReadiness(): Promise<void> {
+    try {
+      const result = await dbus.stats_getPromotionReadiness();
+      if (result.success && result.data) {
+        this.state.ai_promotion_readiness = result.data as any;
+        this.notifyNeedsRender();
+      } else {
+        vscode.window.showWarningMessage(`Promotion readiness: ${result.error || "No data"}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to load promotion readiness: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async _evaluateQuestionLocal(questionId: string): Promise<void> {
+    if (!questionId) return;
+    vscode.window.showInformationMessage("Evaluating question with local LLM...");
+    try {
+      const result = await dbus.stats_evaluateQuestionLocal(questionId);
+      if (result.success && result.data) {
+        const data = result.data as any;
+        vscode.window.showInformationMessage(`Evaluation complete (${data.model || "local LLM"})`);
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Evaluation failed: ${result.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Local evaluation error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async _classifyLogEntry(description: string): Promise<void> {
+    if (!description || description.length < 5) return;
+    try {
+      const result = await dbus.stats_classifyLogEntry(description);
+      if (result.success && result.data) {
+        const cat = (result.data as any).category;
+        if (cat) {
+          this.services?.postMessage?.({ command: "aiLogCategory", category: cat });
+        }
+      }
+    } catch { /* classification is best-effort */ }
+  }
+
+  private async _askAI(question: string): Promise<void> {
+    if (!question) return;
+    try {
+      const result = await dbus.stats_askAI(question);
+      if (result.success && result.data) {
+        const answer = (result.data as any).answer || "No answer available.";
+        this.services?.postMessage?.({ command: "aiAnswer", answer, question });
+      }
+    } catch (error) {
+      this.services?.postMessage?.({
+        command: "aiAnswer",
+        answer: "AI is currently unavailable.",
+        question,
+      });
+    }
+  }
+
+  private async _loadGapCoach(competencyId: string): Promise<void> {
+    if (!competencyId) return;
+    try {
+      const result = await dbus.stats_getGapCoach(competencyId);
+      if (result.success && result.data) {
+        const suggestion = (result.data as any).suggestion || "";
+        if (suggestion) {
+          this.state.gap_suggestions[competencyId] = {
+            ...(this.state.gap_suggestions[competencyId] || {}),
+            ai_suggestion: suggestion,
+          } as any;
+          this.notifyNeedsRender();
+        }
+      }
+    } catch { /* gap coach is best-effort */ }
+  }
+
+  private async _explainScore(competencyId: string): Promise<void> {
+    if (!competencyId) return;
+    try {
+      const result = await dbus.stats_explainCompetencyScore(competencyId);
+      if (result.success && result.data) {
+        const explanation = (result.data as any).explanation || "";
+        if (explanation) {
+          vscode.window.showInformationMessage(explanation.substring(0, 500));
+        }
+      }
+    } catch { /* explanation is best-effort */ }
+  }
+
+  private async _detectMissingLinks(): Promise<void> {
+    vscode.window.showInformationMessage("Scanning for orphan issues...");
+    try {
+      const result = await dbus.stats_detectMissingLinks();
+      if (result.success && result.data) {
+        const suggestions = (result.data as any).suggestions || [];
+        this.services?.postMessage?.({ command: "missingLinksResult", suggestions });
+        if (suggestions.length === 0) {
+          vscode.window.showInformationMessage("No missing links found -- all issues appear well-connected.");
+        }
+      } else {
+        vscode.window.showWarningMessage(result.error || "Missing link detection unavailable.");
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Missing link detection failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async _suggestConfigTune(): Promise<void> {
+    try {
+      const result = await dbus.stats_suggestConfigTune();
+      if (result.success && result.data) {
+        const suggestions = (result.data as any).suggestions || [];
+        if (suggestions.length === 0) {
+          vscode.window.showInformationMessage("No config adjustments suggested -- your settings look balanced.");
+        } else {
+          const msgs = suggestions.map((s: any) => s.message).join("\n\n");
+          vscode.window.showInformationMessage(msgs.substring(0, 500));
+        }
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Config tune failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async logActivity(category: string, description: string): Promise<void> {
     if (!description) {
       vscode.window.showWarningMessage("Please enter a description");
@@ -6478,7 +6950,8 @@ After saving, the QC tab will show the result inline on the card.`;
   private updateScoringGlobal(field: string, value: number): void {
     if (!this.state.scoring_config || !field) return;
     (this.state.scoring_config as any)[field] = value;
-    this.debouncedSaveScoringConfig();
+    const delay = (field === "min_signals" || field === "daily_cap") ? 500 : 1500;
+    this.debouncedSaveScoringConfig(delay);
     this.deferredSettingsRender();
   }
 
@@ -6622,14 +7095,14 @@ After saving, the QC tab will show the result inline on the card.`;
     this.notifyNeedsRender();
   }
 
-  private debouncedSaveScoringConfig(): void {
+  private debouncedSaveScoringConfig(delayMs: number = 1500): void {
     if (this._scoringSaveTimer) {
       clearTimeout(this._scoringSaveTimer);
     }
     this._scoringSaveTimer = setTimeout(() => {
       this._scoringSaveTimer = null;
       this.saveScoringConfig();
-    }, 1500);
+    }, delayMs);
   }
 
   private async saveScoringConfig(): Promise<void> {
@@ -6672,6 +7145,7 @@ After saving, the QC tab will show the result inline on the card.`;
       const result = await dbus.stats_setScoringConfig(payload);
       if (result.success) {
         this._settingsDirty = true;
+        this.schedulePostSaveRefresh();
         if (this._pendingLevelRefresh) {
           this._pendingLevelRefresh = false;
           this.deferredSettingsRefresh();
@@ -6682,6 +7156,21 @@ After saving, the QC tab will show the result inline on the card.`;
     } catch (error) {
       vscode.window.showErrorMessage(`Error saving config: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * After a successful config save + backend re-evaluation, reload all
+   * data so charts reflect the new scores.  Debounced at 300ms so rapid
+   * saves (e.g. typing base_points) coalesce into a single reload.
+   */
+  private schedulePostSaveRefresh(): void {
+    if (this._postSaveRefreshTimer) {
+      clearTimeout(this._postSaveRefreshTimer);
+    }
+    this._postSaveRefreshTimer = setTimeout(async () => {
+      this._postSaveRefreshTimer = null;
+      await this.refreshPreservingUIState();
+    }, 300);
   }
 
   /**

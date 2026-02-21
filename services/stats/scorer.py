@@ -1092,6 +1092,160 @@ def map_competencies(
     return points
 
 
+def map_competencies_with_signals(
+    classification_text: str,
+    source: str,
+    event_type: str,
+    scope: str = "story",
+    role: str = "assignee",
+    *,
+    effective_defs: dict[str, dict] | None = None,
+    min_signals: int | None = None,
+    level: str | None = None,
+    strategy_aligned: bool = False,
+    npu_classifier: object | None = None,
+    contribution_type: str | None = None,
+    is_cross_team: bool = False,
+    review_decision: str | None = None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Like map_competencies but also returns raw signal counts per competency.
+
+    Returns (points, signal_counts) where signal_counts[comp_id] is the raw
+    signal count *before* the min_signals threshold check.  Persisting
+    signal_counts in daily files allows fast re-thresholding when only
+    min_signals changes without re-running text matching.
+    """
+    if effective_defs is not None and min_signals is not None:
+        defs, min_sig = effective_defs, min_signals
+    else:
+        defs, min_sig, _, _ = get_effective_defs()
+
+    cfg = get_merged_config()
+    if not level:
+        level = cfg.get("engineering_level", "sse")
+
+    scope_multipliers = cfg.get(
+        "scope_multipliers", DEFAULT_GLOBALS["scope_multipliers"]
+    )
+    scope_mult = scope_multipliers.get(scope, 1)
+
+    lw = get_level_weights(level)
+    user_cfg = load_scoring_config()
+    user_lw = user_cfg.get("level_weight_overrides", {}).get(level, {})
+    if user_lw.get("role_weights"):
+        merged_rw = dict(lw.get("role_weights", {}))
+        for s, roles in user_lw["role_weights"].items():
+            if isinstance(roles, dict):
+                merged_rw[s] = {**merged_rw.get(s, {}), **roles}
+        role_weights_table = merged_rw
+    else:
+        role_weights_table = lw.get("role_weights", {})
+    if user_lw.get("pillar_weights"):
+        pillar_weights = {**lw.get("pillar_weights", {}), **user_lw["pillar_weights"]}
+    else:
+        pillar_weights = lw.get("pillar_weights", {})
+
+    strategy_cfg = cfg.get("strategy_alignment", DEFAULT_GLOBALS["strategy_alignment"])
+    strategy_bonus = 1.0
+    if strategy_aligned and strategy_cfg.get("enabled", True):
+        strategy_bonus = strategy_cfg.get("bonus_multiplier", 1.5)
+
+    npu_bonus: dict[str, int] = {}
+    if npu_classifier is not None and hasattr(npu_classifier, "get_bonus_signals"):
+        try:
+            npu_bonus = npu_classifier.get_bonus_signals(classification_text)
+        except Exception:
+            pass
+
+    points: dict[str, int] = {}
+    signal_counts: dict[str, int] = {}
+    text = classification_text.lower()
+
+    _contrib_bonus_comps: set[str] = set()
+    if contribution_type in ("upstream", "fork"):
+        _contrib_bonus_comps.update(("opportunity_recognition", "scope"))
+    if contribution_type == "cross-org":
+        _contrib_bonus_comps.update(("scope", "collaboration"))
+    _cross_team_bonus_comps: set[str] = set()
+    if is_cross_team:
+        _cross_team_bonus_comps.update(("scope", "collaboration", "leadership"))
+    _review_decision_bonus: dict[str, set[str]] = {}
+    if review_decision:
+        rd = review_decision.upper()
+        if rd == "CHANGES_REQUESTED":
+            _review_decision_bonus = {"mentorship": {rd}, "collaboration": {rd}}
+        elif rd == "APPROVED":
+            _review_decision_bonus = {"collaboration": {rd}}
+
+    for comp_id, defn in defs.items():
+        signals = 0
+
+        if event_type in defn.get("event_types", []):
+            signals += 1
+
+        for phrase in defn.get("phrases", []):
+            if phrase in text:
+                signals += 1
+
+        for kw in defn.get("keywords", []):
+            if kw in text:
+                signals += 1
+
+        signals += npu_bonus.get(comp_id, 0)
+
+        if comp_id in _contrib_bonus_comps:
+            signals += 1
+        if comp_id in _cross_team_bonus_comps:
+            signals += 1
+        if comp_id in _review_decision_bonus:
+            signals += 1
+
+        signal_counts[comp_id] = signals
+
+        if signals >= min_sig:
+            base = defn["base_points"]
+            scope_role_weights = role_weights_table.get(scope, {})
+            role_weight = scope_role_weights.get(role, 1.0)
+            category = defn.get("category", "")
+            pillar_weight = pillar_weights.get(category, 1.0)
+            final = round(
+                base * scope_mult * role_weight * pillar_weight * strategy_bonus
+            )
+            points[comp_id] = max(final, 1)
+
+    if source in ("github", "gitlab") and "opportunity_recognition" in defs:
+        comp_id = "opportunity_recognition"
+        defn = defs[comp_id]
+        extra_signals = 1
+        if event_type in defn.get("event_types", []):
+            extra_signals += 1
+        for phrase in defn.get("phrases", []):
+            if phrase in text:
+                extra_signals += 1
+        for kw in defn.get("keywords", []):
+            if kw in text:
+                extra_signals += 1
+        extra_signals += npu_bonus.get(comp_id, 0)
+        if comp_id in _contrib_bonus_comps:
+            extra_signals += 1
+        signal_counts[comp_id] = max(signal_counts.get(comp_id, 0), extra_signals)
+        if extra_signals >= min_sig:
+            base = defn["base_points"]
+            scope_role_weights = role_weights_table.get(scope, {})
+            role_weight = scope_role_weights.get(role, 1.0)
+            category = defn.get("category", "")
+            pillar_weight = pillar_weights.get(category, 1.0)
+            final = round(
+                base * scope_mult * role_weight * pillar_weight * strategy_bonus
+            )
+            points[comp_id] = max(
+                points.get(comp_id, 0),
+                max(final, 1),
+            )
+
+    return points, signal_counts
+
+
 _competencies_yaml_cache: dict | None = None
 
 
