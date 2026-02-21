@@ -493,8 +493,11 @@ export class HtmlGenerator {
                     if (document.getElementById('perfMindmapData') && typeof window._initPerfMindmap === 'function') {
                       setTimeout(function() { window._initPerfMindmap(); }, 200);
                     }
+                    if (document.getElementById('wmGraphData') && typeof window._initWeightedMindmap === 'function') {
+                      setTimeout(function() { window._initWeightedMindmap(); }, 250);
+                    }
                     if (document.getElementById('perfHelpData') && typeof window._initPerfHelp === 'function') {
-                      setTimeout(function() { window._initPerfHelp(); }, 250);
+                      setTimeout(function() { window._initPerfHelp(); }, 300);
                     }
                   }
                 });

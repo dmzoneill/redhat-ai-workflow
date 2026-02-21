@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import calendar
 import math
-from datetime import datetime
 from html import escape
 from pathlib import Path
 
@@ -457,3 +456,235 @@ def render_pdf(template_data: dict, template_path: Path, output_path: Path) -> s
     HTML(string=html_str).write_pdf(str(output_path))
 
     return str(output_path)
+
+
+# ============================================================
+# Peer comparison charts
+# ============================================================
+
+LEVEL_COLORS = {
+    "se": "#3b82f6",
+    "pse": "#8b5cf6",
+    "spse": "#f59e0b",
+    "de": "#ef4444",
+    "you": "#10b981",
+}
+
+LEVEL_LABELS = {
+    "se": "Senior",
+    "pse": "Principal",
+    "spse": "Sr Principal",
+    "de": "Distinguished",
+    "you": "You",
+}
+
+
+def generate_grouped_bars_html(
+    user_data: dict,
+    peer_levels: dict,
+) -> str:
+    """Generate grouped horizontal bars comparing user vs peer level averages.
+
+    user_data:   {comp_id: {"percentage": N, "points": N}}
+    peer_levels: {level_key: {"avg_competency_pct": {comp_id: N}}}
+    """
+    all_comp_ids: set[str] = set(user_data.keys())
+    for level_data in peer_levels.values():
+        all_comp_ids.update(level_data.get("avg_competency_pct", {}).keys())
+
+    sorted_comps = sorted(all_comp_ids)
+    active_levels = [lk for lk in ["se", "pse", "spse", "de"] if lk in peer_levels]
+
+    html = '<div class="peer-grouped-bars">'
+    for comp_id in sorted_comps:
+        name = comp_id.replace("_", " ").title()
+        html += '<div class="peer-comp-group">'
+        html += f'<div class="peer-comp-name">{escape(name)}</div>'
+
+        user_pct = (
+            user_data.get(comp_id, {}).get("percentage", 0)
+            if isinstance(user_data.get(comp_id), dict)
+            else 0
+        )
+        color = LEVEL_COLORS["you"]
+        html += (
+            f'<div class="peer-bar-row">'
+            f'<span class="peer-bar-label">You</span>'
+            f'<div class="peer-bar-track">'
+            f'<div class="peer-bar-fill" style="width:{user_pct}%;background:{color};"></div>'
+            f"</div>"
+            f'<span class="peer-bar-value">{user_pct}%</span>'
+            f"</div>"
+        )
+
+        for lk in active_levels:
+            ldata = peer_levels[lk]
+            pct = ldata.get("avg_competency_pct", {}).get(comp_id, 0)
+            color = LEVEL_COLORS.get(lk, "#888")
+            label = LEVEL_LABELS.get(lk, lk)
+            html += (
+                f'<div class="peer-bar-row">'
+                f'<span class="peer-bar-label">{escape(label)}</span>'
+                f'<div class="peer-bar-track">'
+                f'<div class="peer-bar-fill" style="width:{pct}%;background:{color};"></div>'
+                f"</div>"
+                f'<span class="peer-bar-value">{pct}%</span>'
+                f"</div>"
+            )
+
+        html += "</div>"
+
+    html += "</div>"
+    return html
+
+
+def generate_radar_svg(
+    user_profile: dict,
+    peer_profiles: dict,
+    width: int = 500,
+    height: int = 500,
+) -> str:
+    """Generate a radar/spider SVG overlaying user vs peer level averages.
+
+    user_profile:  {comp_id: percentage}
+    peer_profiles: {level_key: {comp_id: percentage}}
+    """
+    all_comp_ids = sorted(
+        set(user_profile.keys()) | {c for p in peer_profiles.values() for c in p.keys()}
+    )
+    n = len(all_comp_ids)
+    if n < 3:
+        return ""
+
+    cx, cy = width / 2, height / 2
+    max_r = min(cx, cy) * 0.75
+
+    svg = (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'xmlns="http://www.w3.org/2000/svg">'
+        f"<style>text {{ font-family: system-ui, -apple-system, sans-serif; font-size: 11px; }}</style>"
+    )
+
+    for ring_pct in [25, 50, 75, 100]:
+        r = max_r * ring_pct / 100
+        ring_points = []
+        for i in range(n):
+            angle = (2 * math.pi * i / n) - math.pi / 2
+            rx = cx + r * math.cos(angle)
+            ry = cy + r * math.sin(angle)
+            ring_points.append(f"{rx:.1f},{ry:.1f}")
+        svg += (
+            f'<polygon points="{" ".join(ring_points)}" '
+            f'fill="none" stroke="#ddd" stroke-width="0.5"/>'
+        )
+
+    for i in range(n):
+        angle = (2 * math.pi * i / n) - math.pi / 2
+        lx = cx + max_r * math.cos(angle)
+        ly = cy + max_r * math.sin(angle)
+        svg += f'<line x1="{cx}" y1="{cy}" x2="{lx:.1f}" y2="{ly:.1f}" stroke="#eee" stroke-width="0.5"/>'
+
+        label_r = max_r + 20
+        tx = cx + label_r * math.cos(angle)
+        ty = cy + label_r * math.sin(angle)
+        name = all_comp_ids[i].replace("_", " ").title()
+        if len(name) > 16:
+            name = name[:14] + ".."
+        anchor = "middle"
+        if abs(math.cos(angle)) > 0.3:
+            anchor = "start" if math.cos(angle) > 0 else "end"
+        svg += (
+            f'<text x="{tx:.1f}" y="{ty:.1f}" text-anchor="{anchor}" '
+            f'dominant-baseline="middle" fill="#666">{escape(name)}</text>'
+        )
+
+    def _polygon(
+        profile: dict, color: str, opacity: float, dashed: bool = False
+    ) -> str:
+        pts = []
+        for i, comp_id in enumerate(all_comp_ids):
+            pct = min(profile.get(comp_id, 0), 100)
+            r = max_r * pct / 100
+            angle = (2 * math.pi * i / n) - math.pi / 2
+            px = cx + r * math.cos(angle)
+            py = cy + r * math.sin(angle)
+            pts.append(f"{px:.1f},{py:.1f}")
+        dash = ' stroke-dasharray="6,4"' if dashed else ""
+        return (
+            f'<polygon points="{" ".join(pts)}" fill="{color}" fill-opacity="{opacity * 0.15}" '
+            f'stroke="{color}" stroke-width="2" stroke-opacity="{opacity}"{dash}/>'
+        )
+
+    for lk in ["se", "pse", "spse", "de"]:
+        if lk in peer_profiles:
+            color = LEVEL_COLORS.get(lk, "#888")
+            svg += _polygon(peer_profiles[lk], color, 0.6, dashed=True)
+
+    svg += _polygon(user_profile, LEVEL_COLORS["you"], 1.0)
+
+    legend_y = height - 20
+    legend_x = 10
+    items = [("you", "You")] + [
+        (lk, LEVEL_LABELS.get(lk, lk))
+        for lk in ["se", "pse", "spse", "de"]
+        if lk in peer_profiles
+    ]
+    for lk, label in items:
+        color = LEVEL_COLORS.get(lk, "#888")
+        dash = "" if lk == "you" else ' stroke-dasharray="6,4"'
+        svg += (
+            f'<line x1="{legend_x}" y1="{legend_y}" x2="{legend_x + 20}" y2="{legend_y}" '
+            f'stroke="{color}" stroke-width="2"{dash}/>'
+            f'<text x="{legend_x + 25}" y="{legend_y + 4}" fill="#666">{escape(label)}</text>'
+        )
+        legend_x += 90
+
+    svg += "</svg>"
+    return svg
+
+
+def generate_volume_table_html(
+    user_volume: dict,
+    peer_volumes: dict,
+) -> str:
+    """Generate an HTML table comparing event volume by source.
+
+    user_volume:  {source: count}
+    peer_volumes: {level_key: {source: avg_count}}
+    """
+    all_sources: set[str] = set(user_volume.keys())
+    for level_data in peer_volumes.values():
+        all_sources.update(level_data.keys())
+
+    sorted_sources = sorted(all_sources)
+    active_levels = [lk for lk in ["se", "pse", "spse", "de"] if lk in peer_volumes]
+
+    html = '<table class="peer-volume-table">'
+    html += "<thead><tr><th>Source</th><th>You</th>"
+    for lk in active_levels:
+        label = LEVEL_LABELS.get(lk, lk)
+        html += f"<th>{escape(label)}</th>"
+    html += "</tr></thead><tbody>"
+
+    for src in sorted_sources:
+        html += f"<tr><td>{escape(src.title())}</td>"
+        user_count = user_volume.get(src, 0)
+        html += f'<td class="vol-you">{user_count}</td>'
+        for lk in active_levels:
+            peer_count = peer_volumes.get(lk, {}).get(src, 0)
+            diff_class = ""
+            if isinstance(peer_count, (int, float)):
+                if user_count > peer_count * 1.2:
+                    diff_class = ' class="vol-above"'
+                elif user_count < peer_count * 0.8:
+                    diff_class = ' class="vol-below"'
+            val = (
+                f"{peer_count:.1f}"
+                if isinstance(peer_count, float)
+                else str(peer_count)
+            )
+            html += f"<td{diff_class}>{val}</td>"
+        html += "</tr>"
+
+    html += "</tbody></table>"
+    return html

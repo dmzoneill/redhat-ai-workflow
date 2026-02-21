@@ -788,7 +788,44 @@
   {% endif %}
 </div>
 
-<!-- ===== 8. ACTIVITY LOG ===== -->
+<!-- ===== 8. PEER COMPARISON ===== -->
+{% if peer_benchmarks and peer_benchmarks.levels %}
+<div class="section-page">
+  <div class="section-title">8. Peer Comparison</div>
+  <p>Competency scores compared against peer averages by engineering level.</p>
+
+  <div class="stats-grid" style="margin-bottom:24px;">
+    <div class="stat-box">
+      <div class="stat-value" style="color:#10b981;">{{ overall_pct }}%</div>
+      <div class="stat-label">You</div>
+    </div>
+    {% for level_key in ['se', 'pse', 'spse', 'de'] %}
+    {% if peer_benchmarks.levels[level_key] is defined %}
+    <div class="stat-box">
+      <div class="stat-value">{{ peer_benchmarks.levels[level_key].avg_overall_pct }}%</div>
+      <div class="stat-label">{{ {'se':'Senior','pse':'Principal','spse':'Sr Principal','de':'Distinguished'}.get(level_key, level_key) }}</div>
+      <div class="text-muted" style="font-size:9px;">{{ peer_benchmarks.levels[level_key].engineers | join(', ') }}</div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if peer_radar_svg %}
+  <div style="max-width:500px;margin:0 auto 24px;">{{ peer_radar_svg | safe }}</div>
+  {% endif %}
+
+  {% if peer_bars_html %}
+  {{ peer_bars_html | safe }}
+  {% endif %}
+
+  {% if peer_volume_html %}
+  <div class="section-subtitle">Event Volume by Source</div>
+  {{ peer_volume_html | safe }}
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- ===== 9. ACTIVITY LOG ===== -->
 <div class="section-page">
   <div class="section-title">8. Activity Log</div>
   {% if all_events %}

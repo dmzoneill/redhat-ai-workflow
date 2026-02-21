@@ -132,6 +132,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("remove_question", self._handle_remove_question)
         self.register_handler("get_question_detail", self._handle_get_question_detail)
         self.register_handler("add_question_note", self._handle_add_question_note)
+        self.register_handler("clear_drafts", self._handle_clear_drafts)
+
+        # Peer comparison handlers
+        self.register_handler("collect_peers", self._handle_collect_peers)
+        self.register_handler("collect_peer", self._handle_collect_peer)
+        self.register_handler("get_peer_benchmarks", self._handle_get_peer_benchmarks)
 
         # Executive strategy mapping handlers
         self.register_handler(
@@ -361,6 +367,20 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     "error": f"Question '{question_id}' not found",
                 }
             return {"success": True, "questions_summary": qm.get_questions_summary()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_clear_drafts(self, **kwargs) -> dict:
+        """Clear all AI-generated draft summaries from questions."""
+        try:
+            perf_dir = self._get_perf_dir()
+            qm = QuestionManager(perf_dir)
+            cleared = qm.clear_all_drafts()
+            return {
+                "success": True,
+                "cleared": cleared,
+                "questions_summary": qm.get_questions_summary(),
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -672,6 +692,351 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "remaining": 0,
             "results": results,
             "days_processed": len(all_weekdays),
+        }
+
+    # ==================== Peer Comparison ====================
+
+    def _load_peers_config(self) -> dict[str, list[dict]]:
+        """Load the peers roster from config.json."""
+        config_paths = [
+            Path(__file__).parent.parent.parent / "config.json",
+            AA_CONFIG_DIR / "config.json",
+        ]
+        for cfg_path in config_paths:
+            try:
+                if cfg_path.exists():
+                    with open(cfg_path, encoding="utf-8") as f:
+                        config = json.load(f)
+                    peers = config.get("peers", {})
+                    if peers:
+                        return peers
+            except Exception:
+                continue
+        return {}
+
+    def _update_peer_summary(
+        self,
+        username: str,
+        level: str,
+        year: int | None = None,
+        quarter: int | None = None,
+    ) -> dict:
+        """Build summary.json for a single peer from their daily files."""
+        perf_dir = self._get_perf_dir(year, quarter)
+        peer_daily_dir = perf_dir / "peers" / username / "daily"
+        if not peer_daily_dir.exists():
+            return {}
+
+        cumulative_points: dict[str, int] = {}
+        total_events = 0
+        event_counts: dict[str, int] = {}
+
+        for daily_file in sorted(peer_daily_dir.glob("*.json")):
+            try:
+                with open(daily_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                for comp_id, pts in data.get("daily_points", {}).items():
+                    cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
+                day_events = data.get("events", [])
+                total_events += len(day_events)
+                for ev in day_events:
+                    src = ev.get("source", "unknown")
+                    event_counts[src] = event_counts.get(src, 0) + 1
+            except Exception:
+                continue
+
+        _, _, _, target_per_competency = get_effective_defs()
+        lw = get_level_weights(level)
+        target_scale = lw.get("target_scale", 1.0)
+        effective_target = max(round(target_per_competency * target_scale), 1)
+
+        cumulative_pct = {
+            k: min(round(v / effective_target * 100), 100)
+            for k, v in cumulative_points.items()
+        }
+        overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
+
+        now = datetime.now()
+        y = year or now.year
+        q = quarter or ((now.month - 1) // 3 + 1)
+
+        days_captured = len(list(peer_daily_dir.glob("*.json")))
+        avg_daily_events = round(total_events / max(days_captured, 1), 1)
+
+        summary = {
+            "username": username,
+            "level": level,
+            "year": y,
+            "quarter": q,
+            "cumulative_points": cumulative_points,
+            "cumulative_percentage": cumulative_pct,
+            "overall_percentage": overall,
+            "total_events": total_events,
+            "days_captured": days_captured,
+            "avg_daily_events": avg_daily_events,
+            "event_counts_by_source": event_counts,
+            "effective_target": effective_target,
+            "last_updated": now.isoformat(),
+        }
+
+        peer_dir = perf_dir / "peers" / username
+        peer_dir.mkdir(parents=True, exist_ok=True)
+        with open(peer_dir / "summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        return summary
+
+    def _update_peer_benchmarks(
+        self,
+        year: int | None = None,
+        quarter: int | None = None,
+    ) -> dict:
+        """Aggregate all peer summaries into benchmarks.json grouped by level."""
+        perf_dir = self._get_perf_dir(year, quarter)
+        peers_dir = perf_dir / "peers"
+        if not peers_dir.exists():
+            return {}
+
+        peers_config = self._load_peers_config()
+        levels: dict[str, dict] = {}
+
+        for level_key, peer_list in peers_config.items():
+            level_data: dict[str, Any] = {
+                "engineers": [],
+                "summaries": [],
+                "avg_competency_pct": {},
+                "avg_competency_points": {},
+                "avg_overall_pct": 0,
+                "avg_daily_events": 0.0,
+                "avg_event_counts_by_source": {},
+            }
+
+            for peer in peer_list:
+                uname = peer["username"]
+                summary_file = peers_dir / uname / "summary.json"
+                if summary_file.exists():
+                    try:
+                        with open(summary_file, encoding="utf-8") as f:
+                            s = json.load(f)
+                        level_data["engineers"].append(uname)
+                        level_data["summaries"].append(s)
+                    except Exception:
+                        continue
+
+            n = len(level_data["summaries"])
+            if n > 0:
+                all_comp_ids: set[str] = set()
+                for s in level_data["summaries"]:
+                    all_comp_ids.update(s.get("cumulative_percentage", {}).keys())
+
+                for comp_id in all_comp_ids:
+                    pct_sum = sum(
+                        s.get("cumulative_percentage", {}).get(comp_id, 0)
+                        for s in level_data["summaries"]
+                    )
+                    pts_sum = sum(
+                        s.get("cumulative_points", {}).get(comp_id, 0)
+                        for s in level_data["summaries"]
+                    )
+                    level_data["avg_competency_pct"][comp_id] = round(pct_sum / n)
+                    level_data["avg_competency_points"][comp_id] = round(pts_sum / n)
+
+                level_data["avg_overall_pct"] = round(
+                    sum(s.get("overall_percentage", 0) for s in level_data["summaries"])
+                    / n
+                )
+                level_data["avg_daily_events"] = round(
+                    sum(s.get("avg_daily_events", 0) for s in level_data["summaries"])
+                    / n,
+                    1,
+                )
+
+                all_sources: set[str] = set()
+                for s in level_data["summaries"]:
+                    all_sources.update(s.get("event_counts_by_source", {}).keys())
+                for src in all_sources:
+                    level_data["avg_event_counts_by_source"][src] = round(
+                        sum(
+                            s.get("event_counts_by_source", {}).get(src, 0)
+                            for s in level_data["summaries"]
+                        )
+                        / n,
+                        1,
+                    )
+
+            del level_data["summaries"]
+            levels[level_key] = level_data
+
+        benchmarks = {
+            "levels": levels,
+            "last_updated": datetime.now().isoformat(),
+        }
+
+        peers_dir.mkdir(parents=True, exist_ok=True)
+        with open(peers_dir / "benchmarks.json", "w", encoding="utf-8") as f:
+            json.dump(benchmarks, f, indent=2)
+
+        return benchmarks
+
+    async def _handle_collect_peer(self, **kwargs) -> dict:
+        """Collect data for a single peer engineer."""
+        username = kwargs.get("username", "")
+        date_str = kwargs.get("date", "")
+        if not username:
+            return {"success": False, "error": "username is required"}
+
+        peers_config = self._load_peers_config()
+        peer_info = None
+        peer_level = ""
+        for level_key, peer_list in peers_config.items():
+            for peer in peer_list:
+                if peer["username"] == username:
+                    peer_info = peer
+                    peer_level = level_key
+                    break
+            if peer_info:
+                break
+
+        if not peer_info:
+            return {"success": False, "error": f"Peer '{username}' not found in config"}
+
+        try:
+            target = date.fromisoformat(date_str) if date_str else date.today()
+        except ValueError:
+            target = date.today()
+
+        try:
+            loop = asyncio.get_event_loop()
+            daily_data = await loop.run_in_executor(
+                None,
+                lambda: self._collector.collect_for_date(
+                    target, user_override=peer_info, level_override=peer_level
+                ),
+            )
+
+            year = target.year
+            quarter = (target.month - 1) // 3 + 1
+            await loop.run_in_executor(
+                None, self._update_peer_summary, username, peer_level, year, quarter
+            )
+
+            return {
+                "success": True,
+                "username": username,
+                "level": peer_level,
+                "date": target.isoformat(),
+                "event_count": len(daily_data.get("events", [])),
+                "daily_total": daily_data.get("daily_total", 0),
+            }
+        except Exception as e:
+            logger.error(f"Failed to collect peer data for {username}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _handle_collect_peers(self, **kwargs) -> dict:
+        """Collect data for all configured peers for the current quarter."""
+        date_str = kwargs.get("date", "")
+        backfill = kwargs.get("backfill", False)
+
+        try:
+            target = date.fromisoformat(date_str) if date_str else date.today()
+        except ValueError:
+            target = date.today()
+
+        peers_config = self._load_peers_config()
+        if not peers_config:
+            return {"success": False, "error": "No peers configured in config.json"}
+
+        results: list[dict] = []
+        loop = asyncio.get_event_loop()
+
+        year = target.year
+        quarter = (target.month - 1) // 3 + 1
+
+        if backfill:
+            quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+            sm, sd = quarter_starts[quarter]
+            quarter_start = date(year, sm, sd)
+            all_weekdays: list[date] = []
+            current = quarter_start
+            today = date.today()
+            while current <= today:
+                if current.weekday() < 5:
+                    all_weekdays.append(current)
+                current += timedelta(days=1)
+            dates_to_collect = all_weekdays
+        else:
+            dates_to_collect = [target]
+
+        for level_key, peer_list in peers_config.items():
+            for peer in peer_list:
+                username = peer["username"]
+                peer_results: list[dict] = []
+                for d in dates_to_collect:
+                    try:
+                        daily_data = await loop.run_in_executor(
+                            None,
+                            lambda _d=d, _p=peer, _l=level_key: self._collector.collect_for_date(
+                                _d, user_override=_p, level_override=_l
+                            ),
+                        )
+                        peer_results.append(
+                            {
+                                "date": d.isoformat(),
+                                "success": True,
+                                "events": len(daily_data.get("events", [])),
+                            }
+                        )
+                    except Exception as e:
+                        peer_results.append(
+                            {
+                                "date": d.isoformat(),
+                                "success": False,
+                                "error": str(e),
+                            }
+                        )
+
+                await loop.run_in_executor(
+                    None, self._update_peer_summary, username, level_key, year, quarter
+                )
+                results.append(
+                    {
+                        "username": username,
+                        "level": level_key,
+                        "days_processed": len(peer_results),
+                        "days_succeeded": sum(1 for r in peer_results if r["success"]),
+                    }
+                )
+
+        await loop.run_in_executor(None, self._update_peer_benchmarks, year, quarter)
+
+        total_peers = sum(len(pl) for pl in peers_config.values())
+        return {
+            "success": True,
+            "peers_processed": total_peers,
+            "backfill": backfill,
+            "results": results,
+        }
+
+    async def _handle_get_peer_benchmarks(self, **kwargs) -> dict:
+        """Return aggregated peer benchmarks for the UI."""
+        now = datetime.now()
+        year = kwargs.get("year") or now.year
+        quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+
+        if benchmarks_file.exists():
+            try:
+                with open(benchmarks_file, encoding="utf-8") as f:
+                    benchmarks = json.load(f)
+                return {"success": True, "benchmarks": benchmarks}
+            except Exception as e:
+                return {"success": False, "error": f"Failed to read benchmarks: {e}"}
+
+        return {
+            "success": True,
+            "benchmarks": {"levels": {}, "last_updated": None},
         }
 
     async def _handle_evaluate_all(self, **kwargs) -> dict:
@@ -1498,6 +1863,46 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         days_captured = len(captured_days)
         total_issues = hierarchy.get("total_issues", 0) if hierarchy else 0
 
+        # Load peer benchmarks for comparison section
+        peer_benchmarks_data: dict | None = None
+        peer_radar_svg = ""
+        peer_bars_html = ""
+        peer_volume_html = ""
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+        if benchmarks_file.exists():
+            try:
+                with open(benchmarks_file, encoding="utf-8") as bf:
+                    peer_benchmarks_data = json.load(bf)
+                from services.stats.report_helpers import (
+                    generate_grouped_bars_html,
+                    generate_radar_svg,
+                    generate_volume_table_html,
+                )
+
+                user_profile = {
+                    k: v.get("percentage", 0) if isinstance(v, dict) else 0
+                    for k, v in comp_dict.items()
+                }
+                peer_profiles = {
+                    lk: ld.get("avg_competency_pct", {})
+                    for lk, ld in peer_benchmarks_data.get("levels", {}).items()
+                }
+                peer_radar_svg = generate_radar_svg(user_profile, peer_profiles)
+                peer_bars_html = generate_grouped_bars_html(
+                    comp_dict, peer_benchmarks_data.get("levels", {})
+                )
+                user_volume: dict[str, int] = {}
+                for ev in all_events:
+                    src = ev.get("source", "unknown")
+                    user_volume[src] = user_volume.get(src, 0) + 1
+                peer_volumes = {
+                    lk: ld.get("avg_event_counts_by_source", {})
+                    for lk, ld in peer_benchmarks_data.get("levels", {}).items()
+                }
+                peer_volume_html = generate_volume_table_html(user_volume, peer_volumes)
+            except Exception as e:
+                logger.debug(f"Failed to load peer benchmarks for report: {e}")
+
         template_data = {
             "quarter": quarter_label,
             "generated_at": now.strftime("%Y-%m-%d %H:%M"),
@@ -1521,6 +1926,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "questions_summary": questions_summary,
             "strategy_data": strategy_data,
             "all_events": all_events,
+            "peer_benchmarks": peer_benchmarks_data,
+            "peer_radar_svg": peer_radar_svg,
+            "peer_bars_html": peer_bars_html,
+            "peer_volume_html": peer_volume_html,
         }
 
         template_path = Path(__file__).parent / "report_template.html"

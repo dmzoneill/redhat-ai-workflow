@@ -23,12 +23,6 @@
 .perf-question-data-counts,
 .perf-evidence-header span:first-child { cursor: pointer; }
 
-.perf-help-dot-cap {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-}
 
 .perf-help-trace-step.fail { border-left-color: var(--error); }
 
@@ -45,8 +39,7 @@
 
 .perf-add-question-form.visible { display: flex; }
 
-.perf-tree-node,
-.perf-tree-toggle.expanded,
+.perf-tree-toggle.expanded { transform: rotate(90deg); }
 
 .perf-help-dot-current,
 .perf-help-level-bar-fill.active { background: var(--rh-red); }
@@ -716,6 +709,10 @@
       margin-bottom: 4px;
     }
 
+    .perf-gap-card-suggestions {
+      margin-top: auto;
+    }
+
     .perf-gap-card-suggestions ul {
       margin: 0;
       padding-left: 18px;
@@ -810,7 +807,15 @@
       line-height: 1.4;
     }
 
-    .perf-gap-category-label { margin: 12px 0 6px 0; }
+    .perf-gap-category-label {
+      grid-column: 1 / -1;
+      margin: 16px 0 4px 0;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      font-size: var(--text-xs);
+      letter-spacing: 0.5px;
+    }
 
     .perf-gap-category-label:first-child { margin-top: 0; }
 
@@ -830,6 +835,14 @@
       padding-top: 8px;
       border-top: 1px solid var(--border-color);
     }
+
+    .perf-gap-evidence-link {
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .perf-gap-evidence-link:hover { text-decoration: underline; }
 
     .perf-gap-evidence-reason {
       display: inline-block;
@@ -1228,6 +1241,12 @@
       flex-shrink: 0;
     }
 
+    .perf-help-dot-source { background: #60a5fa; }
+    .perf-help-dot-processing { background: #a78bfa; }
+    .perf-help-dot-gate { background: #f59e0b; }
+    .perf-help-dot-output { background: #10b981; }
+    .perf-help-dot-cap { background: #ef4444; }
+
     .perf-help-pyramid-container { min-height: 260px; }
 
     .perf-help-pyramid-tier {
@@ -1566,20 +1585,41 @@
 
 .perf-comp-goal-text { font-size: var(--text-sm); color: var(--text-secondary); font-style: italic; }
 
-.perf-gap-card-desc { font-size: var(--text-sm); color: var(--text-secondary); }
+.perf-gap-card-desc {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
 
-.perf-gap-card-evidence { font-size: var(--text-sm); color: var(--text-muted); font-style: italic; }
+.perf-gap-card-evidence {
+      font-size: var(--text-sm);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-color);
+    }
 
 .perf-highlight-item { font-size: var(--text-sm); color: var(--text-secondary); padding: 4px 0; }
 
 .perf-gaps-item-header,
 .perf-day-event-top { display: flex; align-items: center; justify-content: space-between; }
 
-.perf-gap-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; }
+.perf-gap-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+    }
 
 .perf-gap-card-header { font-weight: 600; font-size: var(--text-base); }
 
-.perf-gap-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.perf-gap-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+    }
 
 .perf-tab {
   padding: 8px 16px;
@@ -1601,4 +1641,175 @@
 @media (max-width: 750px) {
   .perf-help-compare-layout { flex-direction: column; }
   .perf-help-compare-radar-container { flex: 1 1 auto; width: 100%; }
+}
+
+/* ============================================================
+   Peer Comparison Tab
+   ============================================================ */
+
+.peer-overall-grid {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.peer-overall-card {
+  flex: 1 1 120px;
+  min-width: 120px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.peer-overall-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.peer-overall-value {
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.peer-overall-engineers {
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
+.peer-radar-container {
+  max-width: 550px;
+  margin: 0 auto;
+}
+
+.peer-grouped-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 12px 0;
+}
+
+.peer-comp-group {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.peer-comp-name {
+  font-weight: 700;
+  font-size: var(--text-base);
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.peer-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.peer-bar-label {
+  width: 110px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.peer-bar-track {
+  flex: 1;
+  height: 14px;
+  background: var(--bg-tertiary);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.peer-bar-fill {
+  height: 100%;
+  border-radius: 7px;
+  transition: width 0.3s ease;
+}
+
+.peer-bar-value {
+  width: 40px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-align: right;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.peer-volume-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: var(--text-sm);
+}
+
+.peer-volume-table th,
+.peer-volume-table td {
+  padding: 8px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+.peer-volume-table th {
+  font-weight: 700;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.peer-volume-table th:first-child,
+.peer-volume-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.vol-you { font-weight: 700; color: #10b981; }
+.vol-above { color: #10b981; }
+.vol-below { color: #ef4444; }
+
+/* ---- Competency Chart View Toggle ---- */
+.perf-chart-view-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+}
+.perf-chart-view-btn {
+  padding: 6px 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, color 0.15s;
+}
+.perf-chart-view-btn:hover {
+  background: var(--bg-secondary);
+}
+.perf-chart-view-btn.active {
+  background: var(--accent, #667eea);
+  color: #fff;
+}
+
+/* ---- Weighted Mindmap wrapper ---- */
+.perf-wm-d3-wrapper {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
 }

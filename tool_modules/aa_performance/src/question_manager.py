@@ -299,6 +299,26 @@ class QuestionManager:
                     return True
         return False
 
+    def clear_all_drafts(self) -> int:
+        """Clear all LLM-generated draft summaries from every question.
+
+        Returns:
+            Number of drafts cleared.
+        """
+        cleared = 0
+        for q_list in [
+            self.questions_data.get("questions", []),
+            self.questions_data.get("custom_questions", []),
+        ]:
+            for q in q_list:
+                if q.get("llm_summary") is not None:
+                    q["llm_summary"] = None
+                    q["last_evaluated"] = None
+                    cleared += 1
+        if cleared:
+            self._save_questions()
+        return cleared
+
     def get_evidence_details(self, question_id: str, daily_dir: Path) -> list[dict]:
         """Get full event details for a question's evidence.
 

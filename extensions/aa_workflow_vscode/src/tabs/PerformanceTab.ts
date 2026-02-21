@@ -195,6 +195,22 @@ interface PerformanceState {
   strategy_alignment: StrategyAlignment | null;
   executive_senders: string[];
   executive_emails: ExecutiveEmailSummary[];
+  peer_benchmarks: PeerBenchmarks | null;
+  competency_view: "sunburst" | "mindmap";
+}
+
+interface PeerLevelData {
+  engineers: string[];
+  avg_competency_pct: Record<string, number>;
+  avg_competency_points: Record<string, number>;
+  avg_overall_pct: number;
+  avg_daily_events: number;
+  avg_event_counts_by_source: Record<string, number>;
+}
+
+interface PeerBenchmarks {
+  levels: Record<string, PeerLevelData>;
+  last_updated: string | null;
 }
 
 interface ExecutiveEmailSummary {
@@ -339,6 +355,8 @@ export class PerformanceTab extends BaseTab {
     strategy_alignment: null,
     executive_senders: [],
     executive_emails: [],
+    peer_benchmarks: null,
+    competency_view: "sunburst",
   };
 
   private _scoringSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -524,6 +542,16 @@ export class PerformanceTab extends BaseTab {
       } catch (e) {
         logger.warn(`Failed to load executive emails: ${e}`);
       }
+
+      // Load peer benchmarks
+      try {
+        const peerResult = await dbus.stats_getPeerBenchmarks();
+        if (peerResult.success && peerResult.data) {
+          this.state.peer_benchmarks = (peerResult.data as any).benchmarks || null;
+        }
+      } catch (e) {
+        logger.warn(`Failed to load peer benchmarks: ${e}`);
+      }
     } catch (error) {
       logger.error("Error loading data", error);
     }
@@ -563,6 +591,7 @@ export class PerformanceTab extends BaseTab {
       { id: "competencies", label: "Competencies", icon: "\u{1F3AF}" },
       { id: "progress", label: "Progress", icon: "\u{2705}" },
       { id: "settings", label: "Settings", icon: "\u2699\uFE0F" },
+      { id: "peers", label: "Peers", icon: "\u{1F465}" },
       { id: "log", label: "Log", icon: "\u{270F}\uFE0F" },
       { id: "help", label: "Help", icon: "\u2753" },
     ];
@@ -605,6 +634,7 @@ export class PerformanceTab extends BaseTab {
         ${tab === "competencies" ? this.renderCompetenciesTab() : ""}
         ${tab === "progress" ? this.renderProgressTab() : ""}
         ${tab === "settings" ? this.renderSettingsTab() : ""}
+        ${tab === "peers" ? this.renderPeersTab() : ""}
         ${tab === "log" ? this.renderLogTab() : ""}
         ${tab === "help" ? this.renderHelpTab() : ""}
       </div>
@@ -801,19 +831,23 @@ export class PerformanceTab extends BaseTab {
   }
 
   private renderCompetenciesTab(): string {
+    const view = this.state.competency_view || "sunburst";
+    const toggleHtml = `
+      <div class="perf-chart-view-toggle">
+        <button class="perf-chart-view-btn${view === "sunburst" ? " active" : ""}"
+                data-action="switchCompView" data-view="sunburst">Sunburst</button>
+        <button class="perf-chart-view-btn${view === "mindmap" ? " active" : ""}"
+                data-action="switchCompView" data-view="mindmap">Mindmap</button>
+      </div>`;
+
+    const chartHtml = view === "sunburst"
+      ? this.renderSunburstView()
+      : this.renderWeightedMindmapView();
+
     return `
       <div class="perf-tab-panel">
-        <!-- Sunburst -->
-        <div class="section">
-          <div class="section-title">Competency Sunburst</div>
-          <div class="perf-sunburst-container text-center">
-            ${this.generateSunburstSVG()}
-          </div>
-          <div class="perf-sunburst-ring-legend">
-            <div class="perf-sunburst-ring-item"><span class="ring-num">1</span> <b>Pillar</b> &mdash; ${Object.keys(PILLAR_DEFS).length} competency pillars (color = pillar, opacity = score)</div>
-            <div class="perf-sunburst-ring-item"><span class="ring-num">2</span> <b>Competency</b> &mdash; ${Object.keys(this.state.competencies).length} individual competencies (color = red/yellow/green by %)</div>
-          </div>
-        </div>
+        ${toggleHtml}
+        ${chartHtml}
 
         <!-- Expandable Competency Bars -->
         <div class="section">
@@ -824,6 +858,545 @@ export class PerformanceTab extends BaseTab {
         <!-- Gap Suggestions -->
         ${this.renderGapsWithSuggestions()}
       </div>
+    `;
+  }
+
+  private renderSunburstView(): string {
+    return `
+      <div class="section">
+        <div class="section-title">Competency Sunburst</div>
+        <div class="perf-sunburst-container text-center">
+          ${this.generateSunburstSVG()}
+        </div>
+        <div class="perf-sunburst-ring-legend">
+          <div class="perf-sunburst-ring-item"><span class="ring-num">1</span> <b>Pillar</b> &mdash; ${Object.keys(PILLAR_DEFS).length} competency pillars (color = pillar, opacity = score)</div>
+          <div class="perf-sunburst-ring-item"><span class="ring-num">2</span> <b>Competency</b> &mdash; ${Object.keys(this.state.competencies).length} individual competencies (color = red/yellow/green by %)</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // ============================================================
+  // Weighted Competency Mindmap
+  // ============================================================
+
+  private buildWeightedCompetencyGraph(): { nodes: any[]; links: any[]; pillarInfo: any[]; stats: any } | null {
+    const meta = this.state.competency_meta || {};
+    const comps = this.state.competencies || {};
+    const evidence = this.state.competency_evidence || {};
+    const h = this.state.issue_hierarchy;
+    const cfg = this.state.scoring_config;
+    const hasCompetencies = Object.keys(meta).length > 0;
+    const hasIssues = h && h.total_issues > 0;
+
+    if (!hasCompetencies && !hasIssues) return null;
+
+    const scopeMult: Record<string, number> = (cfg as any)?.scope_multipliers || { commit: 1, story: 2, epic: 4, anstrat: 7, strategy: 10 };
+    const levelWeights = (cfg as any)?.level_weights || {};
+    const pillarWeightsMap: Record<string, number> = levelWeights.pillar_weights || {};
+    const roleWeightsMap: Record<string, Record<string, number>> = levelWeights.role_weights || {};
+    const targetPerComp = cfg?.target_per_competency || 100;
+    const targetScale = levelWeights.target_scale ?? 1.0;
+    const effectiveTarget = Math.round(targetPerComp * targetScale);
+
+    const nodes: any[] = [];
+    const links: any[] = [];
+
+    const pillarNames = Object.keys(PILLAR_DEFS);
+    const angleStep = 360 / pillarNames.length;
+    const pillarDefs: Record<string, { label: string; color: string; angle: number; compIds: string[] }> = {};
+    pillarNames.forEach((name, i) => {
+      pillarDefs[name] = { label: name, color: PILLAR_DEFS[name].color, angle: i * angleStep, compIds: [] };
+    });
+
+    for (const [compId, m] of Object.entries(meta)) {
+      const cat = m.category || "Technical Contribution";
+      if (pillarDefs[cat]) pillarDefs[cat].compIds.push(compId);
+    }
+
+    const allPillarIds = Object.keys(pillarDefs).map(n => `pillar_${n.replace(/[^a-z]/gi, "_")}`);
+
+    // Per-competency issue key sets for cross-linking
+    const compEvidenceKeys: Record<string, Set<string>> = {};
+    const compEvidencePoints: Record<string, Record<string, number>> = {};
+    for (const [compId, events] of Object.entries(evidence)) {
+      const keys = new Set<string>();
+      const keyPoints: Record<string, number> = {};
+      for (const ev of events) {
+        for (const k of (ev.issue_keys || [])) {
+          keys.add(k);
+          keyPoints[k] = (keyPoints[k] || 0) + ev.points;
+        }
+      }
+      compEvidenceKeys[compId] = keys;
+      compEvidencePoints[compId] = keyPoints;
+    }
+
+    // Root node
+    const rootId = "wm_root";
+    const overallPct = this.state.overall_percentage || 0;
+    nodes.push({
+      id: rootId,
+      label: this.state.quarter,
+      sublabel: `${overallPct}%`,
+      type: "root",
+      percentage: overallPct,
+      size: 32,
+      color: "#667eea",
+      pillars: allPillarIds,
+      weightInfo: `Overall: ${overallPct}%`,
+    });
+
+    let compCount = 0, anstratCount = 0, epicCount = 0, issueCount = 0, stratCount = 0, evidenceLinkCount = 0;
+
+    // Pillar + Competency nodes (Data Set 1)
+    for (const [pillarName, pDef] of Object.entries(pillarDefs)) {
+      const pillarId = `wm_pillar_${pillarName.replace(/[^a-z]/gi, "_")}`;
+      const pillarComps = pDef.compIds;
+      const avgPct = pillarComps.length > 0
+        ? Math.round(pillarComps.reduce((s, id) => s + (comps[id]?.percentage || 0), 0) / pillarComps.length)
+        : 0;
+      const totalPts = pillarComps.reduce((s, id) => s + (comps[id]?.points || 0), 0);
+      const pw = pillarWeightsMap[pillarName] ?? 1.0;
+
+      nodes.push({
+        id: pillarId,
+        label: pDef.label,
+        sublabel: `${avgPct}% \u00B7 w=${pw}`,
+        type: "pillar",
+        percentage: avgPct,
+        size: 24,
+        color: pDef.color,
+        heatColor: this.getHeatColor(avgPct),
+        angle: pDef.angle,
+        compCount: pillarComps.length,
+        pillars: [pillarId],
+        weightInfo: `Avg: ${avgPct}% | ${totalPts}pts | pillar_w: ${pw}`,
+      });
+      links.push({ source: rootId, target: pillarId, type: "hierarchy", label: `w=${pw}` });
+
+      for (const compId of pillarComps) {
+        compCount++;
+        const m = meta[compId];
+        const c = comps[compId];
+        const pct = c?.percentage || m?.percentage || 0;
+        const pts = c?.points || m?.points || 0;
+        const target = m?.target || effectiveTarget;
+        const evCount = m?.evidence_count || 0;
+        const basePoints = cfg?.competencies?.[compId]?.base_points || 0;
+
+        const nodeId = `wm_comp_${compId}`;
+        const compTint = pillarTint(pDef.color, "competency", pct);
+        nodes.push({
+          id: nodeId,
+          compId,
+          label: m.name,
+          sublabel: `${pts}/${target} (${pct}%)`,
+          type: "competency",
+          category: m.category,
+          percentage: pct,
+          points: pts,
+          target,
+          evidenceCount: evCount,
+          size: Math.min(Math.max(evCount * 1.5 + 8, 8), 20),
+          color: compTint,
+          heatColor: compTint,
+          pillarColor: pDef.color,
+          pillarId,
+          pillarAngle: pDef.angle,
+          pillars: [pillarId],
+          weightInfo: `${pts}/${target} = ${pct}% | base: ${basePoints} | ${evCount} events`,
+        });
+        links.push({ source: pillarId, target: nodeId, type: "hierarchy" });
+      }
+    }
+
+    // Work hierarchy nodes (Data Set 2)
+    if (hasIssues && h) {
+      const issueStrategies = Array.isArray(h.strategies) ? h.strategies : [];
+      const unattachedEpics = Array.isArray(h.unattached_epics) ? h.unattached_epics : [];
+      const uncatIssues = Array.isArray(h.uncategorized) ? h.uncategorized : [];
+
+      const pillarIdToHex: Record<string, string> = {};
+      for (const [pn, pd] of Object.entries(pillarDefs)) {
+        pillarIdToHex[`wm_pillar_${pn.replace(/[^a-z]/gi, "_")}`] = pd.color;
+      }
+
+      const anstratIssueKeys: Record<string, Set<string>> = {};
+      const anstratNodeIds: string[] = [];
+
+      const anstratScopeMult = scopeMult.anstrat ?? 7;
+      const epicScopeMult = scopeMult.epic ?? 4;
+      const storyScopeMult = scopeMult.story ?? 2;
+
+      // ANSTRAT groups
+      issueStrategies.forEach((group, gi) => {
+        anstratCount++;
+        const gId = `wm_anstrat_${gi}`;
+        anstratNodeIds.push(gId);
+        const allKeys = new Set<string>();
+
+        nodes.push({
+          id: gId,
+          label: group.key.replace(/^ANSTRAT-/, "AN-"),
+          fullKey: group.key,
+          summary: group.summary,
+          sublabel: `${group.points}pts \u00D7${anstratScopeMult}`,
+          type: "anstrat",
+          points: group.points,
+          size: Math.min(Math.max(group.points / 8, 16), 24),
+          color: "#06b6d4",
+          eventCount: group.event_count || 0,
+          pillars: [] as string[],
+          weightInfo: `${group.points}pts | scope: \u00D7${anstratScopeMult} | ${group.event_count || 0} events`,
+        });
+
+        (group.children || []).forEach((child, ci) => {
+          epicCount++;
+          const cId = `${gId}_epic_${ci}`;
+          nodes.push({
+            id: cId,
+            label: child.key.replace(/^AAP-/, ""),
+            fullKey: child.key,
+            summary: child.summary,
+            sublabel: `${child.points}pts \u00D7${epicScopeMult}`,
+            type: "epic",
+            points: child.points,
+            size: Math.min(Math.max(child.points / 8, 10), 18),
+            color: "#f97316",
+            eventCount: child.event_count || 0,
+            parentAnstrat: gId,
+            pillars: [] as string[],
+            weightInfo: `${child.points}pts | scope: \u00D7${epicScopeMult} | ${child.event_count || 0} events`,
+          });
+          links.push({ source: gId, target: cId, type: "parent", label: `\u00D7${epicScopeMult}` });
+          allKeys.add(child.key);
+
+          (child.children || []).forEach((issue, ii) => {
+            issueCount++;
+            const iId = `${cId}_issue_${ii}`;
+            nodes.push({
+              id: iId,
+              label: issue.key.replace(/^AAP-/, ""),
+              fullKey: issue.key,
+              summary: issue.summary,
+              sublabel: `${issue.points}pts \u00D7${storyScopeMult}`,
+              type: issue.type || "task",
+              points: issue.points,
+              size: Math.min(Math.max(issue.points / 10, 6), 12),
+              color: "#e879f9",
+              eventCount: issue.event_count || 0,
+              parentAnstrat: gId,
+              pillars: [] as string[],
+              weightInfo: `${issue.points}pts | scope: \u00D7${storyScopeMult} | ${issue.event_count || 0} events`,
+            });
+            links.push({ source: cId, target: iId, type: "parent", label: `\u00D7${storyScopeMult}` });
+            allKeys.add(issue.key);
+          });
+        });
+
+        anstratIssueKeys[gId] = allKeys;
+      });
+
+      // Pillar assignment for ANSTRATs via evidence overlap
+      const findPillarForKey = (key: string): string | null => {
+        for (const [compId, compKeys] of Object.entries(compEvidenceKeys)) {
+          if (compKeys.has(key)) {
+            const cat = meta[compId]?.category || "Technical Contribution";
+            return `wm_pillar_${cat.replace(/[^a-z]/gi, "_")}`;
+          }
+        }
+        return null;
+      };
+
+      const nodeMap = new Map(nodes.map(n => [n.id, n]));
+      for (const [gId, issueKeys] of Object.entries(anstratIssueKeys)) {
+        const linkedCompIds: string[] = [];
+
+        for (const [compId, compKeys] of Object.entries(compEvidenceKeys)) {
+          let shared = 0;
+          let sharedPts = 0;
+          for (const k of compKeys) {
+            if (issueKeys.has(k)) {
+              shared++;
+              sharedPts += compEvidencePoints[compId]?.[k] || 0;
+            }
+          }
+          if (shared > 0) {
+            linkedCompIds.push(compId);
+            evidenceLinkCount++;
+            links.push({
+              source: `wm_comp_${compId}`,
+              target: gId,
+              type: "evidence",
+              weight: shared,
+              points: sharedPts,
+              label: `${sharedPts}pts`,
+            });
+          }
+        }
+
+        const anstratNode = nodeMap.get(gId);
+        if (linkedCompIds.length > 0 && anstratNode) {
+          const assocPillars = new Set<string>();
+          for (const cid of linkedCompIds) {
+            const cat = meta[cid]?.category || "Technical Contribution";
+            assocPillars.add(`wm_pillar_${cat.replace(/[^a-z]/gi, "_")}`);
+          }
+          anstratNode.pillars = Array.from(assocPillars);
+        } else {
+          if (anstratNode) anstratNode.pillars = allPillarIds.slice();
+          links.push({ source: rootId, target: gId, type: "parent" });
+        }
+
+        const anstratPillars = anstratNode?.pillars || allPillarIds;
+        for (const n of nodes) {
+          if (n.parentAnstrat === gId) n.pillars = anstratPillars;
+        }
+      }
+
+      // Unattached epics
+      unattachedEpics.forEach((epic, ei) => {
+        epicCount++;
+        const eId = `wm_unattached_epic_${ei}`;
+        const pillar = findPillarForKey(epic.key);
+        const target = pillar || rootId;
+        const epicPillarHex = pillar ? (pillarIdToHex[pillar] || "#f97316") : "#f97316";
+
+        nodes.push({
+          id: eId,
+          label: epic.key.replace(/^AAP-/, ""),
+          fullKey: epic.key,
+          summary: epic.summary,
+          sublabel: `${epic.points}pts \u00D7${epicScopeMult}`,
+          type: "epic",
+          points: epic.points,
+          size: Math.min(Math.max(epic.points / 8, 10), 18),
+          color: pillar ? pillarTint(epicPillarHex, "epic") : "#f97316",
+          eventCount: epic.event_count || 0,
+          pillars: pillar ? [pillar] : allPillarIds.slice(),
+          weightInfo: `${epic.points}pts | scope: \u00D7${epicScopeMult}`,
+        });
+        links.push({ source: target, target: eId, type: "hierarchy" });
+
+        (epic.children || []).forEach((issue, ii) => {
+          issueCount++;
+          const iId = `${eId}_issue_${ii}`;
+          const issuePillar = findPillarForKey(issue.key) || pillar;
+          const issuePillarHex = issuePillar ? (pillarIdToHex[issuePillar] || "#e879f9") : "#e879f9";
+          nodes.push({
+            id: iId,
+            label: issue.key.replace(/^AAP-/, ""),
+            fullKey: issue.key,
+            summary: issue.summary,
+            sublabel: `${issue.points}pts \u00D7${storyScopeMult}`,
+            type: issue.type || "task",
+            points: issue.points,
+            size: Math.min(Math.max(issue.points / 10, 6), 12),
+            color: issuePillar ? pillarTint(issuePillarHex, "issue") : "#e879f9",
+            eventCount: issue.event_count || 0,
+            pillars: issuePillar ? [issuePillar] : allPillarIds.slice(),
+            weightInfo: `${issue.points}pts | scope: \u00D7${storyScopeMult}`,
+          });
+          links.push({ source: eId, target: iId, type: "parent" });
+        });
+      });
+
+      // Uncategorized issues
+      uncatIssues.forEach((issue, ui) => {
+        issueCount++;
+        const uId = `wm_uncat_${ui}`;
+        const pillar = findPillarForKey(issue.key);
+        const target = pillar || rootId;
+        const uncatHex = pillar ? (pillarIdToHex[pillar] || "#e879f9") : "#e879f9";
+
+        nodes.push({
+          id: uId,
+          label: issue.key.replace(/^AAP-/, ""),
+          fullKey: issue.key,
+          summary: issue.summary,
+          sublabel: `${issue.points}pts \u00D7${storyScopeMult}`,
+          type: issue.type || "task",
+          points: issue.points,
+          size: Math.min(Math.max(issue.points / 10, 6), 12),
+          color: pillar ? pillarTint(uncatHex, "issue") : "#e879f9",
+          eventCount: issue.event_count || 0,
+          pillars: pillar ? [pillar] : allPillarIds.slice(),
+          weightInfo: `${issue.points}pts | scope: \u00D7${storyScopeMult}`,
+        });
+        links.push({ source: target, target: uId, type: "hierarchy" });
+      });
+
+      // Recolor work nodes with pillar associations
+      for (const n of nodes) {
+        if (n.pillars && n.pillars.length > 0 && n.pillars.length < allPillarIds.length) {
+          const primaryHex = pillarIdToHex[n.pillars[0]] || "#888";
+          if (n.type === "anstrat") n.color = pillarTint(primaryHex, "anstrat");
+          else if (n.type === "epic") n.color = pillarTint(primaryHex, "epic");
+          else if (n.type === "task" || n.type === "bug" || n.type === "story") n.color = pillarTint(primaryHex, "issue");
+        }
+      }
+    }
+
+    // Strategy diamonds
+    const alignment = this.state.strategy_alignment;
+    if (alignment?.priorities) {
+      const strategyScopeMult = scopeMult.strategy ?? 10;
+      for (const [pi, priority] of alignment.priorities.entries()) {
+        stratCount++;
+        const stratId = `wm_strat_${pi}`;
+        const isCovered = priority.status === "covered";
+        const pillarName = priority.pillar || "End-to-End Delivery";
+        const pillarId = `wm_pillar_${pillarName.replace(/[^a-z]/gi, "_")}`;
+        const stratPillars = new Set<string>([pillarId]);
+        const priorityKeys = new Set(priority.issue_keys || []);
+
+        let totalEvidencePts = 0;
+        for (const [compId, compKeys] of Object.entries(compEvidenceKeys)) {
+          let shared = 0;
+          let sharedPts = 0;
+          for (const k of compKeys) {
+            if (priorityKeys.has(k)) {
+              shared++;
+              sharedPts += compEvidencePoints[compId]?.[k] || 0;
+            }
+          }
+          if (shared > 0) {
+            evidenceLinkCount++;
+            totalEvidencePts += sharedPts;
+            links.push({
+              source: `wm_comp_${compId}`,
+              target: stratId,
+              type: "evidence",
+              weight: shared,
+              points: sharedPts,
+              label: `${sharedPts}pts`,
+            });
+            const compCat = meta[compId]?.category || "Technical Contribution";
+            stratPillars.add(`wm_pillar_${compCat.replace(/[^a-z]/gi, "_")}`);
+          }
+        }
+
+        const stratPillarHex = PILLAR_DEFS[pillarName]?.color || "#888";
+        const stratTint = pillarTint(stratPillarHex, "strategy", undefined, isCovered);
+        nodes.push({
+          id: stratId,
+          label: priority.name.length > 30 ? priority.name.substring(0, 27) + "..." : priority.name,
+          fullLabel: priority.name,
+          sublabel: isCovered ? `${totalEvidencePts}pts \u2713` : "gap",
+          type: "strategy",
+          status: priority.status,
+          size: 14,
+          color: stratTint,
+          heatColor: stratTint,
+          isCovered,
+          pillarId,
+          pillars: Array.from(stratPillars),
+          weightInfo: `${isCovered ? "Covered" : "Gap"} | ${totalEvidencePts}pts | scope: \u00D7${strategyScopeMult}`,
+        });
+        links.push({ source: pillarId, target: stratId, type: "pillar_strategy", label: `\u00D7${strategyScopeMult}` });
+      }
+    }
+
+    const pillarInfo = Object.entries(pillarDefs).map(([name, def]) => ({
+      id: `wm_pillar_${name.replace(/[^a-z]/gi, "_")}`,
+      label: def.label,
+      color: def.color,
+    }));
+
+    return {
+      nodes,
+      links,
+      pillarInfo,
+      stats: {
+        pillars: Object.keys(pillarDefs).length,
+        competencies: compCount,
+        anstrats: anstratCount,
+        epics: epicCount,
+        issues: issueCount,
+        strategies: stratCount,
+        evidenceLinks: evidenceLinkCount,
+      },
+    };
+  }
+
+  private renderWeightedMindmapView(): string {
+    const graphData = this.buildWeightedCompetencyGraph();
+
+    if (!graphData) {
+      return this.getEmptyStateHtml("--", "Weighted mindmap will appear after data collection.");
+    }
+
+    const graphJson = JSON.stringify(graphData);
+    const s = graphData.stats;
+
+    const parts: string[] = [];
+    if (s.pillars) parts.push(`${s.pillars} pillars`);
+    if (s.competencies) parts.push(`${s.competencies} competencies`);
+    if (s.anstrats) parts.push(`${s.anstrats} ANSTRATs`);
+    if (s.epics) parts.push(`${s.epics} epics`);
+    if (s.issues) parts.push(`${s.issues} issues`);
+    if (s.strategies) parts.push(`${s.strategies} strategies`);
+    if (s.evidenceLinks) parts.push(`${s.evidenceLinks} cross-links`);
+    const statsHtml = parts.join(" &middot; ");
+
+    const pillarCheckboxes = graphData.pillarInfo.map((p: any) =>
+      `<label class="perf-mindmap-toggle perf-pillar-filter" style="color:${p.color}">` +
+      `<input type="checkbox" class="wmPillarChk" data-pillar="${this.escapeHtml(p.id)}" checked /> ${this.escapeHtml(p.label)}</label>`
+    ).join("");
+
+    return `
+      <div class="section">
+        <div class="section-title">Weighted Competency Mindmap</div>
+        <div class="perf-wm-d3-wrapper">
+          <div class="perf-mindmap-d3-header">
+            <div class="perf-mindmap-d3-filters">
+              ${pillarCheckboxes}
+              <span class="perf-mindmap-d3-sep">|</span>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="competency" checked /> Competencies</label>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="anstrat" checked /> ANSTRATs</label>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="epic" checked /> Epics</label>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="task,bug,story" checked /> Issues</label>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="strategy" checked /> Strategies</label>
+            </div>
+            <span class="perf-mindmap-d3-stats" id="wmStats">${statsHtml}</span>
+            <div class="perf-mindmap-d3-controls">
+              <label class="perf-mindmap-toggle"><input type="checkbox" id="wmLabels" checked /> Labels</label>
+              <label class="perf-mindmap-toggle"><input type="checkbox" id="wmWeights" checked /> Weights</label>
+              <label class="perf-mindmap-toggle"><input type="checkbox" id="wmSticky" /> Sticky</label>
+              <button class="btn btn-xs" id="wmReheat" title="Reheat simulation">Reheat</button>
+              <button class="btn btn-xs" id="wmFit" title="Fit to view">Fit</button>
+            </div>
+          </div>
+          <div class="perf-mindmap-d3-graph" id="wmGraph">
+            <svg id="wmSvg" class="svg-full">
+              <defs>
+                <filter id="wmGlow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="2.5" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+            </svg>
+          </div>
+          <div class="perf-mindmap-d3-tooltip" id="wmTooltip"></div>
+          <div class="perf-mindmap-d3-legend">
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-root"></span>Root</span>
+            ${Object.entries(PILLAR_DEFS).map(([name, def]) =>
+              `<span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot" style="background:${def.color}"></span>${name}</span>`
+            ).join("\n            ")}
+            <span class="legend-separator">|</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-ring legend-dot-default"></span>Pillar</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot legend-dot-small"></span>Competency</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-roundrect legend-dot-default"></span>ANSTRAT</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-triangle legend-dot-default"></span>Epic</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-square legend-dot-default"></span>Issue</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Strategy</span>
+            <span class="legend-separator">|</span>
+            <span class="flex-row gap-4 legend-item-compact wm-legend-evidence"><span class="dot legend-dot" style="border:2px dashed #f59e0b;background:transparent;"></span>Evidence Link</span>
+          </div>
+        </div>
+      </div>
+      <script id="wmGraphData" type="application/json">${graphJson}</script>
     `;
   }
 
@@ -1239,6 +1812,7 @@ export class PerformanceTab extends BaseTab {
             <span>Quarterly Questions</span>
             <button class="btn btn-xs" data-action="addQuestion">+ Add Question</button>
             <button class="btn btn-xs" data-action="evaluateAll">Re-score All</button>
+            <button class="btn btn-xs btn-warning" data-action="clearDrafts">Clear Drafts</button>
           </div>
           <div class="perf-add-question-form" id="addQuestionForm">
             <input type="text" id="newQuestionText" placeholder="Enter your question..." />
@@ -1253,6 +1827,220 @@ export class PerformanceTab extends BaseTab {
         </div>
       </div>
     `;
+  }
+
+  private renderPeersTab(): string {
+    const benchmarks = this.state.peer_benchmarks;
+    const levelLabels: Record<string, string> = {
+      se: "Senior Engineer",
+      pse: "Principal Engineer",
+      spse: "Sr Principal Engineer",
+      de: "Distinguished Engineer",
+    };
+    const levelColors: Record<string, string> = {
+      se: "#3b82f6",
+      pse: "#8b5cf6",
+      spse: "#f59e0b",
+      de: "#ef4444",
+      you: "#10b981",
+    };
+
+    if (!benchmarks || !benchmarks.levels || Object.keys(benchmarks.levels).length === 0) {
+      return `
+        <div class="perf-tab-panel">
+          <div class="section">
+            <div class="section-title">Peer Comparison</div>
+            <div class="empty-state-text">No peer data collected yet.</div>
+            <p class="text-secondary text-sm mt-8">Click "Collect Peers" to gather data for configured peer engineers across levels.</p>
+            <button class="btn btn-sm btn-primary mt-8" data-action="collectPeers">Collect Peers (Today)</button>
+            <button class="btn btn-sm btn-secondary mt-8 ml-8" data-action="collectPeersBackfill">Backfill Quarter</button>
+          </div>
+        </div>`;
+    }
+
+    const activeLevels = ["se", "pse", "spse", "de"].filter(lk => benchmarks.levels[lk]);
+    const allCompIds = new Set<string>();
+    Object.keys(this.state.competencies).forEach(c => allCompIds.add(c));
+    for (const lk of activeLevels) {
+      Object.keys(benchmarks.levels[lk].avg_competency_pct || {}).forEach(c => allCompIds.add(c));
+    }
+    const sortedComps = Array.from(allCompIds).sort();
+
+    // Radar chart (SVG in JS)
+    const radarSvg = this.renderPeerRadar(sortedComps, activeLevels, benchmarks, levelColors);
+
+    // Grouped competency bars
+    let barsHtml = '<div class="peer-grouped-bars">';
+    for (const compId of sortedComps) {
+      const name = compId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      barsHtml += `<div class="peer-comp-group"><div class="peer-comp-name">${this.escapeHtml(name)}</div>`;
+
+      const userPct = this.state.competencies[compId]?.percentage ?? 0;
+      barsHtml += `<div class="peer-bar-row"><span class="peer-bar-label" style="color:${levelColors.you}">You</span><div class="peer-bar-track"><div class="peer-bar-fill" style="width:${userPct}%;background:${levelColors.you};"></div></div><span class="peer-bar-value">${userPct}%</span></div>`;
+
+      for (const lk of activeLevels) {
+        const pct = benchmarks.levels[lk].avg_competency_pct[compId] ?? 0;
+        const label = levelLabels[lk] || lk;
+        const color = levelColors[lk] || "#888";
+        barsHtml += `<div class="peer-bar-row"><span class="peer-bar-label" style="color:${color}">${this.escapeHtml(label)}</span><div class="peer-bar-track"><div class="peer-bar-fill" style="width:${pct}%;background:${color};"></div></div><span class="peer-bar-value">${pct}%</span></div>`;
+      }
+      barsHtml += `</div>`;
+    }
+    barsHtml += "</div>";
+
+    // Overall comparison
+    let overallHtml = '<div class="peer-overall-grid">';
+    overallHtml += `<div class="peer-overall-card"><div class="peer-overall-label">You</div><div class="peer-overall-value" style="color:${levelColors.you}">${this.state.overall_percentage}%</div></div>`;
+    for (const lk of activeLevels) {
+      const color = levelColors[lk] || "#888";
+      const label = levelLabels[lk] || lk;
+      const pct = benchmarks.levels[lk].avg_overall_pct ?? 0;
+      const engineers = benchmarks.levels[lk].engineers?.join(", ") || "";
+      overallHtml += `<div class="peer-overall-card"><div class="peer-overall-label">${this.escapeHtml(label)}</div><div class="peer-overall-value" style="color:${color}">${pct}%</div><div class="peer-overall-engineers text-secondary text-xs">${this.escapeHtml(engineers)}</div></div>`;
+    }
+    overallHtml += "</div>";
+
+    // Event volume table
+    const allSources = new Set<string>();
+    for (const lk of activeLevels) {
+      Object.keys(benchmarks.levels[lk].avg_event_counts_by_source || {}).forEach(s => allSources.add(s));
+    }
+    const sortedSources = Array.from(allSources).sort();
+
+    let volumeHtml = '<table class="peer-volume-table"><thead><tr><th>Source</th><th>You (avg/day)</th>';
+    for (const lk of activeLevels) {
+      volumeHtml += `<th>${this.escapeHtml(levelLabels[lk] || lk)}</th>`;
+    }
+    volumeHtml += "</tr></thead><tbody>";
+
+    const userDaysCaptured = Math.max(this.state.coverage.captured, 1);
+    for (const src of sortedSources) {
+      volumeHtml += `<tr><td>${this.escapeHtml(src.charAt(0).toUpperCase() + src.slice(1))}</td>`;
+      volumeHtml += `<td class="vol-you">--</td>`;
+      for (const lk of activeLevels) {
+        const avg = benchmarks.levels[lk].avg_event_counts_by_source?.[src] ?? 0;
+        const days = benchmarks.levels[lk].engineers?.length ? Math.max(1, 1) : 1;
+        volumeHtml += `<td>${typeof avg === "number" ? avg.toFixed(1) : avg}</td>`;
+      }
+      volumeHtml += "</tr>";
+    }
+    volumeHtml += "</tbody></table>";
+
+    const lastUpdated = benchmarks.last_updated ? new Date(benchmarks.last_updated).toLocaleString() : "Never";
+
+    return `
+      <div class="perf-tab-panel">
+        <div class="section">
+          <div class="flex-between">
+            <div class="section-title">Peer Comparison</div>
+            <div class="d-flex gap-8">
+              <button class="btn btn-sm btn-primary" data-action="collectPeers">Collect Peers (Today)</button>
+              <button class="btn btn-sm btn-secondary" data-action="collectPeersBackfill">Backfill Quarter</button>
+            </div>
+          </div>
+          <div class="text-secondary text-xs mt-4">Last updated: ${this.escapeHtml(lastUpdated)}</div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Overall Score Comparison</div>
+          ${overallHtml}
+        </div>
+
+        <div class="section">
+          <div class="section-title">Competency Radar</div>
+          <div class="peer-radar-container">${radarSvg}</div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Competency Breakdown by Level</div>
+          ${barsHtml}
+        </div>
+
+        <div class="section">
+          <div class="section-title">Event Volume by Source</div>
+          ${volumeHtml}
+        </div>
+      </div>`;
+  }
+
+  private renderPeerRadar(
+    compIds: string[],
+    activeLevels: string[],
+    benchmarks: PeerBenchmarks,
+    levelColors: Record<string, string>,
+  ): string {
+    const n = compIds.length;
+    if (n < 3) return "<p>Not enough competencies for radar chart.</p>";
+
+    const width = 500, height = 500;
+    const cx = width / 2, cy = height / 2;
+    const maxR = Math.min(cx, cy) * 0.7;
+    let svg = `<svg width="100%" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><style>text { font-family: system-ui, -apple-system, sans-serif; font-size: 10px; }</style>`;
+
+    // Grid rings
+    for (const ringPct of [25, 50, 75, 100]) {
+      const r = maxR * ringPct / 100;
+      const pts = compIds.map((_, i) => {
+        const a = (2 * Math.PI * i / n) - Math.PI / 2;
+        return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`;
+      }).join(" ");
+      svg += `<polygon points="${pts}" fill="none" stroke="var(--vscode-widget-border, #ddd)" stroke-width="0.5"/>`;
+    }
+
+    // Axis lines + labels
+    for (let i = 0; i < n; i++) {
+      const a = (2 * Math.PI * i / n) - Math.PI / 2;
+      const lx = cx + maxR * Math.cos(a);
+      const ly = cy + maxR * Math.sin(a);
+      svg += `<line x1="${cx}" y1="${cy}" x2="${lx.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="var(--vscode-widget-border, #eee)" stroke-width="0.5"/>`;
+
+      const labelR = maxR + 18;
+      const tx = cx + labelR * Math.cos(a);
+      const ty = cy + labelR * Math.sin(a);
+      let name = compIds[i].replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      if (name.length > 14) name = name.substring(0, 12) + "..";
+      const anchor = Math.abs(Math.cos(a)) > 0.3 ? (Math.cos(a) > 0 ? "start" : "end") : "middle";
+      svg += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="${anchor}" dominant-baseline="middle" fill="var(--vscode-foreground, #666)">${this.escapeHtml(name)}</text>`;
+    }
+
+    const makePolygon = (profile: Record<string, number>, color: string, opacity: number, dashed: boolean) => {
+      const pts = compIds.map((cid, i) => {
+        const pct = Math.min(profile[cid] ?? 0, 100);
+        const r = maxR * pct / 100;
+        const a = (2 * Math.PI * i / n) - Math.PI / 2;
+        return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+      }).join(" ");
+      const dash = dashed ? ` stroke-dasharray="6,4"` : "";
+      return `<polygon points="${pts}" fill="${color}" fill-opacity="${opacity * 0.12}" stroke="${color}" stroke-width="2" stroke-opacity="${opacity}"${dash}/>`;
+    };
+
+    // Peer polygons (dashed)
+    for (const lk of activeLevels) {
+      const profile = benchmarks.levels[lk].avg_competency_pct || {};
+      svg += makePolygon(profile, levelColors[lk] || "#888", 0.6, true);
+    }
+
+    // User polygon (solid)
+    const userProfile: Record<string, number> = {};
+    for (const cid of compIds) {
+      userProfile[cid] = this.state.competencies[cid]?.percentage ?? 0;
+    }
+    svg += makePolygon(userProfile, levelColors.you, 1.0, false);
+
+    // Legend
+    let legendX = 10;
+    const legendY = height - 15;
+    const items: [string, string][] = [["you", "You"], ...activeLevels.map(lk => [lk, ({se: "Senior", pse: "Principal", spse: "Sr Principal", de: "Distinguished"} as Record<string, string>)[lk] || lk] as [string, string])];
+    for (const [lk, label] of items) {
+      const color = levelColors[lk] || "#888";
+      const dash = lk === "you" ? "" : ` stroke-dasharray="6,4"`;
+      svg += `<line x1="${legendX}" y1="${legendY}" x2="${legendX + 18}" y2="${legendY}" stroke="${color}" stroke-width="2"${dash}/>`;
+      svg += `<text x="${legendX + 22}" y="${legendY + 3}" fill="var(--vscode-foreground, #666)" font-size="9">${this.escapeHtml(label)}</text>`;
+      legendX += 85;
+    }
+
+    svg += "</svg>";
+    return svg;
   }
 
   private renderLogTab(): string {
@@ -3047,6 +3835,16 @@ export class PerformanceTab extends BaseTab {
               action: 'switchTab',
               key: tabId
             });
+          } else if (action === 'switchCompView') {
+            var viewId = element.getAttribute('data-view') || 'sunburst';
+            document.querySelectorAll('.perf-chart-view-btn').forEach(function(btn) {
+              btn.classList.toggle('active', btn.getAttribute('data-view') === viewId);
+            });
+            vscode.postMessage({
+              command: 'performanceAction',
+              action: 'switchCompView',
+              view: viewId
+            });
           } else if (action === 'selectDay') {
             vscode.postMessage({
               command: 'performanceAction',
@@ -3140,6 +3938,10 @@ export class PerformanceTab extends BaseTab {
             var qId = element.getAttribute('data-question');
             if (qId && confirm('Remove this question? Evidence and notes will be lost.')) {
               vscode.postMessage({ command: 'performanceAction', action: 'removeQuestion', questionId: qId });
+            }
+          } else if (action === 'clearDrafts') {
+            if (confirm('Clear all AI-generated drafts? You can re-generate them later.')) {
+              vscode.postMessage({ command: 'performanceAction', action: 'clearDrafts' });
             }
           } else {
             var evidenceId = element.getAttribute('data-evidence');
@@ -4014,6 +4816,430 @@ export class PerformanceTab extends BaseTab {
         setTimeout(initPerfMindmap, 150);
       })();
 
+      // ============ Weighted Competency Mindmap (D3) ============
+      (function() {
+        var wmState = { simulation: null, svg: null, g: null, zoom: null,
+          nodeSelection: null, linkSelection: null, allLinks: null,
+          edgeLabelSelection: null };
+
+        function initWeightedMindmap() {
+          var dataEl = document.getElementById('wmGraphData');
+          var svgEl = document.getElementById('wmSvg');
+          if (!dataEl || !svgEl) return;
+          if (typeof d3 === 'undefined') { setTimeout(initWeightedMindmap, 500); return; }
+
+          var graphData;
+          try {
+            graphData = JSON.parse(dataEl.textContent || '');
+            if (!graphData || !graphData.nodes) return;
+          } catch (e) { return; }
+
+          var container = document.getElementById('wmGraph');
+          if (!container) return;
+
+          var width = container.clientWidth || 800;
+          var height = container.clientHeight || 600;
+          var cx = width / 2, cy = height / 2;
+
+          var svg = d3.select('#wmSvg');
+          svg.selectAll('g.wm-root').remove();
+
+          var zoomBehavior = d3.zoom().scaleExtent([0.15, 4])
+            .on('zoom', function(event) { rootG.attr('transform', event.transform); });
+          svg.call(zoomBehavior);
+
+          var rootG = svg.append('g').attr('class', 'wm-root');
+          wmState.svg = svg;
+          wmState.g = rootG;
+          wmState.zoom = zoomBehavior;
+
+          var nodes = graphData.nodes.map(function(d) { return Object.assign({}, d); });
+          var links = graphData.links.map(function(d) { return Object.assign({}, d); });
+
+          // Pre-position nodes radially
+          var anstratIdx = 0;
+          var anstratTotal = nodes.filter(function(d) { return d.type === 'anstrat'; }).length;
+          nodes.forEach(function(d) {
+            if (d.type === 'root') { d.x = cx; d.y = cy; }
+            else if (d.type === 'pillar') {
+              var rad = (d.angle || 0) * Math.PI / 180 - Math.PI / 2;
+              d.x = cx + 220 * Math.cos(rad);
+              d.y = cy + 220 * Math.sin(rad);
+            } else if (d.type === 'competency') {
+              var pRad = (d.pillarAngle || 0) * Math.PI / 180 - Math.PI / 2;
+              var spread = (Math.random() - 0.5) * 0.5;
+              d.x = cx + 360 * Math.cos(pRad + spread);
+              d.y = cy + 360 * Math.sin(pRad + spread);
+            } else if (d.type === 'anstrat') {
+              var aRad = (anstratIdx / Math.max(anstratTotal, 1)) * Math.PI * 2 - Math.PI / 2;
+              d.x = cx + 220 * Math.cos(aRad);
+              d.y = cy + 220 * Math.sin(aRad);
+              anstratIdx++;
+            } else if (d.type === 'strategy') {
+              var sAngle = Math.random() * Math.PI * 2;
+              d.x = cx + 450 * Math.cos(sAngle);
+              d.y = cy + 450 * Math.sin(sAngle);
+            } else {
+              d.x = cx + (Math.random() - 0.5) * 700;
+              d.y = cy + (Math.random() - 0.5) * 700;
+            }
+          });
+
+          var simulation = d3.forceSimulation(nodes)
+            .force('link', d3.forceLink(links).id(function(d) { return d.id; })
+              .distance(function(d) {
+                if (d.type === 'evidence') return 200;
+                if (d.type === 'pillar_strategy') return 160;
+                var src = typeof d.source === 'object' ? d.source : null;
+                var tgt = typeof d.target === 'object' ? d.target : null;
+                if (src && src.type === 'root') return 220;
+                if (src && src.type === 'pillar' && tgt && tgt.type === 'competency') return 160;
+                if (src && src.type === 'anstrat') return 70;
+                if (tgt && (tgt.type === 'task' || tgt.type === 'bug' || tgt.type === 'story')) return 45;
+                return 90;
+              })
+              .strength(function(d) {
+                if (d.type === 'evidence') return 0.15;
+                return 0.45;
+              }))
+            .force('charge', d3.forceManyBody().strength(function(d) {
+              if (d.type === 'root') return -800;
+              if (d.type === 'pillar') return -600;
+              if (d.type === 'competency') return -120;
+              if (d.type === 'anstrat') return -180;
+              if (d.type === 'epic') return -80;
+              if (d.type === 'strategy') return -60;
+              return -30;
+            }))
+            .force('radial_pillar', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'pillar' ? 0.85 : 0; }))
+            .force('radial_comp', d3.forceRadial(360, cx, cy).strength(function(d) { return d.type === 'competency' ? 0.25 : 0; }))
+            .force('radial_anstrat', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'anstrat' ? 0.15 : 0; }))
+            .force('radial_strat', d3.forceRadial(450, cx, cy).strength(function(d) { return d.type === 'strategy' ? 0.3 : 0; }))
+            .force('center_root', d3.forceRadial(0, cx, cy).strength(function(d) { return d.type === 'root' ? 1 : 0; }))
+            .force('collision', d3.forceCollide().radius(function(d) {
+              if (d.type === 'pillar') return (d.size || 22) + 40;
+              return (d.size || 8) + 4;
+            }))
+            .alphaDecay(0.012).velocityDecay(0.35);
+
+          simulation.force('angular_pin', function(alpha) {
+            var strength = 0.15 * alpha;
+            nodes.forEach(function(d) {
+              if (d.type !== 'pillar' || d.angle == null) return;
+              var targetRad = d.angle * Math.PI / 180 - Math.PI / 2;
+              var tx = cx + 220 * Math.cos(targetRad);
+              var ty = cy + 220 * Math.sin(targetRad);
+              d.vx += (tx - d.x) * strength;
+              d.vy += (ty - d.y) * strength;
+            });
+          });
+          wmState.simulation = simulation;
+
+          // Links
+          var link = rootG.append('g').attr('class', 'wm-links').selectAll('line').data(links).enter().append('line')
+            .attr('class', function(d) {
+              if (d.type === 'evidence') return 'perf-mm-link perf-mm-link--evidence';
+              if (d.type === 'pillar_strategy') return 'perf-mm-link perf-mm-link--pillar-strategy';
+              return 'perf-mm-link';
+            })
+            .attr('stroke', function(d) {
+              var src = typeof d.source === 'object' ? d.source : null;
+              if (d.type === 'evidence') return '#f59e0b';
+              if (d.type === 'pillar_strategy') return src ? (src.color || '#888') : '#888';
+              return src ? (src.color || '#555') : '#555';
+            })
+            .attr('stroke-opacity', function(d) {
+              if (d.type === 'evidence') return 0.5;
+              if (d.type === 'pillar_strategy') return 0.55;
+              return 0.3;
+            })
+            .attr('stroke-width', function(d) {
+              if (d.type === 'evidence') return Math.min((d.weight || 1) * 1.5, 4);
+              if (d.type === 'pillar_strategy') return 2.5;
+              var src = typeof d.source === 'object' ? d.source : null;
+              if (src && src.type === 'root') return 3;
+              if (src && src.type === 'pillar') return 2;
+              if (src && src.type === 'anstrat') return 1.8;
+              return 1;
+            })
+            .attr('stroke-dasharray', function(d) {
+              if (d.type === 'evidence') return '6,4';
+              if (d.type === 'pillar_strategy') return '6,3,2,3';
+              return 'none';
+            });
+          wmState.linkSelection = link;
+          wmState.allLinks = links;
+
+          // Edge weight labels
+          var edgeLabels = rootG.append('g').attr('class', 'wm-edge-labels').selectAll('text')
+            .data(links.filter(function(d) { return d.label; })).enter().append('text')
+            .attr('class', 'wm-edge-label')
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--vscode-foreground, #aaa)')
+            .attr('font-size', '8px')
+            .attr('opacity', 0.7)
+            .text(function(d) { return d.label; });
+          wmState.edgeLabelSelection = edgeLabels;
+
+          // Nodes
+          var node = rootG.append('g').attr('class', 'wm-nodes').selectAll('g').data(nodes).enter().append('g')
+            .attr('class', function(d) { return 'perf-mm-node perf-mm-node--' + d.type; })
+            .call(d3.drag()
+              .on('start', function(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x; d.fy = d.y;
+              })
+              .on('drag', function(event, d) { d.fx = event.x; d.fy = event.y; })
+              .on('end', function(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                var stickyEl = document.getElementById('wmSticky');
+                if (!(stickyEl && stickyEl.checked)) { d.fx = null; d.fy = null; }
+              })
+            );
+
+          // Root glow + circle
+          node.filter(function(d) { return d.type === 'root'; })
+            .append('circle').attr('r', function(d) { return (d.size || 30) + 6; })
+            .attr('fill', 'none').attr('stroke', '#667eea').attr('stroke-width', 2).attr('stroke-opacity', 0.3);
+          node.filter(function(d) { return d.type === 'root'; })
+            .append('circle').attr('r', function(d) { return d.size || 30; })
+            .attr('fill', '#667eea').attr('stroke', '#8b9cf5').attr('stroke-width', 3);
+
+          // Pillar ring
+          node.filter(function(d) { return d.type === 'pillar'; })
+            .append('circle').attr('r', function(d) { return d.size || 22; })
+            .attr('fill', 'none').attr('stroke', function(d) { return d.color; })
+            .attr('stroke-width', 3).attr('stroke-opacity', 0.7);
+
+          // Competency circles
+          node.filter(function(d) { return d.type === 'competency'; })
+            .append('circle').attr('r', function(d) { return d.size || 10; })
+            .attr('fill', function(d) { return d.heatColor || d.color; })
+            .attr('stroke', function(d) { try { return d3.color(d.heatColor || d.color).brighter(0.5).toString(); } catch(e) { return '#999'; } })
+            .attr('stroke-width', 1.5);
+
+          // ANSTRAT rounded rects
+          node.filter(function(d) { return d.type === 'anstrat'; })
+            .append('rect')
+            .attr('width', function(d) { return (d.size || 16) * 4; })
+            .attr('height', function(d) { return (d.size || 16) * 2.8; })
+            .attr('x', function(d) { return -(d.size || 16) * 2; })
+            .attr('y', function(d) { return -(d.size || 16) * 1.4; })
+            .attr('rx', 5).attr('ry', 5)
+            .attr('fill', function(d) { return d.color; })
+            .attr('stroke', function(d) { try { return d3.color(d.color).brighter(0.4).toString(); } catch(e) { return '#999'; } })
+            .attr('stroke-width', 1.5).attr('opacity', 0.9);
+
+          // Epic triangles
+          node.filter(function(d) { return d.type === 'epic'; })
+            .append('polygon')
+            .attr('points', function(d) {
+              var s = d.size || 10;
+              return '0,' + (-s) + ' ' + (s * 0.9) + ',' + (s * 0.7) + ' ' + (-s * 0.9) + ',' + (s * 0.7);
+            })
+            .attr('fill', function(d) { return d.color || '#888'; })
+            .attr('stroke', function(d) { try { return d3.color(d.color || '#888').brighter(0.4).toString(); } catch(e) { return '#999'; } })
+            .attr('stroke-width', 1);
+
+          // Issue squares
+          node.filter(function(d) { return d.type === 'task' || d.type === 'bug' || d.type === 'story'; })
+            .append('rect')
+            .attr('width', function(d) { return (d.size || 6) * 1.6; })
+            .attr('height', function(d) { return (d.size || 6) * 1.6; })
+            .attr('x', function(d) { return -(d.size || 6) * 0.8; })
+            .attr('y', function(d) { return -(d.size || 6) * 0.8; })
+            .attr('rx', 2).attr('ry', 2)
+            .attr('fill', function(d) { return d.color || '#888'; })
+            .attr('fill-opacity', 0.7)
+            .attr('stroke', function(d) { try { return d3.color(d.color || '#888').brighter(0.3).toString(); } catch(e) { return '#999'; } })
+            .attr('stroke-width', 0.8);
+
+          // Strategy diamonds
+          node.filter(function(d) { return d.type === 'strategy'; })
+            .append('polygon')
+            .attr('points', function(d) {
+              var s = d.size || 12;
+              return '0,' + (-s) + ' ' + s + ',0 0,' + s + ' ' + (-s) + ',0';
+            })
+            .attr('fill', function(d) { return d.color; })
+            .attr('stroke', function(d) { try { return d3.color(d.color).brighter(0.5).toString(); } catch(e) { return '#999'; } })
+            .attr('stroke-width', function(d) { return d.isCovered ? 1.5 : 2; })
+            .attr('stroke-dasharray', function(d) { return d.isCovered ? 'none' : '4,2'; })
+            .attr('opacity', function(d) { return d.isCovered ? 0.9 : 0.65; });
+
+          // Root percentage
+          node.filter(function(d) { return d.type === 'root'; }).append('text')
+            .attr('text-anchor', 'middle').attr('dy', 5)
+            .attr('fill', '#fff').attr('font-size', '12px').attr('font-weight', '700')
+            .text(function(d) { return d.percentage + '%'; });
+          node.filter(function(d) { return d.type === 'root'; }).append('text')
+            .attr('text-anchor', 'middle').attr('dy', function(d) { return -d.size - 8; })
+            .attr('fill', 'var(--vscode-foreground, #e0e0e0)').attr('font-size', '12px').attr('font-weight', '600')
+            .text(function(d) { return d.label; });
+
+          // Pillar labels + pct
+          node.filter(function(d) { return d.type === 'pillar'; }).append('text')
+            .attr('class', 'perf-mm-label').attr('text-anchor', 'middle')
+            .attr('dy', function(d) { return -(d.size || 22) - 8; })
+            .attr('fill', function(d) { return d.color; })
+            .attr('font-size', '11px').attr('font-weight', '600')
+            .text(function(d) { return d.label; });
+          node.filter(function(d) { return d.type === 'pillar'; }).append('text')
+            .attr('text-anchor', 'middle').attr('dy', 5)
+            .attr('fill', function(d) { return d.color; })
+            .attr('font-size', '12px').attr('font-weight', '700')
+            .text(function(d) { return d.percentage + '%'; });
+
+          // ANSTRAT labels
+          node.filter(function(d) { return d.type === 'anstrat'; }).append('text')
+            .attr('text-anchor', 'middle').attr('dy', 4)
+            .attr('fill', '#fff').attr('font-size', '9px').attr('font-weight', '600')
+            .text(function(d) { return d.label; });
+
+          // Weight sublabels (persistent, togglable)
+          var sublabelGroup = node.append('text')
+            .attr('class', 'wm-sublabel')
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--vscode-foreground, #aaa)')
+            .attr('font-size', '7px')
+            .attr('opacity', 0.8)
+            .attr('dy', function(d) {
+              if (d.type === 'root') return (d.size || 30) + 16;
+              if (d.type === 'pillar') return (d.size || 22) + 14;
+              if (d.type === 'competency') return (d.size || 10) + 12;
+              if (d.type === 'anstrat') return (d.size || 16) * 1.4 + 12;
+              if (d.type === 'epic') return (d.size || 10) + 14;
+              if (d.type === 'strategy') return (d.size || 12) + 14;
+              return (d.size || 6) * 0.8 + 12;
+            })
+            .text(function(d) { return d.sublabel || ''; });
+
+          // Tooltip
+          var tooltip = document.getElementById('wmTooltip');
+          node.on('mouseenter', function(event, d) {
+            if (!tooltip) return;
+            var lines = ['<b>' + (d.fullLabel || d.label) + '</b>'];
+            if (d.summary) lines.push(d.summary);
+            if (d.weightInfo) lines.push('<span class="wm-tooltip-weight">' + d.weightInfo + '</span>');
+            if (d.percentage != null) lines.push('Score: ' + d.percentage + '%');
+            if (d.points != null) lines.push('Points: ' + d.points);
+            if (d.evidenceCount != null) lines.push('Evidence: ' + d.evidenceCount + ' events');
+            tooltip.innerHTML = lines.join('<br>');
+            tooltip.style.display = 'block';
+            tooltip.style.left = (event.offsetX + 12) + 'px';
+            tooltip.style.top = (event.offsetY - 10) + 'px';
+          })
+          .on('mousemove', function(event) {
+            if (tooltip) {
+              tooltip.style.left = (event.offsetX + 12) + 'px';
+              tooltip.style.top = (event.offsetY - 10) + 'px';
+            }
+          })
+          .on('mouseleave', function() { if (tooltip) tooltip.style.display = 'none'; });
+
+          wmState.nodeSelection = node;
+
+          // Controls
+          var labelsEl = document.getElementById('wmLabels');
+          var weightsEl = document.getElementById('wmWeights');
+          if (labelsEl) {
+            labelsEl.addEventListener('change', function() {
+              var show = labelsEl.checked;
+              node.selectAll('.perf-mm-label').attr('opacity', show ? 1 : 0);
+            });
+          }
+          if (weightsEl) {
+            weightsEl.addEventListener('change', function() {
+              var show = weightsEl.checked;
+              sublabelGroup.attr('opacity', show ? 0.8 : 0);
+              edgeLabels.attr('opacity', show ? 0.7 : 0);
+            });
+          }
+          var reheatBtn = document.getElementById('wmReheat');
+          if (reheatBtn) {
+            reheatBtn.addEventListener('click', function() { simulation.alpha(1).restart(); });
+          }
+          var fitBtn = document.getElementById('wmFit');
+          if (fitBtn) {
+            fitBtn.addEventListener('click', function() {
+              var bounds = rootG.node().getBBox();
+              if (!bounds.width || !bounds.height) return;
+              var pad = 40;
+              var scaleX = width / (bounds.width + pad * 2);
+              var scaleY = height / (bounds.height + pad * 2);
+              var scale = Math.min(scaleX, scaleY, 2);
+              var tx = width / 2 - (bounds.x + bounds.width / 2) * scale;
+              var ty = height / 2 - (bounds.y + bounds.height / 2) * scale;
+              svg.transition().duration(500).call(
+                zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale)
+              );
+            });
+          }
+
+          // Pillar filter checkboxes
+          var pillarChks = container.querySelectorAll('.wmPillarChk');
+          var typeChks = container.querySelectorAll('.wmTypeChk');
+          function applyFilters() {
+            var activePillars = {};
+            pillarChks.forEach(function(el) { if (el.checked) activePillars[el.getAttribute('data-pillar')] = true; });
+            var activeTypes = {};
+            typeChks.forEach(function(el) {
+              if (el.checked) {
+                (el.getAttribute('data-types') || '').split(',').forEach(function(t) { activeTypes[t.trim()] = true; });
+              }
+            });
+            node.attr('display', function(d) {
+              if (d.type === 'root') return null;
+              var typeOk = activeTypes[d.type] || d.type === 'pillar';
+              if (!typeOk) return 'none';
+              if (d.pillars && d.pillars.length) {
+                var hasPillar = d.pillars.some(function(p) { return activePillars[p]; });
+                return hasPillar ? null : 'none';
+              }
+              return null;
+            });
+            link.attr('display', function(d) {
+              var src = typeof d.source === 'object' ? d.source : null;
+              var tgt = typeof d.target === 'object' ? d.target : null;
+              if (src && src.type === 'root') return null;
+              if (src && !activeTypes[src.type] && src.type !== 'pillar' && src.type !== 'root') return 'none';
+              if (tgt && !activeTypes[tgt.type] && tgt.type !== 'pillar' && tgt.type !== 'root') return 'none';
+              return null;
+            });
+          }
+          pillarChks.forEach(function(el) { el.addEventListener('change', applyFilters); });
+          typeChks.forEach(function(el) { el.addEventListener('change', applyFilters); });
+
+          // Tick
+          simulation.on('tick', function() {
+            link.attr('x1', function(d) { return d.source.x; }).attr('y1', function(d) { return d.source.y; })
+                .attr('x2', function(d) { return d.target.x; }).attr('y2', function(d) { return d.target.y; });
+            edgeLabels
+              .attr('x', function(d) { return (d.source.x + d.target.x) / 2; })
+              .attr('y', function(d) { return (d.source.y + d.target.y) / 2 - 3; });
+            node.attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; });
+          });
+
+          // Auto-fit after settling
+          setTimeout(function() {
+            var bounds = rootG.node().getBBox();
+            if (!bounds.width || !bounds.height) return;
+            var pad = 40;
+            var scaleX = width / (bounds.width + pad * 2);
+            var scaleY = height / (bounds.height + pad * 2);
+            var scale = Math.min(scaleX, scaleY, 2);
+            var tx = width / 2 - (bounds.x + bounds.width / 2) * scale;
+            var ty = height / 2 - (bounds.y + bounds.height / 2) * scale;
+            svg.transition().duration(500).call(
+              zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale)
+            );
+          }, 1500);
+        }
+
+        window._initWeightedMindmap = initWeightedMindmap;
+        setTimeout(initWeightedMindmap, 200);
+      })();
+
       // ============ QC Help Tab (D3 Diagrams) ============
       (function() {
         function initPerfHelp() {
@@ -4043,55 +5269,87 @@ export class PerformanceTab extends BaseTab {
 
           var W = container.clientWidth || 700;
           var H = 340;
+          var cx = W / 2;
           var svg = d3.select(container).append('svg').attr('width', W).attr('height', H).attr('viewBox', '0 0 ' + W + ' ' + H);
 
           svg.append('defs').append('marker').attr('id', 'pipeline-arrow').attr('viewBox', '0 0 10 10')
             .attr('refX', 10).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
             .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#888');
 
-          var stages = [
-            { label: 'Git', color: '#60a5fa', x: 40, y: 30, w: 80, h: 32 },
-            { label: 'GitLab', color: '#60a5fa', x: 140, y: 30, w: 80, h: 32 },
-            { label: 'GitHub', color: '#60a5fa', x: 240, y: 30, w: 80, h: 32 },
-            { label: 'Jira', color: '#60a5fa', x: 340, y: 30, w: 80, h: 32 },
-            { label: 'Gmail', color: '#60a5fa', x: 440, y: 30, w: 80, h: 32 },
+          var srcW = 80, srcH = 32, srcY = 30, srcCount = 5;
+          var srcGap = 16;
+          var srcTotalW = srcCount * srcW + (srcCount - 1) * srcGap;
+          var srcX0 = cx - srcTotalW / 2;
 
-            { label: 'Event Collection', color: '#a78bfa', x: W/2 - 90, y: 90, w: 180, h: 32 },
+          var enrW = 130, enrH = 28, enrY = 155, enrCount = 4;
+          var enrGap = 12;
+          var enrTotalW = enrCount * enrW + (enrCount - 1) * enrGap;
+          var enrX0 = cx - enrTotalW / 2;
 
-            { label: 'Scope Detection', color: '#a78bfa', x: 60, y: 150, w: 130, h: 28 },
-            { label: 'Role Detection', color: '#a78bfa', x: 210, y: 150, w: 130, h: 28 },
-            { label: 'Classification', color: '#a78bfa', x: 360, y: 150, w: 130, h: 28 },
-            { label: 'Strategy Align', color: '#a78bfa', x: 510, y: 150, w: 130, h: 28 },
+          var ecY = 92, ecW = 180, ecH = 32;
+          var sigY = 216, sigW = 220, sigH = 32;
+          var fmY = 268, fmW = 160, fmH = 32;
+          var capY = 310, capW = 180, capH = 28;
 
-            { label: 'Signal Counting (>= 2)', color: '#f59e0b', x: W/2 - 110, y: 210, w: 220, h: 32 },
-            { label: 'Score Formula', color: '#10b981', x: W/2 - 80, y: 260, w: 160, h: 32 },
-            { label: 'Daily Cap (15/comp)', color: '#ef4444', x: W/2 - 90, y: 305, w: 180, h: 28 },
-          ];
+          var sources = ['Git', 'GitLab', 'GitHub', 'Jira', 'Gmail'];
+          var enrichments = ['Scope Detection', 'Role Detection', 'Classification', 'Strategy Align'];
+
+          var stages = [];
+          sources.forEach(function(label, i) {
+            stages.push({ label: label, color: '#60a5fa', x: srcX0 + i * (srcW + srcGap), y: srcY, w: srcW, h: srcH });
+          });
+          stages.push({ label: 'Event Collection', color: '#a78bfa', x: cx - ecW / 2, y: ecY, w: ecW, h: ecH });
+          enrichments.forEach(function(label, i) {
+            stages.push({ label: label, color: '#a78bfa', x: enrX0 + i * (enrW + enrGap), y: enrY, w: enrW, h: enrH });
+          });
+          stages.push({ label: 'Signal Counting (>= 2)', color: '#f59e0b', x: cx - sigW / 2, y: sigY, w: sigW, h: sigH });
+          stages.push({ label: 'Score Formula', color: '#10b981', x: cx - fmW / 2, y: fmY, w: fmW, h: fmH });
+          stages.push({ label: 'Daily Cap (15/comp)', color: '#ef4444', x: cx - capW / 2, y: capY, w: capW, h: capH });
 
           stages.forEach(function(s) {
             var g = svg.append('g').attr('class', 'perf-help-pipeline-node');
             g.append('rect').attr('x', s.x).attr('y', s.y).attr('width', s.w).attr('height', s.h)
               .attr('rx', 6).attr('fill', s.color + '22').attr('stroke', s.color).attr('stroke-width', 1.5);
-            g.append('text').attr('x', s.x + s.w/2).attr('y', s.y + s.h/2).text(s.label);
+            g.append('text').attr('x', s.x + s.w / 2).attr('y', s.y + s.h / 2).text(s.label);
           });
 
-          var edges = [
-            // Sources to Collection
-            [80, 62, W/2, 90], [180, 62, W/2, 90], [280, 62, W/2, 90], [380, 62, W/2, 90], [480, 62, W/2, 90],
-            // Collection to Enrichment
-            [W/2, 122, 125, 150], [W/2, 122, 275, 150], [W/2, 122, 425, 150], [W/2, 122, 575, 150],
-            // Enrichment to Signals
-            [125, 178, W/2, 210], [275, 178, W/2, 210], [425, 178, W/2, 210], [575, 178, W/2, 210],
-            // Signals to Formula
-            [W/2, 242, W/2, 260],
-            // Formula to Cap
-            [W/2, 292, W/2, 305],
-          ];
+          function bezier(x1, y1, x2, y2) {
+            var my = (y1 + y2) / 2;
+            return 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + my + ' ' + x2 + ',' + my + ' ' + x2 + ',' + y2;
+          }
 
-          edges.forEach(function(e) {
-            svg.append('line').attr('class', 'perf-help-pipeline-edge')
-              .attr('x1', e[0]).attr('y1', e[1]).attr('x2', e[2]).attr('y2', e[3]);
+          var ecLeft = cx - ecW / 2;
+          var ecSpanSrc = ecW / (srcCount + 1);
+          var ecSpanEnr = ecW / (enrCount + 1);
+          var sigLeft = cx - sigW / 2;
+          var sigSpanEnr = sigW / (enrCount + 1);
+
+          sources.forEach(function(_label, i) {
+            var sx = srcX0 + i * (srcW + srcGap) + srcW / 2;
+            var sy = srcY + srcH;
+            var tx = ecLeft + (i + 1) * ecSpanSrc;
+            var ty = ecY;
+            svg.append('path').attr('class', 'perf-help-pipeline-edge').attr('d', bezier(sx, sy, tx, ty));
           });
+
+          enrichments.forEach(function(_label, i) {
+            var sx = ecLeft + (i + 1) * ecSpanEnr;
+            var sy = ecY + ecH;
+            var tx = enrX0 + i * (enrW + enrGap) + enrW / 2;
+            var ty = enrY;
+            svg.append('path').attr('class', 'perf-help-pipeline-edge').attr('d', bezier(sx, sy, tx, ty));
+          });
+
+          enrichments.forEach(function(_label, i) {
+            var sx = enrX0 + i * (enrW + enrGap) + enrW / 2;
+            var sy = enrY + enrH;
+            var tx = sigLeft + (i + 1) * sigSpanEnr;
+            var ty = sigY;
+            svg.append('path').attr('class', 'perf-help-pipeline-edge').attr('d', bezier(sx, sy, tx, ty));
+          });
+
+          svg.append('path').attr('class', 'perf-help-pipeline-edge').attr('d', bezier(cx, sigY + sigH, cx, fmY));
+          svg.append('path').attr('class', 'perf-help-pipeline-edge').attr('d', bezier(cx, fmY + fmH, cx, capY));
         }
 
         // 1.2 Pyramid
@@ -4646,6 +5904,15 @@ export class PerformanceTab extends BaseTab {
       case "evaluateAll":
         await this.evaluateAllQuestions();
         break;
+      case "collectPeers":
+        await this.collectPeers(false);
+        break;
+      case "collectPeersBackfill":
+        await this.collectPeers(true);
+        break;
+      case "clearDrafts":
+        await this.clearAllDrafts();
+        break;
       case "addNote":
         await this.addNoteToQuestion(message.questionId);
         break;
@@ -4663,6 +5930,13 @@ export class PerformanceTab extends BaseTab {
         break;
       case "deselectAllEvidence":
         this.deselectAllEvidence(message.questionId);
+        break;
+      case "switchCompView":
+        this.state.competency_view = (message.view === "mindmap") ? "mindmap" : "sunburst";
+        if (this.state.competency_view === "mindmap") {
+          this.forceNextRender = true;
+        }
+        this.notifyNeedsRender();
         break;
       case "switchTab": {
         const leavingSettings = this.state.active_tab === "settings";
@@ -4945,6 +6219,29 @@ export class PerformanceTab extends BaseTab {
     }
   }
 
+  private async collectPeers(backfill: boolean): Promise<void> {
+    const msg = backfill
+      ? "Backfilling peer data for entire quarter (this may take several minutes)..."
+      : "Collecting peer data for today...";
+    vscode.window.showInformationMessage(msg);
+    try {
+      const result = await dbus.stats_collectPeers(backfill);
+      if (result.success) {
+        const data = result.data as any;
+        vscode.window.showInformationMessage(
+          `Peer collection complete: ${data?.peers_processed ?? 0} peers processed`
+        );
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Peer collection failed: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Error collecting peers: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
   private async logActivity(category: string, description: string): Promise<void> {
     if (!description) {
       vscode.window.showWarningMessage("Please enter a description");
@@ -4975,6 +6272,25 @@ export class PerformanceTab extends BaseTab {
       }
     } catch (error) {
       vscode.window.showErrorMessage(`Error evaluating: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async clearAllDrafts(): Promise<void> {
+    try {
+      const result = await dbus.stats_clearDrafts();
+      if (result.success) {
+        const data = result.data as any;
+        const cleared = data?.cleared || 0;
+        if (data?.questions_summary) {
+          this.state.questions_summary = data.questions_summary;
+        }
+        vscode.window.showInformationMessage(`Cleared ${cleared} AI draft${cleared !== 1 ? "s" : ""}`);
+        this.notifyNeedsRender();
+      } else {
+        vscode.window.showErrorMessage(`Failed to clear drafts: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error clearing drafts: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

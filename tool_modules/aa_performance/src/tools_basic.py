@@ -911,6 +911,172 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
             )
         ]
 
+    @registry.tool()
+    async def performance_peer_status() -> list[TextContent]:
+        """
+        Show peer benchmark data across engineering levels.
+
+        Displays aggregated peer comparison data: overall scores, competency
+        averages, and event volumes grouped by Senior, Principal, Sr Principal,
+        and Distinguished levels.
+
+        Returns:
+            Formatted peer benchmarks summary.
+        """
+        year, quarter, _, _, _ = get_quarter_info()
+        perf_dir = get_performance_dir(year, quarter)
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+
+        if not benchmarks_file.exists():
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        "No peer benchmarks found. Run peer collection first:\n"
+                        "- From VSCode: QC tab > Peers > Collect Peers\n"
+                        "- Via D-Bus: stats_collectPeers()"
+                    ),
+                )
+            ]
+
+        with open(benchmarks_file, encoding="utf-8") as f:
+            benchmarks = json.load(f)
+
+        level_labels = {
+            "se": "Senior Engineer",
+            "pse": "Principal Engineer",
+            "spse": "Sr Principal Engineer",
+            "de": "Distinguished Engineer",
+        }
+
+        lines = [
+            f"# Peer Benchmarks - Q{quarter} {year}",
+            f"_Last updated: {benchmarks.get('last_updated', 'unknown')}_",
+            "",
+        ]
+
+        for level_key in ["se", "pse", "spse", "de"]:
+            level_data = benchmarks.get("levels", {}).get(level_key)
+            if not level_data:
+                continue
+
+            label = level_labels.get(level_key, level_key)
+            engineers = ", ".join(level_data.get("engineers", []))
+            overall = level_data.get("avg_overall_pct", 0)
+
+            lines.append(f"## {label} ({overall}% overall)")
+            lines.append(f"_Engineers: {engineers}_")
+            lines.append(f"_Avg daily events: {level_data.get('avg_daily_events', 0)}_")
+            lines.append("")
+
+            comp_pcts = level_data.get("avg_competency_pct", {})
+            for comp_id, pct in sorted(
+                comp_pcts.items(), key=lambda x: x[1], reverse=True
+            ):
+                name = comp_id.replace("_", " ").title()
+                lines.append(f"- {name}: {pct}%")
+            lines.append("")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    @registry.tool()
+    async def performance_peer_compare(level: str = "") -> list[TextContent]:
+        """
+        Compare your competency scores against a specific peer level or all levels.
+
+        Args:
+            level: Engineering level to compare against (se, pse, spse, de).
+                   Leave empty to compare against all levels.
+
+        Returns:
+            Side-by-side comparison of your scores vs peer averages.
+        """
+        year, quarter, _, _, _ = get_quarter_info()
+        engine = ScoringEngine(year=year, quarter=quarter)
+        user_summary = engine.calculate_summary()
+
+        perf_dir = get_performance_dir(year, quarter)
+        benchmarks_file = perf_dir / "peers" / "benchmarks.json"
+
+        if not benchmarks_file.exists():
+            return [
+                TextContent(
+                    type="text",
+                    text="No peer benchmarks found. Run peer collection first.",
+                )
+            ]
+
+        with open(benchmarks_file, encoding="utf-8") as f:
+            benchmarks = json.load(f)
+
+        level_labels = {
+            "se": "Senior",
+            "pse": "Principal",
+            "spse": "Sr Principal",
+            "de": "Distinguished",
+        }
+
+        levels_to_compare = (
+            [level]
+            if level and level in benchmarks.get("levels", {})
+            else [
+                lk
+                for lk in ["se", "pse", "spse", "de"]
+                if lk in benchmarks.get("levels", {})
+            ]
+        )
+
+        user_pcts = user_summary.get("cumulative_percentage", {})
+        all_comp_ids = sorted(
+            set(user_pcts.keys())
+            | {
+                c
+                for lk in levels_to_compare
+                for c in benchmarks.get("levels", {})
+                .get(lk, {})
+                .get("avg_competency_pct", {})
+                .keys()
+            }
+        )
+
+        lines = [
+            f"# Peer Comparison - Q{quarter} {year}",
+            f"**Your Overall:** {user_summary.get('overall_percentage', 0)}%",
+            "",
+        ]
+
+        header = f"| {'Competency':<30} | {'You':>5} |"
+        sep = f"| {'-'*30} | {'---':>5} |"
+        for lk in levels_to_compare:
+            label = level_labels.get(lk, lk)
+            header += f" {label:>12} |"
+            sep += f" {'---':>12} |"
+
+        lines.append(header)
+        lines.append(sep)
+
+        for comp_id in all_comp_ids:
+            name = comp_id.replace("_", " ").title()
+            if len(name) > 30:
+                name = name[:28] + ".."
+            user_pct = user_pcts.get(comp_id, 0)
+            row = f"| {name:<30} | {user_pct:>4}% |"
+            for lk in levels_to_compare:
+                peer_pct = (
+                    benchmarks["levels"][lk]
+                    .get("avg_competency_pct", {})
+                    .get(comp_id, 0)
+                )
+                diff = user_pct - peer_pct
+                indicator = "  " if abs(diff) < 5 else (" +" if diff > 0 else " -")
+                row += f" {peer_pct:>4}%{indicator:>6} |"
+            lines.append(row)
+
+        lines.append("")
+        lines.append("_Legend: + = you're above peer avg, - = you're below_")
+
+        return [TextContent(type="text", text="\n".join(lines))]
+
     return registry.count
 
 

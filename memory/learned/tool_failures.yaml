@@ -1,11 +1,4 @@
 failures:
-- error_snippet: no route to host
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:27:35.633381'
-  tool: some_tool
 - error_snippet: unauthorized 401
   error_type: auth
   fix_applied: kube_login
@@ -717,8 +710,16 @@ failures:
   success: true
   timestamp: '2026-02-20T21:01:19.637044'
   tool: jira_my_issues
+- error_snippet: "\u274C Failed to fetch: ssh: Could not resolve hostname gitlab.cee.redhat.com:\
+    \ Name or service not known\n"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-21T10:00:57.781727'
+  tool: git_fetch
 stats:
-  auto_fixed: 172
+  auto_fixed: 173
   daily:
     '2026-02-17':
       auto_fixed: 1
@@ -727,7 +728,7 @@ stats:
       auto_fixed: 1
       total: 1
   manual_required: 201
-  total_failures: 373
+  total_failures: 374
   weekly:
     2026-W07:
       auto_fixed: 2

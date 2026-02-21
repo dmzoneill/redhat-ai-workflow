@@ -1732,6 +1732,13 @@ class DBusClient {
   }
 
   /**
+   * Clear all AI-generated draft summaries from questions
+   */
+  async stats_clearDrafts(): Promise<DBusResult> {
+    return this.callMethod("stats", "clear_drafts");
+  }
+
+  /**
    * Evaluate a specific question
    */
   async stats_evaluateQuestion(questionId: string): Promise<DBusResult> {
@@ -1848,6 +1855,27 @@ class DBusClient {
    */
   async stats_setExecutiveSenders(senders: string[]): Promise<DBusResult<{ senders: string[] }>> {
     return this.callMethod("stats", "set_executive_senders", { senders });
+  }
+
+  /**
+   * Collect data for all configured peers (current day or backfill entire quarter)
+   */
+  async stats_collectPeers(backfill: boolean = false): Promise<DBusResult> {
+    return this.callMethod("stats", "collect_peers", { backfill });
+  }
+
+  /**
+   * Collect data for a single peer by username
+   */
+  async stats_collectPeer(username: string, date?: string): Promise<DBusResult> {
+    return this.callMethod("stats", "collect_peer", { username, date: date || "" });
+  }
+
+  /**
+   * Get aggregated peer benchmarks by engineering level
+   */
+  async stats_getPeerBenchmarks(year?: number, quarter?: number): Promise<DBusResult> {
+    return this.callMethod("stats", "get_peer_benchmarks", { year, quarter });
   }
 
   // ==========================================================================

@@ -174,6 +174,8 @@ class DataCollector:
         self.hierarchy_cache: dict = {}
         self.strategy_index: dict = {}
         self.npu_classifier: object | None = None
+        self._user_override: dict | None = None
+        self._level_override: str | None = None
 
     def get_git_email(self) -> str:
         if self._git_email_cache is None:
@@ -275,8 +277,15 @@ class DataCollector:
                 )
                 classification_text += f" [Strategy: {pname}] {ctx}"
 
-        cfg = get_merged_config()
-        level = cfg.get("engineering_level", "sse")
+        if self._level_override:
+            level = self._level_override
+        else:
+            cfg = get_merged_config()
+            level = cfg.get("engineering_level", "sse")
+
+        if self._user_override:
+            current_user = self._user_override.get("jira_username", current_user)
+            current_email = self._user_override.get("email", current_email)
 
         event["scope"] = scope
         event["role"] = role
@@ -447,10 +456,13 @@ class DataCollector:
     # GitLab MR + Review collection (Stream 1)
     # ------------------------------------------------------------------
 
-    def get_gitlab_cache(self, year: int, quarter: int) -> dict:
+    def get_gitlab_cache(
+        self, year: int, quarter: int, username_override: str = ""
+    ) -> dict:
         """Fetch GitLab MRs and review activity for the quarter, with caching."""
         perf_dir = self.get_perf_dir(year, quarter)
-        cache_file = perf_dir / "gitlab_event_cache.json"
+        cache_suffix = f"_{username_override}" if username_override else ""
+        cache_file = perf_dir / f"gitlab_event_cache{cache_suffix}.json"
 
         if cache_file.exists():
             try:
@@ -468,7 +480,7 @@ class DataCollector:
             logger.warning("No GitLab token – skipping GitLab collection")
             return {"mrs_authored": [], "reviews_given": [], "reviews_received": []}
 
-        username = self._get_gitlab_username(gitlab_host, token)
+        username = username_override or self._get_gitlab_username(gitlab_host, token)
         if not username:
             logger.warning("Could not determine GitLab username")
             return {"mrs_authored": [], "reviews_given": [], "reviews_received": []}
@@ -638,13 +650,17 @@ class DataCollector:
         )
         return cache_data
 
-    def collect_gitlab_for_date(self, target: date, seen_ids: set[str]) -> list[dict]:
+    def collect_gitlab_for_date(
+        self, target: date, seen_ids: set[str], username_override: str = ""
+    ) -> list[dict]:
         """Produce GitLab events for a specific date from the quarter cache."""
         year = target.year
         quarter = (target.month - 1) // 3 + 1
         target_str = target.isoformat()
         events: list[dict] = []
-        cache = self.get_gitlab_cache(year, quarter)
+        cache = self.get_gitlab_cache(
+            year, quarter, username_override=username_override
+        )
 
         def _date_of(iso: str) -> str:
             return iso[:10] if iso else ""
@@ -743,15 +759,18 @@ class DataCollector:
     # ------------------------------------------------------------------
 
     def collect_jira_created_for_date(
-        self, target: date, seen_ids: set[str]
+        self, target: date, seen_ids: set[str], jira_user: str = ""
     ) -> list[dict]:
         """Collect Jira issues created by the user on the target date (any project)."""
         jira_date = target.strftime("%Y-%m-%d")
         events: list[dict] = []
         try:
+            reporter_clause = (
+                f"reporter = '{jira_user}'" if jira_user else "reporter = currentUser()"
+            )
             jql = (
                 f"created >= '{jira_date}' AND created < '{jira_date}' + 1d "
-                f"AND reporter = currentUser() "
+                f"AND {reporter_clause} "
                 f"ORDER BY created DESC"
             )
             result = subprocess.check_output(
@@ -861,9 +880,12 @@ class DataCollector:
             return "own"
         return "cross-org"
 
-    def get_github_cache(self, year: int, quarter: int) -> dict:
+    def get_github_cache(
+        self, year: int, quarter: int, username_override: str = ""
+    ) -> dict:
         perf_dir = self.get_perf_dir(year, quarter)
-        cache_file = perf_dir / "github_cache.json"
+        cache_suffix = f"_{username_override}" if username_override else ""
+        cache_file = perf_dir / f"github_cache{cache_suffix}.json"
 
         if cache_file.exists():
             try:
@@ -884,7 +906,7 @@ class DataCollector:
         else:
             q_end = date(year, 12, 31)
 
-        username = self.get_github_username()
+        username = username_override or self.get_github_username()
         if not username:
             return {"prs_authored": [], "prs_reviewed": [], "issues_authored": []}
 
@@ -960,15 +982,19 @@ class DataCollector:
 
         return cache_data
 
-    def collect_github_for_date(self, target: date, seen_ids: set[str]) -> list[dict]:
+    def collect_github_for_date(
+        self, target: date, seen_ids: set[str], username_override: str = ""
+    ) -> list[dict]:
         year = target.year
         quarter = (target.month - 1) // 3 + 1
         target_str = target.isoformat()
         events: list[dict] = []
 
-        cache = self.get_github_cache(year, quarter)
+        cache = self.get_github_cache(
+            year, quarter, username_override=username_override
+        )
         repo_meta = self._get_github_repo_metadata(year, quarter)
-        gh_username = self.get_github_username()
+        gh_username = username_override or self.get_github_username()
         meta_dirty = False
 
         def _parse_date(iso_str: str | None) -> str | None:
@@ -1402,7 +1428,26 @@ class DataCollector:
 
         return new_events
 
-    def collect_for_date(self, target: date) -> dict:
+    def collect_for_date(
+        self, target: date, user_override: dict | None = None, level_override: str = ""
+    ) -> dict:
+        """Collect daily performance data for a given date.
+
+        When user_override is provided, collects data for that user instead
+        of the current user. Used for peer comparison data capture.
+        user_override keys: git_author, jira_username, gitlab_username, github_username
+        """
+        self._user_override = user_override
+        self._level_override = level_override or None
+        try:
+            return self._collect_for_date_impl(target, user_override)
+        finally:
+            self._user_override = None
+            self._level_override = None
+
+    def _collect_for_date_impl(
+        self, target: date, user_override: dict | None = None
+    ) -> dict:
         year = target.year
         quarter = (target.month - 1) // 3 + 1
         quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
@@ -1414,7 +1459,9 @@ class DataCollector:
         seen_ids: set[str] = set()
         target_str = target.isoformat()
 
-        git_author = self.get_git_author()
+        git_author = (
+            user_override["git_author"] if user_override else self.get_git_author()
+        )
         repos = self.get_config_repos()
         for repo in repos:
             try:
@@ -1458,11 +1505,20 @@ class DataCollector:
             except Exception as e:
                 logger.debug(f"Git collect failed for {repo['name']}: {e}")
 
+        jira_user = user_override.get("jira_username", "") if user_override else ""
         jira_date = target.strftime("%Y-%m-%d")
         try:
+            if jira_user:
+                assignee_clause = (
+                    f"(assignee = '{jira_user}' OR reporter = '{jira_user}')"
+                )
+            else:
+                assignee_clause = (
+                    "(assignee = currentUser() OR reporter = currentUser())"
+                )
             jql = (
                 f"resolved >= '{jira_date}' AND resolved < '{jira_date}' + 1d "
-                f"AND (assignee = currentUser() OR reporter = currentUser()) "
+                f"AND {assignee_clause} "
                 f"ORDER BY resolved DESC"
             )
             result = subprocess.check_output(
@@ -1498,8 +1554,11 @@ class DataCollector:
         except Exception as e:
             logger.debug(f"Jira resolved fetch failed: {e}")
 
+        gh_user = user_override.get("github_username", "") if user_override else ""
         try:
-            gh_events = self.collect_github_for_date(target, seen_ids)
+            gh_events = self.collect_github_for_date(
+                target, seen_ids, username_override=gh_user
+            )
             events.extend(gh_events)
             if gh_events:
                 logger.info(
@@ -1508,8 +1567,11 @@ class DataCollector:
         except Exception as e:
             logger.debug(f"GitHub collect failed: {e}")
 
+        gl_user = user_override.get("gitlab_username", "") if user_override else ""
         try:
-            gl_events = self.collect_gitlab_for_date(target, seen_ids)
+            gl_events = self.collect_gitlab_for_date(
+                target, seen_ids, username_override=gl_user
+            )
             events.extend(gl_events)
             if gl_events:
                 logger.info(
@@ -1518,8 +1580,11 @@ class DataCollector:
         except Exception as e:
             logger.debug(f"GitLab collect failed: {e}")
 
+        jira_created_user = jira_user
         try:
-            jira_created = self.collect_jira_created_for_date(target, seen_ids)
+            jira_created = self.collect_jira_created_for_date(
+                target, seen_ids, jira_user=jira_created_user
+            )
             events.extend(jira_created)
             if jira_created:
                 logger.info(
@@ -1528,21 +1593,22 @@ class DataCollector:
         except Exception as e:
             logger.debug(f"Jira created collect failed: {e}")
 
-        try:
-            perf_dir = self.get_perf_dir(target.year, (target.month - 1) // 3 + 1)
-            new_email_ids = collect_executive_emails_for_date(target, perf_dir)
-            if new_email_ids:
-                logger.info(
-                    f"Gmail: cached {len(new_email_ids)} executive emails for {target_str}"
-                )
-        except Exception as e:
-            logger.warning(f"Executive email collect failed (non-blocking): {e}")
+        if not user_override:
+            try:
+                perf_dir = self.get_perf_dir(target.year, (target.month - 1) // 3 + 1)
+                new_email_ids = collect_executive_emails_for_date(target, perf_dir)
+                if new_email_ids:
+                    logger.info(
+                        f"Gmail: cached {len(new_email_ids)} executive emails for {target_str}"
+                    )
+            except Exception as e:
+                logger.warning(f"Executive email collect failed (non-blocking): {e}")
 
-        try:
-            session_events = self._collect_session_events(target, events, seen_ids)
-            events.extend(session_events)
-        except Exception as e:
-            logger.debug(f"Session collect failed (non-blocking): {e}")
+            try:
+                session_events = self._collect_session_events(target, events, seen_ids)
+                events.extend(session_events)
+            except Exception as e:
+                logger.debug(f"Session collect failed (non-blocking): {e}")
 
         _, _, daily_cap, _ = get_effective_defs()
         daily_points: dict[str, int] = {}
@@ -1560,9 +1626,16 @@ class DataCollector:
             "saved_at": datetime.now().isoformat(),
         }
 
-        daily_dir = self.get_daily_dir(year, quarter)
-        daily_dir.mkdir(parents=True, exist_ok=True)
-        daily_file = daily_dir / f"{target_str}.json"
+        if user_override:
+            peer_name = user_override.get("username", "unknown")
+            peer_dir = self.get_perf_dir(year, quarter) / "peers" / peer_name / "daily"
+            peer_dir.mkdir(parents=True, exist_ok=True)
+            daily_file = peer_dir / f"{target_str}.json"
+        else:
+            daily_dir = self.get_daily_dir(year, quarter)
+            daily_dir.mkdir(parents=True, exist_ok=True)
+            daily_file = daily_dir / f"{target_str}.json"
+
         with open(daily_file, "w", encoding="utf-8") as f:
             json.dump(daily_data, f, indent=2)
 

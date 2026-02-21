@@ -1622,7 +1622,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-02-09T23:28:48.244139'
   total_combinations: 140
-last_updated: '2026-02-20T21:01:15.020385'
+last_updated: '2026-02-21T00:02:48.848476'
 popular_queries:
 - avg_results: 0.0
   first_searched: '2026-02-07T20:58:16.717532'
@@ -1777,3 +1777,9 @@ vector_reindexes:
   timestamp: '2026-02-20T21:01:15.005451'
   total_chunks: 3032
   total_files: 94
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-21T00:02:48.832681'
+  total_chunks: 2403
+  total_files: 62
