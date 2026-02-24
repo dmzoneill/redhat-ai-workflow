@@ -63,7 +63,10 @@ class NPUCompetencyClassifier:
                     model_kwargs=model_kwargs,
                 )
                 self.stats["device_used"] = self.device.upper()
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Loading SentenceTransformer with OpenVINO backend: %s", e
+                )
                 self.model = SentenceTransformer(model_name)
                 self.stats["device_used"] = "CPU (fallback)"
 

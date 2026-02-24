@@ -500,6 +500,19 @@ code_searches:
   query: test
   results_count: 0
   timestamp: '2026-02-09T23:28:46.314198'
+common_hygiene_issues:
+  No fix version set:
+    count: 1
+    example_issues:
+    - AAP-62977
+    first_seen: '2026-02-23T10:25:31.968800'
+    last_seen: '2026-02-23T10:25:31.968803'
+  Story not linked to an Epic:
+    count: 1
+    example_issues:
+    - AAP-62977
+    first_seen: '2026-02-23T10:25:31.968775'
+    last_seen: '2026-02-23T10:25:31.968790'
 daily_patterns:
 - commits: 0
   date: '2026-02-08'
@@ -1221,6 +1234,14 @@ daily_patterns:
   lines_removed: 0
   stale_branches: 0
   weekly_commits: 2
+hygiene_checks:
+- health_score: 85
+  is_healthy: false
+  issue_key: AAP-62977
+  issues_count: 2
+  needs_input_count: 1
+  timestamp: '2026-02-23T10:25:31.811132'
+  transition_ready: false
 knowledge_bootstraps_all:
 - errors: 0
   force: false
@@ -1622,7 +1643,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-02-09T23:28:48.244139'
   total_combinations: 140
-last_updated: '2026-02-21T00:02:48.848476'
+last_updated: '2026-02-24T15:01:07.938659'
 popular_queries:
 - avg_results: 0.0
   first_searched: '2026-02-07T20:58:16.717532'
@@ -1783,3 +1804,99 @@ vector_reindexes:
   timestamp: '2026-02-21T00:02:48.832681'
   total_chunks: 2403
   total_files: 62
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-02-21T12:01:15.105835'
+  total_chunks: 1240
+  total_files: 27
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-21T15:01:07.031250'
+  total_chunks: 827
+  total_files: 9
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-21T18:01:24.411708'
+  total_chunks: 986
+  total_files: 14
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-21T21:01:04.650864'
+  total_chunks: 823
+  total_files: 7
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-22T03:01:02.805161'
+  total_chunks: 874
+  total_files: 9
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-22T12:01:02.834381'
+  total_chunks: 1137
+  total_files: 15
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-22T18:01:19.358642'
+  total_chunks: 1528
+  total_files: 33
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-22T21:01:02.058166'
+  total_chunks: 1121
+  total_files: 10
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T00:01:07.804109'
+  total_chunks: 1293
+  total_files: 18
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T09:01:07.467101'
+  total_chunks: 593
+  total_files: 8
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T12:01:21.407733'
+  total_chunks: 1110
+  total_files: 15
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T15:01:16.145557'
+  total_chunks: 207
+  total_files: 19
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T18:04:59.584330'
+  total_chunks: 2071
+  total_files: 257
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-23T21:01:06.722668'
+  total_chunks: 348
+  total_files: 14
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-24T00:01:04.267847'
+  total_chunks: 1076
+  total_files: 11
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-02-24T15:01:07.921383'
+  total_chunks: 984
+  total_files: 5

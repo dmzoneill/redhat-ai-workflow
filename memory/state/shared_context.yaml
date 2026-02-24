@@ -1,3 +1,32 @@
+current_investigation:
+  context:
+    action: request_changes
+    author: ''
+    files_changed:
+    - AGENTS.md
+    - docs/CSS_DUPLICATE_ANALYSIS.md
+    - docs/CSS_RESTORE_TRACKER.md
+    - docs/ai-rules/10-skill-first.md
+    - docs/ai-rules/15-session-lifecycle.md
+    - docs/ai-rules/25-memory-operations.md
+    - docs/personas/performance.md
+    - docs/skills/performance-backfill-missing.md
+    - docs/skills/performance-collect-daily.md
+    - docs/skills/performance-evaluate-questions.md
+    format_issues:
+    - 'Commit message doesn''t match format: {issue_key} - {type}({scope}): {description}'
+    - 'Examples: AAP-12345 - feat(billing): Add invoice generation, AAP-12345 - fix(api):
+      Handle null response from external service'
+    - 'Pattern: {issue_key} - {type}({scope}): {description}'
+    has_security_issues: false
+    issues_found: []
+    jira_key: null
+    mr_id: '1513'
+    pipeline_status: ok
+    type: pr_review
+  expires_at: '2026-02-24T14:46:08.769807'
+  started_at: '2026-02-23T14:46:08.769807'
+  started_by: review_pr
 last_ci_health_check:
   ci_valid: true
   errors: []
@@ -5,4 +34,4 @@ last_ci_health_check:
   pipeline_count: 5
   project: dataverse/data-products/source-aligned/aapautomationanalytics/aapautomationanalytics-dbt
   timestamp: '2026-02-18T15:21:08.643925'
-last_updated: '2026-02-18T15:21:08.644225'
+last_updated: '2026-02-23T14:46:08.784921'

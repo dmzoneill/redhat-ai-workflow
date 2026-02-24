@@ -28,8 +28,10 @@ import json
 import logging
 import os
 import re
+import statistics
 import time
 from datetime import date, datetime, timedelta
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +41,22 @@ from server.paths import (
     INFERENCE_STATS_FILE,
     SKILL_EXECUTION_FILE,
 )
+from server.utils import run_cmd_sync
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
+from services.stats.anstrat_sync import (
+    load_anstrat_ownership,
+    load_sender_gdrive_docs,
+    load_sender_jira_activity,
+    sync_anstrat_ownership,
+    sync_sender_gdrive_docs,
+    sync_sender_jira_activity,
+)
 from services.stats.collector import DataCollector
 from services.stats.email_parser import (
     get_executive_emails_dir,
     get_executive_senders,
+    is_calendar_event,
     parse_email_text,
     set_executive_senders,
 )
@@ -59,9 +71,12 @@ from services.stats.scorer import (
     get_level_weights,
     get_merged_config,
     get_npu_settings,
+    get_peer_comparable_config,
     get_scope_multipliers,
+    get_source_daily_caps,
     get_strategy_alignment_config,
     load_scoring_config,
+    map_competencies,
     save_scoring_config,
 )
 from services.stats.strategy import (
@@ -89,6 +104,24 @@ def get_performance_summary_path() -> Path:
 logger = logging.getLogger(__name__)
 
 
+def _is_work_repo(
+    repo: str,
+    work_orgs: list[str],
+    work_gl_groups: list[str],
+    work_repos: list[str],
+) -> bool:
+    """Return True if a repo belongs to a known work org or project list."""
+    if repo in work_repos:
+        return True
+    for org in work_orgs:
+        if repo.startswith(f"{org}/"):
+            return True
+    for grp in work_gl_groups:
+        if repo.startswith(f"{grp}/"):
+            return True
+    return False
+
+
 class StatsDaemon(DaemonDBusBase, BaseDaemon):
     """Stats daemon with D-Bus support."""
 
@@ -107,6 +140,29 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self._stats_cache: dict[str, Any] = {}
         self._last_modified: dict[str, float] = {}
         self._collector = DataCollector()
+        self._peer_backfill_task: asyncio.Task | None = None
+        self._peer_backfill_cancelled = False
+        self._peer_backfill_progress: dict[str, Any] = {
+            "running": False,
+            "phase": "",
+            "phase_detail": "",
+            "total_peers": 0,
+            "completed_peers": 0,
+            "current_peer": "",
+            "current_level": "",
+            "total_days": 0,
+            "completed_days": 0,
+            "errors": [],
+            "started_at": "",
+            "elapsed_seconds": 0,
+            "total_events": 0,
+            "cancelled": False,
+            "phases_completed": [],
+        }
+        self._last_collection_time: float = 0.0
+        self._last_collection_errors: dict[str, str] = {}
+        self._last_collection_date: str = ""
+        self._consecutive_collection_failures: int = 0
 
         # Register D-Bus handlers
         self.register_handler("get_state", self._handle_get_state)
@@ -138,6 +194,17 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler("collect_peers", self._handle_collect_peers)
         self.register_handler("collect_peer", self._handle_collect_peer)
         self.register_handler("get_peer_benchmarks", self._handle_get_peer_benchmarks)
+        self.register_handler(
+            "get_peer_backfill_progress",
+            self._handle_get_peer_backfill_progress,
+        )
+        self.register_handler("cancel_backfill", self._handle_cancel_backfill)
+        self.register_handler("scrub_data", self._handle_scrub_data)
+        self.register_handler(
+            "resolve_github_usernames", self._handle_resolve_github_usernames
+        )
+        self.register_handler("rescore_peers", self._handle_rescore_peers)
+        self.register_handler("get_org_stats", self._handle_get_org_stats)
 
         # AI-powered analysis handlers
         self.register_handler("get_peer_narrative", self._handle_get_peer_narrative)
@@ -198,6 +265,24 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self.register_handler(
             "set_executive_senders", self._handle_set_executive_senders
         )
+        self.register_handler(
+            "sync_anstrat_ownership", self._handle_sync_anstrat_ownership
+        )
+        self.register_handler(
+            "get_anstrat_ownership", self._handle_get_anstrat_ownership
+        )
+        self.register_handler(
+            "infer_strategy_relationships",
+            self._handle_infer_strategy_relationships,
+        )
+        self.register_handler(
+            "sync_sender_sources",
+            self._handle_sync_sender_sources,
+        )
+        self.register_handler(
+            "get_sender_sources",
+            self._handle_get_sender_sources,
+        )
 
     # ==================== D-Bus Interface Methods ====================
 
@@ -239,15 +324,28 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
             questions_summary = self._get_questions_summary()
 
+            pc_pct = perf_summary.get("peer_comparable_percentage", {})
+            pc_pts = perf_summary.get("peer_comparable_points", {})
+            ne_pct = perf_summary.get("no_enrichment_percentage", {})
+            ne_pts = perf_summary.get("no_enrichment_points", {})
+
             performance_data = {
                 "last_updated": perf_summary.get("last_updated", now.isoformat()),
                 "quarter": f"Q{quarter} {now.year}",
                 "day_of_quarter": day_of_quarter,
                 "overall_percentage": perf_summary.get("overall_percentage", 0),
+                "no_enrichment_overall": perf_summary.get("no_enrichment_overall", 0),
+                "peer_comparable_overall": perf_summary.get(
+                    "peer_comparable_overall", 0
+                ),
                 "competencies": {
                     k: {
                         "points": perf_summary.get("cumulative_points", {}).get(k, 0),
                         "percentage": v,
+                        "no_enrichment_points": ne_pts.get(k, 0),
+                        "no_enrichment_percentage": ne_pct.get(k, 0),
+                        "peer_comparable_points": pc_pts.get(k, 0),
+                        "peer_comparable_percentage": pc_pct.get(k, 0),
                     }
                     for k, v in perf_summary.get("cumulative_percentage", {}).items()
                 },
@@ -255,6 +353,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "gaps": perf_summary.get("gaps", []),
                 "questions_summary": questions_summary,
                 "strategy_alignment": perf_summary.get("strategy_alignment"),
+                "event_counts_by_source": perf_summary.get(
+                    "event_counts_by_source", {}
+                ),
+                "comparable_event_counts_by_source": perf_summary.get(
+                    "comparable_event_counts_by_source", {}
+                ),
             }
 
         return {
@@ -464,6 +568,176 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         return tagged_total
 
+    @staticmethod
+    def _is_personal_repo_event(ev: dict) -> bool:
+        """Return True if the event is from a personal/non-work repo.
+
+        Checks git, github, gitlab sources against configured work repos/orgs.
+        Used to exclude personal hobby projects from ALL scoring (full + comparable).
+        """
+        source = ev.get("source", "")
+        pc_cfg = get_peer_comparable_config()
+        work_orgs = pc_cfg.get("work_github_orgs", [])
+        work_gl_groups = pc_cfg.get("work_gitlab_groups", [])
+        work_repos = pc_cfg.get("work_project_repos", [])
+
+        if source in ("github", "gitlab"):
+            item_id = ev.get("item_id", "")
+            repo = ""
+            if "#" in item_id:
+                repo = item_id.split("#")[0]
+            elif "!" in item_id:
+                repo = item_id.split("!")[0]
+            if repo and not _is_work_repo(repo, work_orgs, work_gl_groups, work_repos):
+                return True
+
+        if source == "git":
+            title = ev.get("title", "")
+            m = re.match(r"\[([^\]]+)\]", title)
+            repo_name = m.group(1) if m else ""
+            if repo_name and repo_name not in work_repos:
+                return True
+
+        return False
+
+    @staticmethod
+    def _is_primary_only_event(ev: dict) -> bool:
+        """Return True if the event should be excluded from the peer-comparable score.
+
+        Excluded categories (beyond personal repos which are excluded from all scores):
+        - Session events (no peer equivalent)
+        - Personal GDrive (not shared drive)
+        """
+        if StatsDaemon._is_personal_repo_event(ev):
+            return True
+        source = ev.get("source", "")
+        if source == "session":
+            return True
+        if source == "gdrive" and not ev.get("gdrive_shared_drive"):
+            return True
+        return False
+
+    @staticmethod
+    def _normalize_strategy_bonus(points: dict[str, int], ev: dict) -> dict[str, int]:
+        """Remove strategy alignment bonus from event points for fair comparison.
+
+        Peers CAN receive strategy bonuses when their Jira work matches the
+        strategy index (built from executive emails).  Stripping the bonus
+        from both self and peer scores ensures an apples-to-apples comparison.
+        """
+        if not ev.get("strategy_aligned"):
+            return points
+        bonus = 1.5
+        return {comp_id: max(1, round(pts / bonus)) for comp_id, pts in points.items()}
+
+    @staticmethod
+    def _comparable_points(ev: dict) -> dict[str, int]:
+        """Return event points suitable for peer-comparable scoring.
+
+        If the event was enriched with session narrative
+        (extra_classification_text), re-score using the base
+        classification text only so the comparison is fair -- peers
+        never have session enrichment.
+        """
+        extra = ev.get("extra_classification_text", "")
+        if not extra:
+            return ev.get("points", {})
+
+        class_text = ev.get("classification_text", "")
+        if extra and extra in class_text:
+            class_text = class_text.replace(extra, "").rstrip()
+
+        return map_competencies(
+            class_text,
+            ev.get("source", ""),
+            ev.get("type", ""),
+            ev.get("scope", "story"),
+            ev.get("role", "assignee"),
+            strategy_aligned=ev.get("strategy_aligned", False),
+            contribution_type=ev.get("contribution_type"),
+            is_cross_team=ev.get("is_cross_team", False),
+            review_decision=ev.get("review_decision"),
+        )
+
+    @staticmethod
+    def _dedup_events_by_jira_key(events: list[dict]) -> list[dict]:
+        """Deduplicate and cap events for fair daily scoring.
+
+        1. Cross-source dedup: keep only the highest-scoring event per Jira key
+        2. Meeting cap: keep only the top N meeting events by point value
+        """
+        pc_cfg = get_peer_comparable_config()
+        max_meetings = pc_cfg.get("max_meetings_per_day", 3)
+
+        keyed: dict[str, list[dict]] = {}
+        unkeyed: list[dict] = []
+        for ev in events:
+            item_id = ev.get("item_id", "")
+            title = ev.get("title", "")
+            jira_key = ""
+            if re.match(r"[A-Z]+-\d+$", item_id):
+                jira_key = item_id
+            else:
+                m = re.search(r"([A-Z]+-\d+)", title)
+                if m:
+                    jira_key = m.group(1)
+            if jira_key:
+                keyed.setdefault(jira_key, []).append(ev)
+            else:
+                unkeyed.append(ev)
+        result = list(unkeyed)
+        for _jk, evts in keyed.items():
+            best = max(evts, key=lambda e: sum(e.get("points", {}).values()))
+            result.append(best)
+
+        meetings = [e for e in result if e.get("source") == "meeting"]
+        if len(meetings) > max_meetings:
+            meetings.sort(key=lambda e: sum(e.get("points", {}).values()), reverse=True)
+            drop = set(id(e) for e in meetings[max_meetings:])
+            result = [e for e in result if id(e) not in drop]
+
+        return result
+
+    @staticmethod
+    def _compute_daily_points(
+        events: list[dict], daily_cap: int, strip_enrichment: bool = False
+    ) -> dict[str, int]:
+        """Aggregate event points into daily competency totals.
+
+        Applies per-competency daily_cap and per-source daily caps to
+        prevent any single data source from dominating the daily score.
+
+        When strip_enrichment=True, uses _comparable_points() to re-score
+        each event without session enrichment text before aggregating.
+        """
+        source_caps = get_source_daily_caps()
+        daily_points: dict[str, int] = {}
+        source_totals: dict[str, int] = {}
+
+        for ev in events:
+            src = ev.get("source", "unknown")
+            src_cap = source_caps.get(src)
+            if src_cap is not None and source_totals.get(src, 0) >= src_cap:
+                continue
+
+            pts_dict = (
+                StatsDaemon._comparable_points(ev)
+                if strip_enrichment
+                else ev.get("points", {})
+            )
+
+            ev_added = 0
+            for comp_id, pts in pts_dict.items():
+                current = daily_points.get(comp_id, 0)
+                added = min(pts, daily_cap - current)
+                daily_points[comp_id] = current + added
+                ev_added += added
+
+            if src_cap is not None:
+                source_totals[src] = source_totals.get(src, 0) + ev_added
+
+        return daily_points
+
     def _update_summary(
         self, year: int | None = None, quarter: int | None = None
     ) -> dict:
@@ -472,8 +746,18 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         if not daily_dir.exists():
             return {}
 
+        _, _, daily_cap, target_per_competency = get_effective_defs()
+        pc_cfg = get_peer_comparable_config()
+        max_daily_total = pc_cfg.get("max_daily_comparable_total", 0)
+        max_meetings_per_day = pc_cfg.get("max_meetings_per_day", 3)
+
         cumulative_points: dict[str, int] = {}
+        no_enrichment_points: dict[str, int] = {}
+        peer_comparable_points: dict[str, int] = {}
         total_events = 0
+        peer_comparable_events = 0
+        event_counts_by_source: dict[str, int] = {}
+        comparable_event_counts_by_source: dict[str, int] = {}
         highlights: list[str] = []
 
         for daily_file in sorted(daily_dir.glob("*.json")):
@@ -482,14 +766,68 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     data = json.load(f)
                 for comp_id, pts in data.get("daily_points", {}).items():
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
-                total_events += len(data.get("events", []))
-                for ev in data.get("events", [])[:3]:
+                events = data.get("events", [])
+
+                work_events = [
+                    ev for ev in events if not self._is_personal_repo_event(ev)
+                ]
+                deduped = self._dedup_events_by_jira_key(work_events)
+                ne_daily = self._compute_daily_points(
+                    deduped, daily_cap, strip_enrichment=True
+                )
+                for comp_id, pts in ne_daily.items():
+                    no_enrichment_points[comp_id] = (
+                        no_enrichment_points.get(comp_id, 0) + pts
+                    )
+
+                pc_daily: dict[str, int] = {}
+                day_meeting_count = 0
+                for ev in events:
+                    if self._is_personal_repo_event(ev):
+                        continue
+                    src = ev.get("source", "unknown")
+                    total_events += 1
+                    event_counts_by_source[src] = event_counts_by_source.get(src, 0) + 1
+
+                    if not self._is_primary_only_event(ev):
+                        if src == "meeting":
+                            day_meeting_count += 1
+                            if day_meeting_count > max_meetings_per_day:
+                                continue
+                        peer_comparable_events += 1
+                        comparable_event_counts_by_source[src] = (
+                            comparable_event_counts_by_source.get(src, 0) + 1
+                        )
+                        raw_pts = self._comparable_points(ev)
+                        ev_pts = self._normalize_strategy_bonus(raw_pts, ev)
+                        for comp_id, pts in ev_pts.items():
+                            current = pc_daily.get(comp_id, 0)
+                            pc_daily[comp_id] = min(current + pts, daily_cap)
+
+                if max_daily_total and pc_daily:
+                    pc_day_sum = sum(pc_daily.values())
+                    if pc_day_sum > max_daily_total:
+                        scale = max_daily_total / pc_day_sum
+                        pc_daily = {
+                            k: max(1, round(v * scale)) for k, v in pc_daily.items()
+                        }
+
+                for comp_id, pts in pc_daily.items():
+                    peer_comparable_points[comp_id] = (
+                        peer_comparable_points.get(comp_id, 0) + pts
+                    )
+
+                for ev in events[:3]:
                     if ev.get("title") and len(highlights) < 10:
                         highlights.append(ev["title"][:80])
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Failed to read daily file %s during summary update: %s",
+                    daily_file,
+                    e,
+                )
                 continue
 
-        _, _, _, target_per_competency = get_effective_defs()
         cfg = get_merged_config()
         level = cfg.get("engineering_level", "sse")
         lw = get_level_weights(level)
@@ -502,6 +840,18 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         }
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
 
+        ne_pct = {
+            k: min(round(v / effective_target * 100), 100)
+            for k, v in no_enrichment_points.items()
+        }
+        ne_overall = round(sum(ne_pct.values()) / max(len(ne_pct), 1))
+
+        pc_pct = {
+            k: min(round(v / effective_target * 100), 100)
+            for k, v in peer_comparable_points.items()
+        }
+        pc_overall = round(sum(pc_pct.values()) / max(len(pc_pct), 1))
+
         gaps = [k for k, v in cumulative_pct.items() if v < 25]
 
         now = datetime.now()
@@ -513,12 +863,20 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         perf_dir = self._get_perf_dir(year, quarter)
         emails_dir = self._get_executive_emails_dir(year, quarter)
+
+        ownership = load_anstrat_ownership(perf_dir)
+        jira_activity = load_sender_jira_activity(perf_dir)
+        gdrive_docs = load_sender_gdrive_docs(perf_dir)
+
         strategy_alignment = build_strategy_alignment(
             y,
             q,
             cumulative_points,
             perf_dir,
             emails_dir,
+            ownership=ownership,
+            jira_activity=jira_activity,
+            gdrive_docs=gdrive_docs,
         )
 
         questions_summary = self._get_questions_summary(year, quarter)
@@ -530,7 +888,16 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "cumulative_points": cumulative_points,
             "cumulative_percentage": cumulative_pct,
             "overall_percentage": overall,
+            "no_enrichment_points": no_enrichment_points,
+            "no_enrichment_percentage": ne_pct,
+            "no_enrichment_overall": ne_overall,
+            "peer_comparable_points": peer_comparable_points,
+            "peer_comparable_percentage": pc_pct,
+            "peer_comparable_overall": pc_overall,
+            "peer_comparable_events": peer_comparable_events,
             "total_events": total_events,
+            "event_counts_by_source": event_counts_by_source,
+            "comparable_event_counts_by_source": comparable_event_counts_by_source,
             "highlights": highlights,
             "gaps": gaps,
             "strategy_alignment": strategy_alignment,
@@ -550,6 +917,98 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         return summary
 
+    def _compute_peer_comparable_from_daily(
+        self, year: int | None = None, quarter: int | None = None
+    ) -> tuple[dict[str, int], int, dict[str, int], dict[str, int], dict[str, int]]:
+        """Scan daily files and aggregate points excluding primary-only events.
+
+        Also computes no-enrichment points (all non-personal events but with
+        session enrichment text stripped) for the enrichment toggle.
+
+        Returns (peer_comparable_points, peer_comparable_event_count,
+        event_counts_by_source, comparable_event_counts_by_source,
+        no_enrichment_points).
+        """
+        daily_dir = self._get_daily_dir(year, quarter)
+        _, _, daily_cap, _ = get_effective_defs()
+        pc_cfg = get_peer_comparable_config()
+        max_daily_total = pc_cfg.get("max_daily_comparable_total", 0)
+        max_meetings_per_day = pc_cfg.get("max_meetings_per_day", 3)
+        pc_points: dict[str, int] = {}
+        ne_points: dict[str, int] = {}
+        pc_events = 0
+        counts_by_source: dict[str, int] = {}
+        comparable_counts_by_source: dict[str, int] = {}
+
+        if not daily_dir.exists():
+            return (
+                pc_points,
+                pc_events,
+                counts_by_source,
+                comparable_counts_by_source,
+                ne_points,
+            )
+
+        for daily_file in sorted(daily_dir.glob("*.json")):
+            try:
+                with open(daily_file, encoding="utf-8") as f:
+                    data = json.load(f)
+                events = data.get("events", [])
+                work_events = [
+                    ev for ev in events if not self._is_personal_repo_event(ev)
+                ]
+                deduped = self._dedup_events_by_jira_key(work_events)
+                ne_daily = self._compute_daily_points(
+                    deduped, daily_cap, strip_enrichment=True
+                )
+                for comp_id, pts in ne_daily.items():
+                    ne_points[comp_id] = ne_points.get(comp_id, 0) + pts
+
+                pc_daily: dict[str, int] = {}
+                day_meeting_count = 0
+                for ev in events:
+                    if self._is_personal_repo_event(ev):
+                        continue
+                    src = ev.get("source", "unknown")
+                    counts_by_source[src] = counts_by_source.get(src, 0) + 1
+
+                    if not self._is_primary_only_event(ev):
+                        if src == "meeting":
+                            day_meeting_count += 1
+                            if day_meeting_count > max_meetings_per_day:
+                                continue
+                        pc_events += 1
+                        comparable_counts_by_source[src] = (
+                            comparable_counts_by_source.get(src, 0) + 1
+                        )
+                        raw_pts = self._comparable_points(ev)
+                        ev_pts = self._normalize_strategy_bonus(raw_pts, ev)
+                        for comp_id, pts in ev_pts.items():
+                            current = pc_daily.get(comp_id, 0)
+                            pc_daily[comp_id] = min(current + pts, daily_cap)
+
+                if max_daily_total and pc_daily:
+                    pc_day_sum = sum(pc_daily.values())
+                    if pc_day_sum > max_daily_total:
+                        scale = max_daily_total / pc_day_sum
+                        pc_daily = {
+                            k: max(1, round(v * scale)) for k, v in pc_daily.items()
+                        }
+
+                for comp_id, pts in pc_daily.items():
+                    pc_points[comp_id] = pc_points.get(comp_id, 0) + pts
+            except Exception as e:
+                logger.warning("Failed to read daily file for peer comparable: %s", e)
+                continue
+
+        return (
+            pc_points,
+            pc_events,
+            counts_by_source,
+            comparable_counts_by_source,
+            ne_points,
+        )
+
     def _update_summary_from_data(
         self,
         cumulative_points: dict[str, int],
@@ -557,11 +1016,17 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         highlights: list[str],
         year: int | None = None,
         quarter: int | None = None,
+        skip_strategy: bool = False,
     ) -> dict:
         """Build and write quarter summary from pre-computed scoring data.
 
         Avoids re-reading daily files when the caller already has the
         aggregated data (e.g. after _rescore).
+
+        When skip_strategy=True, reuses the existing strategy_alignment and
+        questions_summary from the current summary.json instead of rebuilding
+        them.  This is safe when only min_signals/daily_cap changed (strategy
+        alignment depends on emails/issues, not scoring thresholds).
         """
         _, _, _, target_per_competency = get_effective_defs()
         cfg = get_merged_config()
@@ -577,6 +1042,19 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
         gaps = [k for k, v in cumulative_pct.items() if v < 25]
 
+        pc_points, pc_events, counts_by_source, comp_counts_by_source, ne_points = (
+            self._compute_peer_comparable_from_daily(year, quarter)
+        )
+        pc_pct = {
+            k: min(round(v / effective_target * 100), 100) for k, v in pc_points.items()
+        }
+        pc_overall = round(sum(pc_pct.values()) / max(len(pc_pct), 1))
+
+        ne_pct = {
+            k: min(round(v / effective_target * 100), 100) for k, v in ne_points.items()
+        }
+        ne_overall = round(sum(ne_pct.values()) / max(len(ne_pct), 1))
+
         now = datetime.now()
         y = year or now.year
         q = quarter or ((now.month - 1) // 3 + 1)
@@ -585,15 +1063,37 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         day_of_quarter = (now.date() - date(y, sm, sd)).days + 1
 
         perf_dir = self._get_perf_dir(year, quarter)
-        emails_dir = self._get_executive_emails_dir(year, quarter)
-        strategy_alignment = build_strategy_alignment(
-            y,
-            q,
-            cumulative_points,
-            perf_dir,
-            emails_dir,
-        )
-        questions_summary = self._get_questions_summary(year, quarter)
+
+        if skip_strategy:
+            summary_file = perf_dir / "summary.json"
+            strategy_alignment = {}
+            questions_summary = {}
+            if summary_file.exists():
+                try:
+                    with open(summary_file, encoding="utf-8") as f:
+                        prev = json.load(f)
+                    strategy_alignment = prev.get("strategy_alignment", {})
+                    questions_summary = prev.get("questions_summary", {})
+                except Exception as e:
+                    logger.warning("Failed to read existing summary.json: %s", e)
+                    pass
+        else:
+            emails_dir = self._get_executive_emails_dir(year, quarter)
+            ownership = load_anstrat_ownership(perf_dir)
+            jira_activity = load_sender_jira_activity(perf_dir)
+            gdrive_docs = load_sender_gdrive_docs(perf_dir)
+
+            strategy_alignment = build_strategy_alignment(
+                y,
+                q,
+                cumulative_points,
+                perf_dir,
+                emails_dir,
+                ownership=ownership,
+                jira_activity=jira_activity,
+                gdrive_docs=gdrive_docs,
+            )
+            questions_summary = self._get_questions_summary(year, quarter)
 
         summary = {
             "year": y,
@@ -602,7 +1102,16 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "cumulative_points": cumulative_points,
             "cumulative_percentage": cumulative_pct,
             "overall_percentage": overall,
+            "no_enrichment_points": ne_points,
+            "no_enrichment_percentage": ne_pct,
+            "no_enrichment_overall": ne_overall,
+            "peer_comparable_points": pc_points,
+            "peer_comparable_percentage": pc_pct,
+            "peer_comparable_overall": pc_overall,
+            "peer_comparable_events": pc_events,
             "total_events": total_events,
+            "event_counts_by_source": counts_by_source,
+            "comparable_event_counts_by_source": comp_counts_by_source,
             "highlights": highlights,
             "gaps": gaps,
             "strategy_alignment": strategy_alignment,
@@ -643,7 +1152,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as f:
                         self._collector.hierarchy_cache = json.load(f)
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load hierarchy cache %s: %s", cache_file, e
+                    )
                     self._collector.hierarchy_cache = {}
 
             loop = asyncio.get_event_loop()
@@ -654,19 +1166,66 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             )
             await loop.run_in_executor(None, self._update_summary)
 
-            # Tag collected events to quarterly questions
             await loop.run_in_executor(
                 None, self._tag_events_to_questions, perf_dir, daily_data
             )
+
+            source_errors = daily_data.get("source_errors", {})
+            self._last_collection_time = time.time()
+            self._last_collection_date = target.isoformat()
+            self._last_collection_errors = source_errors
+
+            if source_errors:
+                self._consecutive_collection_failures += 1
+                failed_sources = ", ".join(source_errors.keys())
+                logger.error(
+                    "Collection for %s completed with %d source failure(s): %s",
+                    target.isoformat(),
+                    len(source_errors),
+                    failed_sources,
+                )
+                self.emit_event(
+                    "collection_failure",
+                    json.dumps(
+                        {
+                            "date": target.isoformat(),
+                            "failed_sources": list(source_errors.keys()),
+                            "errors": source_errors,
+                            "event_count": len(daily_data.get("events", [])),
+                            "consecutive_failures": self._consecutive_collection_failures,
+                        }
+                    ),
+                )
+            else:
+                self._consecutive_collection_failures = 0
 
             return {
                 "success": True,
                 "event_count": len(daily_data.get("events", [])),
                 "daily_total": daily_data.get("daily_total", 0),
                 "date": target.isoformat(),
+                "source_errors": source_errors,
+                "sources_attempted": daily_data.get("sources_attempted", []),
+                "sources_succeeded": daily_data.get("sources_succeeded", []),
             }
         except Exception as e:
-            logger.error(f"Failed to collect daily data: {e}")
+            self._consecutive_collection_failures += 1
+            self._last_collection_time = time.time()
+            self._last_collection_date = target.isoformat()
+            self._last_collection_errors = {"_fatal": str(e)}
+            logger.error(
+                "Failed to collect daily data for %s: %s", target.isoformat(), e
+            )
+            self.emit_event(
+                "collection_failure",
+                json.dumps(
+                    {
+                        "date": target.isoformat(),
+                        "fatal_error": str(e),
+                        "consecutive_failures": self._consecutive_collection_failures,
+                    }
+                ),
+            )
             return {"success": False, "error": str(e)}
 
     async def _handle_backfill(self, **kwargs) -> dict:
@@ -687,6 +1246,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             current += timedelta(days=1)
 
         results = []
+        failed_days = []
+        all_source_errors: dict[str, list[str]] = {}
         loop = asyncio.get_event_loop()
 
         for d in all_weekdays:
@@ -696,14 +1257,21 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     self._collector.collect_for_date,
                     d,
                 )
+                day_errors = daily_data.get("source_errors", {})
                 results.append(
                     {
                         "date": d.isoformat(),
                         "success": True,
                         "events": len(daily_data.get("events", [])),
+                        "source_errors": day_errors,
                     }
                 )
+                for src, err in day_errors.items():
+                    all_source_errors.setdefault(src, []).append(
+                        f"{d.isoformat()}: {err}"
+                    )
             except Exception as e:
+                failed_days.append(d.isoformat())
                 results.append(
                     {
                         "date": d.isoformat(),
@@ -711,28 +1279,67 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         "error": str(e),
                     }
                 )
+                logger.error("Backfill failed for %s: %s", d.isoformat(), e)
 
         if all_weekdays:
             await loop.run_in_executor(None, self._update_summary)
 
-            # Rebuild all question evidence from scratch after backfill
             perf_dir = self._get_perf_dir(year, quarter)
             await loop.run_in_executor(
                 None, self._tag_events_to_questions, perf_dir, None
             )
 
+        if failed_days or all_source_errors:
+            logger.error(
+                "Backfill completed with issues: %d day(s) failed completely, "
+                "%d source(s) had errors",
+                len(failed_days),
+                len(all_source_errors),
+            )
+            self.emit_event(
+                "backfill_errors",
+                json.dumps(
+                    {
+                        "failed_days": failed_days,
+                        "source_errors": {
+                            src: len(errs) for src, errs in all_source_errors.items()
+                        },
+                        "total_days": len(all_weekdays),
+                    }
+                ),
+            )
+
         return {
-            "success": True,
+            "success": len(failed_days) == 0,
             "processed": len(all_weekdays),
             "remaining": 0,
             "results": results,
             "days_processed": len(all_weekdays),
+            "failed_days": failed_days,
+            "source_error_summary": {
+                src: len(errs) for src, errs in all_source_errors.items()
+            },
         }
 
     # ==================== Peer Comparison ====================
 
     def _load_peers_config(self) -> dict[str, list[dict]]:
-        """Load the peers roster from config.json."""
+        """Load peers roster from org_roster.json (preferred) or config.json."""
+        org_roster = AA_CONFIG_DIR / "performance" / "org" / "org_roster.json"
+        try:
+            if org_roster.exists():
+                with open(org_roster, encoding="utf-8") as f:
+                    roster = json.load(f)
+                peers = roster.get("peers", {})
+                if peers:
+                    logger.info(
+                        "Loaded %d peer levels from org_roster.json",
+                        len(peers),
+                    )
+                    return peers
+        except Exception as e:
+            logger.warning("Failed to load org_roster.json: %s", e)
+
         config_paths = [
             Path(__file__).parent.parent.parent / "config.json",
             AA_CONFIG_DIR / "config.json",
@@ -745,9 +1352,39 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     peers = config.get("peers", {})
                     if peers:
                         return peers
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to read config file: %s", e)
                 continue
         return {}
+
+    async def _handle_get_org_stats(self, **kwargs) -> dict:
+        """Return org roster statistics for the Peers overview charts."""
+        org_roster = AA_CONFIG_DIR / "performance" / "org" / "org_roster.json"
+        try:
+            if not org_roster.exists():
+                return {"success": True, "data": {"available": False}}
+            with open(org_roster, encoding="utf-8") as f:
+                roster = json.load(f)
+            stats = roster.get("stats", {})
+            by_level = stats.get("by_level", {})
+            peers = roster.get("peers", {})
+            sampled = {lvl: len(p_list) for lvl, p_list in peers.items()}
+            return {
+                "success": True,
+                "data": {
+                    "available": True,
+                    "total_org_chart": stats.get("total_org_chart", 0),
+                    "total_resolved": stats.get("total_resolved", 0),
+                    "total_unresolved": stats.get("total_unresolved", 0),
+                    "by_level": by_level,
+                    "sampled_per_level": sampled,
+                    "selected_per_level": stats.get("selected_per_level", 10),
+                    "generated": roster.get("generated", ""),
+                },
+            }
+        except Exception as e:
+            logger.warning("Failed to load org stats: %s", e)
+            return {"success": False, "error": str(e)}
 
     def _update_peer_summary(
         self,
@@ -756,14 +1393,22 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         year: int | None = None,
         quarter: int | None = None,
     ) -> dict:
-        """Build summary.json for a single peer from their daily files."""
+        """Build summary.json for a single peer from their daily files.
+
+        Computes both raw cumulative scores and peer-comparable scores
+        (strategy bonus stripped) so benchmarks can be built from either.
+        """
         perf_dir = self._get_perf_dir(year, quarter)
         peer_daily_dir = perf_dir / "peers" / username / "daily"
         if not peer_daily_dir.exists():
             return {}
 
+        _, _, daily_cap, target_per_competency = get_effective_defs()
+
         cumulative_points: dict[str, int] = {}
+        comparable_points: dict[str, int] = {}
         total_events = 0
+        days_with_events = 0
         event_counts: dict[str, int] = {}
 
         for daily_file in sorted(peer_daily_dir.glob("*.json")):
@@ -774,13 +1419,28 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
                 day_events = data.get("events", [])
                 total_events += len(day_events)
+                if day_events:
+                    days_with_events += 1
+
+                pc_daily: dict[str, int] = {}
                 for ev in day_events:
                     src = ev.get("source", "unknown")
                     event_counts[src] = event_counts.get(src, 0) + 1
-            except Exception:
+
+                    if not self._is_primary_only_event(ev):
+                        ev_pts = self._normalize_strategy_bonus(
+                            ev.get("points", {}), ev
+                        )
+                        for comp_id, pts in ev_pts.items():
+                            current = pc_daily.get(comp_id, 0)
+                            pc_daily[comp_id] = min(current + pts, daily_cap)
+
+                for comp_id, pts in pc_daily.items():
+                    comparable_points[comp_id] = comparable_points.get(comp_id, 0) + pts
+            except Exception as e:
+                logger.warning("Failed to read peer daily file: %s", e)
                 continue
 
-        _, _, _, target_per_competency = get_effective_defs()
         lw = get_level_weights(level)
         target_scale = lw.get("target_scale", 1.0)
         effective_target = max(round(target_per_competency * target_scale), 1)
@@ -790,6 +1450,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             for k, v in cumulative_points.items()
         }
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
+
+        comparable_pct = {
+            k: min(round(v / effective_target * 100), 100)
+            for k, v in comparable_points.items()
+        }
+        comparable_overall = round(
+            sum(comparable_pct.values()) / max(len(comparable_pct), 1)
+        )
 
         now = datetime.now()
         y = year or now.year
@@ -806,8 +1474,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "cumulative_points": cumulative_points,
             "cumulative_percentage": cumulative_pct,
             "overall_percentage": overall,
+            "comparable_points": comparable_points,
+            "comparable_percentage": comparable_pct,
+            "comparable_overall": comparable_overall,
             "total_events": total_events,
             "days_captured": days_captured,
+            "days_with_events": days_with_events,
             "avg_daily_events": avg_daily_events,
             "event_counts_by_source": event_counts,
             "effective_target": effective_target,
@@ -821,42 +1493,120 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         return summary
 
+    @staticmethod
+    def _compute_distribution(values: list[float | int]) -> dict:
+        """Compute min/max/median/p25/p75/avg from a list of numeric values."""
+        if not values:
+            return {
+                "min": 0,
+                "max": 0,
+                "median": 0,
+                "p25": 0,
+                "p75": 0,
+                "avg": 0,
+                "count": 0,
+            }
+        sv = sorted(values)
+        n = len(sv)
+        return {
+            "min": round(sv[0], 1),
+            "max": round(sv[-1], 1),
+            "median": round(statistics.median(sv), 1),
+            "p25": round(sv[max(0, n // 4)], 1),
+            "p75": round(sv[min(n - 1, 3 * n // 4)], 1),
+            "avg": round(statistics.mean(sv), 1),
+            "count": n,
+        }
+
     def _update_peer_benchmarks(
         self,
         year: int | None = None,
         quarter: int | None = None,
     ) -> dict:
-        """Aggregate all peer summaries into benchmarks.json grouped by level."""
+        """Aggregate all peer summaries into benchmarks.json grouped by level.
+
+        Produces both raw and comparable (strategy-normalized) benchmark
+        stats so the UI can display a fair apples-to-apples comparison.
+
+        Only peers with actual event data (total_events > 0) are included
+        in averages and distributions.  The current user is excluded from
+        the peer roster to avoid self-comparison bias.
+        """
         perf_dir = self._get_perf_dir(year, quarter)
         peers_dir = perf_dir / "peers"
         if not peers_dir.exists():
             return {}
 
+        self_username = self._collector.get_jira_username()
         peers_config = self._load_peers_config()
+        pc_cfg = get_peer_comparable_config()
+        min_events = pc_cfg.get("min_peer_events", 30)
+        min_days = pc_cfg.get("min_peer_active_days", 15)
+        blacklist = set(pc_cfg.get("blacklisted_peers", []))
         levels: dict[str, dict] = {}
 
         for level_key, peer_list in peers_config.items():
             level_data: dict[str, Any] = {
                 "engineers": [],
+                "excluded_sparse": [],
                 "summaries": [],
                 "avg_competency_pct": {},
                 "avg_competency_points": {},
                 "avg_overall_pct": 0,
+                "comparable_avg_competency_pct": {},
+                "comparable_avg_overall_pct": 0,
+                "comparable_stats_competency": {},
+                "comparable_stats_overall": {},
                 "avg_daily_events": 0.0,
                 "avg_event_counts_by_source": {},
+                "avg_days_with_events": 0.0,
+                "stats_overall": {},
+                "stats_competency": {},
             }
 
+            roster_count = 0
             for peer in peer_list:
                 uname = peer["username"]
+                if uname == self_username:
+                    continue
+                roster_count += 1
+                if uname in blacklist:
+                    level_data["excluded_sparse"].append(uname)
+                    continue
                 summary_file = peers_dir / uname / "summary.json"
                 if summary_file.exists():
                     try:
                         with open(summary_file, encoding="utf-8") as f:
                             s = json.load(f)
-                        level_data["engineers"].append(uname)
-                        level_data["summaries"].append(s)
-                    except Exception:
+                        total_ev = s.get("total_events", 0)
+                        active_days = s.get(
+                            "days_with_events", s.get("days_captured", 0)
+                        )
+                        if total_ev < min_events or active_days < min_days:
+                            level_data["excluded_sparse"].append(uname)
+                            continue
+                        if total_ev > 0:
+                            level_data["engineers"].append(uname)
+                            level_data["summaries"].append(s)
+                    except Exception as e:
+                        logger.warning("Failed to read peer summary.json: %s", e)
                         continue
+
+            if not level_data["summaries"] and level_data["excluded_sparse"]:
+                for uname in list(level_data["excluded_sparse"]):
+                    if uname in blacklist:
+                        continue
+                    summary_file = peers_dir / uname / "summary.json"
+                    if summary_file.exists():
+                        try:
+                            with open(summary_file, encoding="utf-8") as f:
+                                s = json.load(f)
+                            if s.get("total_events", 0) > 0:
+                                level_data["engineers"].append(uname)
+                                level_data["summaries"].append(s)
+                                level_data["excluded_sparse"].remove(uname)
+                        except Exception:
+                            continue
 
             n = len(level_data["summaries"])
             if n > 0:
@@ -864,7 +1614,17 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 for s in level_data["summaries"]:
                     all_comp_ids.update(s.get("cumulative_percentage", {}).keys())
 
+                excluded_comps: set[str] = set()
                 for comp_id in all_comp_ids:
+                    all_zero = all(
+                        s.get("cumulative_points", {}).get(comp_id, 0) == 0
+                        for s in level_data["summaries"]
+                    )
+                    if all_zero:
+                        excluded_comps.add(comp_id)
+
+                comparable_comps = all_comp_ids - excluded_comps
+                for comp_id in comparable_comps:
                     pct_sum = sum(
                         s.get("cumulative_percentage", {}).get(comp_id, 0)
                         for s in level_data["summaries"]
@@ -876,12 +1636,64 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     level_data["avg_competency_pct"][comp_id] = round(pct_sum / n)
                     level_data["avg_competency_points"][comp_id] = round(pts_sum / n)
 
-                level_data["avg_overall_pct"] = round(
-                    sum(s.get("overall_percentage", 0) for s in level_data["summaries"])
-                    / n
+                    comp_values = [
+                        s.get("cumulative_percentage", {}).get(comp_id, 0)
+                        for s in level_data["summaries"]
+                    ]
+                    level_data["stats_competency"][comp_id] = (
+                        self._compute_distribution(comp_values)
+                    )
+
+                    comp_comparable_pct_sum = sum(
+                        s.get(
+                            "comparable_percentage", s.get("cumulative_percentage", {})
+                        ).get(comp_id, 0)
+                        for s in level_data["summaries"]
+                    )
+                    level_data["comparable_avg_competency_pct"][comp_id] = round(
+                        comp_comparable_pct_sum / n
+                    )
+
+                    comp_comparable_values = [
+                        s.get(
+                            "comparable_percentage", s.get("cumulative_percentage", {})
+                        ).get(comp_id, 0)
+                        for s in level_data["summaries"]
+                    ]
+                    level_data["comparable_stats_competency"][comp_id] = (
+                        self._compute_distribution(comp_comparable_values)
+                    )
+
+                level_data["excluded_competencies"] = sorted(excluded_comps)
+
+                overall_values = [
+                    s.get("overall_percentage", 0) for s in level_data["summaries"]
+                ]
+                level_data["avg_overall_pct"] = round(sum(overall_values) / n)
+                level_data["stats_overall"] = self._compute_distribution(overall_values)
+
+                comparable_overall_values = [
+                    s.get("comparable_overall", s.get("overall_percentage", 0))
+                    for s in level_data["summaries"]
+                ]
+                level_data["comparable_avg_overall_pct"] = round(
+                    sum(comparable_overall_values) / n
                 )
+                level_data["comparable_stats_overall"] = self._compute_distribution(
+                    comparable_overall_values
+                )
+
                 level_data["avg_daily_events"] = round(
                     sum(s.get("avg_daily_events", 0) for s in level_data["summaries"])
+                    / n,
+                    1,
+                )
+
+                level_data["avg_days_with_events"] = round(
+                    sum(
+                        s.get("days_with_events", s.get("days_captured", 0))
+                        for s in level_data["summaries"]
+                    )
                     / n,
                     1,
                 )
@@ -899,6 +1711,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         1,
                     )
 
+            level_data["peer_count"] = n
+            level_data["roster_count"] = roster_count
             del level_data["summaries"]
             levels[level_key] = level_data
 
@@ -968,9 +1782,26 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             return {"success": False, "error": str(e)}
 
     async def _handle_collect_peers(self, **kwargs) -> dict:
-        """Collect data for all configured peers for the current quarter."""
+        """Collect data for all configured peers for the current quarter.
+
+        When backfill=True, launches a background task and returns immediately
+        so the caller can poll progress via get_peer_backfill_progress.
+
+        Optional filters (only used when backfill=True):
+          sources:    list of data sources to collect, e.g. ["jira","gitlab"].
+                      None / empty means all sources.
+          usernames:  list of peer usernames to limit to.
+                      None / empty means all peers.
+          date_start: ISO date string for range start (inclusive).
+          date_end:   ISO date string for range end (inclusive).
+        """
         date_str = kwargs.get("date", "")
         backfill = kwargs.get("backfill", False)
+
+        sources = kwargs.get("sources") or None
+        usernames = kwargs.get("usernames") or None
+        date_start = kwargs.get("date_start", "")
+        date_end = kwargs.get("date_end", "")
 
         try:
             target = date.fromisoformat(date_str) if date_str else date.today()
@@ -979,78 +1810,761 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         peers_config = self._load_peers_config()
         if not peers_config:
-            return {"success": False, "error": "No peers configured in config.json"}
+            return {"success": False, "error": "No peers configured"}
 
-        results: list[dict] = []
+        if backfill:
+            if self._peer_backfill_progress["running"]:
+                return {
+                    "success": False,
+                    "error": "Peer backfill already running",
+                    "progress": self._peer_backfill_progress,
+                }
+            self._peer_backfill_task = asyncio.create_task(
+                self._run_peer_backfill(
+                    peers_config,
+                    target,
+                    sources=sources,
+                    usernames=usernames,
+                    date_start=date_start,
+                    date_end=date_end,
+                )
+            )
+            label_parts = []
+            if sources:
+                label_parts.append(f"sources={sources}")
+            if usernames:
+                label_parts.append(f"peers={usernames}")
+            if date_start or date_end:
+                label_parts.append(
+                    f"range={date_start or 'q-start'}..{date_end or 'today'}"
+                )
+            scope = ", ".join(label_parts) if label_parts else "all"
+            return {
+                "success": True,
+                "async": True,
+                "message": f"Peer backfill started ({scope})",
+            }
+
+        return await self._collect_peers_sync(peers_config, [target], sources=sources)
+
+    def _ensure_strategy_and_hierarchy(self, year: int, quarter: int) -> None:
+        """Load strategy index and hierarchy cache if not already set."""
+        if not self._collector.strategy_index:
+            emails_dir = self._get_executive_emails_dir(year, quarter)
+            self._collector.strategy_index = build_strategy_context_index(emails_dir)
+        if not self._collector.hierarchy_cache:
+            perf_dir = self._get_perf_dir(year, quarter)
+            cache_file = perf_dir / "jira_hierarchy_cache.json"
+            if cache_file.exists():
+                try:
+                    with open(cache_file, encoding="utf-8") as f:
+                        self._collector.hierarchy_cache = json.load(f)
+                except Exception as e:
+                    logger.warning("Failed to load hierarchy cache: %s", e)
+                    self._collector.hierarchy_cache = {}
+
+    async def _collect_peers_sync(
+        self,
+        peers_config: dict[str, list[dict]],
+        dates_to_collect: list[date],
+        sources: list[str] | None = None,
+    ) -> dict:
+        """Synchronous peer collection (for daily / single-date collection)."""
         loop = asyncio.get_event_loop()
-
+        target = dates_to_collect[0]
         year = target.year
         quarter = (target.month - 1) // 3 + 1
 
-        if backfill:
-            quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
-            sm, sd = quarter_starts[quarter]
-            quarter_start = date(year, sm, sd)
-            all_weekdays: list[date] = []
-            current = quarter_start
-            today = date.today()
-            while current <= today:
-                if current.weekday() < 5:
-                    all_weekdays.append(current)
-                current += timedelta(days=1)
-            dates_to_collect = all_weekdays
-        else:
-            dates_to_collect = [target]
+        self._ensure_strategy_and_hierarchy(year, quarter)
+
+        results: list[dict] = []
+        total_events = 0
 
         for level_key, peer_list in peers_config.items():
             for peer in peer_list:
                 username = peer["username"]
-                peer_results: list[dict] = []
+                peer_events = 0
                 for d in dates_to_collect:
                     try:
                         daily_data = await loop.run_in_executor(
                             None,
-                            lambda _d=d, _p=peer, _l=level_key: self._collector.collect_for_date(
-                                _d, user_override=_p, level_override=_l
+                            lambda _d=d, _p=peer, _l=level_key, _s=sources: self._collector.collect_for_date(
+                                _d, user_override=_p, level_override=_l, sources=_s
                             ),
                         )
-                        peer_results.append(
-                            {
-                                "date": d.isoformat(),
-                                "success": True,
-                                "events": len(daily_data.get("events", [])),
-                            }
-                        )
+                        peer_events += len(daily_data.get("events", []))
                     except Exception as e:
-                        peer_results.append(
-                            {
-                                "date": d.isoformat(),
-                                "success": False,
-                                "error": str(e),
-                            }
-                        )
+                        logger.debug("Peer %s date %s failed: %s", username, d, e)
 
                 await loop.run_in_executor(
                     None, self._update_peer_summary, username, level_key, year, quarter
                 )
+                total_events += peer_events
                 results.append(
                     {
                         "username": username,
                         "level": level_key,
-                        "days_processed": len(peer_results),
-                        "days_succeeded": sum(1 for r in peer_results if r["success"]),
+                        "total_events": peer_events,
                     }
                 )
 
         await loop.run_in_executor(None, self._update_peer_benchmarks, year, quarter)
 
-        total_peers = sum(len(pl) for pl in peers_config.values())
         return {
             "success": True,
-            "peers_processed": total_peers,
-            "backfill": backfill,
+            "peers_processed": sum(len(pl) for pl in peers_config.values()),
+            "backfill": False,
+            "total_events": total_events,
             "results": results,
         }
+
+    async def _run_peer_backfill(
+        self,
+        peers_config: dict[str, list[dict]],
+        target: date,
+        *,
+        sources: list[str] | None = None,
+        usernames: list[str] | None = None,
+        date_start: str = "",
+        date_end: str = "",
+    ) -> None:
+        """Background task: backfill peer data for the quarter with progress.
+
+        Granular filters let callers re-collect specific slices without a
+        full scrub:
+          sources   – only re-collect these data sources (git/jira/gitlab/github/gdrive/meeting)
+          usernames – only process these peers
+          date_start/date_end – restrict to a date range within the quarter
+        """
+        year = target.year
+        quarter = (target.month - 1) // 3 + 1
+        loop = asyncio.get_event_loop()
+        start_time = time.monotonic()
+
+        src_set = set(sources) if sources else None
+        filter_label = []
+        if sources:
+            filter_label.append(f"sources={sources}")
+        if usernames:
+            filter_label.append(f"peers={usernames}")
+        if date_start or date_end:
+            filter_label.append(
+                f"range={date_start or 'q-start'}..{date_end or 'today'}"
+            )
+
+        self._peer_backfill_cancelled = False
+        self._peer_backfill_progress.update(
+            {
+                "running": True,
+                "phase": "resolve_github",
+                "phase_detail": "Resolving GitHub usernames...",
+                "total_peers": 0,
+                "completed_peers": 0,
+                "current_peer": "resolving GitHub usernames...",
+                "current_level": "",
+                "total_days": 0,
+                "completed_days": 0,
+                "errors": [],
+                "started_at": datetime.now().isoformat(timespec="seconds"),
+                "elapsed_seconds": 0,
+                "total_events": 0,
+                "cancelled": False,
+                "phases_completed": [],
+                "sources": sources or [],
+                "filter_info": ", ".join(filter_label) if filter_label else "all",
+            }
+        )
+
+        try:
+            from services.stats.org_parser import resolve_github_usernames
+
+            peers_config = await loop.run_in_executor(
+                None, resolve_github_usernames, peers_config
+            )
+            logger.info("GitHub username resolution completed before backfill")
+        except Exception as e:
+            logger.warning("GitHub username resolution failed (non-blocking): %s", e)
+
+        self._peer_backfill_progress["phases_completed"].append("resolve_github")
+
+        if self._peer_backfill_cancelled:
+            self._peer_backfill_progress.update(
+                {"running": False, "cancelled": True, "phase": "cancelled"}
+            )
+            return
+
+        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        sm, sd = quarter_starts[quarter]
+        quarter_start = date(year, sm, sd)
+        all_weekdays: list[date] = []
+        current = quarter_start
+        today = date.today()
+        while current <= today:
+            if current.weekday() < 5:
+                all_weekdays.append(current)
+            current += timedelta(days=1)
+
+        if date_start:
+            try:
+                ds = date.fromisoformat(date_start)
+                all_weekdays = [d for d in all_weekdays if d >= ds]
+            except ValueError:
+                pass
+        if date_end:
+            try:
+                de = date.fromisoformat(date_end)
+                all_weekdays = [d for d in all_weekdays if d <= de]
+            except ValueError:
+                pass
+
+        all_peers = [
+            (level_key, peer)
+            for level_key, peer_list in peers_config.items()
+            for peer in peer_list
+        ]
+        if usernames:
+            uname_set = set(usernames)
+            all_peers = [(lk, p) for lk, p in all_peers if p["username"] in uname_set]
+
+        total_peers = len(all_peers)
+        total_days = len(all_weekdays)
+
+        self._peer_backfill_progress.update(
+            {
+                "total_peers": total_peers,
+                "current_peer": "",
+                "total_days": total_days,
+            }
+        )
+
+        self._ensure_strategy_and_hierarchy(year, quarter)
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        for level_key, peer in all_peers:
+            if not src_set or "gitlab" in src_set:
+                gl_user = peer.get("gitlab_username", "")
+                if gl_user:
+                    cache = perf_dir / f"gitlab_event_cache_{gl_user}.json"
+                    if cache.exists():
+                        with self._collector._gitlab_mem_lock:
+                            self._collector._gitlab_mem_cache.pop(str(cache), None)
+                        cache.unlink()
+            if not src_set or "github" in src_set:
+                gh_user = peer.get("github_username", "")
+                if gh_user:
+                    cache = perf_dir / f"github_cache_{gh_user}.json"
+                    if cache.exists():
+                        with self._collector._github_mem_lock:
+                            self._collector._github_mem_cache.pop(str(cache), None)
+                        cache.unlink()
+
+        prefetch_count = 0
+        if not src_set or src_set & {"gitlab", "github", "jira"}:
+            self._peer_backfill_progress.update(
+                {
+                    "phase": "prefetch",
+                    "phase_detail": "Pre-fetching quarter caches...",
+                    "current_peer": "pre-fetching quarter caches...",
+                }
+            )
+            for pf_idx, (_, peer) in enumerate(all_peers):
+                if self._peer_backfill_cancelled:
+                    self._peer_backfill_progress.update(
+                        {"running": False, "cancelled": True, "phase": "cancelled"}
+                    )
+                    return
+                pf_user = peer["username"]
+                try:
+                    if not src_set or "gitlab" in src_set:
+                        gl_u = peer.get("gitlab_username", "")
+                        if gl_u:
+                            await loop.run_in_executor(
+                                None,
+                                lambda _u=gl_u: self._collector.get_gitlab_cache(
+                                    year, quarter, username_override=_u
+                                ),
+                            )
+                    if not src_set or "github" in src_set:
+                        gh_u = peer.get("github_username", "")
+                        if gh_u:
+                            await loop.run_in_executor(
+                                None,
+                                lambda _u=gh_u: self._collector.get_github_cache(
+                                    year, quarter, username_override=_u
+                                ),
+                            )
+                    if not src_set or "jira" in src_set:
+                        jira_u = peer.get("jira_username", "")
+                        if jira_u:
+                            await loop.run_in_executor(
+                                None,
+                                lambda _u=jira_u: self._collector.prefetch_jira_quarter(
+                                    _u, year, quarter
+                                ),
+                            )
+                    prefetch_count += 1
+                except Exception as e:
+                    logger.warning("Pre-fetch failed for %s: %s", pf_user, e)
+                self._peer_backfill_progress.update(
+                    {
+                        "current_peer": f"pre-fetching caches... {pf_idx+1}/{len(all_peers)}",
+                        "elapsed_seconds": int(time.monotonic() - start_time),
+                    }
+                )
+            logger.info(
+                "Pre-fetched quarter caches for %d/%d peers in %ds",
+                prefetch_count,
+                len(all_peers),
+                int(time.monotonic() - start_time),
+            )
+            self._peer_backfill_progress["phases_completed"].append("prefetch")
+
+        if self._peer_backfill_cancelled:
+            self._peer_backfill_progress.update(
+                {"running": False, "cancelled": True, "phase": "cancelled"}
+            )
+            return
+
+        if not src_set or "gdrive" in src_set:
+            self._peer_backfill_progress.update(
+                {
+                    "phase": "index_gdrive",
+                    "phase_detail": "Indexing shared drives...",
+                    "current_peer": "indexing shared drives...",
+                }
+            )
+            try:
+                from services.stats.gdrive_collector import (
+                    _get_shared_drive_ids,
+                    ensure_shared_drive_index,
+                )
+
+                _drive_ids = _get_shared_drive_ids()
+                await loop.run_in_executor(
+                    None,
+                    lambda: ensure_shared_drive_index(
+                        perf_dir=perf_dir,
+                        drive_ids=_drive_ids,
+                        target=all_weekdays[0] if all_weekdays else date.today(),
+                    ),
+                )
+                logger.info(
+                    "Shared drive index built in %ds",
+                    int(time.monotonic() - start_time),
+                )
+            except Exception as e:
+                logger.warning("Shared drive index failed (non-blocking): %s", e)
+            self._peer_backfill_progress["phases_completed"].append("index_gdrive")
+
+        if self._peer_backfill_cancelled:
+            self._peer_backfill_progress.update(
+                {"running": False, "cancelled": True, "phase": "cancelled"}
+            )
+            return
+
+        if not src_set or "meeting" in src_set:
+            self._peer_backfill_progress.update(
+                {
+                    "phase": "index_meetings",
+                    "phase_detail": "Indexing meeting attendance...",
+                    "current_peer": "indexing meeting attendance...",
+                }
+            )
+            try:
+                from services.stats.meeting_collector import ensure_meeting_peer_index
+
+                await loop.run_in_executor(
+                    None,
+                    lambda: ensure_meeting_peer_index(
+                        perf_dir=perf_dir,
+                        target=all_weekdays[0] if all_weekdays else date.today(),
+                    ),
+                )
+                logger.info(
+                    "Meeting peer index built in %ds",
+                    int(time.monotonic() - start_time),
+                )
+            except Exception as e:
+                logger.warning("Meeting peer index failed (non-blocking): %s", e)
+            self._peer_backfill_progress["phases_completed"].append("index_meetings")
+
+        if self._peer_backfill_cancelled:
+            self._peer_backfill_progress.update(
+                {"running": False, "cancelled": True, "phase": "cancelled"}
+            )
+            return
+
+        self._peer_backfill_progress.update(
+            {
+                "phase": "collecting",
+                "phase_detail": "Collecting peer data...",
+            }
+        )
+
+        PARALLEL_PEERS = 4
+        sem = asyncio.Semaphore(PARALLEL_PEERS)
+        completed_peers_count = 0
+        total_events = 0
+        _progress_lock = asyncio.Lock()
+
+        async def _process_peer(
+            peer_idx: int,
+            level_key: str,
+            peer: dict,
+        ) -> int:
+            nonlocal completed_peers_count, total_events
+            username = peer["username"]
+
+            async with sem:
+                if src_set and "jira" in src_set:
+                    jira_user = peer.get("jira_username", "")
+                    if jira_user:
+                        cache_key = f"{jira_user}:{year}:Q{quarter}"
+                        with self._collector._jira_quarter_lock:
+                            self._collector._jira_quarter_cache.pop(cache_key, None)
+
+                peer_repos = None
+                if not src_set or "git" in src_set:
+                    peer_repos = await loop.run_in_executor(
+                        None,
+                        lambda _p=peer: self._collector.prepare_peer_repos(
+                            _p, year, quarter
+                        ),
+                    )
+
+                peer_events = 0
+                peers_daily_dir = perf_dir / "peers" / username / "daily"
+                for day_idx, d in enumerate(all_weekdays):
+                    if self._peer_backfill_cancelled:
+                        return 0
+
+                    existing_file = peers_daily_dir / f"{d.isoformat()}.json"
+                    if existing_file.exists():
+                        try:
+                            with open(existing_file, encoding="utf-8") as _ef:
+                                existing = json.load(_ef)
+                            if existing.get("events"):
+                                peer_events += len(existing["events"])
+                                continue
+                        except Exception:
+                            pass
+
+                    try:
+                        daily_data = await loop.run_in_executor(
+                            None,
+                            lambda _d=d, _p=peer, _l=level_key, _s=sources, _r=peer_repos: self._collector.collect_for_date(
+                                _d,
+                                user_override=_p,
+                                level_override=_l,
+                                sources=_s,
+                                peer_repos=_r,
+                            ),
+                        )
+                        peer_events += len(daily_data.get("events", []))
+                    except Exception as e:
+                        async with _progress_lock:
+                            if len(self._peer_backfill_progress["errors"]) < 50:
+                                self._peer_backfill_progress["errors"].append(
+                                    f"{username}/{d}: {e}"
+                                )
+
+                await loop.run_in_executor(
+                    None, self._update_peer_summary, username, level_key, year, quarter
+                )
+
+                async with _progress_lock:
+                    completed_peers_count += 1
+                    total_events += peer_events
+                    self._peer_backfill_progress.update(
+                        {
+                            "completed_peers": completed_peers_count,
+                            "total_events": total_events,
+                            "current_peer": username,
+                            "current_level": level_key,
+                            "completed_days": len(all_weekdays),
+                            "elapsed_seconds": int(time.monotonic() - start_time),
+                        }
+                    )
+
+                logger.info(
+                    "Peer backfill %d/%d: %s (%s) -- %d events",
+                    completed_peers_count,
+                    total_peers,
+                    username,
+                    level_key,
+                    peer_events,
+                )
+                return peer_events
+
+        try:
+            tasks = [_process_peer(idx, lk, p) for idx, (lk, p) in enumerate(all_peers)]
+            await asyncio.gather(*tasks)
+
+            if self._peer_backfill_cancelled:
+                self._peer_backfill_progress.update(
+                    {"running": False, "cancelled": True, "phase": "cancelled"}
+                )
+                return
+
+            self._peer_backfill_progress["phases_completed"].append("collecting")
+            self._peer_backfill_progress.update(
+                {
+                    "phase": "benchmarks",
+                    "phase_detail": "Updating benchmarks...",
+                }
+            )
+
+            await loop.run_in_executor(
+                None, self._update_peer_benchmarks, year, quarter
+            )
+            self._peer_backfill_progress["phases_completed"].append("benchmarks")
+            self._peer_backfill_progress["phase"] = "complete"
+            logger.info(
+                "Peer backfill complete: %d peers, %d events in %ds (filter: %s)",
+                total_peers,
+                total_events,
+                int(time.monotonic() - start_time),
+                ", ".join(filter_label) if filter_label else "all",
+            )
+        except Exception as e:
+            logger.error("Peer backfill failed: %s", e)
+            self._peer_backfill_progress["errors"].append(f"Fatal: {e}")
+            self._peer_backfill_progress["phase"] = "error"
+        finally:
+            self._peer_backfill_progress["running"] = False
+            self._peer_backfill_progress["elapsed_seconds"] = int(
+                time.monotonic() - start_time
+            )
+
+    async def _handle_get_peer_backfill_progress(self, **kwargs) -> dict:
+        """Return current peer backfill progress for the UI."""
+        return {"success": True, **self._peer_backfill_progress}
+
+    async def _handle_cancel_backfill(self, **kwargs) -> dict:
+        """Cancel a running peer backfill."""
+        if not self._peer_backfill_progress.get("running"):
+            return {"success": True, "message": "No backfill running"}
+
+        self._peer_backfill_cancelled = True
+        if self._peer_backfill_task and not self._peer_backfill_task.done():
+            self._peer_backfill_task.cancel()
+
+        self._peer_backfill_progress.update(
+            {
+                "running": False,
+                "cancelled": True,
+                "phase": "cancelled",
+                "phase_detail": "Cancelled by user",
+            }
+        )
+        logger.info("Peer backfill cancelled by user")
+        return {"success": True, "message": "Backfill cancelled"}
+
+    async def _handle_scrub_data(self, **kwargs) -> dict:
+        """Scrub all collected performance data for the current quarter.
+
+        Nukes the entire perf_dir and parent quarter caches, resets all
+        in-memory caches.  After scrub the UI should show a blank slate.
+        """
+        import shutil
+
+        if self._peer_backfill_progress.get("running"):
+            await self._handle_cancel_backfill()
+
+        now = datetime.now()
+        year = kwargs.get("year") or now.year
+        quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        quarter_dir = perf_dir.parent  # e.g. .../2026/q1/
+
+        deleted: dict[str, int] = {}
+
+        # Wipe the entire perf_dir (daily/, peers/, questions.json,
+        # summary.json, caches, anstrat, reports, sender files - everything)
+        if perf_dir.exists():
+            count = sum(1 for _ in perf_dir.rglob("*") if _.is_file())
+            shutil.rmtree(perf_dir)
+            perf_dir.mkdir(parents=True, exist_ok=True)
+            deleted["perf_dir_files"] = count
+
+        # Wipe quarter-level caches that live outside perf_dir
+        quarter_cache_patterns = [
+            "gdrive_shared_drive_cache.json",
+            "gdrive_shared_drive_user_index.json",
+            "meeting_contributions_cache.json",
+            "meeting_peer_index_cache.json",
+        ]
+        for pattern in quarter_cache_patterns:
+            for f in quarter_dir.glob(pattern):
+                f.unlink()
+                deleted[f.name] = deleted.get(f.name, 0) + 1
+
+        # Wipe executive emails dir (may be inside or beside perf_dir)
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        if emails_dir.exists():
+            count = sum(1 for f in emails_dir.glob("*") if f.is_file())
+            shutil.rmtree(emails_dir)
+            deleted["executive_email_files"] = count
+
+        # Reset ALL in-memory caches
+        with self._collector._gitlab_mem_lock:
+            self._collector._gitlab_mem_cache.clear()
+        with self._collector._github_mem_lock:
+            self._collector._github_mem_cache.clear()
+        with self._collector._jira_quarter_lock:
+            self._collector._jira_quarter_cache.clear()
+
+        self._collector.strategy_index = {}
+        self._collector.hierarchy_cache = {}
+
+        # Flush the daemon's own file cache so stale data isn't served
+        self._stats_cache.clear()
+        self._last_modified.clear()
+
+        total = sum(deleted.values())
+        logger.info("Scrubbed %d items from %s Q%d: %s", total, year, quarter, deleted)
+
+        return {
+            "success": True,
+            "message": f"Scrubbed {total} items from {year} Q{quarter}",
+            "deleted": deleted,
+            "year": year,
+            "quarter": quarter,
+        }
+
+    async def _handle_rescore_peers(self, **kwargs) -> dict:
+        """Re-enrich and re-score all peer daily files without re-collecting.
+
+        Mirrors evaluate_all but operates on peers/{username}/daily/ dirs.
+        Useful after scoring config changes or hierarchy/strategy updates.
+        """
+        now = datetime.now()
+        year = kwargs.get("year") or now.year
+        quarter = kwargs.get("quarter") or ((now.month - 1) // 3 + 1)
+        usernames_filter = kwargs.get("usernames") or None
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        peers_dir = perf_dir / "peers"
+        if not peers_dir.exists():
+            return {"success": True, "files_updated": 0, "peers_updated": 0}
+
+        loop = asyncio.get_event_loop()
+
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        strategy_index = build_strategy_context_index(emails_dir)
+        cache_file = perf_dir / "jira_hierarchy_cache.json"
+        hierarchy_cache: dict = {}
+        if cache_file.exists():
+            try:
+                with open(cache_file, encoding="utf-8") as f:
+                    hierarchy_cache = json.load(f)
+            except Exception as e:
+                logger.warning("Failed to load hierarchy cache: %s", e)
+                pass
+        self._collector.hierarchy_cache = hierarchy_cache
+        self._collector.strategy_index = strategy_index
+
+        def _rescore_peers() -> tuple[int, int]:
+            eff_defs, min_sig, daily_cap, _ = get_effective_defs()
+            files_updated = 0
+            peers_updated = 0
+
+            for peer_path in sorted(peers_dir.iterdir()):
+                if not peer_path.is_dir():
+                    continue
+                username = peer_path.name
+                if usernames_filter and username not in usernames_filter:
+                    continue
+                daily_dir = peer_path / "daily"
+                if not daily_dir.exists():
+                    continue
+
+                peer_changed = False
+                for daily_file in sorted(daily_dir.glob("*.json")):
+                    try:
+                        with open(daily_file, encoding="utf-8") as f:
+                            data = json.load(f)
+                    except Exception as e:
+                        logger.warning("Failed to read daily file for rescore: %s", e)
+                        continue
+
+                    events = data.get("events", [])
+                    for ev in events:
+                        self._collector._enrich_event(ev, eff_defs, min_sig)
+
+                    deduped = self._dedup_events_by_jira_key(events)
+                    daily_points = self._compute_daily_points(deduped, daily_cap)
+
+                    data["daily_points"] = daily_points
+                    data["daily_total"] = sum(daily_points.values())
+                    data["re_evaluated_at"] = datetime.now().isoformat()
+                    with open(daily_file, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    files_updated += 1
+                    peer_changed = True
+
+                if peer_changed:
+                    peers_updated += 1
+
+            return files_updated, peers_updated
+
+        files_updated, peers_updated = await loop.run_in_executor(None, _rescore_peers)
+
+        peers_config = self._load_peers_config()
+        if peers_config:
+            for level_key, peer_list in peers_config.items():
+                for peer in peer_list:
+                    username = peer["username"]
+                    if usernames_filter and username not in usernames_filter:
+                        continue
+                    peer_daily = peers_dir / username / "daily"
+                    if peer_daily.exists():
+                        await loop.run_in_executor(
+                            None,
+                            self._update_peer_summary,
+                            username,
+                            level_key,
+                            year,
+                            quarter,
+                        )
+
+        await loop.run_in_executor(None, self._update_peer_benchmarks, year, quarter)
+
+        return {
+            "success": True,
+            "files_updated": files_updated,
+            "peers_updated": peers_updated,
+            "quarter": f"Q{quarter} {year}",
+        }
+
+    async def _handle_resolve_github_usernames(self, **kwargs) -> dict:
+        """Resolve GitHub usernames for all peers in the roster."""
+        try:
+            from services.stats.org_parser import resolve_github_usernames
+
+            peers_config = self._load_peers_config()
+            if not peers_config:
+                return {"success": False, "error": "No peers configured"}
+            loop = asyncio.get_event_loop()
+            resolved = await loop.run_in_executor(
+                None, resolve_github_usernames, peers_config
+            )
+            total = sum(len(pl) for pl in resolved.values())
+            changed = sum(
+                1
+                for pl in resolved.values()
+                for p in pl
+                if p["github_username"] != p["username"]
+            )
+            return {
+                "success": True,
+                "total_peers": total,
+                "resolved_different": changed,
+            }
+        except Exception as e:
+            logger.error("GitHub username resolution failed: %s", e)
+            return {"success": False, "error": str(e)}
 
     async def _handle_get_peer_benchmarks(self, **kwargs) -> dict:
         """Return aggregated peer benchmarks for the UI."""
@@ -1097,7 +2611,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         src = ev.get("source", "unknown")
                         counts[src] = counts.get(src, 0) + 1
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for event counts: %s", e)
                     continue
         return counts
 
@@ -1110,7 +2625,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(bf, encoding="utf-8") as f:
                     return json.load(f).get("levels", {})
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load benchmarks.json: %s", e)
                 pass
         return {}
 
@@ -1173,7 +2689,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         cumulative[comp_id] = cumulative.get(comp_id, 0) + pts
                     total_pct = sum(cumulative.values())
                     daily_trend.append({"day": day_num, "cumulative_pct": total_pct})
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to read daily file for overview digest: %s", e
+                    )
                     continue
 
         loop = asyncio.get_event_loop()
@@ -1207,7 +2726,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         if comp_id in ev.get("points", {}):
                             user_events.append(ev)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for gap coach: %s", e)
                     continue
 
         loop = asyncio.get_event_loop()
@@ -1419,7 +2939,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         scoring_config = None
         try:
             scoring_config = get_merged_config()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load scoring config: %s", e)
             pass
 
         summary = self._load_file(get_performance_summary_path())
@@ -1452,13 +2973,15 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         if comp_id in ev.get("points", {}):
                             events.append(ev)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for explain: %s", e)
                     continue
 
         scoring_config = None
         try:
             scoring_config = get_merged_config()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to load scoring config: %s", e)
             pass
 
         loop = asyncio.get_event_loop()
@@ -1543,7 +3066,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     "source": ev.get("source", ""),
                                 }
                             )
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for clustering: %s", e)
                     continue
 
         if len(events) < 5:
@@ -1712,12 +3236,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             cumulative_points: dict[str, int] = {}
             total_events = 0
             highlights: list[str] = []
+            missing_signal_counts = 0
 
             for daily_file in sorted(daily_dir.glob("*.json")):
                 try:
                     with open(daily_file, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for rethreshold: %s", e)
                     continue
 
                 events = data.get("events", [])
@@ -1726,6 +3252,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 for ev in events:
                     sig_counts = ev.get("signal_counts")
                     if not sig_counts:
+                        missing_signal_counts += 1
                         continue
 
                     scope = ev.get("scope", "story")
@@ -1761,11 +3288,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         ev["points"] = new_points
                         file_changed = True
 
-                daily_points: dict[str, int] = {}
-                for ev in events:
-                    for comp_id, pts in ev.get("points", {}).items():
-                        current = daily_points.get(comp_id, 0)
-                        daily_points[comp_id] = min(current + pts, daily_cap)
+                deduped = self._dedup_events_by_jira_key(events)
+                daily_points = self._compute_daily_points(deduped, daily_cap)
 
                 old_points = data.get("daily_points", {})
                 if daily_points != old_points or file_changed:
@@ -1783,18 +3307,34 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     if ev.get("title") and len(highlights) < 10:
                         highlights.append(ev["title"][:80])
 
-            return updated, cumulative_points, total_events, highlights
+            return (
+                updated,
+                cumulative_points,
+                total_events,
+                highlights,
+                missing_signal_counts,
+            )
 
         result = await loop.run_in_executor(None, _rethreshold)
-        files_updated, cumulative_points, total_events, highlights = result
+        files_updated, cumulative_points, total_events, highlights, missing_sc = result
+
+        if missing_sc > 0:
+            logger.warning(
+                "Fast rethreshold found %d events without signal_counts, "
+                "falling back to full evaluate_all",
+                missing_sc,
+            )
+            return await self._handle_evaluate_all(year=year, quarter=quarter)
         await loop.run_in_executor(
             None,
-            self._update_summary_from_data,
-            cumulative_points,
-            total_events,
-            highlights,
-            year,
-            quarter,
+            lambda: self._update_summary_from_data(
+                cumulative_points,
+                total_events,
+                highlights,
+                year,
+                quarter,
+                skip_strategy=True,
+            ),
         )
 
         return {
@@ -1831,7 +3371,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(cache_file, encoding="utf-8") as f:
                     hierarchy_cache = json.load(f)
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load hierarchy cache: %s", e)
                 pass
 
         self._collector.hierarchy_cache = hierarchy_cache
@@ -1842,7 +3383,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             cfg = get_merged_config()
             _level = cfg.get("engineering_level", "sse")  # noqa: F841
             strategy_cfg = get_strategy_alignment_config()
-            _min_overlap = strategy_cfg.get("min_text_overlap_words", 3)  # noqa: F841
+            _min_overlap = strategy_cfg.get("min_text_overlap_words", 4)  # noqa: F841
             updated = 0
             cumulative_points: dict[str, int] = {}
             total_events = 0
@@ -1852,31 +3393,30 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(daily_file, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for rescore: %s", e)
                     continue
 
                 events = data.get("events", [])
                 for ev in events:
                     self._collector._enrich_event(ev, eff_defs, min_sig)
 
-                daily_points: dict[str, int] = {}
-                for ev in events:
-                    for comp_id, pts in ev.get("points", {}).items():
-                        current = daily_points.get(comp_id, 0)
-                        daily_points[comp_id] = min(current + pts, daily_cap)
+                work_events = [
+                    ev for ev in events if not self._is_personal_repo_event(ev)
+                ]
+                deduped = self._dedup_events_by_jira_key(work_events)
+                daily_points = self._compute_daily_points(deduped, daily_cap)
 
-                old_points = data.get("daily_points", {})
-                if daily_points != old_points:
-                    data["daily_points"] = daily_points
-                    data["daily_total"] = sum(daily_points.values())
-                    data["re_evaluated_at"] = datetime.now().isoformat()
-                    with open(daily_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, indent=2)
-                    updated += 1
+                data["daily_points"] = daily_points
+                data["daily_total"] = sum(daily_points.values())
+                data["re_evaluated_at"] = datetime.now().isoformat()
+                with open(daily_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+                updated += 1
 
                 for comp_id, pts in daily_points.items():
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
-                total_events += len(events)
+                total_events += len(work_events)
                 for ev in events[:3]:
                     if ev.get("title") and len(highlights) < 10:
                         highlights.append(ev["title"][:80])
@@ -2085,7 +3625,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             "category_points": cat_points,
                         }
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for captured days: %s", e)
                     days.append(
                         {
                             "date": f.stem,
@@ -2127,9 +3668,225 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             },
         }
 
+    @staticmethod
+    def _refresh_issue_hierarchy_from_jira(  # noqa: C901
+        issue_keys: dict[str, dict],
+        issue_info: dict[str, dict],
+        perf_dir: Path,
+    ) -> dict[str, dict]:
+        """Fetch issue metadata from Jira via subprocess (blocking I/O)."""
+
+        def _rh_issue(args: list[str], timeout: int = 15) -> str:
+            """Run rh-issue with proper user shell env (bashrc, PATH, JIRA_JPAT)."""
+            ok, out = run_cmd_sync(["rh-issue"] + args, timeout=timeout)
+            if not ok:
+                raise RuntimeError(out)
+            return out
+
+        aap_keys = [k for k in issue_keys if k.startswith("AAP-")]
+
+        for key in aap_keys[:30]:
+            try:
+                result = _rh_issue(["view-issue", key])
+                info: dict[str, str] = {"key": key, "type": "story"}
+                desc_lines: list[str] = []
+                in_description = False
+                for line in result.split("\n"):
+                    m = re.match(
+                        r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$",
+                        line.strip(),
+                        re.IGNORECASE,
+                    )
+                    if m:
+                        in_description = False
+                        field = m.group(1).strip().lower().replace(" ", "_")
+                        val = m.group(2).strip()
+                        if field in (
+                            "summary",
+                            "status",
+                            "issue_type",
+                            "issuetype",
+                        ):
+                            info[field.replace("issuetype", "issue_type")] = val
+                        if field in ("epic_link", "epic", "parent"):
+                            info["epic"] = val
+                        if field == "component/s":
+                            info["component"] = val
+                        if field == "reporter":
+                            info["reporter"] = val
+                        if field in ("assignee", "assigned_to"):
+                            info["assignee"] = val
+                        if field == "description":
+                            in_description = True
+                            if val:
+                                desc_lines.append(val)
+                    elif in_description:
+                        desc_lines.append(line.strip())
+                if desc_lines:
+                    info["description"] = " ".join(desc_lines)[:500]
+                if "summary" not in info:
+                    for line in result.split("\n"):
+                        if key in line:
+                            info["summary"] = line.split(key)[-1].strip(": ")[:100]
+                            break
+                if "summary" in info:
+                    info["summary"] = html_unescape(info["summary"])
+                issue_info[key] = info
+            except Exception as e:
+                logger.debug(f"Failed to fetch {key}: {e}")
+
+        epic_keys_set: set[str] = set()
+        for info_val in issue_info.values():
+            epic_key = info_val.get("epic", "")
+            if epic_key and epic_key.startswith("AAP-"):
+                epic_keys_set.add(epic_key)
+
+        for epic_key in epic_keys_set:
+            if epic_key not in issue_info:
+                try:
+                    result = _rh_issue(["view-issue", epic_key])
+                    einfo: dict[str, str] = {"key": epic_key, "issue_type": "Epic"}
+                    for line in result.split("\n"):
+                        m = re.match(
+                            r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$",
+                            line.strip(),
+                            re.IGNORECASE,
+                        )
+                        if m:
+                            field = m.group(1).strip().lower().replace(" ", "_")
+                            val = m.group(2).strip()
+                            if field == "summary":
+                                einfo["summary"] = html_unescape(val)
+                            if field == "component/s":
+                                einfo["component"] = val
+                            if field in ("parent", "parent_link"):
+                                if val.startswith("ANSTRAT-"):
+                                    einfo["parent_initiative"] = val
+                    issue_info[epic_key] = einfo
+                except Exception as e:
+                    logger.debug(f"Failed to fetch epic {epic_key}: {e}")
+
+        # Discover user-assigned ANSTRATs (exclude Closed/Done)
+        user_assigned_anstrats: set[str] = set()
+        try:
+            result = _rh_issue(
+                [
+                    "search",
+                    "project = ANSTRAT AND assignee = currentUser() "
+                    "AND status not in (Closed, Done, Resolved) "
+                    "ORDER BY updated DESC",
+                    "--max-results",
+                    "20",
+                ],
+                timeout=30,
+            )
+            for line in result.split("\n"):
+                found = re.findall(r"(ANSTRAT-\d+)", line)
+                for ak in found:
+                    user_assigned_anstrats.add(ak)
+                    if ak not in issue_info:
+                        parts = line.split("|")
+                        if len(parts) >= 5:
+                            issue_info[ak] = {
+                                "key": ak,
+                                "issue_type": (
+                                    parts[1].strip() if len(parts) > 1 else "Initiative"
+                                ),
+                                "summary": html_unescape(
+                                    parts[4].strip()[:100] if len(parts) > 4 else ak
+                                ),
+                            }
+        except Exception as e:
+            logger.debug(f"Failed to search user-assigned ANSTRATs: {e}")
+
+        # Collect ANSTRATs discovered as parents of user's epics
+        hierarchy_anstrats: set[str] = set()
+        for info_val in issue_info.values():
+            parent = info_val.get("parent_initiative", "")
+            if parent.startswith("ANSTRAT-"):
+                hierarchy_anstrats.add(parent)
+
+        # For epics still unmapped, query user-assigned ANSTRATs for children
+        if epic_keys_set:
+            unmapped_epics = {
+                k
+                for k in epic_keys_set
+                if not issue_info.get(k, {}).get("parent_initiative")
+            }
+            if unmapped_epics:
+                epic_list_str = ", ".join(sorted(epic_keys_set))
+                for anstrat_key in user_assigned_anstrats:
+                    if not unmapped_epics:
+                        break
+                    try:
+                        jql = (
+                            f'"Parent Link" = {anstrat_key}'
+                            f" AND key in ({epic_list_str})"
+                        )
+                        result = _rh_issue(
+                            ["search", jql, "--max-results", "20"],
+                            timeout=20,
+                        )
+                        child_epics = re.findall(r"(AAP-\d+)", result)
+                        for ce in child_epics:
+                            if ce in issue_info:
+                                issue_info[ce]["parent_initiative"] = anstrat_key
+                            else:
+                                issue_info[ce] = {
+                                    "key": ce,
+                                    "parent_initiative": anstrat_key,
+                                }
+                            unmapped_epics.discard(ce)
+                            hierarchy_anstrats.add(anstrat_key)
+                    except Exception as e:
+                        logger.debug(f"Failed to query children of {anstrat_key}: {e}")
+
+        # Discover child epics assigned to user under user-assigned ANSTRATs
+        relevant_anstrats = user_assigned_anstrats | hierarchy_anstrats
+        for anstrat_key in relevant_anstrats:
+            try:
+                jql = f'"Parent Link" = {anstrat_key}' f" AND assignee = currentUser()"
+                result = _rh_issue(
+                    ["search", jql, "--max-results", "20"],
+                    timeout=20,
+                )
+                for line in result.split("\n"):
+                    child_keys = re.findall(r"(AAP-\d+)", line)
+                    for ce in child_keys:
+                        if ce in issue_info:
+                            if not issue_info[ce].get("parent_initiative"):
+                                issue_info[ce]["parent_initiative"] = anstrat_key
+                        else:
+                            parts = line.split("|")
+                            issue_info[ce] = {
+                                "key": ce,
+                                "parent_initiative": anstrat_key,
+                                "issue_type": (
+                                    parts[1].strip() if len(parts) > 1 else "Epic"
+                                ),
+                                "summary": (
+                                    parts[4].strip()[:100] if len(parts) > 4 else ce
+                                ),
+                            }
+            except Exception as e:
+                logger.debug(f"Failed to query user children of {anstrat_key}: {e}")
+
+        # Track which ANSTRATs are user-relevant for display filtering
+        issue_info["_user_relevant_anstrats"] = {
+            "keys": sorted(user_assigned_anstrats | hierarchy_anstrats)
+        }
+
+        perf_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = perf_dir / "jira_hierarchy_cache.json"
+        cache_data = {"issues": issue_info, "updated": datetime.now().isoformat()}
+        with open(cache_file, "w", encoding="utf-8") as fh:
+            json.dump(cache_data, fh, indent=2)
+
+        return issue_info
+
     async def _handle_get_issue_hierarchy(self, **kwargs) -> dict:  # noqa: C901
         """Extract issue keys from daily data and build hierarchy tree."""
-        import subprocess
+        from services.stats.scorer import COMPETENCY_DEFS
 
         refresh = kwargs.get("refresh_from_jira", False)
         now = datetime.now()
@@ -2140,6 +3897,21 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         daily_dir = self._get_daily_dir(year, quarter)
         cache_file = perf_dir / "jira_hierarchy_cache.json"
 
+        comp_to_pillar: dict[str, str] = {}
+        pillar_short: dict[str, str] = {
+            "Technical Contribution": "technical",
+            "Leadership": "leadership",
+            "Mentorship": "mentorship",
+            "End-to-End Delivery": "delivery",
+        }
+        for cid, defn in COMPETENCY_DEFS.items():
+            cat = defn.get("category", "Technical Contribution")
+            comp_to_pillar[cid] = pillar_short.get(cat, "technical")
+
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        strategy_index = build_strategy_context_index(emails_dir)
+        strat_issue_keys = strategy_index.get("all_issue_keys", {})
+
         issue_keys: dict[str, dict] = {}
         if daily_dir.exists():
             for f in sorted(daily_dir.glob("*.json")):
@@ -2148,7 +3920,22 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         data = json.load(fh)
                     for ev in data.get("events", []):
                         title = ev.get("title", "")
-                        pts = sum(ev.get("points", {}).values())
+                        ev_points = ev.get("points", {})
+                        pts = sum(ev_points.values())
+                        ev_scope = ev.get("scope", "commit")
+                        ev_strategy = ev.get("strategy_aligned", False)
+                        ev_strat_names = ev.get("strategy_priorities", [])
+
+                        pillar_pts: dict[str, int] = {
+                            "technical": 0,
+                            "leadership": 0,
+                            "mentorship": 0,
+                            "delivery": 0,
+                        }
+                        for comp_id, comp_pts in ev_points.items():
+                            pillar = comp_to_pillar.get(comp_id, "technical")
+                            pillar_pts[pillar] += comp_pts
+
                         keys_in_title = re.findall(r"((?:AAP|ANSTRAT)-\d+)", title)
                         for key in keys_in_title:
                             if key not in issue_keys:
@@ -2156,13 +3943,40 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     "points": 0,
                                     "titles": [],
                                     "event_count": 0,
+                                    "strategy_aligned": False,
+                                    "strategy_names": set(),
+                                    "pillar_points": {
+                                        "technical": 0,
+                                        "leadership": 0,
+                                        "mentorship": 0,
+                                        "delivery": 0,
+                                    },
+                                    "scope_points": {},
                                 }
-                            issue_keys[key]["points"] += pts
-                            issue_keys[key]["event_count"] += 1
-                            if title not in issue_keys[key]["titles"]:
-                                issue_keys[key]["titles"].append(title[:120])
-                except Exception:
+                            ik = issue_keys[key]
+                            ik["points"] += pts
+                            ik["event_count"] += 1
+                            if title not in ik["titles"]:
+                                ik["titles"].append(title[:120])
+                            if ev_strategy:
+                                ik["strategy_aligned"] = True
+                            for sn in ev_strat_names:
+                                ik["strategy_names"].add(sn)
+                            for p, v in pillar_pts.items():
+                                ik["pillar_points"][p] += v
+                            ik["scope_points"][ev_scope] = (
+                                ik["scope_points"].get(ev_scope, 0) + pts
+                            )
+                except Exception as e:
+                    logger.warning("Failed to process daily event for hierarchy: %s", e)
                     continue
+
+        for key, ik in issue_keys.items():
+            if not ik["strategy_aligned"] and key in strat_issue_keys:
+                ik["strategy_aligned"] = True
+                for sn in strat_issue_keys[key]:
+                    ik["strategy_names"].add(sn)
+            ik["strategy_names"] = sorted(ik["strategy_names"])
 
         def extract_keywords(titles: list[str]) -> list[str]:
             kw_patterns = [
@@ -2202,221 +4016,90 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(cache_file, encoding="utf-8") as fh:
                     cached = json.load(fh)
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to load hierarchy cache: %s", e)
                 pass
 
         issue_info: dict[str, dict] = cached.get("issues", {})
 
         if refresh and issue_keys:
-            rh_env = {**os.environ, "HOME": str(Path.home())}
-            aap_keys = [k for k in issue_keys if k.startswith("AAP-")]
-
-            for key in aap_keys[:30]:
-                try:
-                    result = subprocess.check_output(
-                        ["rh-issue", "view-issue", key],
-                        text=True,
-                        stderr=subprocess.DEVNULL,
-                        timeout=15,
-                        env=rh_env,
-                    )
-                    info: dict[str, str] = {"key": key, "type": "story"}
-                    desc_lines: list[str] = []
-                    in_description = False
-                    for line in result.split("\n"):
-                        m = re.match(
-                            r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$",
-                            line.strip(),
-                            re.IGNORECASE,
-                        )
-                        if m:
-                            in_description = False
-                            field = m.group(1).strip().lower().replace(" ", "_")
-                            val = m.group(2).strip()
-                            if field in (
-                                "summary",
-                                "status",
-                                "issue_type",
-                                "issuetype",
-                            ):
-                                info[field.replace("issuetype", "issue_type")] = val
-                            if field in ("epic_link", "epic", "parent"):
-                                info["epic"] = val
-                            if field == "component/s":
-                                info["component"] = val
-                            if field == "reporter":
-                                info["reporter"] = val
-                            if field in ("assignee", "assigned_to"):
-                                info["assignee"] = val
-                            if field == "description":
-                                in_description = True
-                                if val:
-                                    desc_lines.append(val)
-                        elif in_description:
-                            desc_lines.append(line.strip())
-                    if desc_lines:
-                        info["description"] = " ".join(desc_lines)[:500]
-                    if "summary" not in info:
-                        for line in result.split("\n"):
-                            if key in line:
-                                info["summary"] = line.split(key)[-1].strip(": ")[:100]
-                                break
-                    issue_info[key] = info
-                except Exception as e:
-                    logger.debug(f"Failed to fetch {key}: {e}")
-
-            epic_keys_set: set[str] = set()
-            for info in issue_info.values():
-                epic_key = info.get("epic", "")
-                if epic_key and epic_key.startswith("AAP-"):
-                    epic_keys_set.add(epic_key)
-
-            for epic_key in epic_keys_set:
-                if epic_key not in issue_info:
-                    try:
-                        result = subprocess.check_output(
-                            ["rh-issue", "view-issue", epic_key],
-                            text=True,
-                            stderr=subprocess.DEVNULL,
-                            timeout=15,
-                            env=rh_env,
-                        )
-                        einfo: dict[str, str] = {"key": epic_key, "issue_type": "Epic"}
-                        for line in result.split("\n"):
-                            m = re.match(
-                                r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$",
-                                line.strip(),
-                                re.IGNORECASE,
-                            )
-                            if m:
-                                field = m.group(1).strip().lower().replace(" ", "_")
-                                val = m.group(2).strip()
-                                if field == "summary":
-                                    einfo["summary"] = val
-                                if field == "component/s":
-                                    einfo["component"] = val
-                        issue_info[epic_key] = einfo
-                    except Exception as e:
-                        logger.debug(f"Failed to fetch epic {epic_key}: {e}")
-
-            if epic_keys_set:
-                component = None
-                for info in issue_info.values():
-                    c = info.get("component", "")
-                    if c and c != "None":
-                        component = c
-                        break
-
-                anstrat_keys: list[str] = []
-                try:
-                    jql = (
-                        f'project = ANSTRAT AND component = "{component}"'
-                        if component
-                        else 'project = ANSTRAT AND summary ~ "Automation Analytics"'
-                    )
-                    result = subprocess.check_output(
-                        ["rh-issue", "search", jql, "--max-results", "50"],
-                        text=True,
-                        stderr=subprocess.DEVNULL,
-                        timeout=30,
-                        env=rh_env,
-                    )
-                    anstrat_keys = re.findall(r"(ANSTRAT-\d+)", result)
-                    for line in result.split("\n"):
-                        for ak in anstrat_keys:
-                            if ak in line and ak not in issue_info:
-                                parts = line.split("|")
-                                if len(parts) >= 5:
-                                    issue_info[ak] = {
-                                        "key": ak,
-                                        "issue_type": (
-                                            parts[1].strip()
-                                            if len(parts) > 1
-                                            else "Initiative"
-                                        ),
-                                        "summary": (
-                                            parts[4].strip()[:100]
-                                            if len(parts) > 4
-                                            else ak
-                                        ),
-                                    }
-                except Exception as e:
-                    logger.debug(f"Failed to search ANSTRATs: {e}")
-
-                unmapped_epics = {
-                    k
-                    for k in epic_keys_set
-                    if not issue_info.get(k, {}).get("parent_initiative")
-                }
-                epic_list_str = ", ".join(sorted(epic_keys_set))
-                for anstrat_key in anstrat_keys:
-                    if not unmapped_epics:
-                        break
-                    try:
-                        jql = (
-                            f'"Parent Link" = {anstrat_key}'
-                            f" AND key in ({epic_list_str})"
-                        )
-                        result = subprocess.check_output(
-                            ["rh-issue", "search", jql, "--max-results", "20"],
-                            text=True,
-                            stderr=subprocess.DEVNULL,
-                            timeout=20,
-                            env=rh_env,
-                        )
-                        child_epics = re.findall(r"(AAP-\d+)", result)
-                        for ce in child_epics:
-                            if ce in issue_info:
-                                issue_info[ce]["parent_initiative"] = anstrat_key
-                            else:
-                                issue_info[ce] = {
-                                    "key": ce,
-                                    "parent_initiative": anstrat_key,
-                                }
-                            unmapped_epics.discard(ce)
-                    except Exception as e:
-                        logger.debug(f"Failed to query children of {anstrat_key}: {e}")
-
-            perf_dir.mkdir(parents=True, exist_ok=True)
-            cache_data = {"issues": issue_info, "updated": datetime.now().isoformat()}
-            with open(cache_file, "w", encoding="utf-8") as fh:
-                json.dump(cache_data, fh, indent=2)
+            issue_info = await asyncio.to_thread(
+                self._refresh_issue_hierarchy_from_jira,
+                issue_keys,
+                issue_info,
+                perf_dir,
+            )
 
         # Build the tree: ANSTRAT -> Epic -> Issue
         strategies: dict[str, dict] = {}
         epics: dict[str, dict] = {}
         uncategorized: list[dict] = []
 
+        def _empty_pillar() -> dict:
+            return {"technical": 0, "leadership": 0, "mentorship": 0, "delivery": 0}
+
+        def _summary_from_titles(titles: list[str], issue_key: str) -> str:
+            """Extract a display summary from event titles when Jira summary is missing."""
+            for t in titles:
+                cleaned = re.sub(r"(?:AAP|ANSTRAT)-\d+\s*[-:]\s*", "", t).strip()
+                if cleaned and len(cleaned) > 5:
+                    return html_unescape(cleaned[:100])
+            return ""
+
         for key, data in issue_keys.items():
+            jira_summary = issue_info.get(key, {}).get("summary", "")
+            if jira_summary:
+                jira_summary = html_unescape(jira_summary)
+            if not jira_summary:
+                jira_summary = _summary_from_titles(data.get("titles", []), key)
             node = {
                 "key": key,
-                "summary": issue_info.get(key, {}).get("summary", ""),
+                "summary": jira_summary,
                 "type": issue_info.get(key, {}).get("issue_type", "story").lower(),
                 "points": data["points"],
                 "event_count": data["event_count"],
                 "keywords": extract_keywords(data["titles"]),
+                "strategy_aligned": data.get("strategy_aligned", False),
+                "strategy_names": data.get("strategy_names", []),
+                "pillar_points": data.get("pillar_points", _empty_pillar()),
+                "scope_points": data.get("scope_points", {}),
                 "children": [],
             }
             if key.startswith("ANSTRAT-"):
                 strategies[key] = node
                 node["type"] = "strategy"
+                node["strategy_aligned"] = True
             else:
                 epic_key = issue_info.get(key, {}).get("epic", "")
                 if epic_key:
                     if epic_key not in epics:
                         epics[epic_key] = {
                             "key": epic_key,
-                            "summary": issue_info.get(epic_key, {}).get(
-                                "summary", epic_key
+                            "summary": html_unescape(
+                                issue_info.get(epic_key, {}).get("summary", epic_key)
                             ),
                             "type": "epic",
                             "points": 0,
                             "event_count": 0,
                             "keywords": [],
+                            "strategy_aligned": False,
+                            "strategy_names": [],
+                            "pillar_points": _empty_pillar(),
+                            "scope_points": {},
                             "children": [],
                         }
                     epics[epic_key]["children"].append(node)
                     epics[epic_key]["points"] += node["points"]
+                    if node["strategy_aligned"]:
+                        epics[epic_key]["strategy_aligned"] = True
+                    for p in ("technical", "leadership", "mentorship", "delivery"):
+                        epics[epic_key]["pillar_points"][p] += node[
+                            "pillar_points"
+                        ].get(p, 0)
+                    for sc, sv in node["scope_points"].items():
+                        epics[epic_key]["scope_points"][sc] = (
+                            epics[epic_key]["scope_points"].get(sc, 0) + sv
+                        )
                 else:
                     uncategorized.append(node)
 
@@ -2432,18 +4115,57 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     anstrat_info = issue_info.get(parent, {})
                     strategies[parent] = {
                         "key": parent,
-                        "summary": anstrat_info.get("summary", parent),
+                        "summary": html_unescape(anstrat_info.get("summary", parent)),
                         "type": "strategy",
                         "points": 0,
                         "event_count": 0,
                         "keywords": [],
+                        "strategy_aligned": True,
+                        "strategy_names": [],
+                        "pillar_points": _empty_pillar(),
+                        "scope_points": {},
                         "children": [],
                     }
                 strategies[parent]["children"].append(epic_node)
                 strategies[parent]["points"] += epic_node["points"]
+                if epic_node.get("strategy_aligned"):
+                    strategies[parent]["strategy_aligned"] = True
+                for p in ("technical", "leadership", "mentorship", "delivery"):
+                    strategies[parent]["pillar_points"][p] += epic_node.get(
+                        "pillar_points", {}
+                    ).get(p, 0)
+                for sc, sv in epic_node.get("scope_points", {}).items():
+                    strategies[parent]["scope_points"][sc] = (
+                        strategies[parent]["scope_points"].get(sc, 0) + sv
+                    )
                 attached = True
             if not attached:
                 unattached_epics.append(epic_node)
+
+        # Add user-relevant ANSTRATs that have no events yet
+        # Only ANSTRATs the user is assigned to or that are parents of user epics
+        relevant_set = set(
+            issue_info.get("_user_relevant_anstrats", {}).get("keys", [])
+        )
+        for info_key, info_val in issue_info.items():
+            if (
+                info_key.startswith("ANSTRAT-")
+                and info_key not in strategies
+                and info_key in relevant_set
+            ):
+                strategies[info_key] = {
+                    "key": info_key,
+                    "summary": info_val.get("summary", info_key),
+                    "type": "strategy",
+                    "points": 0,
+                    "event_count": 0,
+                    "keywords": [],
+                    "strategy_aligned": True,
+                    "strategy_names": [],
+                    "pillar_points": _empty_pillar(),
+                    "scope_points": {},
+                    "children": [],
+                }
 
         strat_list = sorted(strategies.values(), key=lambda x: -x["points"])
         for s in strat_list:
@@ -2457,6 +4179,26 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         uncategorized = sorted(uncategorized, key=lambda x: -x["points"])
 
+        total_points = sum(ik["points"] for ik in issue_keys.values())
+        aligned_points = sum(
+            ik["points"] for ik in issue_keys.values() if ik.get("strategy_aligned")
+        )
+        agg_scope: dict[str, int] = {}
+        agg_pillar: dict[str, int] = {
+            "technical": 0,
+            "leadership": 0,
+            "mentorship": 0,
+            "delivery": 0,
+        }
+        agg_tags: dict[str, int] = {}
+        for ik in issue_keys.values():
+            for sc, sv in ik.get("scope_points", {}).items():
+                agg_scope[sc] = agg_scope.get(sc, 0) + sv
+            for p in ("technical", "leadership", "mentorship", "delivery"):
+                agg_pillar[p] += ik.get("pillar_points", {}).get(p, 0)
+            for kw in extract_keywords(ik.get("titles", [])):
+                agg_tags[kw] = agg_tags.get(kw, 0) + 1
+
         return {
             "success": True,
             "strategies": strat_list,
@@ -2464,6 +4206,17 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "uncategorized": uncategorized,
             "total_issues": len(issue_keys),
             "cached": not refresh and bool(cached),
+            "summary": {
+                "total_points": total_points,
+                "aligned_points": aligned_points,
+                "unaligned_points": total_points - aligned_points,
+                "alignment_pct": (
+                    round(aligned_points / total_points * 100) if total_points else 0
+                ),
+                "scope_points": agg_scope,
+                "pillar_points": agg_pillar,
+                "tag_counts": dict(sorted(agg_tags.items(), key=lambda x: -x[1])),
+            },
         }
 
     # ==================== Report Export ====================
@@ -2487,7 +4240,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     with open(f, encoding="utf-8") as fh:
                         data = json.load(fh)
                     all_events.extend(data.get("events", []))
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read daily file for report: %s", e)
                     continue
 
         if fmt == "json":
@@ -2955,6 +4709,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         {
                             "email_id": data.get("email_id", f.stem),
                             "sender": data.get("sender", "Unknown"),
+                            "sender_email": data.get("sender_email", ""),
+                            "subject": data.get("subject", ""),
+                            "date": data.get("email_date", ""),
                             "parsed_at": data.get("parsed_at", ""),
                             "text_preview": data.get("text_preview", "")[:150],
                             "total_priorities": data.get("total_priorities", 0),
@@ -2962,7 +4719,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             "total_themes": data.get("total_themes", 0),
                         }
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning("Failed to read executive email cache: %s", e)
                     continue
 
         return {"success": True, "emails": emails}
@@ -2997,6 +4755,105 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         if set_executive_senders(cleaned):
             return {"success": True, "senders": cleaned}
         return {"success": False, "error": "Failed to write config.json"}
+
+    async def _handle_sync_anstrat_ownership(self, **kwargs) -> dict:
+        """Sync ANSTRAT issue catalog from Jira (passive model, no assignee ownership)."""
+        try:
+            perf_dir = self._get_perf_dir()
+            ownership = await asyncio.to_thread(sync_anstrat_ownership, perf_dir)
+            issue_count = len(ownership.get("issues", {}))
+            return {
+                "success": True,
+                "issues": issue_count,
+                "last_synced": ownership.get("last_synced"),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_get_anstrat_ownership(self, **kwargs) -> dict:
+        """Return the cached ANSTRAT ownership map."""
+        try:
+            perf_dir = self._get_perf_dir()
+            ownership = load_anstrat_ownership(perf_dir)
+            return {"success": True, "data": ownership}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_infer_strategy_relationships(self, **kwargs) -> dict:
+        """Use LLM to infer non-obvious email-to-ANSTRAT connections."""
+        try:
+            from services.stats.strategy import infer_relationships_with_llm
+
+            perf_dir = self._get_perf_dir()
+            emails_dir = self._get_executive_emails_dir()
+            ownership = load_anstrat_ownership(perf_dir)
+
+            cache_file = perf_dir / "jira_hierarchy_cache.json"
+            hierarchy_cache: dict = {}
+            if cache_file.exists():
+                try:
+                    with open(cache_file, encoding="utf-8") as fh:
+                        hierarchy_cache = json.load(fh)
+                except Exception as e:
+                    logger.warning("Failed to load hierarchy cache: %s", e)
+                    pass
+
+            inferred = await asyncio.to_thread(
+                infer_relationships_with_llm,
+                emails_dir,
+                ownership,
+                hierarchy_cache,
+            )
+            return {"success": True, "relationships": inferred}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_sync_sender_sources(self, **kwargs) -> dict:
+        """Sync Jira activity and Google Drive docs for target senders.
+
+        Fetches recent Jira issues (last 90 days) and strategy-related
+        Google Drive documents for the executive senders, caching results
+        to disk for the relationship builder.
+
+        Runs blocking I/O in a thread to avoid starving the watchdog.
+        """
+        try:
+            perf_dir = self._get_perf_dir()
+
+            jira_result = await asyncio.to_thread(sync_sender_jira_activity, perf_dir)
+            jira_count = sum(
+                a.get("issue_count", 0)
+                for a in jira_result.get("sender_activity", {}).values()
+            )
+
+            gdrive_result = await asyncio.to_thread(sync_sender_gdrive_docs, perf_dir)
+            doc_count = len(gdrive_result.get("documents", []))
+
+            await asyncio.to_thread(self._update_summary)
+
+            return {
+                "success": True,
+                "jira_issues": jira_count,
+                "jira_senders": len(jira_result.get("sender_activity", {})),
+                "gdrive_docs": doc_count,
+                "last_synced": jira_result.get("last_synced"),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _handle_get_sender_sources(self, **kwargs) -> dict:
+        """Return cached Jira activity and GDrive doc data for senders."""
+        try:
+            perf_dir = self._get_perf_dir()
+            jira_activity = load_sender_jira_activity(perf_dir)
+            gdrive_docs = load_sender_gdrive_docs(perf_dir)
+            return {
+                "success": True,
+                "jira_activity": jira_activity,
+                "gdrive_docs": gdrive_docs,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     async def _handle_search_executive_gmail(self, **kwargs) -> dict:
         """Search Gmail for executive emails."""
@@ -3176,7 +5033,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(p, encoding="utf-8") as fh:
                     existing_gmail_ids.add(json.load(fh).get("gmail_message_id", ""))
-            except Exception:
+            except Exception as e:
+                logger.warning("Failed to read existing email cache file: %s", e)
                 pass
 
         total_new = 0
@@ -3223,6 +5081,16 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         payload = msg_data.get("payload", {})
                         headers = payload.get("headers", [])
                         header_map = {h["name"]: h["value"] for h in headers}
+
+                        subject = header_map.get("Subject", "")
+                        if is_calendar_event(subject):
+                            logger.debug(
+                                "Backfill: skipping calendar event from %s: %s",
+                                sender,
+                                subject[:80],
+                            )
+                            skipped += 1
+                            continue
 
                         def _extract_body(part: dict) -> str:
                             mime = part.get("mimeType", "")
@@ -3300,6 +5168,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         }
                     )
 
+                import time
+
+                time.sleep(1)
+
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _do_backfill)
 
@@ -3353,7 +5225,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as cfh:
                         issue_info = json.load(cfh).get("issues", {})
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load hierarchy cache for day detail: %s", e
+                    )
                     pass
 
             events = data.get("events", [])
@@ -3479,7 +5354,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                         "match_reason": reason,
                                     }
                                 )
-                except Exception:
+                except Exception as e:
+                    logger.warning(
+                        "Failed to read daily file for competency evidence: %s", e
+                    )
                     continue
 
         all_competencies = list(COMPETENCY_DEFS.keys())
@@ -3561,7 +5439,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         try:
             with open(SCORING_CONFIG_FILE, encoding="utf-8") as f:
                 old_cfg = json.load(f)
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to read old scoring config for migration: %s", e)
             return
 
         if "scope_multipliers" in old_cfg:
@@ -3642,20 +5521,52 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         """Perform a health check on the stats daemon."""
         self._last_health_check = time.time()
 
+        collection_stale = False
+        if self._last_collection_time > 0:
+            hours_since = (time.time() - self._last_collection_time) / 3600
+            collection_stale = hours_since > 26
+
         checks = {
             "running": self.is_running,
             "config_dir_exists": AA_CONFIG_DIR.exists(),
+            "collection_recent": not collection_stale,
+            "no_consecutive_failures": self._consecutive_collection_failures < 3,
         }
 
         healthy = all(checks.values())
+
+        messages = []
+        if not healthy:
+            if collection_stale:
+                messages.append(
+                    f"Last collection was {hours_since:.1f}h ago "
+                    f"(date: {self._last_collection_date})"
+                )
+            if self._consecutive_collection_failures >= 3:
+                messages.append(
+                    f"{self._consecutive_collection_failures} consecutive "
+                    f"collection failures"
+                )
+            if self._last_collection_errors:
+                messages.append(
+                    f"Last errors: {', '.join(self._last_collection_errors.keys())}"
+                )
 
         return {
             "healthy": healthy,
             "checks": checks,
             "message": (
-                "Stats daemon is healthy" if healthy else "Stats daemon has issues"
+                "Stats daemon is healthy"
+                if healthy
+                else f"Stats daemon has issues: {'; '.join(messages)}"
             ),
             "timestamp": self._last_health_check,
+            "last_collection": {
+                "time": self._last_collection_time,
+                "date": self._last_collection_date,
+                "errors": self._last_collection_errors,
+                "consecutive_failures": self._consecutive_collection_failures,
+            },
         }
 
 

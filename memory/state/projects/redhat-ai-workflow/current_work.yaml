@@ -9,6 +9,14 @@ active_issues:
   status: New
   summary: Tekton pipelines namespace access revalidation
   type: Story
+- alert: AutomationAnalyticsProcessorStoppedProcessing
+  namespace: tower-analytics-stage
+  severity: processor processing rate less than 1 payload in 24h
+  status: blocked - skill executor unavailable
+  needs_reply: true
+  channel_id: C01CPSKFG0P
+  thread_ts: 1771848571.224559
+  timestamp: 2026-02-23
 daily_summaries:
 - commits: 0
   date: '2026-02-09'
@@ -161,7 +169,7 @@ daily_summaries:
   open_prs: 3
   uncommitted_repos: 0
 last_beer: '2026-02-09T23:28:48.052195'
-last_updated: '2026-02-19T16:09:43.889174'
+last_updated: '2026-02-24T16:09:35.726761'
 follow_ups:
 - alert: MessagesRecoveryTarballProcessingFailedError in tower-analytics-stage namespace
     - needs kibana log review and slack reply to C01CPSKFG0P:1771430769.677249
@@ -172,3 +180,48 @@ follow_ups:
   slack_thread: 1771517330.094199
   status: blocked - skill executor down, needs manual cli investigation
   kibana: https://kibana.apps.crcs02ue1.urby.p1.openshiftapps.com/app/kibana#/dashboard/fe7a7460-bb06-11ee-b94f-797a13a62d1a
+- task: investigate AutomationAnalyticsProcessorStoppedProcessing alert
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: 1771762171.094229
+  status: blocked - skill executor down, needs manual cli investigation or wait for
+    skills
+  alert: processor has processed less than 1 payload in past 24hrs
+- alert: MessagesRecoveryTarballProcessingFailedError in tower-analytics-stage namespace,
+    slack thread C01CPSKFG0P/1771776530.624579 - needs investigation when k8s access
+    restored
+- task: 'Fix hygiene issues on AAP-62977: epic_link'
+  priority: low
+  created: '2026-02-23T10:25:32.029870'
+  issue_key: AAP-62977
+- alert: MessagesRecoveryTarballProcessingFailedError
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1771862930.809309'
+  status: blocked - skill executor completely down, cannot reply to slack
+  task: investigate messages recovery cronjob tarball processing failures (4th recent
+    occurrence)
+  kibana: https://kibana.apps.crcs02ue1.urby.p1.openshiftapps.com/app/kibana#/dashboard/fe7a7460-bb06-11ee-b94f-797a13a62d1a
+  pattern: recurring failures suggest storage/s3 issues or malformed tarballs
+  next: check pod logs, review kibana errors, verify s3 access when tooling returns
+- alert: AutomationAnalyticsProcessorAAPEdaStoppedProcessing
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1771876730.826839'
+  status: blocked - skill executor completely down, cannot check pods or reply
+  task: investigate eda processor stopped processing - <1 payload per 24hrs
+  next: check pod status with oc get pods, check logs, verify message queue connectivity
+  pattern: recurring processor alerts in stage suggest systemic issue with message
+    ingestion or pod health
+- alert: MessagesRecoveryTarballProcessingFailedError (5th occurrence)
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1771949330.993589'
+  kibana: https://kibana.apps.crcs02ue1.urby.p1.openshiftapps.com/app/kibana#/dashboard/fe7a7460-bb06-11ee-b94f-797a13a62d1a
+  status: blocked - skill executor down, cannot reply to slack
+  pattern: recurring tarball processing failures - likely s3/storage or data corruption
+    issues
+  next: when skills return - reply to slack with investigation summary, check pod
+    logs, verify s3 access, review kibana for specific errors
+  impact: historical message recovery blocked, real-time processing unaffected
+  priority: medium - recurring issue needs root cause fix

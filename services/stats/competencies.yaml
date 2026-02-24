@@ -733,6 +733,8 @@ level_weights:
     target_scale: 0.65
     role_weights:
       commit: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      doc: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      meeting: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
       story: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
       epic: {reporter: 3.0, assignee: 2.0, contributor: 1.0}
       anstrat: {reporter: 5.0, assignee: 4.0, contributor: 2.0}
@@ -746,6 +748,8 @@ level_weights:
     target_scale: 0.9
     role_weights:
       commit: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      doc: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
+      meeting: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
       story: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
       epic: {reporter: 2.5, assignee: 1.8, contributor: 0.8}
       anstrat: {reporter: 4.0, assignee: 3.0, contributor: 1.5}
@@ -759,6 +763,8 @@ level_weights:
     target_scale: 1.25
     role_weights:
       commit: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
+      doc: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
+      meeting: {reporter: 0.7, assignee: 0.7, contributor: 0.35}
       story: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
       epic: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
       anstrat: {reporter: 3.0, assignee: 2.0, contributor: 1.0}
@@ -769,9 +775,11 @@ level_weights:
       Mentorship: 0.8
       End-to-End Delivery: 1.0
   pse:
-    target_scale: 1.6
+    target_scale: 2.0
     role_weights:
       commit: {reporter: 0.4, assignee: 0.4, contributor: 0.2}
+      doc: {reporter: 0.5, assignee: 0.5, contributor: 0.25}
+      meeting: {reporter: 0.5, assignee: 0.4, contributor: 0.2}
       story: {reporter: 0.5, assignee: 0.4, contributor: 0.2}
       epic: {reporter: 1.0, assignee: 0.8, contributor: 0.4}
       anstrat: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
@@ -779,57 +787,65 @@ level_weights:
     pillar_weights:
       Technical Contribution: 0.8
       Leadership: 1.3
-      Mentorship: 1.2
-      End-to-End Delivery: 1.2
+      Mentorship: 1.1
+      End-to-End Delivery: 1.25
   spse:
     target_scale: 2.0
     role_weights:
       commit: {reporter: 0.3, assignee: 0.3, contributor: 0.1}
+      doc: {reporter: 0.4, assignee: 0.3, contributor: 0.15}
+      meeting: {reporter: 0.4, assignee: 0.3, contributor: 0.15}
       story: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
       epic: {reporter: 0.7, assignee: 0.5, contributor: 0.3}
       anstrat: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
       strategy: {reporter: 1.5, assignee: 1.2, contributor: 0.6}
     pillar_weights:
-      Technical Contribution: 0.7
-      Leadership: 1.4
-      Mentorship: 1.3
-      End-to-End Delivery: 1.3
+      Technical Contribution: 0.6
+      Leadership: 1.5
+      Mentorship: 1.2
+      End-to-End Delivery: 1.4
   de:
     target_scale: 2.5
     role_weights:
       commit: {reporter: 0.2, assignee: 0.2, contributor: 0.1}
+      doc: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
+      meeting: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
       story: {reporter: 0.2, assignee: 0.2, contributor: 0.1}
       epic: {reporter: 0.5, assignee: 0.4, contributor: 0.2}
       anstrat: {reporter: 0.8, assignee: 0.8, contributor: 0.4}
       strategy: {reporter: 1.2, assignee: 1.0, contributor: 0.5}
     pillar_weights:
-      Technical Contribution: 0.6
-      Leadership: 1.5
-      Mentorship: 1.4
-      End-to-End Delivery: 1.4
+      Technical Contribution: 0.45
+      Leadership: 1.65
+      Mentorship: 1.35
+      End-to-End Delivery: 1.55
   sde:
     target_scale: 3.1
     role_weights:
       commit: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      doc: {reporter: 0.2, assignee: 0.15, contributor: 0.08}
+      meeting: {reporter: 0.2, assignee: 0.15, contributor: 0.08}
       story: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
       epic: {reporter: 0.4, assignee: 0.3, contributor: 0.15}
       anstrat: {reporter: 0.7, assignee: 0.7, contributor: 0.35}
       strategy: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
     pillar_weights:
-      Technical Contribution: 0.5
-      Leadership: 1.5
+      Technical Contribution: 0.35
+      Leadership: 1.75
       Mentorship: 1.5
-      End-to-End Delivery: 1.5
+      End-to-End Delivery: 1.65
   fellow:
     target_scale: 3.75
     role_weights:
       commit: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
+      doc: {reporter: 0.15, assignee: 0.1, contributor: 0.05}
+      meeting: {reporter: 0.15, assignee: 0.1, contributor: 0.05}
       story: {reporter: 0.1, assignee: 0.1, contributor: 0.05}
       epic: {reporter: 0.3, assignee: 0.2, contributor: 0.1}
       anstrat: {reporter: 0.6, assignee: 0.6, contributor: 0.3}
       strategy: {reporter: 1.0, assignee: 1.0, contributor: 0.5}
     pillar_weights:
-      Technical Contribution: 0.5
-      Leadership: 1.5
-      Mentorship: 1.5
-      End-to-End Delivery: 1.5
+      Technical Contribution: 0.3
+      Leadership: 1.8
+      Mentorship: 1.6
+      End-to-End Delivery: 1.75

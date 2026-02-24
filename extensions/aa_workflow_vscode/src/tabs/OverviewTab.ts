@@ -239,11 +239,11 @@ export class OverviewTab extends BaseTab {
     html += '<div class="card">';
     html += '<div class="rh-category">Active Issue</div>';
     if (activeIssue) {
-      html += `<div class="card-title">${activeIssue.key}</div>`;
-      html += `<div class="card-content-primary mt-8">${this.escapeHtml(activeIssue.summary)}</div>`;
-      html += `<div class="card-content-secondary mt-4">Status: ${activeIssue.status}</div>`;
+      html += `<div class="card-title">${this.escapeHtml(activeIssue.key)}</div>`;
+      html += `<div class="card-content-primary mt-8">${this.safeText(activeIssue.summary)}</div>`;
+      html += `<div class="card-content-secondary mt-4">Status: ${this.escapeHtml(activeIssue.status)}</div>`;
     } else {
-      html += '<div class="loading-placeholder">No active issue</div>';
+      html += '<div class="card-content-secondary mt-8">No active issue</div>';
     }
     if (totalActiveIssues > 1) {
       html += `<div class="card-content-more mt-8">+${totalActiveIssues - 1} more issues</div>`;
@@ -255,10 +255,10 @@ export class OverviewTab extends BaseTab {
     html += '<div class="rh-category">Active Merge Request</div>';
     if (activeMR) {
       html += `<div class="card-title">!${activeMR.id}</div>`;
-      html += `<div class="card-content-primary mt-8">${this.escapeHtml(activeMR.title)}</div>`;
-      html += `<div class="card-content-secondary mt-4">Project: ${activeMR.project}</div>`;
+      html += `<div class="card-content-primary mt-8">${this.safeText(activeMR.title)}</div>`;
+      html += `<div class="card-content-secondary mt-4">Project: ${this.escapeHtml(activeMR.project)}</div>`;
     } else {
-      html += '<div class="loading-placeholder">No active MR</div>';
+      html += '<div class="card-content-secondary mt-8">No active MR</div>';
     }
     if (totalActiveMRs > 1) {
       html += `<div class="card-content-more mt-8">+${totalActiveMRs - 1} more MRs</div>`;
@@ -272,11 +272,13 @@ export class OverviewTab extends BaseTab {
       html += '<div class="card mt-16">';
       html += '<div class="rh-category">Follow-ups</div>';
       html += '<div class="follow-up-list">';
-      followUps.slice(0, 5).forEach((fu) => {
-        const priorityDot = fu.priority === "high" ? "error" : fu.priority === "medium" ? "warning" : "success";
+      followUps.slice(0, 5).forEach((fu: any) => {
+        const task = typeof fu === "string" ? fu : fu.task || fu.alert || JSON.stringify(fu);
+        const priority = typeof fu === "object" ? fu.priority || "low" : "low";
+        const priorityDot = priority === "high" ? "error" : priority === "medium" ? "warning" : "success";
         html += `<div class="follow-up-item">
           <span class="dot status-dot ${priorityDot}"></span>
-          <span>${this.escapeHtml(fu.task)}</span>
+          <span>${this.escapeHtml(task)}</span>
         </div>`;
       });
       if (followUps.length > 5) {

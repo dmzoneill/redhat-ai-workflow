@@ -24,6 +24,10 @@ const logger = createLogger("PerformanceTab");
 interface CompetencyScore {
   points: number;
   percentage: number;
+  no_enrichment_points?: number;
+  no_enrichment_percentage?: number;
+  peer_comparable_points?: number;
+  peer_comparable_percentage?: number;
 }
 
 interface QuestionNote {
@@ -67,6 +71,13 @@ interface CoverageInfo {
   percentage: number;
 }
 
+interface PillarPoints {
+  technical: number;
+  leadership: number;
+  mentorship: number;
+  delivery: number;
+}
+
 interface IssueNode {
   key: string;
   summary: string;
@@ -74,7 +85,21 @@ interface IssueNode {
   points: number;
   event_count: number;
   keywords: string[];
+  strategy_aligned: boolean;
+  strategy_names: string[];
+  pillar_points: PillarPoints;
+  scope_points: Record<string, number>;
   children: IssueNode[];
+}
+
+interface IssueSummary {
+  total_points: number;
+  aligned_points: number;
+  unaligned_points: number;
+  alignment_pct: number;
+  scope_points: Record<string, number>;
+  pillar_points: PillarPoints;
+  tag_counts: Record<string, number>;
 }
 
 interface IssueHierarchy {
@@ -83,6 +108,7 @@ interface IssueHierarchy {
   uncategorized: IssueNode[];
   total_issues: number;
   cached: boolean;
+  summary: IssueSummary;
 }
 
 interface IssueLineageEntry {
@@ -156,7 +182,27 @@ interface StrategyAlignmentPriority {
   matched_user_issues: string[];
   matched_mrs: string[];
   senders: string[];
+  owner_names?: string[];
 }
+
+interface SenderRelationship {
+  sender: string;
+  anstrat_key: string;
+  match_types: string[];
+  evidence: string[];
+  confidence: number;
+}
+
+interface SenderSummary {
+  total_emails: number;
+  jira_issues?: number;
+  gdrive_docs?: number;
+  anstrat_count: number;
+  top_themes: string[];
+  coverage: number;
+}
+
+// Ownership is derived passively (emails, Jira reporter, GDrive), not from Jira assignee.
 
 interface StrategyAlignment {
   emails_loaded: number;
@@ -166,6 +212,10 @@ interface StrategyAlignment {
   pillar_summary: Record<string, { competency_points: number; priority_count: number; covered: number; gaps: number }>;
   coverage_summary: { total_priorities: number; covered: number; gaps: number; coverage_pct: number };
   user_work_summary?: { jira_issues: number; gitlab_mrs: number };
+  sender_relationships?: { relationships: SenderRelationship[]; sender_summaries: Record<string, SenderSummary>; data_sources?: Record<string, number> };
+  anstrat_catalog_count?: number;
+  jira_activity_summary?: Record<string, { issue_count: number; projects: string[]; themes: string[] }>;
+  gdrive_summary?: { total_docs: number; direct_docs: number; keyword_docs: number };
 }
 
 interface PerformanceState {
@@ -173,6 +223,10 @@ interface PerformanceState {
   quarter: string;
   day_of_quarter: number;
   overall_percentage: number;
+  no_enrichment_overall: number;
+  peer_comparable_overall: number;
+  event_counts_by_source: Record<string, number>;
+  comparable_event_counts_by_source: Record<string, number>;
   competencies: Record<string, CompetencyScore>;
   highlights: string[];
   gaps: string[];
@@ -196,7 +250,12 @@ interface PerformanceState {
   executive_senders: string[];
   executive_emails: ExecutiveEmailSummary[];
   peer_benchmarks: PeerBenchmarks | null;
+  org_stats: OrgStats | null;
   competency_view: "sunburst" | "mindmap";
+  heatmap_mode: "percentage" | "raw_points" | "peer_comparable";
+  event_volume_mode: "all" | "comparable";
+  session_enrichment: boolean;
+  peer_comparison_mode: "raw" | "comparable";
   ai_peer_narrative: { narrative: string; source: string } | null;
   ai_peer_differentiators: {
     level_differentiators: Record<string, { competency: string; name: string; level_avg: number; others_avg: number; factor: number }[]>;
@@ -212,18 +271,48 @@ interface PerformanceState {
   } | null;
 }
 
+interface DistributionStats {
+  min: number;
+  max: number;
+  median: number;
+  p25: number;
+  p75: number;
+  avg: number;
+  count: number;
+}
+
 interface PeerLevelData {
   engineers: string[];
+  peer_count: number;
+  roster_count?: number;
   avg_competency_pct: Record<string, number>;
   avg_competency_points: Record<string, number>;
   avg_overall_pct: number;
+  comparable_avg_competency_pct?: Record<string, number>;
+  comparable_avg_overall_pct?: number;
+  comparable_stats_competency?: Record<string, DistributionStats>;
+  comparable_stats_overall?: DistributionStats;
   avg_daily_events: number;
+  avg_days_with_events?: number;
   avg_event_counts_by_source: Record<string, number>;
+  stats_overall?: DistributionStats;
+  stats_competency?: Record<string, DistributionStats>;
 }
 
 interface PeerBenchmarks {
   levels: Record<string, PeerLevelData>;
   last_updated: string | null;
+}
+
+interface OrgStats {
+  available: boolean;
+  total_org_chart: number;
+  total_resolved: number;
+  total_unresolved: number;
+  by_level: Record<string, number>;
+  sampled_per_level: Record<string, number>;
+  selected_per_level: number;
+  generated: string;
 }
 
 interface ExecutiveEmailSummary {
@@ -347,6 +436,10 @@ export class PerformanceTab extends BaseTab {
     quarter: this.getCurrentQuarter(),
     day_of_quarter: this.getDayOfQuarter(),
     overall_percentage: 0,
+    no_enrichment_overall: 0,
+    peer_comparable_overall: 0,
+    event_counts_by_source: {},
+    comparable_event_counts_by_source: {},
     competencies: {},
     highlights: [],
     gaps: [],
@@ -369,7 +462,12 @@ export class PerformanceTab extends BaseTab {
     executive_senders: [],
     executive_emails: [],
     peer_benchmarks: null,
+    org_stats: null,
     competency_view: "sunburst",
+    heatmap_mode: "peer_comparable",
+    event_volume_mode: "comparable",
+    session_enrichment: true,
+    peer_comparison_mode: "comparable",
     ai_peer_narrative: null,
     ai_peer_differentiators: null,
     ai_overview_digest: null,
@@ -478,6 +576,7 @@ export class PerformanceTab extends BaseTab {
         sendersResult,
         emailsResult,
         peerResult,
+        orgStatsResult,
       ] = await Promise.allSettled([
         dbus.stats_getState(),
         dbus.stats_getCapturedDays(),
@@ -487,6 +586,7 @@ export class PerformanceTab extends BaseTab {
         dbus.stats_getExecutiveSenders(),
         dbus.stats_listExecutiveEmails(),
         dbus.stats_getPeerBenchmarks(),
+        dbus.stats_getOrgStats(),
       ]);
 
       // Process results -- order matches the call order above
@@ -499,7 +599,15 @@ export class PerformanceTab extends BaseTab {
             this.state = { ...this.state, ...statsState.performance };
             logger.info(`Loaded performance data: ${this.state.overall_percentage}%`);
           } else {
-            logger.warn("No performance data in stats state");
+            logger.warn("No performance data in stats state -- resetting to defaults");
+            this.state.overall_percentage = 0;
+            this.state.peer_comparable_overall = 0;
+            this.state.event_counts_by_source = {};
+            this.state.comparable_event_counts_by_source = {};
+            this.state.competencies = {};
+            this.state.highlights = [];
+            this.state.gaps = [];
+            this.state.strategy_alignment = null;
           }
         }
       } else {
@@ -527,6 +635,7 @@ export class PerformanceTab extends BaseTab {
             uncategorized: Array.isArray(raw.uncategorized) ? raw.uncategorized : [],
             total_issues: raw.total_issues || 0,
             cached: raw.cached || false,
+            summary: raw.summary || { total_points: 0, aligned_points: 0, unaligned_points: 0, alignment_pct: 0, scope_points: {}, pillar_points: { technical: 0, leadership: 0, mentorship: 0, delivery: 0 }, tag_counts: {} },
           };
         }
       } else {
@@ -583,6 +692,15 @@ export class PerformanceTab extends BaseTab {
         }
       } else {
         logger.warn(`Failed to load peer benchmarks: ${peerResult.reason}`);
+      }
+
+      if (orgStatsResult.status === "fulfilled") {
+        const r = orgStatsResult.value;
+        if (r.success && r.data) {
+          this.state.org_stats = r.data as OrgStats;
+        }
+      } else {
+        logger.warn(`Failed to load org stats: ${orgStatsResult.reason}`);
       }
 
       // Load AI insights (non-blocking, fire-and-forget)
@@ -672,11 +790,12 @@ export class PerformanceTab extends BaseTab {
         <div class="flex-between">
           <div>
             <h2 class="section-title m-0">${this.escapeHtml(this.state.quarter)} Quarterly Connection</h2>
-            <div class="text-secondary text-sm mt-4">Day ${this.state.day_of_quarter} of 90 &middot; ${this.state.overall_percentage}% overall &middot; ${this.state.coverage.captured}/${this.state.coverage.total_weekdays} days captured</div>
+            <div class="text-secondary text-sm mt-4">Day ${this.state.day_of_quarter} of 90 &middot; ${this.getEffectiveOverall()}% overall &middot; ${this.state.coverage.captured}/${this.state.coverage.total_weekdays} days captured</div>
           </div>
           <div class="d-flex gap-8 items-center">
-            <button class="btn btn-xs btn-ghost" data-action="collectDaily" title="Collect today's data">Collect Today</button>
-            <button class="btn btn-xs btn-ghost" data-action="backfill" title="Backfill missing days">Backfill</button>
+            <button class="btn btn-xs btn-ghost" data-action="collectDaily" title="Collect today's data (user + peers)">Collect Today</button>
+            <button class="btn btn-xs btn-ghost" data-action="backfill" title="Backfill all quarter data (user, peers, emails)">Backfill</button>
+            <button class="btn btn-xs btn-ghost" data-action="toggleBackfillOptions" title="Filtered backfill options" style="opacity:0.8;">Backfill...</button>
             <button class="btn btn-xs btn-ghost" data-action="exportReport" title="Export quarterly report">Export</button>
             <div class="flex-row perf-quarter-progress">
               <div class="progress-bar">
@@ -685,6 +804,72 @@ export class PerformanceTab extends BaseTab {
               <span class="perf-progress-text">${quarterProgress}%</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Unified backfill progress indicator with phase event bar -->
+      <div id="peerBackfillProgress" class="backfill-progress-panel" style="display:none;">
+        <div class="backfill-progress-header">
+          <span class="backfill-progress-title" id="peerProgressTitle">Backfill</span>
+          <span class="text-xs" id="peerProgressPct">0%</span>
+          <button class="btn btn-xs backfill-cancel-btn" id="backfillCancelBtn" data-action="cancelBackfill" title="Cancel backfill">Cancel</button>
+        </div>
+        <div class="backfill-phase-bar" id="backfillPhaseBar">
+          <div class="backfill-phase-segment" data-phase="resolve_github" title="Resolve GitHub users"></div>
+          <div class="backfill-phase-segment" data-phase="prefetch" title="Pre-fetch caches"></div>
+          <div class="backfill-phase-segment" data-phase="index_gdrive" title="Index Google Drive"></div>
+          <div class="backfill-phase-segment" data-phase="index_meetings" title="Index meetings"></div>
+          <div class="backfill-phase-segment backfill-phase-collect" data-phase="collecting" title="Collect peer data"></div>
+          <div class="backfill-phase-segment" data-phase="benchmarks" title="Update benchmarks"></div>
+        </div>
+        <div class="backfill-phase-labels">
+          <span data-phase="resolve_github">GitHub</span>
+          <span data-phase="prefetch">Cache</span>
+          <span data-phase="index_gdrive">Drive</span>
+          <span data-phase="index_meetings">Meets</span>
+          <span data-phase="collecting" class="backfill-phase-label-collect">Collect</span>
+          <span data-phase="benchmarks">Bench</span>
+        </div>
+        <div class="backfill-progress-detail">
+          <span class="text-xs text-secondary" id="peerProgressText">Starting backfill...</span>
+          <span class="text-xs text-secondary" id="peerProgressElapsed"></span>
+        </div>
+      </div>
+
+      <!-- Unified backfill options panel -->
+      <div id="backfillOptionsPanel" style="display:none; margin-bottom:8px; padding:12px; border:1px solid var(--vscode-panel-border); border-radius:6px; background:var(--vscode-editor-background);">
+        <div style="font-weight:600; margin-bottom:8px; font-size:12px;">Backfill Options</div>
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:start;">
+          <div>
+            <div class="text-xs text-secondary" style="margin-bottom:4px;">Sources</div>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcGit" checked /> Git</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcJira" checked /> Jira</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcGitlab" checked /> GitLab</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcGithub" checked /> GitHub</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcGdrive" checked /> Google Drive</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfSrcMeeting" checked /> Calendar / Meet</label>
+          </div>
+          <div>
+            <div class="text-xs text-secondary" style="margin-bottom:4px;">Scope</div>
+            <label style="display:block; font-size:11px; cursor:pointer; margin-bottom:4px;"><input type="checkbox" id="bfScopeUser" checked /> My data</label>
+            <label style="display:block; font-size:11px; cursor:pointer; margin-bottom:4px;"><input type="checkbox" id="bfScopePeers" checked /> Peer data</label>
+            <label style="display:block; font-size:11px; cursor:pointer;"><input type="checkbox" id="bfScopeEmails" checked /> Executive emails</label>
+          </div>
+          <div>
+            <div class="text-xs text-secondary" style="margin-bottom:4px;">Date Range</div>
+            <select id="bfDateRange" style="font-size:11px; padding:2px 4px; background:var(--vscode-input-background); color:var(--vscode-input-foreground); border:1px solid var(--vscode-input-border); border-radius:3px;">
+              <option value="full">Full Quarter</option>
+              <option value="7">Last 7 days</option>
+              <option value="14">Last 14 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px;">
+          <button class="btn btn-sm btn-primary" data-action="startFilteredBackfill">Start Backfill</button>
+          <button class="btn btn-sm btn-secondary" data-action="rescorePeers">Re-score Only</button>
+          <button class="btn btn-sm btn-danger" data-action="scrubData" title="Delete all collected data for this quarter">Scrub All Data</button>
+          <button class="btn btn-sm" data-action="cancelBackfillOptions" style="opacity:0.7;">Close</button>
         </div>
       </div>
 
@@ -716,11 +901,14 @@ export class PerformanceTab extends BaseTab {
     const coveragePct = align?.coverage_summary?.coverage_pct ?? 0;
     const coverageColor = coveragePct >= 70 ? "#10b981" : coveragePct >= 40 ? "#f59e0b" : "#ef4444";
 
+    const enrichmentOn = this.state.session_enrichment;
+    const displayOverall = enrichmentOn ? this.state.overall_percentage : (this.state.no_enrichment_overall || this.state.overall_percentage);
+    const enrichToggle = `<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:var(--vscode-descriptionForeground);margin-top:2px;" title="Session enrichment adds keywords from daily session logs to boost competency matches. Toggle off to see raw signal-only scores."><input type="checkbox" ${enrichmentOn ? "checked" : ""} onchange="vscode.postMessage({type:'toggleSessionEnrichment'})" style="cursor:pointer;" />Enriched</label>`;
     const quickStatsHtml = `
-      <div class="grid-4">
+      <div class="grid-4 mb-16">
         <div class="card stat-card">
-          <div class="stat-value">${this.state.overall_percentage}%</div>
-          <div class="text-meta stat-label">Overall Score</div>
+          <div class="stat-value">${displayOverall}%</div>
+          <div class="text-meta stat-label">Overall Score ${enrichToggle}</div>
         </div>
         <div class="card stat-card">
           <div class="stat-value">${this.state.coverage.captured}</div>
@@ -750,7 +938,7 @@ export class PerformanceTab extends BaseTab {
         return meta?.category === pname;
       });
       const avgPct = catComps.length > 0
-        ? Math.round(catComps.reduce((s, [, c]) => s + c.percentage, 0) / catComps.length)
+        ? Math.round(catComps.reduce((s, [id]) => s + this.getEffectivePercentage(id), 0) / catComps.length)
         : 0;
 
       pillarHtml += `
@@ -774,9 +962,13 @@ export class PerformanceTab extends BaseTab {
     pillarHtml += `</div></div>`;
 
     // Strategy alignment priorities
+    const donutContainerHtml = align && align.priorities.length > 0
+      ? `<span class="qc-donut-inline"><svg id="qcCoverageDonut" class="qc-donut-svg" width="80" height="80"></svg></span>`
+      : "";
+
     let strategyHtml = "";
     if (align && align.priorities.length > 0) {
-      strategyHtml += `<div class="section"><div class="section-title">Executive Strategy Alignment</div>`;
+      strategyHtml += `<div class="section"><div class="section-title">Executive Strategy Alignment ${donutContainerHtml}</div>`;
       strategyHtml += `<div class="progress-bar">`;
       strategyHtml += `<div class="progress-fill" style="width: ${coveragePct}%; background: ${coverageColor};"></div>`;
       strategyHtml += `</div>`;
@@ -792,28 +984,120 @@ export class PerformanceTab extends BaseTab {
       }
       strategyHtml += `</div>`;
 
-      strategyHtml += `<div class="flex-col gap-6 overview-priorities">`;
+      // Sender summary cards (passive ownership via emails, Jira reporter, GDrive)
+      const senderSummaries = align.sender_relationships?.sender_summaries || {};
+      const senderEmails = Object.keys(senderSummaries);
+      const jiraActivitySummary = align.jira_activity_summary || {};
+      const dataSources = align.sender_relationships?.data_sources || {};
+      if (senderEmails.length > 0) {
+        const srcParts: string[] = [];
+        if (dataSources.emails) { srcParts.push(`${dataSources.emails} emails`); }
+        if (dataSources.jira_activity) { srcParts.push(`${dataSources.jira_activity} Jira reported`); }
+        if (dataSources.gdrive) { srcParts.push(`${dataSources.gdrive} GDrive docs`); }
+        if (dataSources.meetings) { srcParts.push(`${dataSources.meetings} meetings`); }
+        if (srcParts.length > 0) {
+          strategyHtml += `<div class="data-sources-indicator">Passive signals: ${srcParts.join(" &bull; ")}</div>`;
+        }
+
+        strategyHtml += `<div class="ownership-summary-row">`;
+        for (const email of senderEmails) {
+          const summary = senderSummaries[email];
+          const anstratCount = summary.anstrat_count || 0;
+          const topThemes = (summary.top_themes || []).slice(0, 4).map((t: string) => this.escapeHtml(t)).join(", ");
+          const jiraAct = jiraActivitySummary[email];
+          const jiraIssueCount = summary.jira_issues || jiraAct?.issue_count || 0;
+          const gdriveDocCount = summary.gdrive_docs || 0;
+          const jiraProjects = jiraAct?.projects || [];
+          const displayName = email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+          strategyHtml += `
+            <div class="ownership-card">
+              <div class="ownership-card-name">${this.escapeHtml(displayName)}</div>
+              <div class="ownership-card-stats">
+                <span title="ANSTRAT issues linked via passive signals">${anstratCount} ANSTRATs</span>
+                ${summary.total_emails ? `<span title="Executive emails parsed">${summary.total_emails} emails</span>` : ""}
+                ${jiraIssueCount > 0 ? `<span title="Jira issues reported (last 90d)" class="source-jira">${jiraIssueCount} reported</span>` : ""}
+                ${gdriveDocCount > 0 ? `<span title="Related Google Drive docs" class="source-gdrive">${gdriveDocCount} docs</span>` : ""}
+              </div>
+              ${jiraProjects.length > 0 ? `<div class="ownership-card-projects">${jiraProjects.join(", ")}</div>` : ""}
+              ${topThemes ? `<div class="ownership-card-themes">${topThemes}</div>` : ""}
+            </div>
+          `;
+        }
+        strategyHtml += `</div>`;
+      }
+
+      // Group priorities by owner
+      const ownerGrouped = new Map<string, StrategyAlignmentPriority[]>();
+      const unownedPrios: StrategyAlignmentPriority[] = [];
       for (const prio of align.priorities) {
+        const senders = (prio as any).sender_names || prio.owner_names || [];
+        if (senders.length > 0) {
+          for (const senderName of senders) {
+            if (!ownerGrouped.has(senderName)) ownerGrouped.set(senderName, []);
+            ownerGrouped.get(senderName)!.push(prio);
+          }
+        } else {
+          unownedPrios.push(prio);
+        }
+      }
+
+      const renderPrioCard = (prio: StrategyAlignmentPriority) => {
         const statusClass = prio.status === "covered" ? "overview-prio-covered" : "overview-prio-gap";
         const statusIcon = prio.status === "covered" ? "\u2705" : "\u26A0\uFE0F";
         const pillarColor = PILLAR_DEFS[prio.pillar]?.color || "#888";
         const issueLinks = prio.matched_user_issues.map(k => this.renderIssueLink(k)).join(" ");
         const mrLinks = (prio.matched_mrs || []).map(m => `<span class="overview-mr-badge">${this.escapeHtml(m)}</span>`).join(" ");
         const allMatches = [issueLinks, mrLinks].filter(Boolean).join(" ");
+        const ownerBadges = ((prio as any).sender_names || prio.owner_names || []).map((n: string) =>
+          `<span class="ownership-badge">${this.escapeHtml(n)}</span>`
+        ).join(" ");
 
-        strategyHtml += `
+        return `
           <div class="overview-priority ${statusClass}">
             <div class="flex-row overview-priority-header">
               <span class="overview-priority-status">${statusIcon}</span>
               <span class="overview-priority-name">${this.escapeHtml(prio.name)}</span>
               <span class="overview-priority-pillar" style="background: ${pillarColor}22; color: ${pillarColor}; border: 1px solid ${pillarColor}44;">${this.escapeHtml(prio.pillar)}</span>
+              ${ownerBadges}
             </div>
             ${prio.context ? `<div class="overview-priority-context">${this.escapeHtml(prio.context.substring(0, 150))}</div>` : ""}
             ${allMatches ? `<div class="overview-priority-matches">${allMatches}</div>` : `<div class="overview-priority-gap-msg">No matching deliverables</div>`}
           </div>
         `;
+      };
+
+      // Render grouped by owner if we have ownership data, otherwise flat list
+      if (ownerGrouped.size > 0) {
+        for (const [ownerName, prios] of ownerGrouped.entries()) {
+          const coveredCount = prios.filter(p => p.status === "covered").length;
+          strategyHtml += `<div class="section owner-group-section">`;
+          strategyHtml += `<div class="section-title owner-group-title">`;
+          strategyHtml += `<span class="owner-group-icon">\u{1F464}</span> ${this.escapeHtml(ownerName)}`;
+          strategyHtml += `<span class="owner-group-stats">${coveredCount}/${prios.length} covered</span>`;
+          strategyHtml += `</div>`;
+          strategyHtml += `<div class="flex-col gap-6 overview-priorities">`;
+          for (const prio of prios) {
+            strategyHtml += renderPrioCard(prio);
+          }
+          strategyHtml += `</div></div>`;
+        }
+        if (unownedPrios.length > 0) {
+          strategyHtml += `<div class="section owner-group-section">`;
+          strategyHtml += `<div class="section-title owner-group-title">Unassigned Priorities</div>`;
+          strategyHtml += `<div class="flex-col gap-6 overview-priorities">`;
+          for (const prio of unownedPrios) {
+            strategyHtml += renderPrioCard(prio);
+          }
+          strategyHtml += `</div></div>`;
+        }
+      } else {
+        strategyHtml += `<div class="flex-col gap-6 overview-priorities">`;
+        for (const prio of align.priorities) {
+          strategyHtml += renderPrioCard(prio);
+        }
+        strategyHtml += `</div></div>`;
       }
-      strategyHtml += `</div></div>`;
 
       // Gaps alert
       const gapPrios = align.priorities.filter(p => p.status === "gap");
@@ -821,10 +1105,12 @@ export class PerformanceTab extends BaseTab {
         strategyHtml += `<div class="section"><div class="section-title">Strategy Gaps (${gapPrios.length})</div>`;
         strategyHtml += `<div class="grid-auto">`;
         for (const g of gapPrios) {
+          const gapOwners = ((g as any).sender_names || g.owner_names || []).map((n: string) => this.escapeHtml(n)).join(", ");
           strategyHtml += `
             <div class="card">
               <div class="card-title">${this.escapeHtml(g.name)}</div>
               <div class="text-secondary text-sm">${this.escapeHtml(g.pillar)}</div>
+              ${gapOwners ? `<div class="text-secondary text-sm mt-4">Owner: ${gapOwners}</div>` : ""}
               <div class="text-secondary text-sm mt-4">Consider aligning work to this executive priority</div>
             </div>
           `;
@@ -860,12 +1146,70 @@ export class PerformanceTab extends BaseTab {
         </div>`;
     }
 
+    // Build pillar averages for charts
+    const pillarAvgs: Record<string, number> = {};
+    for (const [pname] of Object.entries(PILLAR_DEFS)) {
+      const catComps = Object.entries(this.state.competencies).filter(([id]) =>
+        this.state.competency_meta[id]?.category === pname
+      );
+      pillarAvgs[pname] = catComps.length > 0
+        ? Math.round(catComps.reduce((s, [id]) => s + this.getEffectivePercentage(id), 0) / catComps.length)
+        : 0;
+    }
+
+    // Chart data for D3 overview visualizations
+    const chartData = {
+      captured_days: this.state.captured_days.slice().sort((a, b) => a.date.localeCompare(b.date)),
+      day_of_quarter: this.state.day_of_quarter,
+      overall_percentage: this.getEffectiveOverall(),
+      total_weekdays: this.state.coverage.total_weekdays,
+      captured: this.state.coverage.captured,
+      trend: digest?.trend || null,
+      pillar_summary: align?.pillar_summary || {},
+      pillar_avgs: pillarAvgs,
+      pillar_colors: Object.fromEntries(Object.entries(PILLAR_DEFS).map(([k, v]) => [k, v.color])),
+      coverage_summary: align?.coverage_summary || { total_priorities: 0, covered: 0, gaps: 0, coverage_pct: 0 },
+    };
+    const chartDataJson = JSON.stringify(chartData);
+
     return `
       <div class="perf-tab-panel">
         ${quickStatsHtml}
+        <div class="qc-charts-row">
+          <div class="qc-trend-container">
+            <div class="qc-chart-header">
+              <span class="qc-chart-title">Quarter Score Trend</span>
+              <div class="qc-chart-legend">
+                <span class="qc-chart-legend-item"><span class="qc-chart-legend-swatch" style="background:#10b981;"></span>Actual</span>
+                <span class="qc-chart-legend-item"><span class="qc-chart-legend-swatch" style="background:#10b981;opacity:0.4;border-top:2px dashed #10b981;height:0;"></span>Projected</span>
+              </div>
+            </div>
+            <svg id="qcTrendChart" class="qc-trend-svg"></svg>
+          </div>
+        </div>
+        <div class="qc-heatmap-container">
+          <div class="qc-chart-header">
+            <span class="qc-chart-title">Daily Activity</span>
+            <div class="qc-heatmap-legend">
+              <span>Less</span>
+              <span class="qc-heatmap-legend-cell" style="background:rgba(16,185,129,0.1);"></span>
+              <span class="qc-heatmap-legend-cell" style="background:rgba(16,185,129,0.3);"></span>
+              <span class="qc-heatmap-legend-cell" style="background:rgba(16,185,129,0.6);"></span>
+              <span class="qc-heatmap-legend-cell" style="background:#10b981;"></span>
+              <span>More</span>
+            </div>
+          </div>
+          <div id="qcHeatmapStrip" class="qc-heatmap-strip"></div>
+        </div>
         ${digestHtml}
+        <div class="qc-pillar-chart-container">
+          <div class="qc-chart-title">Pillar Comparison</div>
+          <svg id="qcPillarChart" class="qc-pillar-svg"></svg>
+        </div>
         ${pillarHtml}
         ${strategyHtml}
+        <div id="qcTooltip" class="qc-tooltip"></div>
+        <script id="qcOverviewChartData" type="application/json">${chartDataJson}</script>
       </div>
     `;
   }
@@ -879,7 +1223,12 @@ export class PerformanceTab extends BaseTab {
             <span>Data Coverage</span>
             <span class="perf-coverage-badge">${this.state.coverage.captured} of ${this.state.coverage.total_weekdays} days (${this.state.coverage.percentage}%)</span>
           </div>
-          ${this.renderCalendar()}
+          ${this.renderMonthlyTrend()}
+          <div class="cal-charts-row">
+            ${this.renderCalendar()}
+            ${this.renderMonthlyDonut()}
+          </div>
+          ${this.renderDayOfWeekHeatmap()}
         </div>
 
         <!-- Day Detail (shown when a day is clicked) -->
@@ -912,9 +1261,133 @@ export class PerformanceTab extends BaseTab {
     return html;
   }
 
+  private renderIssuesDashboard(): string {
+    const h = this.state.issue_hierarchy;
+    if (!h || !h.summary) return "";
+    const s = h.summary;
+
+    const dataJson = JSON.stringify({
+      strategies: (h.strategies || []).map((st: IssueNode) => ({
+        key: st.key, summary: st.summary, points: st.points,
+        children: (st.children || []).map((ep: IssueNode) => ({
+          key: ep.key, summary: ep.summary, points: ep.points,
+          children: (ep.children || []).map((is: IssueNode) => ({
+            key: is.key, summary: is.summary, points: is.points,
+          })),
+        })),
+      })),
+      scope_points: s.scope_points,
+      alignment_pct: s.alignment_pct,
+      aligned_points: s.aligned_points,
+      unaligned_points: s.unaligned_points,
+      tag_counts: s.tag_counts,
+      pillar_points: s.pillar_points,
+      total_points: s.total_points,
+    });
+
+    // Server-rendered fallback for Strategy Points (replaced by D3 treemap when available)
+    const strategies = h.strategies || [];
+    const maxStratPts = Math.max(...strategies.map((st: IssueNode) => st.points || 0), 1);
+    const stratFallback = strategies.length > 0
+      ? strategies.map((st: IssueNode) => {
+          const pct = Math.max(Math.round(((st.points || 0) / maxStratPts) * 100), 4);
+          return `<div class="issues-dash-strat-row">
+            <span class="issues-dash-strat-key">${this.escapeHtml(st.key.replace("ANSTRAT-", "S-"))}</span>
+            <span class="issues-dash-strat-bar" style="width:${pct}%"></span>
+            <span class="issues-dash-strat-pts">${st.points || 0}</span>
+          </div>`;
+        }).join("")
+      : `<div class="text-muted-sm">No strategy data</div>`;
+
+    // Server-rendered fallback for Points by Scope
+    const scopeColors: Record<string, string> = { commit: "#3b82f6", story: "#10b981", epic: "#f59e0b", anstrat: "#ef4444", meeting: "#8b5cf6", doc: "#06b6d4" };
+    const scopeEntries = Object.entries(s.scope_points || {}).filter(([, v]) => (v as number) > 0);
+    const scopeTotal = scopeEntries.reduce((sum, [, v]) => sum + (v as number), 0);
+    const scopeFallback = scopeTotal > 0
+      ? `<div class="issues-dash-scope-total">${scopeTotal}</div>
+         <div class="issues-dash-scope-legend">${scopeEntries.map(([k, v]) =>
+           `<span class="issues-dash-scope-item"><span class="issues-dash-scope-dot" style="background:${scopeColors[k] || "#6b7280"}"></span>${k}: ${v}</span>`
+         ).join("")}</div>`
+      : `<div class="text-muted-sm">No scope data</div>`;
+
+    // Server-rendered gauge for Strategy Alignment
+    const pct = s.alignment_pct || 0;
+    const aligned = s.aligned_points || 0;
+    const unaligned = s.unaligned_points || 0;
+    const barColor = pct >= 70 ? "var(--success)" : pct >= 40 ? "var(--warning)" : "var(--error)";
+    const gaugeFallback = `
+      <div class="issues-gauge-pct">${pct}%</div>
+      <div class="issues-gauge-label">of points are strategy-aligned</div>
+      <div class="issues-gauge-bar"><div class="issues-gauge-fill" style="width:${pct}%;background:${barColor};"></div></div>
+      <div class="issues-gauge-legend">
+        <span><span class="issues-gauge-dot" style="background:${barColor}"></span>Aligned: ${aligned}pts</span>
+        <span><span class="issues-gauge-dot" style="background:var(--bg-tertiary)"></span>Other: ${unaligned}pts</span>
+      </div>`;
+
+    // Server-rendered tag bars
+    const tagEntries = Object.entries(s.tag_counts || {});
+    const maxTagCount = tagEntries.reduce((m, [, v]) => Math.max(m, v as number), 0) || 1;
+    const tagFallback = tagEntries.length > 0
+      ? tagEntries.slice(0, 10).map(([tag, count]) => {
+          const tagPct = Math.max(Math.round(((count as number) / maxTagCount) * 100), 4);
+          const cat = this.getTagCategory(tag);
+          const catColors: Record<string, string> = {
+            worktype: "#3b82f6", quality: "#10b981", domain: "#8b5cf6",
+            ops: "#f97316", monitoring: "#ef4444", other: "#6b7280",
+          };
+          return `<div class="issues-tag-bar-row">
+            <span class="issues-tag-bar-label">${this.escapeHtml(tag)}</span>
+            <span class="issues-tag-bar-fill" style="width:${tagPct}%;background:${catColors[cat] || "#6b7280"};"></span>
+            <span class="issues-tag-bar-count">${count}</span>
+          </div>`;
+        }).join("")
+      : `<div class="text-muted-sm">No tag data</div>`;
+
+    return `
+      <div class="issues-dashboard">
+        <div class="issues-dashboard-row">
+          <div class="issues-dash-card">
+            <div class="issues-dash-title">Strategy Points</div>
+            <div id="issuesDashTreemap" class="issues-dash-chart">${stratFallback}</div>
+          </div>
+          <div class="issues-dash-card">
+            <div class="issues-dash-title">Points by Scope</div>
+            <div id="issuesDashDonut" class="issues-dash-chart issues-dash-scope-fallback">${scopeFallback}</div>
+          </div>
+          <div class="issues-dash-card">
+            <div class="issues-dash-title">Strategy Alignment</div>
+            <div id="issuesDashGauge" class="issues-dash-chart issues-dash-gauge">${gaugeFallback}</div>
+          </div>
+          <div class="issues-dash-card issues-dash-card-wide">
+            <div class="issues-dash-title">Tag Distribution</div>
+            <div id="issuesDashTags" class="issues-dash-chart">${tagFallback}</div>
+          </div>
+        </div>
+      </div>
+      <script type="application/json" id="issuesDashboardData">${dataJson}</script>
+    `;
+  }
+
+  private renderTagFilterBar(): string {
+    const h = this.state.issue_hierarchy;
+    if (!h || !h.summary || !h.summary.tag_counts) return "";
+    const tags = Object.keys(h.summary.tag_counts);
+    if (tags.length === 0) return "";
+    return `
+      <div class="issues-tag-filter-bar">
+        <span class="issues-tag-filter-label">Filter:</span>
+        ${tags.map((t) => {
+          const cat = this.getTagCategory(t);
+          return `<button class="issues-tag-filter-btn perf-tag-${cat}" data-action="filterTag" data-tag="${this.escapeHtml(t)}">${this.escapeHtml(t)}</button>`;
+        }).join("")}
+        <button class="issues-tag-filter-btn issues-tag-clear" data-action="filterTag" data-tag="">all</button>
+      </div>`;
+  }
+
   private renderIssuesTab(): string {
     return `
       <div class="perf-tab-panel">
+        ${this.renderIssuesDashboard()}
         <div class="section">
           <div class="section-title">
             <span>Delivered Issues</span>
@@ -923,7 +1396,10 @@ export class PerformanceTab extends BaseTab {
               <button class="btn btn-xs" data-action="refreshHierarchy">Refresh from Jira</button>
             </div>
           </div>
-          ${this.renderIssueHierarchy()}
+          ${this.renderTagFilterBar()}
+          <div class="issue-cards-grid">
+            ${this.renderIssueHierarchy()}
+          </div>
         </div>
         <div id="missingLinksContainer"></div>
       </div>
@@ -1047,7 +1523,7 @@ export class PerformanceTab extends BaseTab {
 
     // Root node
     const rootId = "wm_root";
-    const overallPct = this.state.overall_percentage || 0;
+    const overallPct = this.getEffectiveOverall() || 0;
     nodes.push({
       id: rootId,
       label: this.state.quarter,
@@ -1274,8 +1750,6 @@ export class PerformanceTab extends BaseTab {
         const eId = `wm_unattached_epic_${ei}`;
         const pillar = findPillarForKey(epic.key);
         const target = pillar || rootId;
-        const epicPillarHex = pillar ? (pillarIdToHex[pillar] || "#f97316") : "#f97316";
-
         nodes.push({
           id: eId,
           label: epic.key.replace(/^AAP-/, ""),
@@ -1285,7 +1759,7 @@ export class PerformanceTab extends BaseTab {
           type: "epic",
           points: epic.points,
           size: Math.min(Math.max(epic.points / 8, 10), 18),
-          color: pillar ? pillarTint(epicPillarHex, "epic") : "#f97316",
+          color: "#f97316",
           eventCount: epic.event_count || 0,
           pillars: pillar ? [pillar] : allPillarIds.slice(),
           weightInfo: `${epic.points}pts | scope: \u00D7${epicScopeMult}`,
@@ -1340,13 +1814,11 @@ export class PerformanceTab extends BaseTab {
         links.push({ source: target, target: uId, type: "hierarchy" });
       });
 
-      // Recolor work nodes with pillar associations
+      // Recolor issue nodes with pillar associations (ANSTRATs/Epics keep fixed colors per legend)
       for (const n of nodes) {
         if (n.pillars && n.pillars.length > 0 && n.pillars.length < allPillarIds.length) {
           const primaryHex = pillarIdToHex[n.pillars[0]] || "#888";
-          if (n.type === "anstrat") n.color = pillarTint(primaryHex, "anstrat");
-          else if (n.type === "epic") n.color = pillarTint(primaryHex, "epic");
-          else if (n.type === "task" || n.type === "bug" || n.type === "story") n.color = pillarTint(primaryHex, "issue");
+          if (n.type === "task" || n.type === "bug" || n.type === "story") n.color = pillarTint(primaryHex, "issue");
         }
       }
     }
@@ -1411,6 +1883,90 @@ export class PerformanceTab extends BaseTab {
       }
     }
 
+    // ---- Sender/Owner nodes ----
+    let ownerCount = 0;
+    const wmSenderSummaries = alignment?.sender_relationships?.sender_summaries || {};
+    const wmSenderRels = alignment?.sender_relationships?.relationships || [];
+    const wmOwnerColor = "#e0e0e0";
+    const wmAnstratNodeMap = new Map(nodes.filter(n => n.type === "anstrat").map(n => [n.fullKey, n.id]));
+
+    const wmEmailToDisplay = new Map<string, string>();
+    const wmDisplayToEmail = new Map<string, string>();
+    for (const [email] of Object.entries(wmSenderSummaries)) {
+      const dn = email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+      wmEmailToDisplay.set(email, dn);
+      wmDisplayToEmail.set(dn, email);
+    }
+
+    const wmEmailToAnstratViaStrategy = new Map<string, Set<string>>();
+    if (alignment?.priorities) {
+      for (const priority of alignment.priorities) {
+        const senderNames: string[] = (priority as any).sender_names || priority.owner_names || [];
+        const prioIssueKeys = priority.issue_keys || [];
+        const prioAnstratNodeIds: string[] = [];
+        for (const k of prioIssueKeys) {
+          const nid = wmAnstratNodeMap.get(k);
+          if (nid) prioAnstratNodeIds.push(nid);
+        }
+        if (prioAnstratNodeIds.length === 0) continue;
+        for (const sn of senderNames) {
+          const email = wmDisplayToEmail.get(sn) || sn;
+          if (!wmEmailToAnstratViaStrategy.has(email)) wmEmailToAnstratViaStrategy.set(email, new Set());
+          for (const nid of prioAnstratNodeIds) wmEmailToAnstratViaStrategy.get(email)!.add(nid);
+        }
+      }
+    }
+
+    for (const [email, summary] of Object.entries(wmSenderSummaries)) {
+      const senderAnstrats = wmSenderRels
+        .filter(r => r.sender === email)
+        .map(r => r.anstrat_key);
+      const linkedAnstratIds: string[] = [];
+      for (const key of senderAnstrats) {
+        const nodeId = wmAnstratNodeMap.get(key);
+        if (nodeId && !linkedAnstratIds.includes(nodeId)) linkedAnstratIds.push(nodeId);
+      }
+      const strategyLinked = wmEmailToAnstratViaStrategy.get(email);
+      if (strategyLinked) {
+        for (const nid of strategyLinked) {
+          if (!linkedAnstratIds.includes(nid)) linkedAnstratIds.push(nid);
+        }
+      }
+
+      ownerCount++;
+      const ownerId = `wm_owner_${email.replace(/[^a-z0-9]/gi, "_")}`;
+      const displayName = wmEmailToDisplay.get(email) || email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+      const ownerPillars = new Set<string>();
+      for (const anId of linkedAnstratIds) {
+        const anNode = nodes.find(n => n.id === anId);
+        if (anNode?.pillars) {
+          for (const p of anNode.pillars) ownerPillars.add(p);
+        }
+      }
+
+      nodes.push({
+        id: ownerId,
+        label: displayName,
+        email,
+        type: "owner",
+        size: 18,
+        color: wmOwnerColor,
+        issueCount: (summary as SenderSummary).anstrat_count || senderAnstrats.length,
+        linkedCount: linkedAnstratIds.length,
+        themes: ((summary as SenderSummary).top_themes || []).slice(0, 5),
+        pillars: ownerPillars.size > 0 ? Array.from(ownerPillars) : Object.keys(pillarDefs).map(n => `wm_pillar_${n.replace(/[^a-z]/gi, "_")}`),
+      });
+
+      if (linkedAnstratIds.length > 0) {
+        for (const anId of linkedAnstratIds) {
+          links.push({ source: ownerId, target: anId, type: "owner_anstrat", weight: 1 });
+        }
+      } else {
+        links.push({ source: ownerId, target: rootId, type: "owner_anstrat", weight: 1 });
+      }
+    }
+
     const pillarInfo = Object.entries(pillarDefs).map(([name, def]) => ({
       id: `wm_pillar_${name.replace(/[^a-z]/gi, "_")}`,
       label: def.label,
@@ -1425,6 +1981,7 @@ export class PerformanceTab extends BaseTab {
         pillars: Object.keys(pillarDefs).length,
         competencies: compCount,
         anstrats: anstratCount,
+        owners: ownerCount,
         epics: epicCount,
         issues: issueCount,
         strategies: stratCount,
@@ -1447,6 +2004,7 @@ export class PerformanceTab extends BaseTab {
     if (s.pillars) parts.push(`${s.pillars} pillars`);
     if (s.competencies) parts.push(`${s.competencies} competencies`);
     if (s.anstrats) parts.push(`${s.anstrats} ANSTRATs`);
+    if (s.owners) parts.push(`${s.owners} owners`);
     if (s.epics) parts.push(`${s.epics} epics`);
     if (s.issues) parts.push(`${s.issues} issues`);
     if (s.strategies) parts.push(`${s.strategies} strategies`);
@@ -1471,6 +2029,7 @@ export class PerformanceTab extends BaseTab {
               <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="epic" checked /> Epics</label>
               <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="task,bug,story" checked /> Issues</label>
               <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="strategy" checked /> Strategies</label>
+              <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="wmTypeChk" data-types="owner" checked /> Owners</label>
             </div>
             <span class="perf-mindmap-d3-stats" id="wmStats">${statsHtml}</span>
             <div class="perf-mindmap-d3-controls">
@@ -1504,6 +2063,7 @@ export class PerformanceTab extends BaseTab {
             <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-triangle legend-dot-default"></span>Epic</span>
             <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-square legend-dot-default"></span>Issue</span>
             <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Strategy</span>
+            <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-hexagon" style="background:#e0e0e0"></span>Owner</span>
             <span class="legend-separator">|</span>
             <span class="flex-row gap-4 legend-item-compact wm-legend-evidence"><span class="dot legend-dot" style="border:2px dashed #f59e0b;background:transparent;"></span>Evidence Link</span>
           </div>
@@ -1530,6 +2090,10 @@ export class PerformanceTab extends BaseTab {
       "commit", "mr_merged", "pr_merged", "pr_opened",
       "pr_reviewed", "issue_resolved", "issue_created",
       "issue_opened", "issue_closed", "review_given",
+      "gdrive_doc_created", "gdrive_doc_contributed",
+      "gdrive_sheet_created", "gdrive_sheet_contributed",
+      "gdrive_slides_created", "gdrive_slides_contributed",
+      "meeting_organized", "meeting_attended",
     ];
 
     let compCards = "";
@@ -1840,7 +2404,6 @@ export class PerformanceTab extends BaseTab {
           </div>
 
           <div class="d-flex gap-8 mt-12">
-            <button class="btn btn-sm btn-primary" data-action="backfillExecutiveEmails">Backfill Quarter</button>
             <button class="btn btn-sm" data-action="refreshExecutiveEmails">Refresh List</button>
           </div>
         </div>
@@ -1902,7 +2465,7 @@ export class PerformanceTab extends BaseTab {
             <div class="perf-strategy-steps">
               <div class="perf-strategy-step">
                 <span class="perf-strategy-num">1</span>
-                <span>Events are auto-tagged to questions by competency category during daily collection</span>
+                <span>Events from all sources (Git, Jira, GitLab, GitHub, Gmail, Google Drive, Calendar/Meet) are auto-tagged to questions by competency category during daily collection</span>
               </div>
               <div class="perf-strategy-step">
                 <span class="perf-strategy-num">2</span>
@@ -1945,34 +2508,52 @@ export class PerformanceTab extends BaseTab {
 
   private renderPeersTab(): string {
     const benchmarks = this.state.peer_benchmarks;
+    const orgStats = this.state.org_stats;
     const levelLabels: Record<string, string> = {
-      se: "Senior Engineer",
-      pse: "Principal Engineer",
-      spse: "Sr Principal Engineer",
-      de: "Distinguished Engineer",
+      ase: "Associate SE",
+      se: "Software Engineer",
+      sse: "Senior SE",
+      pse: "Principal SE",
+      spse: "Sr Principal SE",
+      de: "Distinguished",
     };
     const levelColors: Record<string, string> = {
+      ase: "#64748b",
       se: "#3b82f6",
+      sse: "#06b6d4",
       pse: "#8b5cf6",
       spse: "#f59e0b",
       de: "#ef4444",
       you: "#10b981",
     };
 
-    if (!benchmarks || !benchmarks.levels || Object.keys(benchmarks.levels).length === 0) {
-      return `
-        <div class="perf-tab-panel">
-          <div class="section">
-            <div class="section-title">Peer Comparison</div>
-            <div class="empty-state-text">No peer data collected yet.</div>
-            <p class="text-secondary text-sm mt-8">Click "Collect Peers" to gather data for configured peer engineers across levels.</p>
-            <button class="btn btn-sm btn-primary mt-8" data-action="collectPeers">Collect Peers (Today)</button>
-            <button class="btn btn-sm btn-secondary mt-8 ml-8" data-action="collectPeersBackfill">Backfill Quarter</button>
+    // Row 1: Org Overview (always visible when org_roster data available)
+    let orgOverviewHtml = "";
+    if (orgStats?.available) {
+      orgOverviewHtml = `
+        <div class="section">
+          <div class="section-title">Organization Overview</div>
+          <div class="peer-chart-row">
+            ${this.renderOrgLevelDistribution(orgStats, levelLabels, levelColors)}
+            ${this.renderOrgDonut(orgStats, levelColors)}
+            ${this.renderPeerSampleCoverage(orgStats, levelColors)}
           </div>
         </div>`;
     }
 
-    const activeLevels = ["se", "pse", "spse", "de"].filter(lk => benchmarks.levels[lk]);
+    if (!benchmarks || !benchmarks.levels || Object.keys(benchmarks.levels).length === 0) {
+      return `
+        <div class="perf-tab-panel">
+          ${orgOverviewHtml}
+          <div class="section">
+            <div class="section-title">Peer Comparison</div>
+            <div class="empty-state-text">No peer data collected yet.</div>
+            <p class="text-secondary text-sm mt-8">Use the <strong>Collect Today</strong> or <strong>Backfill</strong> buttons above to gather data for configured peer engineers across levels.</p>
+          </div>
+        </div>`;
+    }
+
+    const activeLevels = ["ase", "se", "sse", "pse", "spse", "de"].filter(lk => benchmarks.levels[lk]);
     const allCompIds = new Set<string>();
     Object.keys(this.state.competencies).forEach(c => allCompIds.add(c));
     for (const lk of activeLevels) {
@@ -1980,65 +2561,101 @@ export class PerformanceTab extends BaseTab {
     }
     const sortedComps = Array.from(allCompIds).sort();
 
+    // Peer stats summary cards (Your Score vs target level distribution)
+    const statsSummaryHtml = this.renderPeerStatsSummary(benchmarks, activeLevels, levelLabels, levelColors);
+
+    // Level distribution table
+    const levelDistTableHtml = this.renderLevelDistributionTable(benchmarks, activeLevels, levelLabels, levelColors);
+
+    // Global comparison mode toggle + enrichment toggle
+    const cmpMode = this.state.peer_comparison_mode || "comparable";
+    const rawActive = cmpMode === "raw" ? " active" : "";
+    const cmpActive = cmpMode === "comparable" ? " active" : "";
+    const enrichOn = this.state.session_enrichment;
+    const comparisonToggle = `<div class="heatmap-mode-toggle" style="margin-bottom:8px;display:flex;align-items:center;gap:12px;">
+      <div>
+        <button class="heatmap-mode-btn${rawActive}" onclick="vscode.postMessage({type:'switchPeerComparisonMode',mode:'raw'})">Raw</button>
+        <button class="heatmap-mode-btn${cmpActive}" onclick="vscode.postMessage({type:'switchPeerComparisonMode',mode:'comparable'})">Normalized</button>
+      </div>
+      <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:var(--vscode-descriptionForeground);" title="Session enrichment adds keywords from daily session logs to boost competency matches. Toggle off to see raw signal-only scores."><input type="checkbox" ${enrichOn ? "checked" : ""} onchange="vscode.postMessage({type:'toggleSessionEnrichment'})" style="cursor:pointer;" />Enriched</label>
+    </div>`;
+
+    // Benchmark Comparison: two charts side-by-side, heatmap full-width below
+    const benchmarkRow = `
+      <div class="section">
+        <div class="section-title">Benchmark Comparison ${comparisonToggle}</div>
+        <div class="peer-chart-row peer-chart-row--2col">
+          ${this.renderLevelComparisonBars(benchmarks, activeLevels, levelLabels, levelColors)}
+          ${this.renderEventStackedBars(benchmarks, activeLevels, levelLabels, levelColors)}
+        </div>
+        <div class="peer-heatmap-section">
+          ${this.renderCompetencyHeatmap(benchmarks, activeLevels, levelLabels, levelColors)}
+        </div>
+      </div>`;
+    const heatmapRow = "";
+
     // Radar chart (SVG in JS)
     const radarSvg = this.renderPeerRadar(sortedComps, activeLevels, benchmarks, levelColors);
 
-    // Grouped competency bars
+    // Grouped competency bars with collapsible per-level stats tables
     let barsHtml = '<div class="peer-grouped-bars">';
     for (const compId of sortedComps) {
       const name = compId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
       barsHtml += `<div class="peer-comp-group"><div class="peer-comp-name">${this.escapeHtml(name)}</div>`;
 
-      const userPct = this.state.competencies[compId]?.percentage ?? 0;
+      const isComp = (this.state.peer_comparison_mode || "comparable") === "comparable";
+      const userPct = isComp
+        ? (this.state.competencies[compId]?.peer_comparable_percentage ?? this.state.competencies[compId]?.percentage ?? 0)
+        : this.getEffectivePercentage(compId);
       barsHtml += `<div class="peer-bar-row"><span class="peer-bar-label" style="color:${levelColors.you}">You</span><div class="peer-bar-track"><div class="peer-bar-fill" style="width:${userPct}%;background:${levelColors.you};"></div></div><span class="peer-bar-value">${userPct}%</span></div>`;
 
       for (const lk of activeLevels) {
-        const pct = benchmarks.levels[lk].avg_competency_pct[compId] ?? 0;
+        const ld = benchmarks.levels[lk];
+        const pct = isComp
+          ? (ld?.comparable_avg_competency_pct?.[compId] ?? ld?.avg_competency_pct?.[compId] ?? 0)
+          : (ld?.avg_competency_pct?.[compId] ?? 0);
         const label = levelLabels[lk] || lk;
         const color = levelColors[lk] || "#888";
-        barsHtml += `<div class="peer-bar-row"><span class="peer-bar-label" style="color:${color}">${this.escapeHtml(label)}</span><div class="peer-bar-track"><div class="peer-bar-fill" style="width:${pct}%;background:${color};"></div></div><span class="peer-bar-value">${pct}%</span></div>`;
+        const compStats = isComp
+          ? (ld?.comparable_stats_competency?.[compId] ?? ld?.stats_competency?.[compId])
+          : ld?.stats_competency?.[compId];
+        let rangeHtml = "";
+        let valueText = `${pct}%`;
+        if (compStats && compStats.count > 1) {
+          rangeHtml = `<div class="peer-bar-range" style="left:${compStats.min}%;width:${Math.max(compStats.max - compStats.min, 1)}%;background:${color};"></div>`;
+          rangeHtml += `<div class="peer-bar-median" style="left:${compStats.median}%;background:${color};"></div>`;
+          valueText = `${pct}% (${compStats.min}–${compStats.max}%)`;
+        }
+        barsHtml += `<div class="peer-bar-row"><span class="peer-bar-label" style="color:${color}">${this.escapeHtml(label)}</span><div class="peer-bar-track">${rangeHtml}<div class="peer-bar-fill" style="width:${pct}%;background:${color};"></div></div><span class="peer-bar-value">${valueText}</span></div>`;
       }
+
+      // Collapsible stats detail table for this competency
+      const hasAnyStats = activeLevels.some(lk => {
+        const st = isComp
+          ? (benchmarks.levels[lk]?.comparable_stats_competency?.[compId] ?? benchmarks.levels[lk]?.stats_competency?.[compId])
+          : benchmarks.levels[lk]?.stats_competency?.[compId];
+        return (st?.count ?? 0) > 0;
+      });
+      if (hasAnyStats) {
+        barsHtml += `<details class="peer-comp-stats-detail"><summary class="peer-comp-stats-toggle">Distribution Details</summary>`;
+        barsHtml += `<table class="peer-volume-table"><thead><tr><th>Level</th><th>N</th><th>Min</th><th>Avg</th><th>Median</th><th>Max</th><th>P25</th><th>P75</th></tr></thead><tbody>`;
+        for (const lk of activeLevels) {
+          const cs = isComp
+            ? (benchmarks.levels[lk]?.comparable_stats_competency?.[compId] ?? benchmarks.levels[lk]?.stats_competency?.[compId])
+            : benchmarks.levels[lk]?.stats_competency?.[compId];
+          if (!cs) continue;
+          const color = levelColors[lk] || "#888";
+          barsHtml += `<tr><td style="color:${color}">${this.escapeHtml(levelLabels[lk] || lk)}</td><td>${cs.count}</td><td>${cs.min}%</td><td>${cs.avg}%</td><td>${cs.median}%</td><td>${cs.max}%</td><td>${cs.p25}%</td><td>${cs.p75}%</td></tr>`;
+        }
+        barsHtml += `</tbody></table></details>`;
+      }
+
       barsHtml += `</div>`;
     }
     barsHtml += "</div>";
 
-    // Overall comparison
-    let overallHtml = '<div class="peer-overall-grid">';
-    overallHtml += `<div class="peer-overall-card"><div class="peer-overall-label">You</div><div class="peer-overall-value" style="color:${levelColors.you}">${this.state.overall_percentage}%</div></div>`;
-    for (const lk of activeLevels) {
-      const color = levelColors[lk] || "#888";
-      const label = levelLabels[lk] || lk;
-      const pct = benchmarks.levels[lk].avg_overall_pct ?? 0;
-      const engineers = benchmarks.levels[lk].engineers?.join(", ") || "";
-      overallHtml += `<div class="peer-overall-card"><div class="peer-overall-label">${this.escapeHtml(label)}</div><div class="peer-overall-value" style="color:${color}">${pct}%</div><div class="peer-overall-engineers text-secondary text-xs">${this.escapeHtml(engineers)}</div></div>`;
-    }
-    overallHtml += "</div>";
-
-    // Event volume table
-    const allSources = new Set<string>();
-    for (const lk of activeLevels) {
-      Object.keys(benchmarks.levels[lk].avg_event_counts_by_source || {}).forEach(s => allSources.add(s));
-    }
-    const sortedSources = Array.from(allSources).sort();
-
-    let volumeHtml = '<table class="peer-volume-table"><thead><tr><th>Source</th><th>You (avg/day)</th>';
-    for (const lk of activeLevels) {
-      volumeHtml += `<th>${this.escapeHtml(levelLabels[lk] || lk)}</th>`;
-    }
-    volumeHtml += "</tr></thead><tbody>";
-
-    const userDaysCaptured = Math.max(this.state.coverage.captured, 1);
-    for (const src of sortedSources) {
-      volumeHtml += `<tr><td>${this.escapeHtml(src.charAt(0).toUpperCase() + src.slice(1))}</td>`;
-      volumeHtml += `<td class="vol-you">--</td>`;
-      for (const lk of activeLevels) {
-        const avg = benchmarks.levels[lk].avg_event_counts_by_source?.[src] ?? 0;
-        const days = benchmarks.levels[lk].engineers?.length ? Math.max(1, 1) : 1;
-        volumeHtml += `<td>${typeof avg === "number" ? avg.toFixed(1) : avg}</td>`;
-      }
-      volumeHtml += "</tr>";
-    }
-    volumeHtml += "</tbody></table>";
+    // Volume summary table (You vs peer levels by event source)
+    const volumeTableHtml = this.renderVolumeTable(benchmarks, activeLevels, levelLabels, levelColors);
 
     const lastUpdated = benchmarks.last_updated ? new Date(benchmarks.last_updated).toLocaleString() : "Never";
 
@@ -2088,25 +2705,25 @@ export class PerformanceTab extends BaseTab {
             <div class="section-title">Peer Comparison</div>
             <div class="d-flex gap-8">
               ${promoHtml}
-              <button class="btn btn-sm btn-primary" data-action="collectPeers">Collect Peers (Today)</button>
-              <button class="btn btn-sm btn-secondary" data-action="collectPeersBackfill">Backfill Quarter</button>
             </div>
           </div>
           <div class="text-secondary text-xs mt-4">Last updated: ${this.escapeHtml(lastUpdated)}</div>
         </div>
+
+        ${orgOverviewHtml}
+        ${statsSummaryHtml}
+        ${benchmarkRow}
+        ${heatmapRow}
+        ${levelDistTableHtml}
 
         ${narrativeHtml}
         ${diffHtml}
         ${this._renderPromotionReadiness()}
 
         <div class="section">
-          <div class="section-title">Overall Score Comparison</div>
-          ${overallHtml}
-        </div>
-
-        <div class="section">
           <div class="section-title">Competency Radar</div>
           <div class="peer-radar-container">${radarSvg}</div>
+          ${this.renderRadarStatsLegend(benchmarks, activeLevels, levelLabels, levelColors)}
         </div>
 
         <div class="section">
@@ -2114,10 +2731,7 @@ export class PerformanceTab extends BaseTab {
           ${barsHtml}
         </div>
 
-        <div class="section">
-          <div class="section-title">Event Volume by Source</div>
-          ${volumeHtml}
-        </div>
+        ${volumeTableHtml}
 
         <div class="section">
           <div class="flex-between">
@@ -2127,6 +2741,156 @@ export class PerformanceTab extends BaseTab {
           <div id="peerGrowthContainer" class="peer-growth-container"></div>
         </div>
       </div>`;
+  }
+
+  private renderPeerStatsSummary(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const isComp = (this.state.peer_comparison_mode || "comparable") === "comparable";
+    const userLevel = this.state.scoring_config?.engineering_level || "sse";
+    const targetLevel = activeLevels.includes(userLevel) ? userLevel : activeLevels[activeLevels.length - 1];
+    if (!targetLevel) return "";
+    const ld = benchmarks.levels[targetLevel];
+    const stats = isComp ? (ld?.comparable_stats_overall ?? ld?.stats_overall) : ld?.stats_overall;
+    if (!stats || stats.count === 0) return "";
+
+    const userPct = isComp && this.state.peer_comparable_overall > 0
+      ? this.state.peer_comparable_overall
+      : this.getEffectiveOverall();
+    const color = levelColors[targetLevel] || "#888";
+    const label = levelLabels[targetLevel] || targetLevel.toUpperCase();
+    const modeLabel = isComp ? " (Normalized)" : "";
+
+    const card = (title: string, value: string, highlight?: string) =>
+      `<div class="peer-overall-card"><div class="peer-overall-label">${this.escapeHtml(title)}</div><div class="peer-overall-value" style="color:${highlight || "var(--text-primary)"}">${value}</div></div>`;
+
+    const rosterN = ld?.roster_count ?? 0;
+    const coveragePct = rosterN > 0 ? Math.round((stats.count / rosterN) * 100) : 0;
+    const coverageNote = rosterN > 0 ? ` of ${rosterN} in roster` : "";
+    let warning = "";
+    if (stats.count < 3) {
+      warning = `<div class="peer-warning peer-warning-critical">Too few peers with data (N=${stats.count}${coverageNote}) &mdash; comparison is unreliable</div>`;
+    } else if (stats.count < 5) {
+      warning = `<div class="peer-warning peer-warning-low">Low sample size (N=${stats.count}${coverageNote}, ${coveragePct}% coverage) &mdash; interpret with caution</div>`;
+    }
+
+    return `
+      <div class="section">
+        <div class="section-title">Your Score vs ${this.escapeHtml(label)} Peers (N=${stats.count}${coverageNote})${modeLabel}</div>
+        ${warning}
+        <div class="peer-overall-grid">
+          ${card("Your Score", `${userPct}%`, levelColors.you)}
+          ${card("Min", `${stats.min}%`, color)}
+          ${card("P25", `${stats.p25}%`, color)}
+          ${card("Avg", `${stats.avg}%`, color)}
+          ${card("Median", `${stats.median}%`, color)}
+          ${card("P75", `${stats.p75}%`, color)}
+          ${card("Max", `${stats.max}%`, color)}
+        </div>
+      </div>`;
+  }
+
+  private renderLevelDistributionTable(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const isComp = (this.state.peer_comparison_mode || "comparable") === "comparable";
+    const hasStats = activeLevels.some(lk => {
+      const st = isComp
+        ? (benchmarks.levels[lk]?.comparable_stats_overall ?? benchmarks.levels[lk]?.stats_overall)
+        : benchmarks.levels[lk]?.stats_overall;
+      return (st?.count ?? 0) > 0;
+    });
+    if (!hasStats) return "";
+
+    const userLevel = this.state.scoring_config?.engineering_level || "sse";
+    const modeLabel = isComp ? " (Normalized)" : "";
+    let html = `<div class="section"><div class="section-title">Level Distribution (Overall Score)${modeLabel}</div>`;
+    html += `<table class="peer-volume-table"><thead><tr><th>Level</th><th>Peers</th><th>Min</th><th>P25</th><th>Avg</th><th>Median</th><th>P75</th><th>Max</th></tr></thead><tbody>`;
+    for (const lk of activeLevels) {
+      const st = isComp
+        ? (benchmarks.levels[lk]?.comparable_stats_overall ?? benchmarks.levels[lk]?.stats_overall)
+        : benchmarks.levels[lk]?.stats_overall;
+      if (!st) continue;
+      const color = levelColors[lk] || "#888";
+      const highlight = lk === userLevel ? ` style="background:var(--bg-tertiary, rgba(255,255,255,0.05))"` : "";
+      const rosterN = benchmarks.levels[lk]?.roster_count ?? 0;
+      const peersLabel = rosterN > 0 ? `${st.count}/${rosterN}` : `${st.count}`;
+      const lowNMark = st.count < 5 ? ' <span style="color:var(--warning)" title="Low sample size">\u26A0</span>' : "";
+      html += `<tr${highlight}><td style="color:${color};font-weight:700">${this.escapeHtml(levelLabels[lk] || lk)}</td><td>${peersLabel}${lowNMark}</td><td>${st.min}%</td><td>${st.p25}%</td><td>${st.avg}%</td><td>${st.median}%</td><td>${st.p75}%</td><td>${st.max}%</td></tr>`;
+    }
+    html += `</tbody></table></div>`;
+    return html;
+  }
+
+  private renderVolumeTable(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const allSources = new Set<string>();
+    for (const lk of activeLevels) {
+      Object.keys(benchmarks.levels[lk]?.avg_event_counts_by_source || {}).forEach(s => allSources.add(s));
+    }
+    const sources = Array.from(allSources).sort();
+    if (sources.length === 0) return "";
+
+    let html = `<div class="section"><div class="section-title">Event Volume Comparison (Avg Daily Events)</div>`;
+    html += `<table class="peer-volume-table"><thead><tr><th>Source</th>`;
+    for (const lk of activeLevels) {
+      const color = levelColors[lk] || "#888";
+      html += `<th style="color:${color}">${this.escapeHtml(levelLabels[lk] || lk)}</th>`;
+    }
+    html += `</tr></thead><tbody>`;
+
+    for (const src of sources) {
+      html += `<tr><td>${this.escapeHtml(src.charAt(0).toUpperCase() + src.slice(1))}</td>`;
+      for (const lk of activeLevels) {
+        const val = benchmarks.levels[lk]?.avg_event_counts_by_source?.[src] ?? 0;
+        const display = typeof val === "number" && !Number.isInteger(val) ? val.toFixed(1) : String(val);
+        html += `<td>${display}</td>`;
+      }
+      html += `</tr>`;
+    }
+
+    // Total row
+    html += `<tr style="font-weight:700;border-top:2px solid var(--border)"><td>Total</td>`;
+    for (const lk of activeLevels) {
+      const total = sources.reduce((s, src) => s + (benchmarks.levels[lk]?.avg_event_counts_by_source?.[src] ?? 0), 0);
+      html += `<td>${total.toFixed(1)}</td>`;
+    }
+    html += `</tr></tbody></table></div>`;
+    return html;
+  }
+
+  private renderRadarStatsLegend(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const hasStats = activeLevels.some(lk => (benchmarks.levels[lk]?.stats_overall?.count ?? 0) > 1);
+    if (!hasStats) return "";
+
+    let html = `<div class="peer-radar-stats-legend">`;
+    for (const lk of activeLevels) {
+      const st = benchmarks.levels[lk]?.stats_overall;
+      if (!st || st.count < 2) continue;
+      const color = levelColors[lk] || "#888";
+      const label = levelLabels[lk] || lk;
+      const rosterN = benchmarks.levels[lk]?.roster_count ?? 0;
+      const nLabel = rosterN > 0 ? `N=${st.count}/${rosterN}` : `N=${st.count}`;
+      const lowN = st.count < 5 ? ' <span style="color:var(--warning)">\u26A0</span>' : "";
+      html += `<span class="peer-radar-stats-item" style="color:${color}"><strong>${this.escapeHtml(label)}</strong>: avg ${st.avg}% &middot; min ${st.min}% &middot; max ${st.max}% &middot; median ${st.median}% (${nLabel})${lowN}</span>`;
+    }
+    html += `</div>`;
+    return html;
   }
 
   private _renderPromotionReadiness(): string {
@@ -2148,6 +2912,454 @@ export class PerformanceTab extends BaseTab {
         <div class="promo-summary mt-8">Meeting ${promo.ready_count}/${promo.total_competencies} competency benchmarks</div>
         <div class="promo-assessments mt-8">${assessHtml}</div>
       </div>`;
+  }
+
+  // ============================================================
+  // Peer Charts: Org Overview (Row 1) + Benchmark Charts (Row 2)
+  // ============================================================
+
+  private renderOrgLevelDistribution(
+    orgStats: OrgStats,
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const byLevel = orgStats.by_level;
+    const orderedLevels = ["ase", "se", "sse", "pse", "spse", "de"].filter(l => byLevel[l] !== undefined);
+    const maxCount = Math.max(...orderedLevels.map(l => byLevel[l] || 0), 1);
+
+    let barsHtml = "";
+    for (const lk of orderedLevels) {
+      const count = byLevel[lk] || 0;
+      const pct = Math.round((count / maxCount) * 100);
+      const color = levelColors[lk] || "#888";
+      const label = (lk === "ase" ? "ASE" : lk === "se" ? "SE" : lk === "sse" ? "SSE" : lk === "pse" ? "PSE" : lk === "spse" ? "SPSE" : "DE");
+      const highlighted = lk === "pse" ? " highlighted" : "";
+      barsHtml += `<div class="org-bar-row">
+        <span class="org-bar-label" style="color:${color}">${label}</span>
+        <div class="org-bar-track">
+          <div class="org-bar-fill${highlighted}" style="width:${pct}%;background:${color};"></div>
+        </div>
+        <span class="org-bar-count">${count}</span>
+      </div>`;
+    }
+
+    return `<div class="peer-chart-cell">
+      <div class="chart-title">Org Level Distribution</div>
+      ${barsHtml}
+      <div class="chart-subtitle">${orgStats.total_resolved} engineers resolved of ${orgStats.total_org_chart} total</div>
+    </div>`;
+  }
+
+  private renderOrgDonut(
+    orgStats: OrgStats,
+    levelColors: Record<string, string>,
+  ): string {
+    const byLevel = orgStats.by_level;
+    const orderedLevels = ["ase", "se", "sse", "pse", "spse", "de"].filter(l => byLevel[l] !== undefined);
+    const total = orderedLevels.reduce((sum, l) => sum + (byLevel[l] || 0), 0);
+    if (total === 0) return `<div class="peer-chart-cell"><div class="chart-title">Org Composition</div><p class="text-secondary text-xs">No data</p></div>`;
+
+    const size = 180;
+    const cx = size / 2, cy = size / 2;
+    const outerR = 80, innerR = 50;
+
+    let svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">`;
+
+    let startAngle = -Math.PI / 2;
+    for (const lk of orderedLevels) {
+      const count = byLevel[lk] || 0;
+      if (count === 0) continue;
+      const sliceAngle = (count / total) * 2 * Math.PI;
+      const endAngle = startAngle + sliceAngle;
+      const largeArc = sliceAngle > Math.PI ? 1 : 0;
+
+      const x1o = cx + outerR * Math.cos(startAngle);
+      const y1o = cy + outerR * Math.sin(startAngle);
+      const x2o = cx + outerR * Math.cos(endAngle);
+      const y2o = cy + outerR * Math.sin(endAngle);
+      const x1i = cx + innerR * Math.cos(endAngle);
+      const y1i = cy + innerR * Math.sin(endAngle);
+      const x2i = cx + innerR * Math.cos(startAngle);
+      const y2i = cy + innerR * Math.sin(startAngle);
+
+      const color = levelColors[lk] || "#888";
+      const d = `M ${x1o.toFixed(1)} ${y1o.toFixed(1)} A ${outerR} ${outerR} 0 ${largeArc} 1 ${x2o.toFixed(1)} ${y2o.toFixed(1)} L ${x1i.toFixed(1)} ${y1i.toFixed(1)} A ${innerR} ${innerR} 0 ${largeArc} 0 ${x2i.toFixed(1)} ${y2i.toFixed(1)} Z`;
+      svg += `<path d="${d}" fill="${color}" opacity="0.85"><title>${lk.toUpperCase()}: ${count} (${Math.round(count / total * 100)}%)</title></path>`;
+
+      startAngle = endAngle;
+    }
+
+    svg += `<text x="${cx}" y="${cy - 6}" text-anchor="middle" fill="var(--vscode-foreground, #ccc)" font-size="22" font-weight="800">${total}</text>`;
+    svg += `<text x="${cx}" y="${cy + 12}" text-anchor="middle" fill="var(--vscode-descriptionForeground, #888)" font-size="10">engineers</text>`;
+    svg += `</svg>`;
+
+    let legendHtml = `<div class="peer-donut-legend">`;
+    for (const lk of orderedLevels) {
+      const count = byLevel[lk] || 0;
+      if (count === 0) continue;
+      const color = levelColors[lk] || "#888";
+      const label = lk.toUpperCase();
+      legendHtml += `<span class="peer-donut-legend-item"><span class="peer-donut-legend-dot" style="background:${color}"></span>${label} ${count}</span>`;
+    }
+    legendHtml += `</div>`;
+
+    return `<div class="peer-chart-cell">
+      <div class="chart-title">Org Composition</div>
+      <div class="peer-donut-container">${svg}</div>
+      ${legendHtml}
+    </div>`;
+  }
+
+  private renderPeerSampleCoverage(
+    orgStats: OrgStats,
+    levelColors: Record<string, string>,
+  ): string {
+    const orderedLevels = ["ase", "se", "sse", "pse", "spse", "de"].filter(
+      l => orgStats.by_level[l] !== undefined || orgStats.sampled_per_level[l] !== undefined,
+    );
+
+    let rowsHtml = "";
+    for (const lk of orderedLevels) {
+      const total = orgStats.by_level[lk] || 0;
+      const sampled = orgStats.sampled_per_level[lk] || 0;
+      const pct = total > 0 ? Math.round((sampled / total) * 100) : 0;
+      const color = levelColors[lk] || "#888";
+      const label = lk.toUpperCase();
+      rowsHtml += `<div class="peer-sample-row">
+        <span class="peer-sample-label" style="color:${color}">${label}</span>
+        <div class="peer-sample-track">
+          <div class="peer-sample-fill" style="width:${pct}%;background:${color};"></div>
+        </div>
+        <span class="peer-sample-text">${sampled}/${total}</span>
+      </div>`;
+    }
+
+    return `<div class="peer-chart-cell">
+      <div class="chart-title">Peer Coverage</div>
+      ${rowsHtml}
+      <div class="chart-subtitle">${orgStats.total_unresolved} engineers unresolved in roster</div>
+    </div>`;
+  }
+
+  private renderLevelComparisonBars(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const isComparable = (this.state.peer_comparison_mode || "comparable") === "comparable";
+    const userPct = isComparable && this.state.peer_comparable_overall > 0
+      ? this.state.peer_comparable_overall
+      : this.getEffectiveOverall();
+    const allMax = activeLevels.reduce((m, lk) => {
+      const ld = benchmarks.levels[lk];
+      const st = isComparable ? (ld?.comparable_stats_overall ?? ld?.stats_overall) : ld?.stats_overall;
+      const avg = isComparable ? (ld?.comparable_avg_overall_pct ?? ld?.avg_overall_pct ?? 0) : (ld?.avg_overall_pct ?? 0);
+      return Math.max(m, st?.max ?? avg);
+    }, userPct);
+    const maxPct = Math.max(allMax, 1);
+
+    const barWidth = 460, barHeight = 28;
+    const gap = 8;
+    const labelWidth = 100;
+    const trackWidth = barWidth - labelWidth - 60;
+
+    interface BarItem { label: string; pct: number; color: string; stats?: DistributionStats }
+    const items: BarItem[] = [
+      { label: "You", pct: userPct, color: levelColors.you },
+      ...activeLevels.map(lk => {
+        const ld = benchmarks.levels[lk];
+        return {
+          label: levelLabels[lk] || lk,
+          pct: isComparable ? (ld?.comparable_avg_overall_pct ?? ld?.avg_overall_pct ?? 0) : (ld?.avg_overall_pct ?? 0),
+          color: levelColors[lk] || "#888",
+          stats: isComparable ? (ld?.comparable_stats_overall ?? ld?.stats_overall) : ld?.stats_overall,
+        };
+      }),
+    ];
+
+    const totalHeight = items.length * (barHeight + gap);
+    let svg = `<svg width="100%" viewBox="0 0 ${barWidth} ${totalHeight}" xmlns="http://www.w3.org/2000/svg">`;
+
+    items.forEach((item, i) => {
+      const y = i * (barHeight + gap);
+      const w = Math.round((item.pct / maxPct) * trackWidth);
+
+      svg += `<text x="${labelWidth - 8}" y="${y + barHeight / 2 + 5}" text-anchor="end" fill="${item.color}" font-size="13" font-weight="600">${this.escapeHtml(item.label)}</text>`;
+      svg += `<rect x="${labelWidth}" y="${y}" width="${trackWidth}" height="${barHeight}" rx="4" fill="var(--vscode-editor-background, #1e1e1e)" opacity="0.5"/>`;
+
+      if (item.stats && item.stats.count > 1) {
+        const st = item.stats;
+        const xMin = labelWidth + Math.round((st.min / maxPct) * trackWidth);
+        const xMax = labelWidth + Math.round((st.max / maxPct) * trackWidth);
+        const rangeW = Math.max(xMax - xMin, 2);
+        svg += `<rect x="${xMin}" y="${y + 2}" width="${rangeW}" height="${barHeight - 4}" rx="3" fill="${item.color}" opacity="0.15"/>`;
+        const midY = y + barHeight / 2;
+        svg += `<line x1="${xMin}" y1="${midY - 5}" x2="${xMin}" y2="${midY + 5}" stroke="${item.color}" stroke-width="1.5" opacity="0.5"/>`;
+        svg += `<line x1="${xMax}" y1="${midY - 5}" x2="${xMax}" y2="${midY + 5}" stroke="${item.color}" stroke-width="1.5" opacity="0.5"/>`;
+        svg += `<line x1="${xMin}" y1="${midY}" x2="${xMax}" y2="${midY}" stroke="${item.color}" stroke-width="1" opacity="0.35"/>`;
+        const xMed = labelWidth + Math.round((st.median / maxPct) * trackWidth);
+        svg += `<line x1="${xMed}" y1="${y + 2}" x2="${xMed}" y2="${y + barHeight - 2}" stroke="${item.color}" stroke-width="2" opacity="0.7"/>`;
+      }
+
+      svg += `<rect x="${labelWidth}" y="${y}" width="${Math.max(w, 2)}" height="${barHeight}" rx="4" fill="${item.color}" opacity="0.8"/>`;
+
+      let labelText = `${item.pct}%`;
+      if (item.stats && item.stats.count > 1) {
+        labelText = `${item.pct}% (${item.stats.min}\u2013${item.stats.max}%)`;
+      }
+
+      if (i === 0 && !isComparable && this.state.peer_comparable_overall > 0 && this.state.peer_comparable_overall < item.pct) {
+        const pcW = Math.round((this.state.peer_comparable_overall / maxPct) * trackWidth);
+        svg += `<line x1="${labelWidth + pcW}" y1="${y}" x2="${labelWidth + pcW}" y2="${y + barHeight}" stroke="${item.color}" stroke-width="2" stroke-dasharray="3,2" opacity="0.6"/>`;
+        labelText += ` (normalized: ${this.state.peer_comparable_overall}%)`;
+      }
+
+      svg += `<text x="${labelWidth + w + 6}" y="${y + barHeight / 2 + 5}" fill="var(--vscode-foreground, #ccc)" font-size="12" font-weight="600">${labelText}</text>`;
+    });
+
+    svg += `</svg>`;
+
+    const modeLabel = isComparable ? " (Normalized)" : "";
+    return `<div class="peer-chart-cell">
+      <div class="chart-title">Overall Score Comparison${modeLabel}</div>
+      ${svg}
+    </div>`;
+  }
+
+  private renderEventStackedBars(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const sourceColors: Record<string, string> = {
+      git: "#f97316",
+      jira: "#3b82f6",
+      gitlab: "#8b5cf6",
+      github: "#10b981",
+      gdrive: "#22c55e",
+      meeting: "#ec4899",
+    };
+
+    const volMode = this.state.event_volume_mode || "comparable";
+    const isComparable = volMode === "comparable";
+    const allCounts = this.state.event_counts_by_source || {};
+    const compCounts = this.state.comparable_event_counts_by_source || {};
+    const userCounts = isComparable && Object.keys(compCounts).length > 0 ? compCounts : allCounts;
+
+    const allSources = new Set<string>();
+    Object.keys(userCounts).forEach(s => allSources.add(s));
+    for (const lk of activeLevels) {
+      Object.keys(benchmarks.levels[lk]?.avg_event_counts_by_source || {}).forEach(s => allSources.add(s));
+    }
+    const sources = Array.from(allSources).sort();
+
+    const userTotal = sources.reduce((s, src) => s + (userCounts[src] || 0), 0);
+
+    const rows: { label: string; color: string; counts: Record<string, number>; total: number }[] = [
+      { label: "You", color: levelColors.you, counts: userCounts, total: userTotal },
+    ];
+    for (const lk of activeLevels) {
+      const counts = benchmarks.levels[lk]?.avg_event_counts_by_source || {};
+      const total = sources.reduce((s, src) => s + (counts[src] || 0), 0);
+      rows.push({ label: levelLabels[lk] || lk, color: levelColors[lk] || "#888", counts, total });
+    }
+    const maxTotal = Math.max(...rows.map(r => r.total), 1);
+
+    let barsHtml = "";
+    for (const row of rows) {
+      let segHtml = "";
+      for (const src of sources) {
+        const val = row.counts[src] || 0;
+        const pct = row.total > 0 ? (val / maxTotal) * 100 : 0;
+        const color = sourceColors[src] || "#666";
+        segHtml += `<div class="peer-stacked-segment" style="width:${pct.toFixed(1)}%;background:${color};" title="${src}: ${val.toFixed(1)}"></div>`;
+      }
+      barsHtml += `<div class="peer-stacked-row">
+        <span class="peer-stacked-label" style="color:${row.color}">${this.escapeHtml(row.label)}</span>
+        <div class="peer-stacked-track">${segHtml}</div>
+        <span class="peer-stacked-total">${row.total.toFixed(0)}</span>
+      </div>`;
+    }
+
+    let legendHtml = `<div class="peer-stacked-legend">`;
+    for (const src of sources) {
+      const color = sourceColors[src] || "#666";
+      legendHtml += `<span class="peer-stacked-legend-item"><span class="peer-stacked-legend-swatch" style="background:${color}"></span>${this.escapeHtml(src)}</span>`;
+    }
+    legendHtml += `</div>`;
+
+    const allBtn = `<button class="heatmap-mode-btn${!isComparable ? " active" : ""}" onclick="vscode.postMessage({type:'switchEventVolumeMode',mode:'all'})">All</button>`;
+    const compBtn = `<button class="heatmap-mode-btn${isComparable ? " active" : ""}" onclick="vscode.postMessage({type:'switchEventVolumeMode',mode:'comparable'})">Comparable</button>`;
+    const toggleHtml = `<div class="heatmap-mode-toggle" style="margin-bottom:6px;">${allBtn}${compBtn}</div>`;
+
+    const primaryOnlySources = ["session", "gdrive"].filter(s => (allCounts[s] || 0) > 0);
+    let coverageNote = "";
+    if (!isComparable && primaryOnlySources.length > 0) {
+      const allTotal = sources.reduce((s, src) => s + (allCounts[src] || 0), 0);
+      const pctExclusive = Math.round(
+        primaryOnlySources.reduce((s, src) => s + (allCounts[src] || 0), 0) / Math.max(allTotal, 1) * 100,
+      );
+      coverageNote = `<div class="chart-subtitle" style="color:var(--warning,#f59e0b);">${pctExclusive}% of your events come from sources peers lack (${primaryOnlySources.join(", ")})</div>`;
+    }
+
+    let parityWarnings = "";
+    const sharedSources = sources.filter(s => s !== "session");
+    for (const lk of activeLevels) {
+      const peerCounts = benchmarks.levels[lk]?.avg_event_counts_by_source || {};
+      const missingSources = sharedSources.filter(s => (userCounts[s] || 0) > 0 && (peerCounts[s] || 0) === 0);
+      if (missingSources.length > 0) {
+        const label = levelLabels[lk] || lk;
+        parityWarnings += `<div class="chart-subtitle" style="color:var(--warning,#f59e0b);">${this.escapeHtml(label)} peers have no ${missingSources.join(", ")} events</div>`;
+      }
+    }
+
+    let coverageIndicator = "";
+    const coverageParts: string[] = [];
+    for (const lk of activeLevels) {
+      const ld = benchmarks.levels[lk];
+      const avgDays = ld?.avg_days_with_events ?? 0;
+      if (avgDays > 0) {
+        const label = levelLabels[lk] || lk;
+        coverageParts.push(`${this.escapeHtml(label)}: ${avgDays.toFixed(0)}d avg`);
+      }
+    }
+    if (coverageParts.length > 0) {
+      coverageIndicator = `<div class="chart-subtitle">Data coverage: ${coverageParts.join(" | ")}</div>`;
+    }
+
+    const modeLabel = isComparable ? " (Comparable Only)" : "";
+    return `<div class="peer-chart-cell">
+      <div class="chart-title">Event Volume by Source${modeLabel}</div>
+      ${toggleHtml}
+      ${barsHtml}
+      ${legendHtml}
+      <div class="chart-subtitle">Cumulative events (peer values are level averages)</div>
+      ${coverageNote}
+      ${parityWarnings}
+      ${coverageIndicator}
+    </div>`;
+  }
+
+  private renderCompetencyHeatmap(
+    benchmarks: PeerBenchmarks,
+    activeLevels: string[],
+    levelLabels: Record<string, string>,
+    levelColors: Record<string, string>,
+  ): string {
+    const allCompIds = new Set<string>();
+    Object.keys(this.state.competencies).forEach(c => allCompIds.add(c));
+    for (const lk of activeLevels) {
+      Object.keys(benchmarks.levels[lk]?.avg_competency_pct || {}).forEach(c => allCompIds.add(c));
+    }
+    const sortedComps = Array.from(allCompIds).sort();
+    if (sortedComps.length === 0) return "";
+
+    const mode = this.state.heatmap_mode || "percentage";
+    const isPeerComparable = mode === "peer_comparable";
+    const isRawPoints = mode === "raw_points";
+
+    const cols = ["you", ...activeLevels];
+    const gridCols = `minmax(220px, 1.2fr) repeat(${cols.length}, minmax(60px, 1fr))`;
+
+    const modeButtons = [
+      { key: "percentage", label: "%" },
+      { key: "raw_points", label: "Pts" },
+      { key: "peer_comparable", label: "Normalized" },
+    ];
+    let toggleHtml = `<div class="heatmap-mode-toggle">`;
+    for (const mb of modeButtons) {
+      const active = mode === mb.key ? " active" : "";
+      toggleHtml += `<button class="heatmap-mode-btn${active}" onclick="vscode.postMessage({type:'switchHeatmapMode',mode:'${mb.key}'})">${mb.label}</button>`;
+    }
+    toggleHtml += `</div>`;
+
+    let html = `<div class="peer-heatmap" style="grid-template-columns: ${gridCols};">`;
+
+    html += `<div class="peer-heatmap-header"></div>`;
+    for (const col of cols) {
+      let label = col === "you" ? "You" : (levelLabels[col] || col.toUpperCase());
+      if (col === "you" && isPeerComparable) label = "You (Normalized)";
+      const color = levelColors[col] || "var(--text-secondary)";
+      html += `<div class="peer-heatmap-header" style="color:${color}">${label}</div>`;
+    }
+
+    for (const compId of sortedComps) {
+      const name = compId.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      html += `<div class="peer-heatmap-row-label" title="${this.escapeHtml(name)}">${this.escapeHtml(name)}</div>`;
+
+      for (const col of cols) {
+        let displayVal: number;
+        let suffix = "%";
+        let maxVal = 100;
+        let spreadAnnotation = "";
+
+        if (col === "you") {
+          if (isRawPoints) {
+            displayVal = this.state.competencies[compId]?.points ?? 0;
+            suffix = "";
+            maxVal = 300;
+          } else if (isPeerComparable) {
+            displayVal = this.state.competencies[compId]?.peer_comparable_percentage ?? 0;
+          } else {
+            displayVal = this.getEffectivePercentage(compId);
+          }
+        } else {
+          if (isRawPoints) {
+            displayVal = benchmarks.levels[col]?.avg_competency_points?.[compId] ?? 0;
+            suffix = "";
+            maxVal = 300;
+          } else if (isPeerComparable) {
+            displayVal = benchmarks.levels[col]?.comparable_avg_competency_pct?.[compId]
+              ?? benchmarks.levels[col]?.avg_competency_pct?.[compId] ?? 0;
+          } else {
+            displayVal = benchmarks.levels[col]?.avg_competency_pct?.[compId] ?? 0;
+          }
+          const statsSource = isPeerComparable
+            ? (benchmarks.levels[col]?.comparable_stats_competency?.[compId] ?? benchmarks.levels[col]?.stats_competency?.[compId])
+            : benchmarks.levels[col]?.stats_competency?.[compId];
+          if (statsSource && statsSource.count > 1 && !isRawPoints) {
+            const spread = Math.round(statsSource.max - statsSource.min);
+            spreadAnnotation = `<span class="heatmap-spread" title="Spread: ${statsSource.min}\u2013${statsSource.max}%">\u00b1${Math.round(spread / 2)}</span>`;
+          }
+        }
+
+        const color = levelColors[col] || "#888";
+        const intensity = Math.max(0.1, Math.min(1, displayVal / maxVal));
+        const textColor = intensity > 0.5 ? "#fff" : "var(--vscode-foreground, #ccc)";
+        const tooltipParts = [`${this.escapeHtml(name)}: ${displayVal}${suffix}`];
+        if (col === "you" && isPeerComparable) {
+          const fullPct = this.state.competencies[compId]?.percentage ?? 0;
+          tooltipParts.push(`Full score: ${fullPct}%`);
+          tooltipParts.push("Excludes: session events, personal GDrive, strategy bonus");
+        }
+        if (col !== "you" && !isRawPoints) {
+          const tooltipStats = isPeerComparable
+            ? (benchmarks.levels[col]?.comparable_stats_competency?.[compId] ?? benchmarks.levels[col]?.stats_competency?.[compId])
+            : benchmarks.levels[col]?.stats_competency?.[compId];
+          if (tooltipStats && tooltipStats.count > 1) {
+            tooltipParts.push(`Range: ${tooltipStats.min}\u2013${tooltipStats.max}%`);
+            tooltipParts.push(`Median: ${tooltipStats.median}%`);
+            tooltipParts.push(`N=${tooltipStats.count}`);
+          }
+          if (isPeerComparable) {
+            tooltipParts.push("Strategy bonus normalized");
+          }
+        }
+        const label = displayVal > 0 ? displayVal + suffix : "-";
+        html += `<div class="peer-heatmap-cell" style="background:${color};opacity:${intensity.toFixed(2)};color:${textColor};" title="${tooltipParts.join('\n')}">${label}${spreadAnnotation}</div>`;
+      }
+    }
+
+    html += `</div>`;
+
+    const modeLabel = isPeerComparable ? "Peer-Comparable" : isRawPoints ? "Raw Points" : "Percentage";
+
+    return `<div class="peer-heatmap-fullwidth">
+      <div class="chart-title">Competency Heatmap <span class="chart-subtitle-inline">${modeLabel}</span> ${toggleHtml}</div>
+      ${html}
+    </div>`;
   }
 
   private renderPeerRadar(
@@ -2201,16 +3413,50 @@ export class PerformanceTab extends BaseTab {
       return `<polygon points="${pts}" fill="${color}" fill-opacity="${opacity * 0.12}" stroke="${color}" stroke-width="2" stroke-opacity="${opacity}"${dash}/>`;
     };
 
-    // Peer polygons (dashed)
+    const isComp = (this.state.peer_comparison_mode || "comparable") === "comparable";
+
+    // Peer min-max range bands (shaded area between min and max polygons)
     for (const lk of activeLevels) {
-      const profile = benchmarks.levels[lk].avg_competency_pct || {};
+      const statsComp = isComp
+        ? (benchmarks.levels[lk]?.comparable_stats_competency ?? benchmarks.levels[lk]?.stats_competency)
+        : benchmarks.levels[lk]?.stats_competency;
+      if (statsComp) {
+        const hasRange = compIds.some(cid => statsComp[cid] && statsComp[cid].count > 1);
+        if (hasRange) {
+          const minPts = compIds.map((cid, i) => {
+            const pct = Math.min(statsComp[cid]?.min ?? 0, 100);
+            const r = maxR * pct / 100;
+            const a = (2 * Math.PI * i / n) - Math.PI / 2;
+            return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+          });
+          const maxPts = compIds.map((cid, i) => {
+            const pct = Math.min(statsComp[cid]?.max ?? 0, 100);
+            const r = maxR * pct / 100;
+            const a = (2 * Math.PI * i / n) - Math.PI / 2;
+            return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
+          });
+          const bandPath = `M ${maxPts[0]} ` + maxPts.slice(1).map(p => `L ${p}`).join(" ") + " Z "
+            + `M ${minPts[0]} ` + minPts.slice(1).map(p => `L ${p}`).join(" ") + " Z";
+          const color = levelColors[lk] || "#888";
+          svg += `<path d="${bandPath}" fill="${color}" fill-opacity="0.08" fill-rule="evenodd" stroke="${color}" stroke-width="0.5" stroke-opacity="0.2"/>`;
+        }
+      }
+    }
+
+    // Peer polygons (dashed) -- average line
+    for (const lk of activeLevels) {
+      const profile = isComp
+        ? (benchmarks.levels[lk]?.comparable_avg_competency_pct ?? benchmarks.levels[lk].avg_competency_pct ?? {})
+        : (benchmarks.levels[lk].avg_competency_pct || {});
       svg += makePolygon(profile, levelColors[lk] || "#888", 0.6, true);
     }
 
     // User polygon (solid)
     const userProfile: Record<string, number> = {};
     for (const cid of compIds) {
-      userProfile[cid] = this.state.competencies[cid]?.percentage ?? 0;
+      userProfile[cid] = isComp
+        ? (this.state.competencies[cid]?.peer_comparable_percentage ?? this.state.competencies[cid]?.percentage ?? 0)
+        : this.getEffectivePercentage(cid);
     }
     svg += makePolygon(userProfile, levelColors.you, 1.0, false);
 
@@ -2357,6 +3603,207 @@ export class PerformanceTab extends BaseTab {
   }
 
   // ============================================================
+  // Calendar Graphs
+  // ============================================================
+
+  private _getMonthDays(): CapturedDay[] {
+    const m = this.state.calendar_month;
+    const y = this.state.calendar_year;
+    const prefix = `${y}-${String(m + 1).padStart(2, "0")}-`;
+    return this.state.captured_days.filter(d => d.date.startsWith(prefix));
+  }
+
+  private renderMonthlyTrend(): string {
+    const monthDays = this._getMonthDays();
+    if (monthDays.length < 2) return "";
+
+    const sorted = [...monthDays].sort((a, b) => a.date.localeCompare(b.date));
+    const pillars = Object.keys(PILLAR_DEFS);
+    const maxPts = Math.max(...sorted.map(d => d.total_points), 1);
+
+    const w = 600, h = 70, padX = 4, padY = 4;
+    const plotW = w - padX * 2;
+    const plotH = h - padY * 2;
+    const n = sorted.length;
+
+    const pillarPaths: string[] = [];
+    for (const pn of pillars) {
+      const color = PILLAR_DEFS[pn].color;
+      const pts: string[] = [];
+      for (let i = 0; i < n; i++) {
+        const x = padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+        const v = sorted[i].category_points?.[pn] || 0;
+        const y2 = padY + plotH - (v / maxPts) * plotH;
+        pts.push(`${x.toFixed(1)},${y2.toFixed(1)}`);
+      }
+      pillarPaths.push(
+        `<polyline points="${pts.join(" ")}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>`,
+      );
+    }
+
+    const totalPts: string[] = [];
+    const dotsSvg: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const x = padX + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+      const y2 = padY + plotH - (sorted[i].total_points / maxPts) * plotH;
+      totalPts.push(`${x.toFixed(1)},${y2.toFixed(1)}`);
+      const dayNum = parseInt(sorted[i].date.split("-")[2], 10);
+      dotsSvg.push(
+        `<circle cx="${x.toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="var(--vscode-foreground, #ccc)" opacity="0.6"><title>${dayNum}: ${sorted[i].total_points}pts</title></circle>`,
+      );
+    }
+
+    const gridLines: string[] = [];
+    for (let g = 0; g <= 2; g++) {
+      const gy = padY + (g / 2) * plotH;
+      gridLines.push(`<line x1="${padX}" y1="${gy.toFixed(1)}" x2="${w - padX}" y2="${gy.toFixed(1)}" stroke="var(--vscode-widget-border, #333)" stroke-width="0.5" opacity="0.3"/>`);
+    }
+
+    const legend = pillars.map(pn =>
+      `<span class="cal-trend-legend-item"><span class="cal-trend-legend-swatch" style="background:${PILLAR_DEFS[pn].color}"></span>${pn.split(" ")[0]}</span>`,
+    ).join("");
+
+    return `
+      <div class="cal-trend-wrap">
+        <div class="cal-trend-header">
+          <span class="cal-trend-title">Daily Trend</span>
+          <div class="cal-trend-legend">${legend}</div>
+        </div>
+        <svg class="cal-trend-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+          ${gridLines.join("")}
+          ${pillarPaths.join("")}
+          <polyline points="${totalPts.join(" ")}" fill="none" stroke="var(--vscode-foreground, #ccc)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" stroke-dasharray="4,3"/>
+          ${dotsSvg.join("")}
+        </svg>
+      </div>
+    `;
+  }
+
+  private renderMonthlyDonut(): string {
+    const monthDays = this._getMonthDays();
+    if (monthDays.length === 0) return "";
+
+    const pillars = Object.keys(PILLAR_DEFS);
+    const sums: Record<string, number> = {};
+    let grandTotal = 0;
+    for (const pn of pillars) sums[pn] = 0;
+    for (const day of monthDays) {
+      for (const pn of pillars) {
+        const v = day.category_points?.[pn] || 0;
+        sums[pn] += v;
+        grandTotal += v;
+      }
+    }
+    if (grandTotal === 0) return "";
+
+    const size = 200;
+    const cx = size / 2, cy = size / 2;
+    const outerR = 90, innerR = 58;
+    const avgPerDay = Math.round(grandTotal / monthDays.length);
+
+    let svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">`;
+    let startAngle = -Math.PI / 2;
+
+    for (const pn of pillars) {
+      const v = sums[pn];
+      if (v === 0) continue;
+      const sliceAngle = (v / grandTotal) * 2 * Math.PI;
+      const endAngle = startAngle + sliceAngle;
+      const largeArc = sliceAngle > Math.PI ? 1 : 0;
+
+      const x1o = cx + outerR * Math.cos(startAngle);
+      const y1o = cy + outerR * Math.sin(startAngle);
+      const x2o = cx + outerR * Math.cos(endAngle);
+      const y2o = cy + outerR * Math.sin(endAngle);
+      const x1i = cx + innerR * Math.cos(endAngle);
+      const y1i = cy + innerR * Math.sin(endAngle);
+      const x2i = cx + innerR * Math.cos(startAngle);
+      const y2i = cy + innerR * Math.sin(startAngle);
+
+      const color = PILLAR_DEFS[pn].color;
+      const d = `M ${x1o.toFixed(1)} ${y1o.toFixed(1)} A ${outerR} ${outerR} 0 ${largeArc} 1 ${x2o.toFixed(1)} ${y2o.toFixed(1)} L ${x1i.toFixed(1)} ${y1i.toFixed(1)} A ${innerR} ${innerR} 0 ${largeArc} 0 ${x2i.toFixed(1)} ${y2i.toFixed(1)} Z`;
+      svg += `<path d="${d}" fill="${color}" opacity="0.85"><title>${this.escapeHtml(pn)}: ${v}pts (${Math.round(v / grandTotal * 100)}%)</title></path>`;
+      startAngle = endAngle;
+    }
+
+    svg += `<text x="${cx}" y="${cy - 6}" text-anchor="middle" fill="var(--vscode-foreground, #ccc)" font-size="26" font-weight="800">${avgPerDay}</text>`;
+    svg += `<text x="${cx}" y="${cy + 14}" text-anchor="middle" fill="var(--vscode-descriptionForeground, #888)" font-size="12">avg/day</text>`;
+    svg += `</svg>`;
+
+    const legendItems = pillars.map(pn => {
+      const v = sums[pn];
+      return `<div class="cal-donut-legend-item">
+        <span class="cal-donut-legend-dot" style="background:${PILLAR_DEFS[pn].color}"></span>
+        <span>${pn}</span>
+        <span class="cal-donut-legend-pts">${v}</span>
+      </div>`;
+    }).join("");
+
+    return `
+      <div class="cal-donut-panel">
+        <div class="cal-donut-container">${svg}</div>
+        <div class="cal-donut-legend">${legendItems}</div>
+      </div>
+    `;
+  }
+
+  private renderDayOfWeekHeatmap(): string {
+    const monthDays = this._getMonthDays();
+    if (monthDays.length === 0) return "";
+
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+    const pillars = Object.keys(PILLAR_DEFS);
+    const buckets: { total: number; count: number; cats: Record<string, number> }[] =
+      Array.from({ length: 5 }, () => ({ total: 0, count: 0, cats: {} }));
+
+    for (const pn of pillars) {
+      for (const b of buckets) b.cats[pn] = 0;
+    }
+
+    for (const day of monthDays) {
+      const dateObj = new Date(day.date + "T12:00:00");
+      const wd = dateObj.getDay();
+      if (wd === 0 || wd === 6) continue;
+      const idx = wd - 1;
+      buckets[idx].total += day.total_points;
+      buckets[idx].count += 1;
+      for (const pn of pillars) {
+        buckets[idx].cats[pn] += day.category_points?.[pn] || 0;
+      }
+    }
+
+    const avgs = buckets.map(b => b.count > 0 ? Math.round(b.total / b.count) : 0);
+    const maxAvg = Math.max(...avgs, 1);
+
+    const cells = dayNames.map((name, i) => {
+      const avg = avgs[i];
+      const count = buckets[i].count;
+      const intensity = avg / maxAvg;
+      const bgAlpha = (0.08 + intensity * 0.25).toFixed(2);
+      const textColor = intensity > 0.6 ? "var(--text-primary)" : "var(--text-secondary)";
+
+      const catMax = Math.max(...pillars.map(pn => buckets[i].cats[pn] || 0), 1);
+      const bars = pillars.map(pn => {
+        const v = count > 0 ? Math.round(buckets[i].cats[pn] / count) : 0;
+        return `<div class="cal-dow-bar" style="height:${Math.round((v / catMax) * 14)}px; background:${PILLAR_DEFS[pn].color};" title="${this.escapeHtml(pn)}: ${v}"></div>`;
+      }).join("");
+
+      return `
+        <div class="cal-dow-cell" style="background:rgba(255,255,255,${bgAlpha}); color:${textColor};">
+          <span class="cal-dow-label">${name}</span>
+          <span class="cal-dow-value">${avg}</span>
+          <span class="cal-dow-sub" style="color:var(--text-secondary);">${count} day${count !== 1 ? "s" : ""}</span>
+          <div class="cal-dow-bars">${bars}</div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="cal-dow-strip">${cells}</div>
+    `;
+  }
+
+  // ============================================================
   // Day Detail (enriched with event table and Jira links)
   // ============================================================
 
@@ -2426,12 +3873,12 @@ export class PerformanceTab extends BaseTab {
           for (const lin of ev.lineage) {
             const parts: string[] = [];
             if (lin.anstrat) {
-              parts.push(`<a class="perf-issue-link perf-lineage-anstrat" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.anstrat.key)}" title="${this.escapeHtml(lin.anstrat.summary)}">${this.escapeHtml(lin.anstrat.key)}</a>`);
+              parts.push(`<a class="perf-issue-link perf-lineage-anstrat" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.anstrat.key)}" title="${this.safeText(lin.anstrat.summary)}">${this.escapeHtml(lin.anstrat.key)}</a>`);
             }
             if (lin.epic) {
-              parts.push(`<a class="perf-issue-link perf-lineage-epic" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.epic.key)}" title="${this.escapeHtml(lin.epic.summary)}">${this.escapeHtml(lin.epic.key)}</a>`);
+              parts.push(`<a class="perf-issue-link perf-lineage-epic" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.epic.key)}" title="${this.safeText(lin.epic.summary)}">${this.escapeHtml(lin.epic.key)}</a>`);
             }
-            parts.push(`<a class="perf-issue-link" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.key)}" title="${this.escapeHtml(lin.summary)}">${this.escapeHtml(lin.key)}</a>`);
+            parts.push(`<a class="perf-issue-link" href="#" data-action="openIssue" data-key="${this.escapeHtml(lin.key)}" title="${this.safeText(lin.summary)}">${this.escapeHtml(lin.key)}</a>`);
             crumbs.push(parts.join(`<span class="perf-lineage-sep">\u203A</span>`));
           }
           lineageHtml = `<div class="perf-event-lineage">${crumbs.join(" ")}</div>`;
@@ -2447,7 +3894,7 @@ export class PerformanceTab extends BaseTab {
               <span class="text-muted-sm perf-day-event-type">${this.escapeHtml(ev.type)}</span>
               <span class="perf-day-event-pts">${pts}pts</span>
             </div>
-            <div class="perf-day-event-title">${this.escapeHtml(ev.title)}</div>
+            <div class="perf-day-event-title">${this.safeText(ev.title)}</div>
             ${lineageHtml}
           </div>
         `;
@@ -2465,6 +3912,33 @@ export class PerformanceTab extends BaseTab {
   // Issue Hierarchy
   // ============================================================
 
+  private getMaxPoints(hierarchy: IssueHierarchy): number {
+    let max = 0;
+    const walk = (nodes: IssueNode[]) => {
+      for (const n of nodes) {
+        if (n.points > max) max = n.points;
+        if (n.children) walk(n.children);
+      }
+    };
+    walk(hierarchy.strategies || []);
+    walk(hierarchy.unattached_epics || []);
+    walk(hierarchy.uncategorized || []);
+    return max || 1;
+  }
+
+  private getTagCategory(tag: string): string {
+    const map: Record<string, string> = {
+      feat: "worktype", fix: "worktype", refactor: "worktype",
+      test: "quality", review: "quality", docs: "quality",
+      billing: "domain", auth: "domain", api: "domain", config: "domain", mock: "domain",
+      deploy: "ops", pipeline: "ops", "ci/cd": "ops", release: "ops",
+      grafana: "monitoring", monitoring: "monitoring", alert: "monitoring",
+      security: "monitoring", performance: "monitoring",
+      migration: "ops", integration: "domain",
+    };
+    return map[tag] || "other";
+  }
+
   private renderIssueHierarchy(): string {
     const h = this.state.issue_hierarchy;
     if (!h || !h.total_issues) {
@@ -2474,6 +3948,7 @@ export class PerformanceTab extends BaseTab {
     const strategies = Array.isArray(h.strategies) ? h.strategies : [];
     const unattachedEpics = Array.isArray(h.unattached_epics) ? h.unattached_epics : [];
     const uncategorized = Array.isArray(h.uncategorized) ? h.uncategorized : [];
+    const maxPts = this.getMaxPoints(h);
 
     const cacheNote = h.cached
       ? `<div class="perf-hierarchy-note">Using cached hierarchy. Click "Refresh from Jira" for live data.</div>`
@@ -2481,24 +3956,132 @@ export class PerformanceTab extends BaseTab {
 
     let html = `<div class="perf-hierarchy">${cacheNote}`;
 
+    // Card-based layout: one card per strategy
     for (const strat of strategies) {
-      html += this.renderTreeNode(strat, 0, "strategy");
+      const stratPts = strat.points || 0;
+      const childCount = this.countDescendants(strat);
+      const barColor = this.getHeatColor(maxPts > 0 ? Math.round((stratPts / maxPts) * 100) : 0);
+      const allStratTags = this.collectAllTags(strat);
+      html += `
+        <div class="issue-card" data-key="${this.escapeHtml(strat.key)}" data-tags="${this.escapeHtml(allStratTags.join(","))}">
+          <div class="issue-card-header">
+            <span class="perf-tree-toggle" data-action="toggleNode" data-key="${this.escapeHtml(strat.key)}">&#9654;</span>
+            <span class="issue-card-icon">\u{1F3AF}</span>
+            <span class="issue-card-key">${this.renderIssueLink(strat.key)}</span>
+            <span class="issue-card-summary">${this.safeText(strat.summary || "")}</span>
+          </div>
+          <div class="issue-card-stats">
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value" style="color:${barColor}">${stratPts}</span>
+              <span class="issue-card-stat-label">points</span>
+            </span>
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value">${childCount}</span>
+              <span class="issue-card-stat-label">issues</span>
+            </span>
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value">${strat.event_count || 0}</span>
+              <span class="issue-card-stat-label">events</span>
+            </span>
+            <span class="issue-card-bar-wrap">
+              <span class="issue-card-bar" style="width:${maxPts > 0 ? Math.max(Math.round((stratPts / maxPts) * 100), 4) : 4}%;background:${barColor};"></span>
+            </span>
+          </div>
+          ${this.renderCardTags(strat)}
+          <div class="perf-tree-children" data-parent="${this.escapeHtml(strat.key)}">
+            ${(strat.children || []).map((child: IssueNode) => {
+              const childChildren = Array.isArray(child.children) ? child.children : [];
+              const childType = childChildren.length > 0 ? "epic" : "issue";
+              return this.renderTreeNode(child, 1, childType, maxPts);
+            }).join("")}
+          </div>
+        </div>`;
     }
-    for (const epic of unattachedEpics) {
-      html += this.renderTreeNode(epic, 0, "epic");
-    }
-    if (uncategorized.length > 0) {
-      html += `<div class="perf-tree-group-label">Other Issues</div>`;
-      for (const issue of uncategorized) {
-        html += this.renderTreeNode(issue, 0, "issue");
+
+    // Unaligned Work card - epics and issues not linked to any strategy
+    const unalignedItems = [...unattachedEpics, ...uncategorized];
+    if (unalignedItems.length > 0) {
+      const unalignedPts = unalignedItems.reduce((sum, n) => sum + (n.points || 0), 0);
+      const unalignedEvents = unalignedItems.reduce((sum, n) => sum + (n.event_count || 0), 0);
+      html += `
+        <div class="issue-card issue-card-unaligned" data-tags="${this.escapeHtml(unalignedItems.flatMap(n => n.keywords || []).join(","))}">
+          <div class="issue-card-header">
+            <span class="perf-tree-toggle" data-action="toggleNode" data-key="__unaligned__">&#9654;</span>
+            <span class="issue-card-icon">\u{1F4CB}</span>
+            <span class="issue-card-summary">Unaligned Work <span class="text-muted-sm">(not linked to a strategy)</span></span>
+          </div>
+          <div class="issue-card-stats">
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value">${unalignedPts}</span>
+              <span class="issue-card-stat-label">points</span>
+            </span>
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value">${unalignedItems.length}</span>
+              <span class="issue-card-stat-label">issues</span>
+            </span>
+            <span class="issue-card-stat">
+              <span class="issue-card-stat-value">${unalignedEvents}</span>
+              <span class="issue-card-stat-label">events</span>
+            </span>
+          </div>
+          <div class="perf-tree-children" data-parent="__unaligned__">`;
+      for (const epic of unattachedEpics) {
+        html += this.renderTreeNode(epic, 1, "epic", maxPts);
       }
+      for (const issue of uncategorized) {
+        html += this.renderTreeNode(issue, 1, "issue", maxPts);
+      }
+      html += `
+          </div>
+        </div>`;
     }
 
     html += `</div>`;
     return html;
   }
 
-  private renderTreeNode(node: IssueNode, depth: number, nodeType: string): string {
+  private countDescendants(node: IssueNode): number {
+    let count = 0;
+    const walk = (n: IssueNode) => {
+      if (n.children) {
+        for (const c of n.children) {
+          count++;
+          walk(c);
+        }
+      }
+    };
+    walk(node);
+    return count;
+  }
+
+  private renderCardTags(node: IssueNode): string {
+    const allTags: Record<string, number> = {};
+    const walk = (n: IssueNode) => {
+      for (const k of (n.keywords || [])) {
+        allTags[k] = (allTags[k] || 0) + 1;
+      }
+      if (n.children) n.children.forEach(walk);
+    };
+    walk(node);
+    const sorted = Object.entries(allTags).sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) return "";
+    return `<div class="issue-card-tags">${sorted.slice(0, 8).map(([tag]) => {
+      const cat = this.getTagCategory(tag);
+      return `<span class="perf-issue-tag perf-tag-${cat}">${this.escapeHtml(tag)}</span>`;
+    }).join("")}</div>`;
+  }
+
+  private collectAllTags(node: IssueNode): string[] {
+    const tags = new Set<string>();
+    const walk = (n: IssueNode) => {
+      for (const k of (n.keywords || [])) tags.add(k);
+      if (n.children) n.children.forEach(walk);
+    };
+    walk(node);
+    return [...tags];
+  }
+
+  private renderTreeNode(node: IssueNode, depth: number, nodeType: string, maxPts: number): string {
     if (!node) return "";
     const children = Array.isArray(node.children) ? node.children : [];
     const hasChildren = children.length > 0;
@@ -2514,24 +4097,64 @@ export class PerformanceTab extends BaseTab {
         ? "perf-epic-badge"
         : "perf-issue-badge";
 
+    // Color-coded tags by category
     const keywords = node.keywords && node.keywords.length > 0
-      ? `<div class="perf-issue-tags">${node.keywords.map((k) => `<span class="perf-issue-tag">${this.escapeHtml(k)}</span>`).join("")}</div>`
+      ? `<div class="perf-issue-tags">${node.keywords.map((k) => {
+          const cat = this.getTagCategory(k);
+          return `<span class="perf-issue-tag perf-tag-${cat}" data-tag="${this.escapeHtml(k)}">${this.escapeHtml(k)}</span>`;
+        }).join("")}</div>`
       : "";
 
     const summary = node.summary
-      ? `<span class="perf-tree-summary">${this.escapeHtml(node.summary)}</span>`
+      ? `<span class="perf-tree-summary">${this.safeText(node.summary)}</span>`
       : "";
 
+    // Points bar - proportional width, color by score band
+    const pct = maxPts > 0 ? Math.round((node.points / maxPts) * 100) : 0;
+    const barColor = pct >= 80 ? "var(--success)" : pct >= 50 ? "var(--warning)" : pct >= 25 ? "#f97316" : "var(--error)";
+    const pointsBar = `
+      <span class="perf-tree-points-wrap">
+        <span class="perf-tree-points-bar" style="width: ${Math.max(pct, 4)}%; background: ${barColor};"></span>
+        <span class="perf-tree-points-label">${node.points}pts</span>
+      </span>`;
+
+    // Strategy alignment badge
+    const aligned = node.strategy_aligned;
+    const stratNames = (node.strategy_names || []).join(", ");
+    const stratBadge = aligned
+      ? `<span class="perf-strat-aligned" title="${this.escapeHtml(stratNames || "Strategy aligned")}">&#9632;</span>`
+      : `<span class="perf-strat-unaligned" title="Not strategy-aligned">&#9633;</span>`;
+
+    // Pillar micro-bars (only if node has meaningful points)
+    const pp = node.pillar_points || { technical: 0, leadership: 0, mentorship: 0, delivery: 0 };
+    const pillarTotal = pp.technical + pp.leadership + pp.mentorship + pp.delivery;
+    let pillarBar = "";
+    if (pillarTotal > 0) {
+      const techPct = Math.round((pp.technical / pillarTotal) * 100);
+      const leadPct = Math.round((pp.leadership / pillarTotal) * 100);
+      const mentPct = Math.round((pp.mentorship / pillarTotal) * 100);
+      const delPct = 100 - techPct - leadPct - mentPct;
+      pillarBar = `
+        <div class="perf-pillar-microbar" title="Tech: ${pp.technical} | Lead: ${pp.leadership} | Ment: ${pp.mentorship} | E2E: ${pp.delivery}">
+          <span class="perf-pillar-seg perf-pillar-tech" style="width:${techPct}%"></span>
+          <span class="perf-pillar-seg perf-pillar-lead" style="width:${leadPct}%"></span>
+          <span class="perf-pillar-seg perf-pillar-ment" style="width:${mentPct}%"></span>
+          <span class="perf-pillar-seg perf-pillar-del" style="width:${delPct}%"></span>
+        </div>`;
+    }
+
     let html = `
-      <div class="perf-tree-node depth-${depth}" style="padding-left: ${indent}px;" data-key="${this.escapeHtml(node.key)}">
+      <div class="perf-tree-node depth-${depth}" style="padding-left: ${indent}px;" data-key="${this.escapeHtml(node.key)}" data-tags="${this.escapeHtml((node.keywords || []).join(","))}">
         <div class="perf-tree-node-header">
           ${toggle}
           <span class="perf-tree-icon">${typeIcon}</span>
+          ${stratBadge}
           <span class="${badge}">${this.renderIssueLink(node.key)}</span>
           ${summary}
-          <span class="perf-tree-points">${node.points}pts</span>
+          ${pointsBar}
           <span class="perf-tree-count">${node.event_count || ""}ev</span>
         </div>
+        ${pillarBar}
         ${keywords}
       </div>
     `;
@@ -2541,7 +4164,7 @@ export class PerformanceTab extends BaseTab {
       for (const child of children) {
         const childChildren = Array.isArray(child.children) ? child.children : [];
         const childType = childChildren.length > 0 ? "epic" : "issue";
-        html += this.renderTreeNode(child, depth + 1, childType);
+        html += this.renderTreeNode(child, depth + 1, childType, maxPts);
       }
       html += `</div>`;
     }
@@ -2606,7 +4229,7 @@ export class PerformanceTab extends BaseTab {
 
     // ---- Root ----
     const rootId = "root";
-    const overallPct = this.state.overall_percentage || 0;
+    const overallPct = this.getEffectiveOverall() || 0;
     nodes.push({
       id: rootId,
       label: this.state.quarter,
@@ -2795,7 +4418,6 @@ export class PerformanceTab extends BaseTab {
         const pillar = findPillarForKey(epic.key);
         const targetPillar = pillar || rootId;
 
-        const epicPillarHex = pillar ? (pillarIdToHex[pillar] || fallbackEpicColor) : fallbackEpicColor;
         nodes.push({
           id: eId,
           label: epic.key.replace(/^AAP-/, ""),
@@ -2804,7 +4426,7 @@ export class PerformanceTab extends BaseTab {
           type: "epic",
           points: epic.points,
           size: Math.min(Math.max(epic.points / 8, 10), 18),
-          color: pillar ? pillarTint(epicPillarHex, "epic") : fallbackEpicColor,
+          color: fallbackEpicColor,
           eventCount: epic.event_count || 0,
           pillars: pillar ? [pillar] : allPillarIds.slice(),
         });
@@ -2897,13 +4519,11 @@ export class PerformanceTab extends BaseTab {
         }
       }
 
-      // Recolor ANSTRAT/epic/issue nodes now that pillars are assigned
+      // Recolor issue nodes with pillar associations (ANSTRATs/Epics keep fixed colors per legend)
       for (const n of nodes) {
         if (n.pillars && n.pillars.length > 0 && n.pillars.length < allPillarIds.length) {
           const primaryPillarHex = pillarIdToHex[n.pillars[0]] || "#888";
-          if (n.type === "anstrat") n.color = pillarTint(primaryPillarHex, "anstrat");
-          else if (n.type === "epic") n.color = pillarTint(primaryPillarHex, "epic");
-          else if (n.type === "task" || n.type === "bug" || n.type === "story") n.color = pillarTint(primaryPillarHex, "issue");
+          if (n.type === "task" || n.type === "bug" || n.type === "story") n.color = pillarTint(primaryPillarHex, "issue");
         }
       }
     }
@@ -2986,6 +4606,104 @@ export class PerformanceTab extends BaseTab {
       }
     }
 
+    // ---- Sender nodes (derived from passive signals, not Jira assignee) ----
+    let ownerCount = 0;
+    const senderSummariesGraph = alignment?.sender_relationships?.sender_summaries || {};
+    const senderRelationships = alignment?.sender_relationships?.relationships || [];
+    const ownerColor = "#e0e0e0";
+    const anstratNodeMap = new Map(nodes.filter(n => n.type === "anstrat").map(n => [n.fullKey, n.id]));
+
+    // Build email→display name lookup from priorities for secondary matching
+    const emailToDisplay = new Map<string, string>();
+    const displayToEmail = new Map<string, string>();
+    for (const [email] of Object.entries(senderSummariesGraph)) {
+      const dn = email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+      emailToDisplay.set(email, dn);
+      displayToEmail.set(dn, email);
+    }
+
+    // Secondary matching: sender → priority → issue_keys → ANSTRAT nodes
+    const emailToAnstratViaStrategy = new Map<string, Set<string>>();
+    if (alignment?.priorities) {
+      for (const priority of alignment.priorities) {
+        const senderNames: string[] = (priority as any).sender_names || priority.owner_names || [];
+        const prioIssueKeys = priority.issue_keys || [];
+        const prioAnstratNodeIds: string[] = [];
+        for (const k of prioIssueKeys) {
+          const nid = anstratNodeMap.get(k);
+          if (nid) prioAnstratNodeIds.push(nid);
+        }
+        if (prioAnstratNodeIds.length === 0) continue;
+        for (const sn of senderNames) {
+          const email = displayToEmail.get(sn) || sn;
+          if (!emailToAnstratViaStrategy.has(email)) emailToAnstratViaStrategy.set(email, new Set());
+          for (const nid of prioAnstratNodeIds) emailToAnstratViaStrategy.get(email)!.add(nid);
+        }
+      }
+    }
+
+    for (const [email, summary] of Object.entries(senderSummariesGraph)) {
+      const senderAnstrats = senderRelationships
+        .filter(r => r.sender === email)
+        .map(r => r.anstrat_key);
+      const linkedAnstratIds: string[] = [];
+      for (const key of senderAnstrats) {
+        const nodeId = anstratNodeMap.get(key);
+        if (nodeId && !linkedAnstratIds.includes(nodeId)) linkedAnstratIds.push(nodeId);
+      }
+      // Also include matches found via strategy priorities
+      const strategyLinked = emailToAnstratViaStrategy.get(email);
+      if (strategyLinked) {
+        for (const nid of strategyLinked) {
+          if (!linkedAnstratIds.includes(nid)) linkedAnstratIds.push(nid);
+        }
+      }
+
+      ownerCount++;
+      const ownerId = `owner_${email.replace(/[^a-z0-9]/gi, "_")}`;
+      const displayName = emailToDisplay.get(email) || email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+      const ownerPillars = new Set<string>();
+      for (const anId of linkedAnstratIds) {
+        const anNode = nodes.find(n => n.id === anId);
+        if (anNode?.pillars) {
+          for (const p of anNode.pillars) ownerPillars.add(p);
+        }
+      }
+
+      nodes.push({
+        id: ownerId,
+        label: displayName,
+        email,
+        type: "owner",
+        size: 18,
+        color: ownerColor,
+        issueCount: (summary as SenderSummary).anstrat_count || senderAnstrats.length,
+        linkedCount: linkedAnstratIds.length,
+        themes: ((summary as SenderSummary).top_themes || []).slice(0, 5),
+        pillars: ownerPillars.size > 0 ? Array.from(ownerPillars) : allPillarIds.slice(),
+      });
+
+      if (linkedAnstratIds.length > 0) {
+        for (const anId of linkedAnstratIds) {
+          links.push({
+            source: ownerId,
+            target: anId,
+            type: "owner_anstrat",
+            weight: 1,
+          });
+        }
+      } else {
+        // No specific ANSTRAT match -- link to root so the node is still visible
+        links.push({
+          source: ownerId,
+          target: rootId,
+          type: "owner_anstrat",
+          weight: 1,
+        });
+      }
+    }
+
     const pillarInfo = Object.entries(pillarDefs).map(([name, def]) => ({
       id: `pillar_${name.replace(/[^a-z]/gi, "_")}`,
       label: def.label,
@@ -3004,6 +4722,7 @@ export class PerformanceTab extends BaseTab {
         epics: epicCount,
         issues: issueCount,
         strategies: stratCount,
+        owners: ownerCount,
         evidenceLinks: evidenceLinkCount,
       },
     };
@@ -3023,6 +4742,7 @@ export class PerformanceTab extends BaseTab {
     if (s.pillars) parts.push(`${s.pillars} pillars`);
     if (s.competencies) parts.push(`${s.competencies} competencies`);
     if (s.anstrats) parts.push(`${s.anstrats} ANSTRATs`);
+    if (s.owners) parts.push(`${s.owners} owners`);
     if (s.epics) parts.push(`${s.epics} epics`);
     if (s.issues) parts.push(`${s.issues} issues`);
     if (s.strategies) parts.push(`${s.strategies} strategies`);
@@ -3044,6 +4764,7 @@ export class PerformanceTab extends BaseTab {
             <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="perfMmTypeChk" data-types="epic" checked /> Epics</label>
             <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="perfMmTypeChk" data-types="task,bug,story" checked /> Issues</label>
             <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="perfMmTypeChk" data-types="strategy" checked /> Strategies</label>
+            <label class="text-meta perf-mindmap-toggle perf-type-filter"><input type="checkbox" class="perfMmTypeChk" data-types="owner" checked /> Owners</label>
           </div>
           <span class="perf-mindmap-d3-stats" id="perfMindmapStats">${statsHtml}</span>
           <div class="perf-mindmap-d3-controls">
@@ -3116,6 +4837,7 @@ export class PerformanceTab extends BaseTab {
           <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-triangle legend-dot-default"></span>Epic</span>
           <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-square legend-dot-default"></span>Issue</span>
           <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Strategy</span>
+          <span class="flex-row gap-4 legend-item-compact"><span class="dot legend-dot perf-mm-legend-hexagon legend-dot-default" style="background:#e0e0e0"></span>Owner</span>
           <span class="legend-separator">|</span>
           <span class="flex-row gap-4 legend-item-compact" title="Solid diamond = covered"><span class="dot legend-dot perf-mm-diamond-legend legend-dot-default"></span>Covered</span>
           <span class="flex-row gap-4 legend-item-compact" title="Dashed diamond = gap"><span class="dot legend-dot perf-mm-diamond-legend perf-help-dot-comparison"></span>Gap</span>
@@ -3139,7 +4861,7 @@ export class PerformanceTab extends BaseTab {
     const r2 = 260;
 
     const competencies = this.state.competencies;
-    const overall = this.state.overall_percentage;
+    const overall = this.getEffectiveOverall();
 
     const pillarColors: Record<string, string> = {};
     for (const [pn, pd] of Object.entries(PILLAR_DEFS)) pillarColors[pn] = pd.color;
@@ -3174,7 +4896,7 @@ export class PerformanceTab extends BaseTab {
 
     metaCategories.forEach((cat) => {
       const pColor = pillarColors[cat.name] || "#888";
-      const catValues = cat.competencies.map((c) => competencies[c]?.percentage || 0);
+      const catValues = cat.competencies.map((c) => this.getEffectivePercentage(c));
       const catAvg = catValues.length > 0 ? Math.round(catValues.reduce((a, b) => a + b, 0) / catValues.length) : 0;
 
       // Ring 1: Pillar segment
@@ -3207,7 +4929,7 @@ export class PerformanceTab extends BaseTab {
       let compStart = startAngle;
 
       cat.competencies.forEach((compId) => {
-        const compPct = competencies[compId]?.percentage || 0;
+        const compPct = this.getEffectivePercentage(compId);
         const compColor = this.getColorForPercentage(compPct);
         const compPath = this.arcPath(cx, cy, r1, r2, compStart, compAngle - 1);
 
@@ -3284,6 +5006,22 @@ export class PerformanceTab extends BaseTab {
     return `M ${x1Outer} ${y1Outer} A ${outerR} ${outerR} 0 ${largeArc} 1 ${x2Outer} ${y2Outer} L ${x2Inner} ${y2Inner} A ${innerR} ${innerR} 0 ${largeArc} 0 ${x1Inner} ${y1Inner} Z`;
   }
 
+  private getEffectivePercentage(compId: string): number {
+    const c = this.state.competencies[compId];
+    if (!c) return 0;
+    if (!this.state.session_enrichment && c.no_enrichment_percentage != null) {
+      return c.no_enrichment_percentage;
+    }
+    return c.percentage;
+  }
+
+  private getEffectiveOverall(): number {
+    if (!this.state.session_enrichment && this.state.no_enrichment_overall > 0) {
+      return this.state.no_enrichment_overall;
+    }
+    return this.state.overall_percentage;
+  }
+
   private getColorForPercentage(pct: number): string {
     if (pct >= 80) return "#10b981";
     if (pct >= 50) return "#f59e0b";
@@ -3348,8 +5086,8 @@ export class PerformanceTab extends BaseTab {
               <div class="flex-col perf-evidence-list">
                 ${evidence.map(ev => {
                   const titleHtml = ev.url
-                    ? `<a href="${this.escapeHtml(ev.url)}" class="perf-event-link">${this.escapeHtml(ev.title)}</a>`
-                    : this.escapeHtml(ev.title);
+                    ? `<a href="${this.escapeHtml(ev.url)}" class="perf-event-link">${this.safeText(ev.title)}</a>`
+                    : this.safeText(ev.title);
                   return `
                     <div class="card perf-evidence-card">
                       <div class="perf-evidence-card-top">
@@ -3410,7 +5148,7 @@ export class PerformanceTab extends BaseTab {
     if (this.state.gaps.length === 0) return "";
 
     const gapItems = this.state.gaps.map((gap) => {
-      const pct = this.state.competencies[gap]?.percentage || 0;
+      const pct = this.getEffectivePercentage(gap);
       const meta = this.state.competency_meta[gap];
       const name = meta?.name || this.formatCompetencyName(gap);
       const goal = meta?.goal || "";
@@ -3494,8 +5232,8 @@ export class PerformanceTab extends BaseTab {
                 <div class="perf-gap-card-subtitle">What you've done so far (${evidence.length}):</div>
                 ${evidence.slice(0, 3).map(ev => {
                   const titleHtml = ev.url
-                    ? `<a href="${this.escapeHtml(ev.url)}" class="perf-gap-evidence-link">${this.escapeHtml(ev.title)}</a>`
-                    : this.escapeHtml(ev.title);
+                    ? `<a href="${this.escapeHtml(ev.url)}" class="perf-gap-evidence-link">${this.safeText(ev.title)}</a>`
+                    : this.safeText(ev.title);
                   return `
                     <div class="perf-gap-evidence-item">
                       <span class="perf-gap-evidence-date">${this.escapeHtml(ev.date)}</span>
@@ -3698,11 +5436,15 @@ export class PerformanceTab extends BaseTab {
       return { id, name: meta?.name || this.formatCompetencyName(id), category: meta?.category || "Other", points: c.points, percentage: c.percentage };
     });
 
+    const competencyDefs = Object.entries(cfg?.competencies || {}).map(([id, c]) => ({
+      id, name: c.name, base_points: c.base_points, category: c.category,
+    }));
+
     const helpData = JSON.stringify({
-      level, levelName, scopeMultipliers, roleWeightsAll, pillarWeightsAll,
+      level, levelName, scopeMultipliers, scopeLabels, roleWeightsAll, pillarWeightsAll,
       levelScales, levelSummaries, baseTarget, minSignals, dailyCap,
       pillarColors: Object.fromEntries(Object.entries(PILLAR_DEFS).map(([k, v]) => [k, v.color])),
-      competencyData,
+      competencyData, competencyDefs,
     });
 
     return `
@@ -3740,7 +5482,7 @@ export class PerformanceTab extends BaseTab {
           <!-- 1.2 Vertex Pyramid -->
           <div class="section perf-help-section">
             <div class="section-title">Scope Vertex Weights</div>
-            <p class="text-secondary text-sm">Higher-scope work earns proportionally more points. The scope multiplier is determined by where an event sits in the Jira hierarchy.</p>
+            <p class="text-secondary text-sm">Higher-scope work earns proportionally more points. The scope multiplier is determined by where an event sits in the Jira hierarchy. Google Drive and Calendar events use filename/title classification to infer scope.</p>
             <div id="perf-help-pyramid" class="perf-help-diagram perf-help-pyramid-container"></div>
             <div class="perf-help-legend">
               <span class="perf-help-legend-item"><span class="perf-help-dot perf-help-dot-gradient"></span>Higher scope = more points</span>
@@ -3748,47 +5490,60 @@ export class PerformanceTab extends BaseTab {
             </div>
           </div>
 
-          <!-- 1.3 Formula Breakdown -->
+          <!-- 1.3 Interactive Scoring DAG -->
           <div class="section perf-help-section">
             <div class="section-title">Scoring Formula</div>
-            <p class="text-secondary text-sm">Each qualifying event produces points per competency using this formula. Values shown are for <strong>${this.escapeHtml(levelName)}</strong>.</p>
-            <div class="perf-help-formula">
-              <div class="perf-help-formula-row">
-                <div class="perf-help-factor perf-help-factor-blue">
-                  <div class="perf-help-factor-value">3</div>
-                  <div class="perf-help-factor-label">base_points</div>
-                </div>
-                <span class="perf-help-operator">&times;</span>
-                <div class="perf-help-factor perf-help-factor-orange">
-                  <div class="perf-help-factor-value">x4</div>
-                  <div class="perf-help-factor-label">scope (epic)</div>
-                </div>
-                <span class="perf-help-operator">&times;</span>
-                <div class="perf-help-factor perf-help-factor-purple">
-                  <div class="perf-help-factor-value">${roleWeights.epic?.assignee ?? 1.2}</div>
-                  <div class="perf-help-factor-label">role (assignee)</div>
-                </div>
-                <span class="perf-help-operator">&times;</span>
-                <div class="perf-help-factor perf-help-factor-info">
-                  <div class="perf-help-factor-value">${pillarWeights["Technical Contribution"] ?? 1.0}</div>
-                  <div class="perf-help-factor-label">pillar (Tech)</div>
-                </div>
-                <span class="perf-help-operator">&times;</span>
-                <div class="perf-help-factor perf-help-factor-gold">
-                  <div class="perf-help-factor-value">1.5</div>
-                  <div class="perf-help-factor-label">strategy</div>
-                </div>
-                <span class="perf-help-operator">=</span>
-                <div class="perf-help-factor perf-help-factor-result">
-                  <div class="perf-help-factor-value">${Math.round(3 * 4 * (roleWeights.epic?.assignee ?? 1.2) * (pillarWeights["Technical Contribution"] ?? 1.0) * 1.5)}</div>
-                  <div class="perf-help-factor-label">points</div>
-                </div>
+            <p class="text-secondary text-sm">Interactive graph showing how each event is scored. Adjust the controls to see how vertices change the scoring path. Level: <strong>${this.escapeHtml(levelName)}</strong>.</p>
+            <div class="dag-controls">
+              <div class="dag-control-group">
+                <label class="dag-control-label">Competency</label>
+                <select id="dag-comp" class="perf-help-select">
+                  ${Object.entries(cfg?.competencies || {}).map(([id, c]) =>
+                    `<option value="${id}" data-base="${c.base_points}" data-category="${this.escapeHtml(c.category)}">${this.escapeHtml(c.name)} (${c.base_points})</option>`
+                  ).join("")}
+                </select>
               </div>
+              <div class="dag-control-group">
+                <label class="dag-control-label">Scope</label>
+                <select id="dag-scope" class="perf-help-select">
+                  ${Object.entries(scopeMultipliers).map(([s, m]) =>
+                    `<option value="${s}" ${s === "epic" ? "selected" : ""}>x${m} ${this.escapeHtml(scopeLabels[s] || s)}</option>`
+                  ).join("")}
+                </select>
+              </div>
+              <div class="dag-control-group">
+                <label class="dag-control-label">Role</label>
+                <select id="dag-role" class="perf-help-select">
+                  <option value="reporter">Reporter</option>
+                  <option value="assignee" selected>Assignee</option>
+                  <option value="contributor">Contributor</option>
+                </select>
+              </div>
+              <div class="dag-control-group">
+                <label class="dag-control-label">Strategy</label>
+                <select id="dag-strat" class="perf-help-select">
+                  <option value="0">Not aligned</option>
+                  <option value="1">Aligned (1.5x)</option>
+                </select>
+              </div>
+              <div class="dag-control-group">
+                <label class="dag-control-label">Signals</label>
+                <input type="range" id="dag-signals" min="0" max="7" value="3" class="dag-slider" />
+                <span id="dag-signals-val" class="dag-slider-val">3</span>
+              </div>
+            </div>
+            <div id="perf-help-dag" class="perf-help-diagram dag-container"></div>
+            <div class="perf-help-legend">
+              <span class="perf-help-legend-item"><span class="perf-help-dot" style="background:#60a5fa"></span>Input</span>
+              <span class="perf-help-legend-item"><span class="perf-help-dot" style="background:#a78bfa"></span>Multiplier</span>
+              <span class="perf-help-legend-item"><span class="perf-help-dot" style="background:#f59e0b"></span>Gate</span>
+              <span class="perf-help-legend-item"><span class="perf-help-dot" style="background:#10b981"></span>Output</span>
+              <span class="perf-help-legend-item"><span class="perf-help-dot" style="background:#ef4444"></span>Blocked / Capped</span>
             </div>
             <div class="perf-help-formula-details">
               <div class="perf-help-detail-card">
                 <strong>Signal Gate</strong>
-                <p>An event must generate &ge; ${minSignals} signals to earn any points. Signals: event_type match, phrase matches, keyword matches, NPU classifier bonus, contribution type, cross-team, review decisions.</p>
+                <p>An event must generate &ge; ${minSignals} signals to earn any points. Signals: event_type match, phrase matches, keyword matches, NPU classifier bonus, contribution type, cross-team, review decisions. Events are collected from Git, GitLab, GitHub, Jira, Gmail, Google Calendar / Meet attendance, and Google Drive (Docs, Sheets, Slides).</p>
               </div>
               <div class="perf-help-detail-card">
                 <strong>Daily Cap</strong>
@@ -3931,44 +5686,7 @@ export class PerformanceTab extends BaseTab {
             </div>
           </div>
 
-          <!-- 3.4 What-If Calculator -->
-          <div class="section perf-help-section">
-            <div class="section-title">What-If Calculator</div>
-            <p class="text-secondary text-sm">Simulate how different event parameters affect your score.</p>
-            <div class="perf-help-whatif-form">
-              <div class="perf-help-whatif-row">
-                <label>Competency</label>
-                <select id="perf-help-wi-comp" class="perf-help-select">
-                  ${Object.entries(cfg?.competencies || {}).map(([id, c]) =>
-                    `<option value="${id}" data-base="${c.base_points}" data-category="${this.escapeHtml(c.category)}">${this.escapeHtml(c.name)} (base: ${c.base_points})</option>`
-                  ).join("")}
-                </select>
-              </div>
-              <div class="perf-help-whatif-row">
-                <label>Scope</label>
-                <select id="perf-help-wi-scope" class="perf-help-select">
-                  ${Object.entries(scopeMultipliers).map(([s, m]) =>
-                    `<option value="${s}" ${s === "epic" ? "selected" : ""}>x${m} ${this.escapeHtml(scopeLabels[s] || s)}</option>`
-                  ).join("")}
-                </select>
-              </div>
-              <div class="perf-help-whatif-row">
-                <label>Role</label>
-                <select id="perf-help-wi-role" class="perf-help-select">
-                  <option value="reporter">Reporter</option>
-                  <option value="assignee" selected>Assignee</option>
-                  <option value="contributor">Contributor</option>
-                </select>
-              </div>
-              <div class="perf-help-whatif-row">
-                <label>Strategy Aligned</label>
-                <input type="checkbox" id="perf-help-wi-strat" />
-              </div>
-            </div>
-            <div id="perf-help-whatif-result" class="perf-help-whatif-result">
-              <span class="text-secondary">Adjust the inputs above to see the calculated score.</span>
-            </div>
-          </div>
+          <!-- What-If Calculator replaced by interactive Scoring DAG in section 1.3 -->
         </details>
       </div>
     `;
@@ -4063,11 +5781,18 @@ export class PerformanceTab extends BaseTab {
               action: action
             });
           } else if (action === 'toggleNode') {
-            var parent = element.closest('.perf-tree-node');
-            if (parent) {
-              var childrenDiv = parent.nextElementSibling;
+            var treeParent = element.closest('.perf-tree-node');
+            var cardParent = element.closest('.issue-card');
+            if (treeParent) {
+              var childrenDiv = treeParent.nextElementSibling;
               if (childrenDiv && childrenDiv.classList.contains('perf-tree-children')) {
                 childrenDiv.classList.toggle('collapsed');
+                element.classList.toggle('expanded');
+              }
+            } else if (cardParent) {
+              var cardChildren = cardParent.querySelector('.perf-tree-children');
+              if (cardChildren) {
+                cardChildren.classList.toggle('collapsed');
                 element.classList.toggle('expanded');
               }
             }
@@ -4137,13 +5862,11 @@ export class PerformanceTab extends BaseTab {
             }
           } else if (action === 'removeQuestion') {
             var qId = element.getAttribute('data-question');
-            if (qId && confirm('Remove this question? Evidence and notes will be lost.')) {
+            if (qId) {
               vscode.postMessage({ command: 'performanceAction', action: 'removeQuestion', questionId: qId });
             }
           } else if (action === 'clearDrafts') {
-            if (confirm('Clear all AI-generated drafts? You can re-generate them later.')) {
-              vscode.postMessage({ command: 'performanceAction', action: 'clearDrafts' });
-            }
+            vscode.postMessage({ command: 'performanceAction', action: 'clearDrafts' });
           } else if (action === 'askAI') {
             var aiInput = document.getElementById('aiAskInput');
             var aiQuestion = aiInput ? aiInput.value.trim() : '';
@@ -4160,6 +5883,31 @@ export class PerformanceTab extends BaseTab {
             if (compId2) {
               vscode.postMessage({ command: 'performanceAction', action: 'explainScore', competencyId: compId2 });
             }
+          } else if (action === 'startFilteredBackfill') {
+            var git = document.getElementById('bfSrcGit');
+            var jira = document.getElementById('bfSrcJira');
+            var gitlab = document.getElementById('bfSrcGitlab');
+            var github = document.getElementById('bfSrcGithub');
+            var gdrive = document.getElementById('bfSrcGdrive');
+            var meeting = document.getElementById('bfSrcMeeting');
+            var scopeUser = document.getElementById('bfScopeUser');
+            var scopePeers = document.getElementById('bfScopePeers');
+            var scopeEmails = document.getElementById('bfScopeEmails');
+            var drSel = document.getElementById('bfDateRange');
+            vscode.postMessage({
+              command: 'performanceAction',
+              action: 'startFilteredBackfill',
+              srcGit: git ? git.checked : true,
+              srcJira: jira ? jira.checked : true,
+              srcGitlab: gitlab ? gitlab.checked : true,
+              srcGithub: github ? github.checked : true,
+              srcGdrive: gdrive ? gdrive.checked : true,
+              srcMeeting: meeting ? meeting.checked : true,
+              scopeUser: scopeUser ? scopeUser.checked : true,
+              scopePeers: scopePeers ? scopePeers.checked : true,
+              scopeEmails: scopeEmails ? scopeEmails.checked : true,
+              dateRange: drSel ? drSel.value : 'full'
+            });
           } else {
             var evidenceId = element.getAttribute('data-evidence');
             vscode.postMessage({
@@ -4329,6 +6077,7 @@ export class PerformanceTab extends BaseTab {
           visibleTypes.add('pillar');
           if (checkedTypes.has('competency')) visibleTypes.add('competency');
           if (checkedTypes.has('strategy')) visibleTypes.add('strategy');
+          if (checkedTypes.has('owner')) visibleTypes.add('owner');
           if (showAnstrat) visibleTypes.add('anstrat');
           if (showAnstrat && showEpic) visibleTypes.add('epic');
           if (showAnstrat && showEpic && showIssue) {
@@ -4347,6 +6096,8 @@ export class PerformanceTab extends BaseTab {
             if (d.type === 'root') { visible = true; }
             else if (d.type === 'pillar') {
               visible = visiblePillars.has(d.id);
+            } else if (d.type === 'owner') {
+              visible = visibleTypes.has('owner');
             } else {
               var typeOk = visibleTypes.has(d.type);
               var pillarOk = true;
@@ -4358,15 +6109,15 @@ export class PerformanceTab extends BaseTab {
             d._visible = visible;
             if (!visible) hiddenParents.add(d.id);
             d3.select(this)
-              .style('opacity', visible ? null : 0.06)
-              .style('pointer-events', visible ? null : 'none');
+              .style('opacity', visible ? 1 : 0.06)
+              .style('pointer-events', visible ? 'auto' : 'none');
           });
 
           perfMmState.linkSelection.each(function(d) {
             var src = typeof d.source === 'object' ? d.source : null;
             var tgt = typeof d.target === 'object' ? d.target : null;
             var visible = (!src || src._visible !== false) && (!tgt || tgt._visible !== false);
-            d3.select(this).style('opacity', visible ? null : 0.03);
+            d3.select(this).style('opacity', visible ? 1 : 0.03);
           });
 
           // Fade heat glows for hidden pillars
@@ -4478,6 +6229,7 @@ export class PerformanceTab extends BaseTab {
                 if (d.type === 'pillar') return -350 * ratio;
                 if (d.type === 'competency') return -100 * ratio;
                 if (d.type === 'anstrat') return -180 * ratio;
+                if (d.type === 'owner') return -200 * ratio;
                 if (d.type === 'epic') return -80 * ratio;
                 if (d.type === 'strategy') return -60 * ratio;
                 return -30 * ratio;
@@ -4494,6 +6246,7 @@ export class PerformanceTab extends BaseTab {
                 if (d.type === 'evidence') return 250 * ratio;
                 if (d.type === 'comp_anstrat') return 120 * ratio;
                 if (d.type === 'anstrat_strategy') return 140 * ratio;
+                if (d.type === 'owner_anstrat') return 100 * ratio;
                 if (d.type === 'pillar_strategy') return 160 * ratio;
                 var src = typeof d.source === 'object' ? d.source : null;
                 var tgt = typeof d.target === 'object' ? d.target : null;
@@ -4633,6 +6386,12 @@ export class PerformanceTab extends BaseTab {
               if (d.summary) html += '<div class="perf-mm-tt-summary">' + escapeHtml(d.summary.substring(0, 150)) + '</div>';
               if (d.points) html += '<div class="perf-mm-tt-meta">' + d.points + ' pts</div>';
               if (d.eventCount) html += '<div class="perf-mm-tt-meta">' + d.eventCount + ' events</div>';
+            } else if (d.type === 'owner') {
+              html = '<strong>' + escapeHtml(d.label) + '</strong>';
+              html += ' <span class="perf-mm-tt-type" style="background:#e0e0e0">Owner</span>';
+              if (d.email) html += '<div class="perf-mm-tt-meta">' + escapeHtml(d.email) + '</div>';
+              html += '<div class="perf-mm-tt-meta">' + d.issueCount + ' ANSTRAT issues &middot; ' + d.linkedCount + ' linked</div>';
+              if (d.themes && d.themes.length) html += '<div class="perf-mm-tt-summary">Themes: ' + d.themes.map(escapeHtml).join(', ') + '</div>';
             } else {
               var typeLabels = { root: 'Quarter', strategy: 'Strategy', epic: 'Epic', story: 'Story', bug: 'Bug', task: 'Task', group: 'Group', anstrat: 'ANSTRAT' };
               html = '<strong>' + escapeHtml(d.fullKey || d.label) + '</strong>';
@@ -4737,6 +6496,7 @@ export class PerformanceTab extends BaseTab {
                 if (d.type === 'evidence') return 250;
                 if (d.type === 'comp_anstrat') return 120;
                 if (d.type === 'anstrat_strategy') return 140;
+                if (d.type === 'owner_anstrat') return 100;
                 if (d.type === 'pillar_strategy') return 160;
                 var src = typeof d.source === 'object' ? d.source : null;
                 var tgt = typeof d.target === 'object' ? d.target : null;
@@ -4750,6 +6510,7 @@ export class PerformanceTab extends BaseTab {
                 if (d.type === 'evidence') return 0.1;
                 if (d.type === 'comp_anstrat') return 0.4;
                 if (d.type === 'anstrat_strategy') return 0.35;
+                if (d.type === 'owner_anstrat') return 0.5;
                 if (d.type === 'pillar_strategy') return 0.35;
                 return 0.45;
               }))
@@ -4758,6 +6519,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'pillar') return -600;
               if (d.type === 'competency') return -120;
               if (d.type === 'anstrat') return -180;
+              if (d.type === 'owner') return -200;
               if (d.type === 'epic') return -80;
               if (d.type === 'strategy') return -60;
               return -30;
@@ -4765,6 +6527,7 @@ export class PerformanceTab extends BaseTab {
             .force('radial_pillar', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'pillar' ? 0.85 : 0; }))
             .force('radial_comp', d3.forceRadial(360, cx, cy).strength(function(d) { return d.type === 'competency' ? 0.25 : 0; }))
             .force('radial_anstrat', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'anstrat' ? 0.15 : 0; }))
+            .force('radial_owner', d3.forceRadial(180, cx, cy).strength(function(d) { return d.type === 'owner' ? 0.2 : 0; }))
             .force('radial_strat', d3.forceRadial(450, cx, cy).strength(function(d) { return d.type === 'strategy' ? 0.3 : 0; }))
             .force('center_root', d3.forceRadial(0, cx, cy).strength(function(d) { return d.type === 'root' ? 1 : 0; }))
             .force('collision', d3.forceCollide().radius(function(d) {
@@ -4792,6 +6555,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'evidence') return 'perf-mm-link perf-mm-link--evidence';
               if (d.type === 'comp_anstrat') return 'perf-mm-link perf-mm-link--comp-anstrat';
               if (d.type === 'anstrat_strategy') return 'perf-mm-link perf-mm-link--anstrat-strategy';
+              if (d.type === 'owner_anstrat') return 'perf-mm-link perf-mm-link--owner-anstrat';
               if (d.type === 'pillar_strategy') return 'perf-mm-link perf-mm-link--pillar-strategy';
               return 'perf-mm-link';
             })
@@ -4802,6 +6566,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'anstrat_strategy') {
                 return src ? (src.color || '#f59e0b') : '#f59e0b';
               }
+              if (d.type === 'owner_anstrat') return '#e0e0e0';
               if (d.type === 'pillar_strategy') return src ? (src.color || '#888') : '#888';
               return src ? (src.color || '#555') : '#555';
             })
@@ -4809,6 +6574,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'evidence') return 0.4;
               if (d.type === 'comp_anstrat') return 0.7;
               if (d.type === 'anstrat_strategy') return 0.7;
+              if (d.type === 'owner_anstrat') return 0.6;
               if (d.type === 'pillar_strategy') return 0.55;
               return 0.3;
             })
@@ -4816,6 +6582,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'evidence') return Math.min((d.weight || 1) * 1.2, 4);
               if (d.type === 'comp_anstrat') return Math.min((d.weight || 1) + 1.5, 4);
               if (d.type === 'anstrat_strategy') return Math.min((d.weight || 1) + 1.5, 4);
+              if (d.type === 'owner_anstrat') return 2;
               if (d.type === 'pillar_strategy') return 2.5;
               var src = typeof d.source === 'object' ? d.source : null;
               if (src && src.type === 'root') return 3;
@@ -4825,6 +6592,7 @@ export class PerformanceTab extends BaseTab {
             })
             .attr('stroke-dasharray', function(d) {
               if (d.type === 'evidence') return '6,4';
+              if (d.type === 'owner_anstrat') return '4,3';
               if (d.type === 'pillar_strategy') return '6,3,2,3';
               return 'none';
             });
@@ -4910,6 +6678,29 @@ export class PerformanceTab extends BaseTab {
             .attr('stroke-width', function(d) { return d.isCovered ? 1.5 : 2; })
             .attr('stroke-dasharray', function(d) { return d.isCovered ? 'none' : '4,2'; })
             .attr('opacity', function(d) { return d.isCovered ? 0.9 : 0.65; });
+
+          // Owner hexagons
+          node.filter(function(d) { return d.type === 'owner'; })
+            .append('polygon').attr('class', 'perf-mm-hexagon')
+            .attr('points', function(d) {
+              var s = d.size || 18;
+              var pts = [];
+              for (var i = 0; i < 6; i++) {
+                var angle = (Math.PI / 3) * i - Math.PI / 6;
+                pts.push(Math.cos(angle) * s + ',' + Math.sin(angle) * s);
+              }
+              return pts.join(' ');
+            })
+            .attr('fill', function(d) { return d.color; })
+            .attr('fill-opacity', 0.8)
+            .attr('stroke', function(d) { try { return d3.color(d.color).brighter(0.6).toString(); } catch(e) { return '#c084fc'; } })
+            .attr('stroke-width', 2);
+
+          // Owner label inside hexagon
+          node.filter(function(d) { return d.type === 'owner'; }).append('text')
+            .attr('class', 'perf-mm-label perf-mm-label--owner').attr('text-anchor', 'middle')
+            .attr('dy', 4).attr('fill', '#1a1a2e').attr('font-size', '9px').attr('font-weight', '600')
+            .text(function(d) { var n = d.label || ''; return n.length > 12 ? n.substring(0, 10) + '..' : n; });
 
           // Secondary pillar dot for multi-pillar ANSTRAT nodes
           var pillarColors = {};
@@ -5096,6 +6887,10 @@ export class PerformanceTab extends BaseTab {
               var sAngle = Math.random() * Math.PI * 2;
               d.x = cx + 450 * Math.cos(sAngle);
               d.y = cy + 450 * Math.sin(sAngle);
+            } else if (d.type === 'owner') {
+              var oAngle = Math.random() * Math.PI * 2;
+              d.x = cx + 300 * Math.cos(oAngle);
+              d.y = cy + 300 * Math.sin(oAngle);
             } else {
               d.x = cx + (Math.random() - 0.5) * 700;
               d.y = cy + (Math.random() - 0.5) * 700;
@@ -5107,6 +6902,7 @@ export class PerformanceTab extends BaseTab {
               .distance(function(d) {
                 if (d.type === 'evidence') return 200;
                 if (d.type === 'pillar_strategy') return 160;
+                if (d.type === 'owner_anstrat') return 120;
                 var src = typeof d.source === 'object' ? d.source : null;
                 var tgt = typeof d.target === 'object' ? d.target : null;
                 if (src && src.type === 'root') return 220;
@@ -5117,6 +6913,7 @@ export class PerformanceTab extends BaseTab {
               })
               .strength(function(d) {
                 if (d.type === 'evidence') return 0.15;
+                if (d.type === 'owner_anstrat') return 0.25;
                 return 0.45;
               }))
             .force('charge', d3.forceManyBody().strength(function(d) {
@@ -5126,15 +6923,18 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'anstrat') return -180;
               if (d.type === 'epic') return -80;
               if (d.type === 'strategy') return -60;
+              if (d.type === 'owner') return -140;
               return -30;
             }))
             .force('radial_pillar', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'pillar' ? 0.85 : 0; }))
             .force('radial_comp', d3.forceRadial(360, cx, cy).strength(function(d) { return d.type === 'competency' ? 0.25 : 0; }))
             .force('radial_anstrat', d3.forceRadial(220, cx, cy).strength(function(d) { return d.type === 'anstrat' ? 0.15 : 0; }))
             .force('radial_strat', d3.forceRadial(450, cx, cy).strength(function(d) { return d.type === 'strategy' ? 0.3 : 0; }))
+            .force('radial_owner', d3.forceRadial(300, cx, cy).strength(function(d) { return d.type === 'owner' ? 0.2 : 0; }))
             .force('center_root', d3.forceRadial(0, cx, cy).strength(function(d) { return d.type === 'root' ? 1 : 0; }))
             .force('collision', d3.forceCollide().radius(function(d) {
               if (d.type === 'pillar') return (d.size || 22) + 40;
+              if (d.type === 'owner') return (d.size || 18) + 8;
               return (d.size || 8) + 4;
             }))
             .alphaDecay(0.012).velocityDecay(0.35);
@@ -5157,22 +6957,26 @@ export class PerformanceTab extends BaseTab {
             .attr('class', function(d) {
               if (d.type === 'evidence') return 'perf-mm-link perf-mm-link--evidence';
               if (d.type === 'pillar_strategy') return 'perf-mm-link perf-mm-link--pillar-strategy';
+              if (d.type === 'owner_anstrat') return 'perf-mm-link perf-mm-link--owner';
               return 'perf-mm-link';
             })
             .attr('stroke', function(d) {
               var src = typeof d.source === 'object' ? d.source : null;
               if (d.type === 'evidence') return '#f59e0b';
               if (d.type === 'pillar_strategy') return src ? (src.color || '#888') : '#888';
+              if (d.type === 'owner_anstrat') return '#e0e0e0';
               return src ? (src.color || '#555') : '#555';
             })
             .attr('stroke-opacity', function(d) {
               if (d.type === 'evidence') return 0.5;
               if (d.type === 'pillar_strategy') return 0.55;
+              if (d.type === 'owner_anstrat') return 0.45;
               return 0.3;
             })
             .attr('stroke-width', function(d) {
               if (d.type === 'evidence') return Math.min((d.weight || 1) * 1.5, 4);
               if (d.type === 'pillar_strategy') return 2.5;
+              if (d.type === 'owner_anstrat') return 1.5;
               var src = typeof d.source === 'object' ? d.source : null;
               if (src && src.type === 'root') return 3;
               if (src && src.type === 'pillar') return 2;
@@ -5182,6 +6986,7 @@ export class PerformanceTab extends BaseTab {
             .attr('stroke-dasharray', function(d) {
               if (d.type === 'evidence') return '6,4';
               if (d.type === 'pillar_strategy') return '6,3,2,3';
+              if (d.type === 'owner_anstrat') return '4,3';
               return 'none';
             });
           wmState.linkSelection = link;
@@ -5284,6 +7089,26 @@ export class PerformanceTab extends BaseTab {
             .attr('stroke-dasharray', function(d) { return d.isCovered ? 'none' : '4,2'; })
             .attr('opacity', function(d) { return d.isCovered ? 0.9 : 0.65; });
 
+          // Owner hexagons
+          node.filter(function(d) { return d.type === 'owner'; })
+            .append('polygon').attr('class', 'perf-mm-hexagon')
+            .attr('points', function(d) {
+              var s = d.size || 18;
+              var pts = [];
+              for (var i = 0; i < 6; i++) {
+                var a = Math.PI / 3 * i - Math.PI / 6;
+                pts.push(Math.round(s * Math.cos(a)) + ',' + Math.round(s * Math.sin(a)));
+              }
+              return pts.join(' ');
+            })
+            .attr('fill', function(d) { return d.color; })
+            .attr('stroke', function(d) { try { return d3.color(d.color).brighter(0.4).toString(); } catch(e) { return '#ccc'; } })
+            .attr('stroke-width', 2);
+          node.filter(function(d) { return d.type === 'owner'; }).append('text')
+            .attr('class', 'perf-mm-label perf-mm-label--owner').attr('text-anchor', 'middle')
+            .attr('dy', 4).attr('fill', '#1a1a2e').attr('font-size', '9px').attr('font-weight', '600')
+            .text(function(d) { var n = d.label || ''; return n.length > 12 ? n.substring(0, 10) + '..' : n; });
+
           // Root percentage
           node.filter(function(d) { return d.type === 'root'; }).append('text')
             .attr('text-anchor', 'middle').attr('dy', 5)
@@ -5327,6 +7152,7 @@ export class PerformanceTab extends BaseTab {
               if (d.type === 'anstrat') return (d.size || 16) * 1.4 + 12;
               if (d.type === 'epic') return (d.size || 10) + 14;
               if (d.type === 'strategy') return (d.size || 12) + 14;
+              if (d.type === 'owner') return (d.size || 18) + 14;
               return (d.size || 6) * 0.8 + 12;
             })
             .text(function(d) { return d.sublabel || ''; });
@@ -5341,6 +7167,12 @@ export class PerformanceTab extends BaseTab {
             if (d.percentage != null) lines.push('Score: ' + d.percentage + '%');
             if (d.points != null) lines.push('Points: ' + d.points);
             if (d.evidenceCount != null) lines.push('Evidence: ' + d.evidenceCount + ' events');
+            if (d.type === 'owner') {
+              if (d.email) lines.push(d.email);
+              if (d.issueCount != null) lines.push('ANSTRATs: ' + d.issueCount);
+              if (d.linkedCount != null) lines.push('Linked: ' + d.linkedCount);
+              if (d.themes && d.themes.length) lines.push('Themes: ' + d.themes.join(', '));
+            }
             tooltip.innerHTML = lines.join('<br>');
             tooltip.style.display = 'block';
             tooltip.style.left = (event.offsetX + 12) + 'px';
@@ -5393,9 +7225,10 @@ export class PerformanceTab extends BaseTab {
             });
           }
 
-          // Pillar filter checkboxes
-          var pillarChks = container.querySelectorAll('.wmPillarChk');
-          var typeChks = container.querySelectorAll('.wmTypeChk');
+          // Pillar & type filter checkboxes (live in sibling header div, not inside #wmGraph)
+          var wrapper = container.closest('.perf-wm-d3-wrapper') || document;
+          var pillarChks = wrapper.querySelectorAll('.wmPillarChk');
+          var typeChks = wrapper.querySelectorAll('.wmTypeChk');
           function applyFilters() {
             var activePillars = {};
             pillarChks.forEach(function(el) { if (el.checked) activePillars[el.getAttribute('data-pillar')] = true; });
@@ -5405,23 +7238,20 @@ export class PerformanceTab extends BaseTab {
                 (el.getAttribute('data-types') || '').split(',').forEach(function(t) { activeTypes[t.trim()] = true; });
               }
             });
-            node.attr('display', function(d) {
-              if (d.type === 'root') return null;
-              var typeOk = activeTypes[d.type] || d.type === 'pillar';
-              if (!typeOk) return 'none';
-              if (d.pillars && d.pillars.length) {
-                var hasPillar = d.pillars.some(function(p) { return activePillars[p]; });
-                return hasPillar ? null : 'none';
+            function isNodeHidden(n) {
+              if (!n || n.type === 'root') return false;
+              if (n.type !== 'pillar' && !activeTypes[n.type]) return true;
+              if (n.type === 'owner') return false;
+              if (n.pillars && n.pillars.length) {
+                return !n.pillars.some(function(p) { return activePillars[p]; });
               }
-              return null;
-            });
+              return false;
+            }
+            node.attr('display', function(d) { return isNodeHidden(d) ? 'none' : 'inline'; });
             link.attr('display', function(d) {
               var src = typeof d.source === 'object' ? d.source : null;
               var tgt = typeof d.target === 'object' ? d.target : null;
-              if (src && src.type === 'root') return null;
-              if (src && !activeTypes[src.type] && src.type !== 'pillar' && src.type !== 'root') return 'none';
-              if (tgt && !activeTypes[tgt.type] && tgt.type !== 'pillar' && tgt.type !== 'root') return 'none';
-              return null;
+              return (isNodeHidden(src) || isNodeHidden(tgt)) ? 'none' : 'inline';
             });
           }
           pillarChks.forEach(function(el) { el.addEventListener('change', applyFilters); });
@@ -5474,7 +7304,7 @@ export class PerformanceTab extends BaseTab {
           initCompare(hd);
           initTreemap(hd);
           initCapChart(hd);
-          initWhatIf(hd);
+          initScoringDAG(hd);
           initSignalFilter();
           initTraceSelector();
         }
@@ -5485,7 +7315,7 @@ export class PerformanceTab extends BaseTab {
           if (!container || container.querySelector('svg')) return;
 
           var W = container.clientWidth || 700;
-          var H = 340;
+          var H = 410;
           var cx = W / 2;
           var svg = d3.select(container).append('svg').attr('width', W).attr('height', H).attr('viewBox', '0 0 ' + W + ' ' + H);
 
@@ -5493,22 +7323,22 @@ export class PerformanceTab extends BaseTab {
             .attr('refX', 10).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
             .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#888');
 
-          var srcW = 80, srcH = 32, srcY = 30, srcCount = 5;
-          var srcGap = 16;
+          var srcW = 84, srcH = 38, srcY = 30, srcCount = 7;
+          var srcGap = 10;
           var srcTotalW = srcCount * srcW + (srcCount - 1) * srcGap;
           var srcX0 = cx - srcTotalW / 2;
 
-          var enrW = 130, enrH = 28, enrY = 155, enrCount = 4;
+          var enrW = 156, enrH = 34, enrY = 180, enrCount = 4;
           var enrGap = 12;
           var enrTotalW = enrCount * enrW + (enrCount - 1) * enrGap;
           var enrX0 = cx - enrTotalW / 2;
 
-          var ecY = 92, ecW = 180, ecH = 32;
-          var sigY = 216, sigW = 220, sigH = 32;
-          var fmY = 268, fmW = 160, fmH = 32;
-          var capY = 310, capW = 180, capH = 28;
+          var ecY = 105, ecW = 280, ecH = 38;
+          var sigY = 256, sigW = 280, sigH = 38;
+          var fmY = 320, fmW = 192, fmH = 38;
+          var capY = 376, capW = 216, capH = 34;
 
-          var sources = ['Git', 'GitLab', 'GitHub', 'Jira', 'Gmail'];
+          var sources = ['Git', 'GitLab', 'GitHub', 'Jira', 'Gmail', 'Calendar', 'GDrive'];
           var enrichments = ['Scope Detection', 'Role Detection', 'Classification', 'Strategy Align'];
 
           var stages = [];
@@ -5583,7 +7413,7 @@ export class PerformanceTab extends BaseTab {
           ];
 
           tiers.forEach(function(t, i) {
-            var widthPct = 30 + (tiers.length - 1 - i) * 15;
+            var widthPct = 24 + (tiers.length - 1 - i) * 12;
             var div = document.createElement('div');
             div.className = 'perf-help-pyramid-tier';
             div.innerHTML = '<div class="perf-help-pyramid-block" style="width:' + widthPct + '%;background:' + t.color + '">' +
@@ -5678,7 +7508,7 @@ export class PerformanceTab extends BaseTab {
           var n = pillars.length;
           if (n === 0) return;
 
-          var size = 320, cx = size/2, cy = size/2, R = 120;
+          var size = 600, cx = size/2, cy = size/2, R = 220;
           var svg = d3.select(container).append('svg').attr('width', size).attr('height', size)
             .attr('viewBox', '0 0 ' + size + ' ' + size);
 
@@ -5701,12 +7531,12 @@ export class PerformanceTab extends BaseTab {
             svg.append('line').attr('x1', cx).attr('y1', cy).attr('x2', ex).attr('y2', ey)
               .attr('stroke', '#444').attr('stroke-width', 0.5);
 
-            var lx = cx + (R + 24) * Math.cos(angle);
-            var ly = cy + (R + 24) * Math.sin(angle);
+            var lx = cx + (R + 40) * Math.cos(angle);
+            var ly = cy + (R + 40) * Math.sin(angle);
             svg.append('text').attr('x', lx).attr('y', ly)
               .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-              .attr('font-size', '10px').attr('fill', hd.pillarColors[p] || '#888')
-              .text(p.replace('End-to-End ', 'E2E '));
+              .attr('font-size', '14px').attr('font-weight', '600').attr('fill', hd.pillarColors[p] || '#888')
+              .text(p);
           });
 
           // Polygon
@@ -5726,10 +7556,10 @@ export class PerformanceTab extends BaseTab {
             var r = R * ((pw[p] || 0) / maxW);
             var px = cx + r * Math.cos(angle);
             var py = cy + r * Math.sin(angle);
-            svg.append('circle').attr('cx', px).attr('cy', py).attr('r', 4)
+            svg.append('circle').attr('cx', px).attr('cy', py).attr('r', 5)
               .attr('fill', hd.pillarColors[p] || '#888');
-            svg.append('text').attr('x', px).attr('y', py - 10)
-              .attr('text-anchor', 'middle').attr('font-size', '11px').attr('font-weight', 'bold')
+            svg.append('text').attr('x', px).attr('y', py - 14)
+              .attr('text-anchor', 'middle').attr('font-size', '14px').attr('font-weight', 'bold')
               .attr('fill', hd.pillarColors[p] || '#888').text(pw[p] || 0);
           });
         }
@@ -5795,7 +7625,7 @@ export class PerformanceTab extends BaseTab {
           var n = pillars.length;
           if (n === 0) return;
 
-          var size = 320, cx = size / 2, cy = size / 2, R = 110;
+          var size = 600, cx = size / 2, cy = size / 2, R = 220;
           var svg = d3.select(container).append('svg')
             .attr('width', size).attr('height', size)
             .attr('viewBox', '0 0 ' + size + ' ' + size);
@@ -5822,11 +7652,11 @@ export class PerformanceTab extends BaseTab {
             svg.append('line').attr('x1', cx).attr('y1', cy).attr('x2', ex).attr('y2', ey)
               .attr('stroke', '#444').attr('stroke-width', 0.5);
 
-            var lx = cx + (R + 28) * Math.cos(angle);
-            var ly = cy + (R + 28) * Math.sin(angle);
+            var lx = cx + (R + 40) * Math.cos(angle);
+            var ly = cy + (R + 40) * Math.sin(angle);
             svg.append('text').attr('x', lx).attr('y', ly)
               .attr('text-anchor', 'middle').attr('dominant-baseline', 'middle')
-              .attr('font-size', '10px').attr('fill', hd.pillarColors[p] || '#888')
+              .attr('font-size', '14px').attr('font-weight', '600').attr('fill', hd.pillarColors[p] || '#888')
               .text(p.replace('End-to-End ', 'E2E '));
           });
 
@@ -5855,8 +7685,8 @@ export class PerformanceTab extends BaseTab {
               .attr('cx', cx + r1 * Math.cos(angle)).attr('cy', cy + r1 * Math.sin(angle))
               .attr('r', 4).attr('fill', 'var(--rh-red, #ee0000)');
             svg.append('text')
-              .attr('x', cx + r1 * Math.cos(angle)).attr('y', cy + r1 * Math.sin(angle) - 10)
-              .attr('text-anchor', 'middle').attr('font-size', '10px').attr('font-weight', 'bold')
+              .attr('x', cx + r1 * Math.cos(angle)).attr('y', cy + r1 * Math.sin(angle) - 14)
+              .attr('text-anchor', 'middle').attr('font-size', '14px').attr('font-weight', 'bold')
               .attr('fill', 'var(--rh-red, #ee0000)').text(myPw[p] || 0);
 
             var r2 = R * ((cmpPw[p] || 0) / maxW);
@@ -5865,11 +7695,11 @@ export class PerformanceTab extends BaseTab {
               .attr('r', 3).attr('fill', '#888').attr('stroke', '#fff').attr('stroke-width', 0.5);
           });
 
-          svg.append('text').attr('x', 8).attr('y', size - 6)
-            .attr('font-size', '9px').attr('fill', 'var(--rh-red, #ee0000)')
+          svg.append('text').attr('x', 8).attr('y', size - 8)
+            .attr('font-size', '13px').attr('fill', 'var(--rh-red, #ee0000)')
             .text('\u25CF ' + myLevel.toUpperCase());
-          svg.append('text').attr('x', 8).attr('y', size - 18)
-            .attr('font-size', '9px').attr('fill', '#888')
+          svg.append('text').attr('x', 8).attr('y', size - 26)
+            .attr('font-size', '13px').attr('fill', '#888')
             .text('\u25CB ' + cmpLevel.toUpperCase() + ' (dashed)');
         }
 
@@ -5878,33 +7708,18 @@ export class PerformanceTab extends BaseTab {
           var container = document.getElementById('perf-help-treemap');
           if (!container || container.querySelector('svg') || typeof d3 === 'undefined') return;
 
-          var tab = document.getElementById('performance');
-          if (!tab) return;
-
-          var compEls = tab.querySelectorAll('[data-action="toggleCompetency"]');
           var treeData = { name: 'Score', children: [] };
           var pillarMap = {};
+          var comps = hd.competencyData || [];
 
-          compEls.forEach(function(el) {
-            var key = el.getAttribute('data-key');
-            if (!key) return;
-            var ptsEl = el.querySelector('.perf-comp-score-pts, .stat-value');
-            var pts = ptsEl ? parseInt(ptsEl.textContent, 10) : 0;
-            if (isNaN(pts) || pts <= 0) pts = 1;
-
-            var catEl = el.closest('.section');
-            var catTitle = 'Technical Contribution';
-            if (catEl) {
-              var titleEl = catEl.querySelector('.section-title');
-              if (titleEl) catTitle = titleEl.textContent.trim();
-            }
-            if (!pillarMap[catTitle]) pillarMap[catTitle] = { name: catTitle, children: [] };
-
-            var label = el.textContent.trim().split('\\n')[0].trim();
-            pillarMap[catTitle].children.push({ name: label || key, value: pts });
+          comps.forEach(function(c) {
+            var cat = c.category || 'Other';
+            var pts = c.points || 0;
+            if (pts <= 0) pts = 1;
+            if (!pillarMap[cat]) pillarMap[cat] = { name: cat, children: [] };
+            pillarMap[cat].children.push({ name: c.name || c.id, value: pts });
           });
 
-          // Fallback: use meta from perfHelpData if no DOM competency elements
           if (Object.keys(pillarMap).length === 0) {
             Object.keys(hd.pillarColors).forEach(function(p) {
               pillarMap[p] = { name: p, children: [{ name: p + ' (no data)', value: 1 }] };
@@ -5975,7 +7790,7 @@ export class PerformanceTab extends BaseTab {
             var row = document.createElement('div');
             row.className = 'perf-help-level-bar-row';
             row.innerHTML =
-              '<div class="perf-help-level-label perf-help-level-label-wide">' + (label.length > 18 ? label.substring(0,16) + '..' : label) + '</div>' +
+              '<div class="perf-help-level-label perf-help-level-label-wide">' + (label.length > 24 ? label.substring(0,22) + '..' : label) + '</div>' +
               '<div class="perf-help-level-bar-track">' +
                 '<div class="perf-help-level-bar-fill" style="width:' + pct + '%;background:' + color + '">' +
                   '<span class="perf-help-level-bar-text">' + pts + '/' + target + ' (' + pct + '%)</span>' +
@@ -5985,22 +7800,180 @@ export class PerformanceTab extends BaseTab {
           });
         }
 
-        // 3.4 What-If
-        function initWhatIf(hd) {
-          var compSel = document.getElementById('perf-help-wi-comp');
-          var scopeSel = document.getElementById('perf-help-wi-scope');
-          var roleSel = document.getElementById('perf-help-wi-role');
-          var stratChk = document.getElementById('perf-help-wi-strat');
-          var resultDiv = document.getElementById('perf-help-whatif-result');
-          if (!compSel || !scopeSel || !roleSel || !stratChk || !resultDiv) return;
+        // 1.3 Interactive Scoring DAG
+        function initScoringDAG(hd) {
+          var container = document.getElementById('perf-help-dag');
+          if (!container || container.querySelector('svg')) return;
 
-          function calc() {
+          var compSel = document.getElementById('dag-comp');
+          var scopeSel = document.getElementById('dag-scope');
+          var roleSel = document.getElementById('dag-role');
+          var stratSel = document.getElementById('dag-strat');
+          var sigSlider = document.getElementById('dag-signals');
+          var sigVal = document.getElementById('dag-signals-val');
+          if (!compSel || !scopeSel || !roleSel || !stratSel || !sigSlider) return;
+
+          var W = container.clientWidth || 700;
+          var H = 320;
+          var svg = d3.select(container).append('svg')
+            .attr('width', W).attr('height', H)
+            .attr('viewBox', '0 0 ' + W + ' ' + H);
+
+          svg.append('defs').append('marker').attr('id', 'dag-arrow')
+            .attr('viewBox', '0 0 10 10').attr('refX', 10).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#888');
+
+          svg.append('defs').append('marker').attr('id', 'dag-arrow-green')
+            .attr('viewBox', '0 0 10 10').attr('refX', 10).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#10b981');
+
+          svg.append('defs').append('marker').attr('id', 'dag-arrow-red')
+            .attr('viewBox', '0 0 10 10').attr('refX', 10).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#ef4444');
+
+          var nodeW = 96, nodeH = 52;
+          var mainY = H / 2 - nodeH / 2;
+          var gatedY = mainY + 90;
+          var padL = 10;
+          var gap = (W - padL * 2 - nodeW * 8) / 7;
+          if (gap < 12) gap = 12;
+
+          function nx(col) { return padL + col * (nodeW + gap); }
+
+          var nodeDefs = [
+            { id: 'event',   col: 0, y: mainY,  color: '#60a5fa', label: 'Work Event',    type: 'input' },
+            { id: 'gate',    col: 1, y: mainY,  color: '#f59e0b', label: 'Signal Gate',   type: 'gate' },
+            { id: 'base',    col: 2, y: mainY,  color: '#60a5fa', label: 'base_points',   type: 'mult' },
+            { id: 'scope',   col: 3, y: mainY,  color: '#a78bfa', label: 'scope',         type: 'mult' },
+            { id: 'role',    col: 4, y: mainY,  color: '#a78bfa', label: 'role',           type: 'mult' },
+            { id: 'pillar',  col: 5, y: mainY,  color: '#a78bfa', label: 'pillar',         type: 'mult' },
+            { id: 'strat',   col: 6, y: mainY,  color: '#a78bfa', label: 'strategy',       type: 'mult' },
+            { id: 'raw',     col: 7, y: mainY - 30, color: '#10b981', label: 'Raw Score',  type: 'output' },
+            { id: 'cap',     col: 7, y: mainY + 30, color: '#10b981', label: 'Final',      type: 'output' },
+            { id: 'gated',   col: 2, y: gatedY, color: '#ef4444', label: 'Blocked',        type: 'dead' },
+          ];
+
+          var edgeDefs = [
+            { from: 'event', to: 'gate',   path: 'main' },
+            { from: 'gate',  to: 'base',   path: 'pass' },
+            { from: 'gate',  to: 'gated',  path: 'fail' },
+            { from: 'base',  to: 'scope',  path: 'pass' },
+            { from: 'scope', to: 'role',   path: 'pass' },
+            { from: 'role',  to: 'pillar', path: 'pass' },
+            { from: 'pillar',to: 'strat',  path: 'pass' },
+            { from: 'strat', to: 'raw',    path: 'pass' },
+            { from: 'raw',   to: 'cap',    path: 'cap' },
+          ];
+
+          function nodeById(id) {
+            for (var i = 0; i < nodeDefs.length; i++) {
+              if (nodeDefs[i].id === id) return nodeDefs[i];
+            }
+            return null;
+          }
+
+          function edgePath(fromN, toN) {
+            var x1 = nx(fromN.col) + nodeW;
+            var y1 = fromN.y + nodeH / 2;
+            var x2 = nx(toN.col);
+            var y2 = toN.y + nodeH / 2;
+            if (fromN.col === toN.col) {
+              x1 = nx(fromN.col) + nodeW / 2;
+              x2 = nx(toN.col) + nodeW / 2;
+              y1 = fromN.y + nodeH;
+              y2 = toN.y;
+            }
+            var mx = (x1 + x2) / 2;
+            return 'M' + x1 + ',' + y1 + ' C' + mx + ',' + y1 + ' ' + mx + ',' + y2 + ' ' + x2 + ',' + y2;
+          }
+
+          var edgeGroup = svg.append('g').attr('class', 'dag-edges');
+          var nodeGroup = svg.append('g').attr('class', 'dag-nodes');
+          var labelGroup = svg.append('g').attr('class', 'dag-labels');
+
+          var edgeEls = {};
+          edgeDefs.forEach(function(e) {
+            var fn = nodeById(e.from);
+            var tn = nodeById(e.to);
+            if (!fn || !tn) return;
+            edgeEls[e.from + '-' + e.to] = edgeGroup.append('path')
+              .attr('class', 'dag-edge')
+              .attr('d', edgePath(fn, tn))
+              .attr('fill', 'none')
+              .attr('stroke', '#555')
+              .attr('stroke-width', 2)
+              .attr('marker-end', 'url(#dag-arrow)');
+          });
+
+          var nodeEls = {};
+          var valueEls = {};
+          var labelEls = {};
+          nodeDefs.forEach(function(n) {
+            var g = nodeGroup.append('g')
+              .attr('transform', 'translate(' + nx(n.col) + ',' + n.y + ')');
+
+            nodeEls[n.id] = g.append('rect')
+              .attr('width', nodeW).attr('height', nodeH)
+              .attr('rx', 8)
+              .attr('fill', n.color + '18')
+              .attr('stroke', n.color)
+              .attr('stroke-width', 2);
+
+            labelEls[n.id] = g.append('text')
+              .attr('x', nodeW / 2).attr('y', 18)
+              .attr('text-anchor', 'middle')
+              .attr('fill', '#ccc')
+              .attr('font-size', '11px')
+              .attr('font-weight', '600')
+              .text(n.label);
+
+            valueEls[n.id] = g.append('text')
+              .attr('x', nodeW / 2).attr('y', 38)
+              .attr('text-anchor', 'middle')
+              .attr('fill', n.color)
+              .attr('font-size', '14px')
+              .attr('font-weight', '700')
+              .text('');
+          });
+
+          var edgeLabelEls = {};
+          edgeDefs.forEach(function(e) {
+            var fn = nodeById(e.from);
+            var tn = nodeById(e.to);
+            if (!fn || !tn) return;
+            var x1 = nx(fn.col) + nodeW;
+            var y1 = fn.y + nodeH / 2;
+            var x2 = nx(tn.col);
+            var y2 = tn.y + nodeH / 2;
+            if (fn.col === tn.col) {
+              x1 = nx(fn.col) + nodeW / 2;
+              x2 = nx(tn.col) + nodeW / 2;
+              y1 = fn.y + nodeH;
+              y2 = tn.y;
+            }
+            edgeLabelEls[e.from + '-' + e.to] = labelGroup.append('text')
+              .attr('x', (x1 + x2) / 2)
+              .attr('y', (y1 + y2) / 2 - 6)
+              .attr('text-anchor', 'middle')
+              .attr('fill', '#888')
+              .attr('font-size', '10px')
+              .text('');
+          });
+
+          function update() {
             var opt = compSel.options[compSel.selectedIndex];
             var base = parseInt(opt.getAttribute('data-base') || '3', 10);
             var category = opt.getAttribute('data-category') || 'Technical Contribution';
             var scope = scopeSel.value;
             var role = roleSel.value;
-            var aligned = stratChk.checked;
+            var aligned = stratSel.value === '1';
+            var signals = parseInt(sigSlider.value, 10);
+            var minSig = hd.minSignals || 2;
+
+            if (sigVal) sigVal.textContent = '' + signals;
 
             var scopeMult = hd.scopeMultipliers[scope] || 1;
             var rw = hd.roleWeightsAll[hd.level] || {};
@@ -6008,29 +7981,108 @@ export class PerformanceTab extends BaseTab {
             var pw = hd.pillarWeightsAll[hd.level] || {};
             var pillarWeight = pw[category] || 1.0;
             var stratBonus = aligned ? 1.5 : 1.0;
-            var result = Math.round(base * scopeMult * roleWeight * pillarWeight * stratBonus);
+            var rawScore = Math.round(base * scopeMult * roleWeight * pillarWeight * stratBonus);
+            var cap = hd.dailyCap || 15;
+            var capped = rawScore > cap;
+            var finalScore = Math.min(rawScore, cap);
+            var gated = signals < minSig;
 
-            resultDiv.innerHTML =
-              '<div class="perf-help-formula-row">' +
-                '<div class="perf-help-factor perf-help-factor-blue"><div class="perf-help-factor-value">' + base + '</div><div class="perf-help-factor-label">base</div></div>' +
-                '<span class="perf-help-operator">&times;</span>' +
-                '<div class="perf-help-factor perf-help-factor-orange"><div class="perf-help-factor-value">x' + scopeMult + '</div><div class="perf-help-factor-label">' + scope + '</div></div>' +
-                '<span class="perf-help-operator">&times;</span>' +
-                '<div class="perf-help-factor perf-help-factor-purple"><div class="perf-help-factor-value">' + roleWeight + '</div><div class="perf-help-factor-label">' + role + '</div></div>' +
-                '<span class="perf-help-operator">&times;</span>' +
-                '<div class="perf-help-factor" style="border-color:' + (hd.pillarColors[category] || '#888') + '"><div class="perf-help-factor-value">' + pillarWeight + '</div><div class="perf-help-factor-label">pillar</div></div>' +
-                '<span class="perf-help-operator">&times;</span>' +
-                '<div class="perf-help-factor perf-help-factor-gold"><div class="perf-help-factor-value">' + stratBonus + '</div><div class="perf-help-factor-label">strategy</div></div>' +
-                '<span class="perf-help-operator">=</span>' +
-                '<div class="perf-help-factor perf-help-factor-result"><div class="perf-help-factor-value">' + result + '</div><div class="perf-help-factor-label">points</div></div>' +
-              '</div>';
+            valueEls['event'].text(signals + ' sig');
+            valueEls['gate'].text(signals + ' / ' + minSig);
+            valueEls['base'].text(gated ? '-' : base);
+            valueEls['scope'].text(gated ? '-' : 'x' + scopeMult);
+            valueEls['role'].text(gated ? '-' : roleWeight);
+            valueEls['pillar'].text(gated ? '-' : pillarWeight);
+            valueEls['strat'].text(gated ? '-' : (aligned ? '1.5x' : '1.0x'));
+            valueEls['raw'].text(gated ? '-' : rawScore);
+            valueEls['cap'].text(gated ? '0' : finalScore);
+            valueEls['gated'].text('0 pts');
+
+            edgeLabelEls['gate-base'].text(gated ? '' : 'pass');
+            edgeLabelEls['gate-gated'].text(gated ? 'fail' : '');
+            edgeLabelEls['base-scope'].text(gated ? '' : 'x' + scopeMult);
+            edgeLabelEls['scope-role'].text(gated ? '' : 'x' + roleWeight);
+            edgeLabelEls['role-pillar'].text(gated ? '' : 'x' + pillarWeight);
+            edgeLabelEls['pillar-strat'].text(gated ? '' : (aligned ? 'x1.5' : 'x1.0'));
+            edgeLabelEls['strat-raw'].text(gated ? '' : '= ' + rawScore);
+            edgeLabelEls['raw-cap'].text(!gated && capped ? 'cap ' + cap : '');
+
+            var passColor = '#10b981';
+            var failColor = '#ef4444';
+            var dimColor = '#333';
+            var dimStroke = '#444';
+
+            function setEdge(key, color, width, dash, marker) {
+              var e = edgeEls[key];
+              if (!e) return;
+              e.transition().duration(400)
+                .attr('stroke', color)
+                .attr('stroke-width', width)
+                .attr('stroke-dasharray', dash || null)
+                .attr('marker-end', 'url(#' + marker + ')');
+            }
+
+            function setNode(id, strokeColor, fillOpacity) {
+              var n = nodeEls[id];
+              if (!n) return;
+              var nd = nodeById(id);
+              n.transition().duration(400)
+                .attr('stroke', strokeColor)
+                .attr('fill', strokeColor + (fillOpacity || '18'));
+            }
+
+            setEdge('event-gate', gated ? failColor : passColor, 2.5, null, gated ? 'dag-arrow-red' : 'dag-arrow-green');
+            setNode('event', '#60a5fa', '18');
+            setNode('gate', gated ? failColor : '#f59e0b', '18');
+
+            var passNodes = ['base', 'scope', 'role', 'pillar', 'strat'];
+            var passEdges = ['gate-base', 'base-scope', 'scope-role', 'role-pillar', 'pillar-strat', 'strat-raw'];
+
+            passNodes.forEach(function(id) {
+              var nd = nodeById(id);
+              if (gated) {
+                setNode(id, dimStroke, '08');
+                valueEls[id].transition().duration(400).attr('fill', dimColor);
+              } else {
+                setNode(id, nd.color, '18');
+                valueEls[id].transition().duration(400).attr('fill', nd.color);
+              }
+            });
+
+            passEdges.forEach(function(key) {
+              if (gated) {
+                setEdge(key, dimStroke, 1, '4,3', 'dag-arrow');
+              } else {
+                setEdge(key, passColor, 2.5, null, 'dag-arrow-green');
+              }
+            });
+
+            setEdge('gate-gated', gated ? failColor : dimStroke, gated ? 2.5 : 1, gated ? null : '4,3', gated ? 'dag-arrow-red' : 'dag-arrow');
+            setNode('gated', gated ? failColor : dimStroke, gated ? '20' : '08');
+            valueEls['gated'].transition().duration(400).attr('fill', gated ? failColor : dimColor);
+            labelEls['gated'].transition().duration(400).attr('fill', gated ? '#fca5a5' : dimColor);
+
+            if (!gated) {
+              setNode('raw', passColor, '18');
+              valueEls['raw'].transition().duration(400).attr('fill', passColor);
+              setEdge('raw-cap', capped ? '#f59e0b' : passColor, 2, null, capped ? 'dag-arrow' : 'dag-arrow-green');
+              setNode('cap', capped ? '#f59e0b' : passColor, capped ? '20' : '18');
+              valueEls['cap'].transition().duration(400).attr('fill', capped ? '#f59e0b' : passColor);
+            } else {
+              setNode('raw', dimStroke, '08');
+              setNode('cap', dimStroke, '08');
+              valueEls['raw'].transition().duration(400).attr('fill', dimColor);
+              valueEls['cap'].transition().duration(400).attr('fill', dimColor);
+              setEdge('raw-cap', dimStroke, 1, '4,3', 'dag-arrow');
+            }
           }
 
-          calc();
-          compSel.addEventListener('change', calc);
-          scopeSel.addEventListener('change', calc);
-          roleSel.addEventListener('change', calc);
-          stratChk.addEventListener('change', calc);
+          update();
+          compSel.addEventListener('change', update);
+          scopeSel.addEventListener('change', update);
+          roleSel.addEventListener('change', update);
+          stratSel.addEventListener('change', update);
+          sigSlider.addEventListener('input', update);
         }
 
         // 1.4 Signal Filter
@@ -6145,6 +8197,113 @@ export class PerformanceTab extends BaseTab {
               gc.innerHTML = html;
             }
           }
+          if (msg && (msg.command === 'peerBackfillStarted' || msg.command === 'peerBackfillProgress' || msg.command === 'peerBackfillComplete' || msg.command === 'peerBackfillCancelled')) {
+            var pbEl = document.getElementById('peerBackfillProgress');
+            var pbPct = document.getElementById('peerProgressPct');
+            var pbText = document.getElementById('peerProgressText');
+            var pbElapsed = document.getElementById('peerProgressElapsed');
+            var pbTitle = document.getElementById('peerProgressTitle');
+            var cancelBtn = document.getElementById('backfillCancelBtn');
+            var allPhaseSegs = document.querySelectorAll('.backfill-phase-segment');
+            var allPhaseLabels = document.querySelectorAll('.backfill-phase-labels span');
+
+            function updatePhaseBar(pr) {
+              var phases = ['resolve_github', 'prefetch', 'index_gdrive', 'index_meetings', 'collecting', 'benchmarks'];
+              var completed = pr.phases_completed || [];
+              var current = pr.phase || '';
+              allPhaseSegs.forEach(function(seg) {
+                var ph = seg.getAttribute('data-phase');
+                seg.classList.remove('phase-done', 'phase-active', 'phase-pending');
+                if (completed.indexOf(ph) >= 0) {
+                  seg.classList.add('phase-done');
+                } else if (ph === current) {
+                  seg.classList.add('phase-active');
+                } else {
+                  seg.classList.add('phase-pending');
+                }
+              });
+              allPhaseLabels.forEach(function(lbl) {
+                var ph = lbl.getAttribute('data-phase');
+                lbl.classList.remove('label-done', 'label-active');
+                if (completed.indexOf(ph) >= 0) lbl.classList.add('label-done');
+                else if (ph === current) lbl.classList.add('label-active');
+              });
+            }
+
+            if (pbEl) {
+              if (msg.command === 'peerBackfillStarted') {
+                pbEl.style.display = 'block';
+                pbEl.classList.remove('backfill-complete', 'backfill-cancelled');
+                if (pbPct) pbPct.textContent = '0%';
+                if (pbText) pbText.textContent = 'Starting backfill...';
+                if (pbElapsed) pbElapsed.textContent = '';
+                if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                allPhaseSegs.forEach(function(s) { s.classList.remove('phase-done', 'phase-active'); s.classList.add('phase-pending'); });
+              } else if (msg.command === 'peerBackfillProgress' && msg.progress) {
+                pbEl.style.display = 'block';
+                var pr = msg.progress;
+                var pctVal = (pr.total_peers > 0 && pr.total_days > 0)
+                  ? Math.round(((pr.completed_peers * pr.total_days + pr.completed_days) / (pr.total_peers * pr.total_days)) * 100)
+                  : 0;
+                if (pbPct) pbPct.textContent = Math.min(pctVal, 100) + '%';
+                updatePhaseBar(pr);
+                if (pbText) {
+                  var filterNote = (pr.filter_info && pr.filter_info !== 'all') ? ' [' + pr.filter_info + ']' : '';
+                  var txt = '';
+                  if (pr.phase === 'collecting' && pr.current_peer) {
+                    txt = pr.current_peer;
+                    if (pr.current_level) txt += ' (' + pr.current_level.toUpperCase() + ')';
+                    txt += ' — ' + pr.completed_peers + '/' + pr.total_peers + ' peers';
+                  } else if (pr.phase_detail) {
+                    txt = pr.phase_detail;
+                  } else if (pr.current_peer) {
+                    txt = pr.current_peer;
+                  } else {
+                    txt = 'Preparing...';
+                  }
+                  txt += filterNote;
+                  pbText.textContent = txt;
+                }
+                if (pbElapsed && pr.elapsed_seconds > 0) {
+                  var m = Math.floor(pr.elapsed_seconds / 60);
+                  var s = pr.elapsed_seconds % 60;
+                  pbElapsed.textContent = m > 0 ? m + 'm ' + s + 's' : s + 's';
+                }
+              } else if (msg.command === 'peerBackfillComplete') {
+                var pc = msg.progress || {};
+                var completeFilter = (pc.filter_info && pc.filter_info !== 'all') ? ' [' + pc.filter_info + ']' : '';
+                pbEl.classList.add('backfill-complete');
+                if (pbPct) pbPct.textContent = '100%';
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                updatePhaseBar({ phases_completed: ['resolve_github','prefetch','index_gdrive','index_meetings','collecting','benchmarks'], phase: 'complete' });
+                if (pbText) {
+                  pbText.textContent = 'Complete: ' +
+                    (pc.completed_peers || 0) + ' peers, ' +
+                    (pc.total_events || 0) + ' events' + completeFilter;
+                }
+                if (pbElapsed && pc.elapsed_seconds > 0) {
+                  var m2 = Math.floor(pc.elapsed_seconds / 60);
+                  var s2 = pc.elapsed_seconds % 60;
+                  pbElapsed.textContent = m2 > 0 ? m2 + 'm ' + s2 + 's' : s2 + 's';
+                }
+                setTimeout(function() { if (pbEl) pbEl.style.display = 'none'; }, 10000);
+              } else if (msg.command === 'peerBackfillCancelled') {
+                pbEl.classList.add('backfill-cancelled');
+                if (pbPct) pbPct.textContent = '--';
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                if (pbText) pbText.textContent = 'Backfill cancelled';
+                setTimeout(function() { if (pbEl) pbEl.style.display = 'none'; }, 5000);
+              }
+            }
+          }
+          if (msg && msg.command === 'toggleBackfillOptions') {
+            var bfPanel = document.getElementById('backfillOptionsPanel');
+            if (bfPanel) bfPanel.style.display = bfPanel.style.display === 'none' ? 'block' : 'none';
+          }
+          if (msg && msg.command === 'hideBackfillOptions') {
+            var bfPanel2 = document.getElementById('backfillOptionsPanel');
+            if (bfPanel2) bfPanel2.style.display = 'none';
+          }
           if (msg && msg.command === 'aiLogCategory' && msg.category) {
             var catSelect = document.getElementById('activityCategory');
             if (catSelect) {
@@ -6160,6 +8319,579 @@ export class PerformanceTab extends BaseTab {
 
         window._initPerfHelp = initPerfHelp;
         setTimeout(initPerfHelp, 200);
+      })();
+
+      // ============ QC Overview Charts (D3) ============
+      (function() {
+        function initQcOverviewCharts() {
+          var dataEl = document.getElementById('qcOverviewChartData');
+          if (!dataEl || typeof d3 === 'undefined') return;
+          var data;
+          try { data = JSON.parse(dataEl.textContent); } catch(e) { return; }
+          if (!data) return;
+
+          _renderTrendChart(data);
+          _renderHeatmap(data);
+          _renderPillarChart(data);
+          _renderCoverageDonut(data);
+        }
+
+        var tooltip = null;
+        function showTip(evt, html) {
+          if (!tooltip) tooltip = document.getElementById('qcTooltip');
+          if (!tooltip) return;
+          tooltip.innerHTML = html;
+          tooltip.style.display = 'block';
+          tooltip.style.left = (evt.clientX + 12) + 'px';
+          tooltip.style.top = (evt.clientY - 28) + 'px';
+        }
+        function hideTip() {
+          if (!tooltip) tooltip = document.getElementById('qcTooltip');
+          if (tooltip) tooltip.style.display = 'none';
+        }
+
+        function _renderTrendChart(data) {
+          var svg = d3.select('#qcTrendChart');
+          if (svg.empty()) return;
+          svg.selectAll('*').remove();
+
+          var days = data.captured_days || [];
+          if (days.length < 2) {
+            svg.append('text').attr('x', '50%').attr('y', '50%')
+              .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)')
+              .attr('font-size', '12px').text('Not enough data for trend chart');
+            return;
+          }
+
+          var margin = { top: 20, right: 40, bottom: 30, left: 50 };
+          var node = svg.node();
+          var containerW = node.parentElement ? node.parentElement.getBoundingClientRect().width : 0;
+          var width = (containerW || node.clientWidth || 600) - margin.left - margin.right;
+          var height = 180 - margin.top - margin.bottom;
+          svg.attr('viewBox', '0 0 ' + (width + margin.left + margin.right) + ' 180');
+          var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+
+          var cumulative = [];
+          var running = 0;
+          for (var i = 0; i < days.length; i++) {
+            running += days[i].total_points;
+            cumulative.push({ dayIdx: i + 1, value: running, date: days[i].date, pts: days[i].total_points });
+          }
+
+          var currentTotal = running;
+          var overallPct = data.overall_percentage || 0;
+          var totalDays = data.total_weekdays || 65;
+          var projectedFinal = data.trend && data.trend.projected_final != null ? data.trend.projected_final : null;
+          var trendStatus = data.trend ? data.trend.status : 'insufficient_data';
+
+          var trendColor = trendStatus === 'on_track' ? '#10b981' : trendStatus === 'at_risk' ? '#f59e0b' : '#ef4444';
+
+          var pctData = cumulative.map(function(d) {
+            return { dayIdx: d.dayIdx, pct: currentTotal > 0 ? Math.round(overallPct * d.value / currentTotal) : 0, date: d.date, pts: d.pts, raw: d.value };
+          });
+
+          var xMax = Math.max(totalDays, cumulative.length + 5);
+          var x = d3.scaleLinear().domain([1, xMax]).range([0, width]);
+          var yMax = Math.max(100, projectedFinal || overallPct, d3.max(pctData, function(d) { return d.pct; }) || 100);
+          var y = d3.scaleLinear().domain([0, Math.min(yMax * 1.1, 120)]).range([height, 0]);
+
+          g.append('g').attr('transform', 'translate(0,' + height + ')')
+            .call(d3.axisBottom(x).ticks(Math.min(10, xMax / 5)).tickFormat(function(d) { return 'Day ' + d; }))
+            .selectAll('text,line,path').attr('stroke', 'var(--text-muted)').attr('fill', 'var(--text-muted)').attr('font-size', '10px');
+
+          g.append('g')
+            .call(d3.axisLeft(y).ticks(5).tickFormat(function(d) { return d + '%'; }))
+            .selectAll('text,line,path').attr('stroke', 'var(--text-muted)').attr('fill', 'var(--text-muted)').attr('font-size', '10px');
+
+          g.selectAll('.grid-line').data(y.ticks(5)).enter()
+            .append('line')
+            .attr('x1', 0).attr('x2', width)
+            .attr('y1', function(d) { return y(d); }).attr('y2', function(d) { return y(d); })
+            .attr('stroke', 'var(--border)').attr('stroke-dasharray', '2,3').attr('opacity', 0.4);
+
+          [60, 80].forEach(function(threshold) {
+            if (threshold <= yMax * 1.1) {
+              g.append('line')
+                .attr('x1', 0).attr('x2', width)
+                .attr('y1', y(threshold)).attr('y2', y(threshold))
+                .attr('stroke', threshold === 80 ? '#10b981' : '#f59e0b')
+                .attr('stroke-dasharray', '4,4').attr('opacity', 0.35);
+              g.append('text').attr('x', width + 4).attr('y', y(threshold) + 3)
+                .attr('fill', threshold === 80 ? '#10b981' : '#f59e0b')
+                .attr('font-size', '9px').text(threshold + '%');
+            }
+          });
+
+          var area = d3.area()
+            .x(function(d) { return x(d.dayIdx); })
+            .y0(height)
+            .y1(function(d) { return y(d.pct); })
+            .curve(d3.curveMonotoneX);
+
+          g.append('path').datum(pctData)
+            .attr('d', area)
+            .attr('fill', trendColor).attr('opacity', 0.08);
+
+          var line = d3.line()
+            .x(function(d) { return x(d.dayIdx); })
+            .y(function(d) { return y(d.pct); })
+            .curve(d3.curveMonotoneX);
+
+          g.append('path').datum(pctData)
+            .attr('d', line)
+            .attr('fill', 'none').attr('stroke', trendColor).attr('stroke-width', 2.5);
+
+          if (projectedFinal != null && pctData.length > 0) {
+            var lastPt = pctData[pctData.length - 1];
+            g.append('line')
+              .attr('x1', x(lastPt.dayIdx)).attr('y1', y(lastPt.pct))
+              .attr('x2', x(totalDays)).attr('y2', y(Math.min(projectedFinal, yMax * 1.1)))
+              .attr('stroke', trendColor).attr('stroke-width', 2)
+              .attr('stroke-dasharray', '6,4').attr('opacity', 0.5);
+
+            g.append('circle')
+              .attr('cx', x(totalDays)).attr('cy', y(Math.min(projectedFinal, yMax * 1.1)))
+              .attr('r', 4).attr('fill', trendColor).attr('opacity', 0.5);
+            g.append('text')
+              .attr('x', x(totalDays)).attr('y', y(Math.min(projectedFinal, yMax * 1.1)) - 8)
+              .attr('text-anchor', 'middle').attr('fill', trendColor)
+              .attr('font-size', '10px').attr('font-weight', '600')
+              .text(projectedFinal + '%');
+          }
+
+          if (pctData.length > 0) {
+            var last = pctData[pctData.length - 1];
+            g.append('circle')
+              .attr('cx', x(last.dayIdx)).attr('cy', y(last.pct))
+              .attr('r', 5).attr('fill', trendColor).attr('stroke', 'var(--bg-secondary)').attr('stroke-width', 2);
+            g.append('text')
+              .attr('x', x(last.dayIdx) + 8).attr('y', y(last.pct) + 4)
+              .attr('fill', trendColor).attr('font-size', '11px').attr('font-weight', '700')
+              .text(overallPct + '%');
+          }
+
+          var bisect = d3.bisector(function(d) { return d.dayIdx; }).left;
+          var focus = g.append('g').style('display', 'none');
+          focus.append('circle').attr('r', 4).attr('fill', trendColor).attr('stroke', '#fff').attr('stroke-width', 1.5);
+          focus.append('line').attr('class', 'focus-line').attr('y1', 0).attr('stroke', 'var(--text-muted)').attr('stroke-dasharray', '2,2').attr('opacity', 0.4);
+
+          svg.append('rect')
+            .attr('transform', 'translate(' + margin.left + ',' + margin.top + ')')
+            .attr('width', width).attr('height', height)
+            .attr('fill', 'transparent')
+            .on('mousemove', function(event) {
+              var coords = d3.pointer(event, g.node());
+              var xDay = x.invert(coords[0]);
+              var idx = bisect(pctData, xDay, 1);
+              if (idx >= pctData.length) idx = pctData.length - 1;
+              if (idx < 0) idx = 0;
+              var d0 = pctData[Math.max(0, idx - 1)], d1 = pctData[idx];
+              var d = (d1 && Math.abs(xDay - d0.dayIdx) > Math.abs(xDay - d1.dayIdx)) ? d1 : d0;
+              if (!d) return;
+              focus.style('display', null);
+              focus.attr('transform', 'translate(' + x(d.dayIdx) + ',' + y(d.pct) + ')');
+              focus.select('.focus-line').attr('y2', height - y(d.pct));
+              showTip(event, '<b>' + d.date + '</b> (Day ' + d.dayIdx + ')<br>' + d.pct + '% &bull; +' + d.pts + ' pts');
+            })
+            .on('mouseleave', function() { focus.style('display', 'none'); hideTip(); });
+        }
+
+        function _renderHeatmap(data) {
+          var container = document.getElementById('qcHeatmapStrip');
+          if (!container) return;
+          container.innerHTML = '';
+
+          var days = data.captured_days || [];
+          if (days.length === 0) return;
+
+          var maxPts = d3.max(days, function(d) { return d.total_points; }) || 1;
+
+          var allDates = new Set(days.map(function(d) { return d.date; }));
+          var first = days[0].date;
+          var last = days[days.length - 1].date;
+          var cur = new Date(first);
+          var end = new Date(last);
+          var allWeekdays = [];
+          while (cur <= end) {
+            var dow = cur.getDay();
+            if (dow !== 0 && dow !== 6) {
+              allWeekdays.push(cur.toISOString().slice(0, 10));
+            }
+            cur.setDate(cur.getDate() + 1);
+          }
+
+          allWeekdays.forEach(function(dateStr) {
+            var cell = document.createElement('div');
+            cell.style.width = '12px';
+            cell.style.height = '12px';
+            cell.style.borderRadius = '2px';
+            cell.style.cursor = 'default';
+            cell.style.transition = 'transform 0.15s';
+
+            var dayData = days.find(function(d) { return d.date === dateStr; });
+            if (dayData) {
+              var intensity = Math.min(dayData.total_points / maxPts, 1);
+              var alpha = 0.1 + intensity * 0.9;
+              cell.style.background = 'rgba(16,185,129,' + alpha.toFixed(2) + ')';
+              cell.title = dateStr + ': ' + dayData.total_points + ' pts, ' + dayData.event_count + ' events';
+            } else {
+              cell.style.background = 'var(--bg-tertiary)';
+              cell.title = dateStr + ': no data';
+            }
+
+            cell.addEventListener('mouseenter', function(e) {
+              cell.style.transform = 'scale(1.6)';
+              cell.style.zIndex = '1';
+              showTip(e, cell.title);
+            });
+            cell.addEventListener('mouseleave', function() {
+              cell.style.transform = '';
+              cell.style.zIndex = '';
+              hideTip();
+            });
+
+            container.appendChild(cell);
+          });
+        }
+
+        function _renderPillarChart(data) {
+          var svg = d3.select('#qcPillarChart');
+          if (svg.empty()) return;
+          svg.selectAll('*').remove();
+
+          var pillars = data.pillar_avgs || {};
+          var colors = data.pillar_colors || {};
+          var summary = data.pillar_summary || {};
+          var names = Object.keys(pillars);
+          if (names.length === 0) return;
+
+          var margin = { top: 10, right: 60, bottom: 10, left: 160 };
+          var node = svg.node();
+          var containerW = node.parentElement ? node.parentElement.getBoundingClientRect().width : 0;
+          var width = (containerW || node.clientWidth || 600) - margin.left - margin.right;
+          var height = 160 - margin.top - margin.bottom;
+          svg.attr('viewBox', '0 0 ' + (width + margin.left + margin.right) + ' 160');
+          var g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+
+          var barHeight = Math.min(28, Math.floor(height / names.length) - 8);
+          var y = d3.scaleBand().domain(names).range([0, height]).padding(0.25);
+          var x = d3.scaleLinear().domain([0, 100]).range([0, width]);
+
+          names.forEach(function(name) {
+            var pct = pillars[name] || 0;
+            var color = colors[name] || '#888';
+            var ps = summary[name] || {};
+            var yPos = y(name) + y.bandwidth() / 2;
+
+            g.append('rect')
+              .attr('x', 0).attr('y', y(name))
+              .attr('width', width).attr('height', y.bandwidth())
+              .attr('fill', 'var(--bg-tertiary)').attr('rx', 4);
+
+            g.append('rect')
+              .attr('x', 0).attr('y', y(name))
+              .attr('width', x(Math.min(pct, 100))).attr('height', y.bandwidth())
+              .attr('fill', color).attr('opacity', 0.8).attr('rx', 4);
+
+            g.append('text')
+              .attr('x', -8).attr('y', yPos + 1)
+              .attr('text-anchor', 'end').attr('fill', 'var(--text-primary)')
+              .attr('font-size', '12px').attr('font-weight', '600')
+              .text(name);
+
+            g.append('text')
+              .attr('x', x(Math.min(pct, 100)) + 6).attr('y', yPos + 1)
+              .attr('fill', color).attr('font-size', '12px').attr('font-weight', '700')
+              .text(pct + '%');
+
+            if (ps.priority_count > 0) {
+              g.append('text')
+                .attr('x', width + 8).attr('y', yPos + 1)
+                .attr('fill', 'var(--text-muted)').attr('font-size', '10px')
+                .text(ps.covered + '/' + ps.priority_count);
+            }
+          });
+        }
+
+        function _renderCoverageDonut(data) {
+          var svg = d3.select('#qcCoverageDonut');
+          if (svg.empty()) return;
+          svg.selectAll('*').remove();
+
+          var cs = data.coverage_summary || {};
+          var covered = cs.covered || 0;
+          var gaps = cs.gaps || 0;
+          var total = covered + gaps;
+          if (total === 0) return;
+          var pct = cs.coverage_pct || 0;
+
+          var size = 80;
+          var radius = size / 2;
+          var innerR = radius * 0.6;
+          var g = svg.append('g').attr('transform', 'translate(' + radius + ',' + radius + ')');
+
+          var arc = d3.arc().innerRadius(innerR).outerRadius(radius);
+          var pie = d3.pie().value(function(d) { return d.value; }).sort(null).padAngle(0.03);
+
+          var slices = pie([
+            { label: 'Covered', value: covered, color: '#10b981' },
+            { label: 'Gaps', value: gaps, color: '#ef4444' }
+          ]);
+
+          g.selectAll('path').data(slices).enter()
+            .append('path')
+            .attr('d', arc)
+            .attr('fill', function(d) { return d.data.color; })
+            .attr('opacity', 0.85)
+            .on('mouseenter', function(event, d) {
+              d3.select(this).attr('opacity', 1);
+              showTip(event, d.data.label + ': ' + d.data.value);
+            })
+            .on('mouseleave', function() {
+              d3.select(this).attr('opacity', 0.85);
+              hideTip();
+            });
+
+          g.append('text')
+            .attr('text-anchor', 'middle').attr('dy', '0.1em')
+            .attr('fill', pct >= 50 ? '#10b981' : '#ef4444')
+            .attr('font-size', '16px').attr('font-weight', '700')
+            .text(pct + '%');
+
+          g.append('text')
+            .attr('text-anchor', 'middle').attr('dy', '1.4em')
+            .attr('fill', 'var(--text-muted)')
+            .attr('font-size', '8px')
+            .text(covered + '/' + total);
+        }
+
+        window._initQcOverviewCharts = initQcOverviewCharts;
+        setTimeout(initQcOverviewCharts, 100);
+      })();
+
+      // ============ Issues Dashboard Charts (D3) ============
+      (function() {
+        var TAG_COLORS = {
+          worktype: '#3b82f6', quality: '#10b981', domain: '#8b5cf6',
+          ops: '#f97316', monitoring: '#ef4444', other: '#6b7280'
+        };
+        var TAG_CAT_MAP = {
+          feat:'worktype', fix:'worktype', refactor:'worktype',
+          test:'quality', review:'quality', docs:'quality',
+          billing:'domain', auth:'domain', api:'domain', config:'domain', mock:'domain',
+          deploy:'ops', pipeline:'ops', 'ci/cd':'ops', release:'ops',
+          grafana:'monitoring', monitoring:'monitoring', alert:'monitoring',
+          security:'monitoring', performance:'monitoring',
+          migration:'ops', integration:'domain'
+        };
+
+        function getTagColor(tag) {
+          return TAG_COLORS[TAG_CAT_MAP[tag] || 'other'] || TAG_COLORS.other;
+        }
+
+        function initIssuesDashboard() {
+          var dataEl = document.getElementById('issuesDashboardData');
+          if (!dataEl) return;
+          if (typeof d3 === 'undefined') { setTimeout(initIssuesDashboard, 500); return; }
+
+          var dd;
+          try { dd = JSON.parse(dataEl.textContent || '{}'); } catch(e) { return; }
+
+          initTreemap(dd);
+          initDonut(dd);
+          initGauge(dd);
+          initTagChart(dd);
+        }
+
+        function initTreemap(dd) {
+          var container = document.getElementById('issuesDashTreemap');
+          if (!container || !dd.strategies || !dd.strategies.length) return;
+
+          var w = container.clientWidth;
+          var h = container.clientHeight;
+          if (!w || w < 50) { setTimeout(function() { initTreemap(dd); }, 300); return; }
+          if (!h || h < 40) h = 130;
+          container.innerHTML = '';
+
+          var root = { name: 'root', children: dd.strategies.map(function(s) {
+            return {
+              name: s.key.replace('ANSTRAT-','S-'),
+              value: Math.max(s.points, 1),
+              fullKey: s.key,
+              summary: (s.summary || '').substring(0, 40),
+              children: (s.children || []).map(function(e) {
+                return { name: e.key, value: Math.max(e.points, 1), summary: (e.summary || '').substring(0, 30) };
+              })
+            };
+          })};
+
+          var hier = d3.hierarchy(root).sum(function(d) { return d.children && d.children.length ? 0 : d.value; });
+          d3.treemap().size([w, h]).padding(2).round(true)(hier);
+
+          var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
+          var colorScale = d3.scaleOrdinal(d3.schemeTableau10);
+
+          var leaves = hier.leaves();
+          var cells = svg.selectAll('g').data(leaves).enter().append('g')
+            .attr('transform', function(d) { return 'translate(' + d.x0 + ',' + d.y0 + ')'; });
+
+          cells.append('rect')
+            .attr('width', function(d) { return Math.max(d.x1 - d.x0, 0); })
+            .attr('height', function(d) { return Math.max(d.y1 - d.y0, 0); })
+            .attr('rx', 2)
+            .attr('fill', function(d) {
+              var anc = d.parent;
+              while (anc && anc.depth > 1) anc = anc.parent;
+              return colorScale(anc ? anc.data.name : d.data.name);
+            })
+            .attr('opacity', 0.8)
+            .style('cursor', 'pointer')
+            .append('title')
+            .text(function(d) { return d.data.name + ': ' + d.value + 'pts' + (d.data.summary ? '\\n' + d.data.summary : ''); });
+
+          cells.each(function(d) {
+            var cw = d.x1 - d.x0;
+            var ch = d.y1 - d.y0;
+            if (cw > 30 && ch > 14) {
+              d3.select(this).append('text')
+                .attr('x', 3).attr('y', 11)
+                .attr('class', 'issues-treemap-label')
+                .text(function(dd) {
+                  var label = dd.data.name;
+                  return label.length > cw / 6 ? label.substring(0, Math.floor(cw / 6)) : label;
+                });
+            }
+          });
+        }
+
+        function initDonut(dd) {
+          var container = document.getElementById('issuesDashDonut');
+          if (!container || !dd.scope_points) return;
+          container.innerHTML = '';
+
+          var w = container.clientWidth || 140;
+          var h = container.clientHeight || 110;
+          var radius = Math.min(w, h) / 2 - 4;
+
+          var data = Object.entries(dd.scope_points).filter(function(e) { return e[1] > 0; });
+          if (!data.length) return;
+
+          var scopeColors = { commit: '#3b82f6', story: '#10b981', epic: '#f59e0b', anstrat: '#ef4444', meeting: '#8b5cf6', doc: '#06b6d4' };
+          var total = data.reduce(function(s, d) { return s + d[1]; }, 0);
+
+          var svg = d3.select(container).append('svg').attr('width', w).attr('height', h);
+          var g = svg.append('g').attr('transform', 'translate(' + w/2 + ',' + h/2 + ')');
+
+          var pie = d3.pie().value(function(d) { return d[1]; }).sort(null);
+          var arc = d3.arc().innerRadius(radius * 0.55).outerRadius(radius);
+
+          g.selectAll('path').data(pie(data)).enter().append('path')
+            .attr('d', arc)
+            .attr('fill', function(d) { return scopeColors[d.data[0]] || '#6b7280'; })
+            .attr('opacity', 0.85)
+            .append('title')
+            .text(function(d) { return d.data[0] + ': ' + d.data[1] + 'pts (' + Math.round(d.data[1]/total*100) + '%)'; });
+
+          g.append('text').attr('class', 'issues-donut-center').attr('dy', '0.35em').text(total);
+
+          var legend = d3.select(container).append('div')
+            .style('display', 'flex').style('gap', '8px').style('justify-content', 'center')
+            .style('flex-wrap', 'wrap').style('margin-top', '2px');
+          data.forEach(function(d) {
+            legend.append('span')
+              .style('font-size', '11px').style('color', 'var(--text-secondary)')
+              .html('<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:'
+                + (scopeColors[d[0]] || '#6b7280') + ';margin-right:3px;"></span>' + d[0]);
+          });
+        }
+
+        function initGauge(dd) {
+          var container = document.getElementById('issuesDashGauge');
+          if (!container) return;
+          container.innerHTML = '';
+
+          var pct = dd.alignment_pct || 0;
+          var aligned = dd.aligned_points || 0;
+          var unaligned = dd.unaligned_points || 0;
+
+          var barColor = pct >= 70 ? 'var(--success)' : pct >= 40 ? 'var(--warning)' : 'var(--error)';
+
+          container.innerHTML =
+            '<div class="issues-gauge-pct">' + pct + '%</div>' +
+            '<div class="issues-gauge-label">of points are strategy-aligned</div>' +
+            '<div class="issues-gauge-bar"><div class="issues-gauge-fill" style="width:' + pct + '%;background:' + barColor + ';"></div></div>' +
+            '<div class="issues-gauge-legend">' +
+              '<span><span class="issues-gauge-dot" style="background:' + barColor + '"></span>Aligned: ' + aligned + 'pts</span>' +
+              '<span><span class="issues-gauge-dot" style="background:var(--bg-tertiary)"></span>Other: ' + unaligned + 'pts</span>' +
+            '</div>';
+        }
+
+        function initTagChart(dd) {
+          var container = document.getElementById('issuesDashTags');
+          if (!container || !dd.tag_counts) return;
+          container.innerHTML = '';
+
+          var tags = Object.entries(dd.tag_counts);
+          if (!tags.length) return;
+          var maxCount = tags.reduce(function(m, t) { return Math.max(m, t[1]); }, 0) || 1;
+
+          var html = '';
+          tags.slice(0, 10).forEach(function(t) {
+            var pct = Math.round(t[1] / maxCount * 100);
+            html += '<div class="issues-tag-bar-row">' +
+              '<span class="issues-tag-bar-label">' + t[0] + '</span>' +
+              '<span class="issues-tag-bar-fill" style="width:' + Math.max(pct, 4) + '%;background:' + getTagColor(t[0]) + ';"></span>' +
+              '<span class="issues-tag-bar-count">' + t[1] + '</span>' +
+            '</div>';
+          });
+          container.innerHTML = html;
+        }
+
+        window._initIssuesDashboard = initIssuesDashboard;
+        setTimeout(initIssuesDashboard, 250);
+      })();
+
+      // ============ Issues Tag Filter ============
+      (function() {
+        function setupTagFilter() {
+          document.addEventListener('click', function(e) {
+            var btn = e.target.closest('[data-action="filterTag"]');
+            if (!btn) return;
+            var tag = btn.getAttribute('data-tag') || '';
+
+            document.querySelectorAll('.issues-tag-filter-btn').forEach(function(b) {
+              b.classList.remove('active');
+            });
+
+            if (tag) {
+              btn.classList.add('active');
+              document.querySelectorAll('.perf-tree-node').forEach(function(node) {
+                var nodeTags = (node.getAttribute('data-tags') || '').split(',');
+                if (nodeTags.indexOf(tag) >= 0 || node.querySelector('.perf-tree-toggle')) {
+                  node.classList.remove('tag-filtered-out');
+                } else {
+                  node.classList.add('tag-filtered-out');
+                }
+              });
+              document.querySelectorAll('.issue-card').forEach(function(card) {
+                var cardTags = (card.getAttribute('data-tags') || '').split(',');
+                if (cardTags.indexOf(tag) >= 0) {
+                  card.classList.remove('tag-filtered-out');
+                } else {
+                  card.classList.add('tag-filtered-out');
+                }
+              });
+            } else {
+              document.querySelectorAll('.perf-tree-node').forEach(function(node) {
+                node.classList.remove('tag-filtered-out');
+              });
+              document.querySelectorAll('.issue-card').forEach(function(card) {
+                card.classList.remove('tag-filtered-out');
+              });
+            }
+          });
+        }
+        setupTagFilter();
       })();
     `;
   }
@@ -6183,12 +8915,19 @@ export class PerformanceTab extends BaseTab {
         await this.handlePerformanceAction(message.action, message);
         return true;
 
+      case "switchHeatmapMode":
+      case "switchPeerComparisonMode":
+      case "switchEventVolumeMode":
+      case "toggleSessionEnrichment":
+        await this.handlePerformanceAction(msgType, message);
+        return true;
+
       default:
         return false;
     }
   }
 
-  private async handlePerformanceAction(action: string, message: any): Promise<void> {
+  private async handlePerformanceAction(action: string, message: any): Promise<boolean> {
     logger.log(`Performance action: ${action}`);
 
     switch (action) {
@@ -6212,6 +8951,24 @@ export class PerformanceTab extends BaseTab {
         break;
       case "collectPeersBackfill":
         await this.collectPeers(true);
+        break;
+      case "toggleBackfillOptions":
+        this.postMessageToWebview({ command: "toggleBackfillOptions" });
+        break;
+      case "cancelBackfillOptions":
+        this.postMessageToWebview({ command: "hideBackfillOptions" });
+        break;
+      case "startFilteredBackfill":
+        await this._startFilteredBackfill(message);
+        break;
+      case "rescorePeers":
+        await this._rescorePeers();
+        break;
+      case "cancelBackfill":
+        await this._cancelBackfill();
+        break;
+      case "scrubData":
+        await this._scrubData();
         break;
       case "loadPromotionReadiness":
         await this._loadPromotionReadiness();
@@ -6243,6 +9000,12 @@ export class PerformanceTab extends BaseTab {
       case "clearDrafts":
         await this.clearAllDrafts();
         break;
+      case "saveQuestion":
+        await this.saveQuestion(message.description);
+        break;
+      case "removeQuestion":
+        await this.removeQuestion(message.questionId);
+        break;
       case "addNote":
         await this.addNoteToQuestion(message.questionId);
         break;
@@ -6268,6 +9031,33 @@ export class PerformanceTab extends BaseTab {
         }
         this.notifyNeedsRender();
         break;
+      case "switchHeatmapMode": {
+        const modes = ["percentage", "raw_points", "peer_comparable"] as const;
+        const validMode = modes.find(m => m === message.mode);
+        if (validMode) {
+          this.state.heatmap_mode = validMode;
+          this.notifyNeedsRender();
+        }
+        break;
+      }
+      case "switchEventVolumeMode": {
+        this.state.event_volume_mode = message.mode === "all" ? "all" : "comparable";
+        this.notifyNeedsRender();
+        break;
+      }
+      case "toggleSessionEnrichment": {
+        this.state.session_enrichment = !this.state.session_enrichment;
+        this.notifyNeedsRender();
+        break;
+      }
+      case "switchPeerComparisonMode": {
+        const cm = message.mode === "raw" ? "raw" : "comparable";
+        this.state.peer_comparison_mode = cm;
+        this.state.heatmap_mode = cm === "comparable" ? "peer_comparable" : "percentage";
+        this.state.event_volume_mode = cm === "comparable" ? "comparable" : "all";
+        this.notifyNeedsRender();
+        break;
+      }
       case "switchTab": {
         const leavingSettings = this.state.active_tab === "settings";
         this.state.active_tab = message.key || "overview";
@@ -6416,7 +9206,9 @@ export class PerformanceTab extends BaseTab {
         break;
       default:
         logger.warn(`Unknown performance action: ${action}`);
+        return false;
     }
+    return true;
   }
 
   // ============================================================
@@ -6471,6 +9263,7 @@ export class PerformanceTab extends BaseTab {
           uncategorized: Array.isArray(raw.uncategorized) ? raw.uncategorized : [],
           total_issues: raw.total_issues || 0,
           cached: raw.cached || false,
+          summary: raw.summary || { total_points: 0, aligned_points: 0, unaligned_points: 0, alignment_pct: 0, scope_points: {}, pillar_points: { technical: 0, leadership: 0, mentorship: 0, delivery: 0 }, tag_counts: {} },
         };
         vscode.window.showInformationMessage("Issue hierarchy refreshed");
         this.notifyNeedsRender();
@@ -6483,24 +9276,47 @@ export class PerformanceTab extends BaseTab {
   }
 
   private async collectDailyData(): Promise<void> {
-    vscode.window.showInformationMessage("Collecting today's performance data...");
+    vscode.window.showInformationMessage("Collecting today's data (user + peers)...");
     try {
-      const result = await dbus.stats_collectDaily();
-      if (result.success) {
-        const data = result.data as any;
-        vscode.window.showInformationMessage(`Daily data collected: ${data?.event_count || 0} events, ${data?.daily_total || 0} points`);
-        await this.refresh();
+      const [dailyResult, peersResult] = await Promise.all([
+        dbus.stats_collectDaily(),
+        dbus.stats_collectPeers(false),
+      ]);
+
+      const parts: string[] = [];
+      if (dailyResult.success) {
+        const data = dailyResult.data as any;
+        parts.push(`${data?.event_count || 0} events, ${data?.daily_total || 0} points`);
       } else {
-        vscode.window.showErrorMessage(`Failed to collect data: ${result.error}`);
+        parts.push(`daily failed: ${dailyResult.error}`);
       }
+      if (peersResult.success) {
+        const pd = peersResult.data as any;
+        parts.push(`${pd?.peers_processed ?? 0} peers`);
+      } else {
+        parts.push(`peers failed: ${peersResult.error}`);
+      }
+
+      vscode.window.showInformationMessage(`Daily collection complete: ${parts.join(", ")}`);
+      await this.refresh();
     } catch (error) {
       vscode.window.showErrorMessage(`Error collecting data: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private async backfillAll(): Promise<void> {
-    vscode.window.showInformationMessage("Re-collecting all quarter data (Jira, GitLab, emails)...");
+    vscode.window.showInformationMessage("Backfilling all quarter data (metadata, user, peers, emails)...");
     try {
+      // Phase 1: Sync metadata caches (strategy ownership, sender sources, Jira hierarchy)
+      vscode.window.showInformationMessage("Phase 1/4: Syncing metadata (strategy, senders, hierarchy)...");
+      await Promise.allSettled([
+        dbus.stats_syncAnstratOwnership(),
+        dbus.stats_syncSenderSources(),
+        dbus.stats_getIssueHierarchy(true),
+      ]);
+
+      // Phase 2: Collect user data + executive emails in parallel
+      vscode.window.showInformationMessage("Phase 2/4: Collecting user data and executive emails...");
       const [daysResult, emailsResult] = await Promise.all([
         dbus.stats_backfill(),
         dbus.stats_backfillExecutiveEmails(),
@@ -6521,8 +9337,26 @@ export class PerformanceTab extends BaseTab {
         parts.push(`emails failed: ${emailsResult.error}`);
       }
 
-      vscode.window.showInformationMessage(`Backfill complete: ${parts.join(", ")}`);
-      await this.refresh();
+      // Phase 3: Re-evaluate/re-score with fresh metadata
+      vscode.window.showInformationMessage("Phase 3/4: Re-scoring with fresh metadata...");
+      await dbus.stats_evaluateAll();
+
+      vscode.window.showInformationMessage(`User backfill done: ${parts.join(", ")}. Phase 4/4: Starting peer backfill...`);
+
+      // Phase 4: Backfill all peer data in the background
+      try {
+        const peersResult = await dbus.stats_collectPeers(true);
+        if (peersResult.success) {
+          this.postMessageToWebview({ command: "peerBackfillStarted" });
+          this._backfillPollInterval = setInterval(() => this._pollBackfillProgress(), 2000);
+        } else {
+          vscode.window.showErrorMessage(`Peer backfill failed: ${peersResult.error}`);
+          await this.refresh();
+        }
+      } catch (peerError) {
+        vscode.window.showErrorMessage(`Peer backfill error: ${peerError instanceof Error ? peerError.message : String(peerError)}`);
+        await this.refresh();
+      }
     } catch (error) {
       vscode.window.showErrorMessage(`Error backfilling: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -6549,26 +9383,293 @@ export class PerformanceTab extends BaseTab {
     }
   }
 
+  private _backfillPollInterval?: ReturnType<typeof setInterval>;
+
   private async collectPeers(backfill: boolean): Promise<void> {
-    const msg = backfill
-      ? "Backfilling peer data for entire quarter (this may take several minutes)..."
-      : "Collecting peer data for today...";
-    vscode.window.showInformationMessage(msg);
-    try {
-      const result = await dbus.stats_collectPeers(backfill);
-      if (result.success) {
-        const data = result.data as any;
-        vscode.window.showInformationMessage(
-          `Peer collection complete: ${data?.peers_processed ?? 0} peers processed`
+    if (!backfill) {
+      vscode.window.showInformationMessage("Collecting peer data for today...");
+      try {
+        const result = await dbus.stats_collectPeers(false);
+        if (result.success) {
+          const data = result.data as any;
+          vscode.window.showInformationMessage(
+            `Peer collection complete: ${data?.peers_processed ?? 0} peers processed`
+          );
+          await this.refresh();
+        } else {
+          vscode.window.showErrorMessage(`Peer collection failed: ${result.error}`);
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Error collecting peers: ${error instanceof Error ? error.message : String(error)}`
         );
-        await this.refresh();
+      }
+      return;
+    }
+
+    vscode.window.showInformationMessage("Starting peer backfill (runs in background)...");
+    try {
+      const result = await dbus.stats_collectPeers(true);
+      if (result.success) {
+        this.postMessageToWebview({ command: "peerBackfillStarted" });
+        this._backfillPollInterval = setInterval(() => this._pollBackfillProgress(), 2000);
       } else {
-        vscode.window.showErrorMessage(`Peer collection failed: ${result.error}`);
+        vscode.window.showErrorMessage(`Peer backfill failed: ${result.error}`);
       }
     } catch (error) {
       vscode.window.showErrorMessage(
-        `Error collecting peers: ${error instanceof Error ? error.message : String(error)}`
+        `Error starting backfill: ${error instanceof Error ? error.message : String(error)}`
       );
+    }
+  }
+
+  private async _startFilteredBackfill(message: any): Promise<void> {
+    const allSourceKeys = ["git", "jira", "gitlab", "github", "gdrive", "meeting"] as const;
+    const sources: string[] = [];
+    if (message.srcGit) sources.push("git");
+    if (message.srcJira) sources.push("jira");
+    if (message.srcGitlab) sources.push("gitlab");
+    if (message.srcGithub) sources.push("github");
+    if (message.srcGdrive) sources.push("gdrive");
+    if (message.srcMeeting) sources.push("meeting");
+
+    const scopeUser = message.scopeUser !== false;
+    const scopePeers = message.scopePeers !== false;
+    const scopeEmails = message.scopeEmails !== false;
+
+    if (sources.length === 0) {
+      vscode.window.showWarningMessage("Select at least one source to backfill.");
+      return;
+    }
+    if (!scopeUser && !scopePeers && !scopeEmails) {
+      vscode.window.showWarningMessage("Select at least one scope (My data, Peers, or Emails).");
+      return;
+    }
+
+    const options: { sources?: string[]; dateStart?: string; dateEnd?: string } = {};
+    if (sources.length < allSourceKeys.length) {
+      options.sources = sources;
+    }
+    const dateRange = message.dateRange as string;
+    if (dateRange && dateRange !== "full") {
+      const days = parseInt(dateRange, 10);
+      if (!isNaN(days)) {
+        const now = new Date();
+        const start = new Date(now);
+        start.setDate(start.getDate() - days);
+        options.dateStart = start.toISOString().slice(0, 10);
+      }
+    }
+
+    const scopeParts: string[] = [];
+    if (scopeUser) scopeParts.push("user");
+    if (scopePeers) scopeParts.push("peers");
+    if (scopeEmails) scopeParts.push("emails");
+    const label = sources.length < allSourceKeys.length ? sources.join(", ") : "all sources";
+    const rangeLabel = dateRange === "full" ? "full quarter" : `last ${dateRange} days`;
+    vscode.window.showInformationMessage(`Starting backfill: ${scopeParts.join("+")} — ${label}, ${rangeLabel}...`);
+
+    this.postMessageToWebview({ command: "hideBackfillOptions" });
+
+    try {
+      if (scopeUser) {
+        vscode.window.showInformationMessage("Syncing metadata (strategy, senders, hierarchy)...");
+        await Promise.allSettled([
+          dbus.stats_syncAnstratOwnership(),
+          dbus.stats_syncSenderSources(),
+          dbus.stats_getIssueHierarchy(true),
+        ]);
+      }
+
+      const promises: Promise<any>[] = [];
+
+      if (scopeUser) {
+        promises.push(dbus.stats_backfill());
+      }
+      if (scopeEmails) {
+        promises.push(dbus.stats_backfillExecutiveEmails());
+      }
+
+      if (promises.length > 0) {
+        const results = await Promise.all(promises);
+        const parts: string[] = [];
+        let idx = 0;
+        if (scopeUser) {
+          const r = results[idx++];
+          if (r.success) {
+            parts.push(`${(r.data as any)?.days_processed || 0} days`);
+          } else {
+            parts.push(`user failed: ${r.error}`);
+          }
+        }
+        if (scopeEmails) {
+          const r = results[idx++];
+          if (r.success) {
+            const e = r.data as any;
+            parts.push(`${(e?.total_new || 0) + (e?.total_skipped || 0)} emails`);
+          } else {
+            parts.push(`emails failed: ${r.error}`);
+          }
+        }
+        if (parts.length > 0) {
+          vscode.window.showInformationMessage(`Backfill progress: ${parts.join(", ")}`);
+        }
+      }
+
+      if (scopeUser) {
+        vscode.window.showInformationMessage("Re-scoring with fresh metadata...");
+        await dbus.stats_evaluateAll();
+      }
+
+      if (scopePeers) {
+        const result = await dbus.stats_collectPeers(true, options);
+        if (result.success) {
+          this.postMessageToWebview({ command: "peerBackfillStarted" });
+          this._backfillPollInterval = setInterval(() => this._pollBackfillProgress(), 2000);
+        } else {
+          vscode.window.showErrorMessage(`Peer backfill failed: ${result.error}`);
+          await this.refresh();
+        }
+      } else {
+        await this.refresh();
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Error starting filtered backfill: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async _rescorePeers(): Promise<void> {
+    vscode.window.showInformationMessage("Re-scoring peer data (no re-collection)...");
+    this.postMessageToWebview({ command: "hideBackfillOptions" });
+    try {
+      const result = await dbus.stats_rescorePeers();
+      if (result.success) {
+        const data = result.data as any;
+        vscode.window.showInformationMessage(
+          `Re-score complete: ${data?.files_updated ?? 0} files, ${data?.peers_updated ?? 0} peers updated`
+        );
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Re-score failed: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Error re-scoring peers: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async _cancelBackfill(): Promise<void> {
+    try {
+      const result = await dbus.stats_cancelBackfill();
+      if (this._backfillPollInterval) {
+        clearInterval(this._backfillPollInterval);
+        this._backfillPollInterval = undefined;
+      }
+      this._backfillEverRanning = false;
+      this.postMessageToWebview({ command: "peerBackfillCancelled" });
+      if (result.success) {
+        vscode.window.showInformationMessage("Backfill cancelled.");
+      } else {
+        vscode.window.showErrorMessage(`Cancel failed: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Error cancelling backfill: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private async _scrubData(): Promise<void> {
+    const confirm = await vscode.window.showWarningMessage(
+      "This will delete ALL collected performance data for the current quarter (user daily data, peer data, caches, executive emails). This cannot be undone.",
+      { modal: true },
+      "Scrub All Data"
+    );
+    if (confirm !== "Scrub All Data") return;
+
+    this.postMessageToWebview({ command: "hideBackfillOptions" });
+    try {
+      const result = await dbus.stats_scrubData();
+      if (result.success) {
+        const data = result.data as any;
+        vscode.window.showInformationMessage(
+          `Data scrubbed: ${data?.message ?? "Done"}. Run Backfill to re-collect.`
+        );
+        this.state.overall_percentage = 0;
+        this.state.peer_comparable_overall = 0;
+        this.state.event_counts_by_source = {};
+        this.state.competencies = {};
+        this.state.highlights = [];
+        this.state.gaps = [];
+        this.state.captured_days = [];
+        this.state.coverage = { total_weekdays: 0, captured: 0, percentage: 0 };
+        this.state.issue_hierarchy = null;
+        this.state.day_detail = null;
+        this.state.competency_evidence = {};
+        this.state.competency_meta = {};
+        this.state.gap_suggestions = {};
+        this.state.strategy_alignment = null;
+        this.state.executive_emails = [];
+        this.state.peer_benchmarks = null;
+        this.state.org_stats = null;
+        this.state.ai_peer_narrative = null;
+        this.state.ai_peer_differentiators = null;
+        this.state.ai_overview_digest = null;
+        this.state.ai_calendar_insights = null;
+        this.state.ai_promotion_readiness = null;
+        await this.refresh();
+      } else {
+        vscode.window.showErrorMessage(`Scrub failed: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(
+        `Error scrubbing data: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  private _backfillEverRanning = false;
+
+  private async _pollBackfillProgress(): Promise<void> {
+    try {
+      const result = await dbus.stats_getPeerBackfillProgress();
+      if (!result.success) return;
+      const p = result.data as any;
+
+      if (p.running) {
+        this._backfillEverRanning = true;
+      }
+
+      this.postMessageToWebview({ command: "peerBackfillProgress", progress: p });
+
+      if (!p.running && this._backfillEverRanning) {
+        this._backfillEverRanning = false;
+        if (this._backfillPollInterval) {
+          clearInterval(this._backfillPollInterval);
+          this._backfillPollInterval = undefined;
+        }
+        if (p.cancelled) {
+          this.postMessageToWebview({ command: "peerBackfillCancelled" });
+          vscode.window.showInformationMessage("Backfill was cancelled.");
+        } else {
+          const evts = p.total_events ?? 0;
+          const peers = p.completed_peers ?? 0;
+          const secs = p.elapsed_seconds ?? 0;
+          const errs = (p.errors?.length ?? 0);
+          const filterInfo = (p.filter_info && p.filter_info !== "all") ? ` [${p.filter_info}]` : "";
+          vscode.window.showInformationMessage(
+            `Peer backfill complete: ${peers} peers, ${evts} events in ${secs}s` +
+            (errs > 0 ? ` (${errs} errors)` : "") + filterInfo
+          );
+          this.postMessageToWebview({ command: "peerBackfillComplete", progress: p });
+        }
+        await this.refresh();
+      }
+    } catch {
+      // polling failure is transient, just skip
     }
   }
 
@@ -6579,7 +9680,7 @@ export class PerformanceTab extends BaseTab {
       const result = await dbus.stats_getPeerGrowthData();
       if (result.success && result.data) {
         const data = result.data as any;
-        this.services?.postMessage?.({ command: "peerGrowthData", data });
+        this.postMessageToWebview({ command: "peerGrowthData", data });
       } else {
         vscode.window.showWarningMessage("No growth data available.");
       }
@@ -6626,7 +9727,7 @@ export class PerformanceTab extends BaseTab {
       if (result.success && result.data) {
         const cat = (result.data as any).category;
         if (cat) {
-          this.services?.postMessage?.({ command: "aiLogCategory", category: cat });
+          this.postMessageToWebview({ command: "aiLogCategory", category: cat });
         }
       }
     } catch { /* classification is best-effort */ }
@@ -6638,10 +9739,10 @@ export class PerformanceTab extends BaseTab {
       const result = await dbus.stats_askAI(question);
       if (result.success && result.data) {
         const answer = (result.data as any).answer || "No answer available.";
-        this.services?.postMessage?.({ command: "aiAnswer", answer, question });
+        this.postMessageToWebview({ command: "aiAnswer", answer, question });
       }
     } catch (error) {
-      this.services?.postMessage?.({
+      this.postMessageToWebview({
         command: "aiAnswer",
         answer: "AI is currently unavailable.",
         question,
@@ -6685,7 +9786,7 @@ export class PerformanceTab extends BaseTab {
       const result = await dbus.stats_detectMissingLinks();
       if (result.success && result.data) {
         const suggestions = (result.data as any).suggestions || [];
-        this.services?.postMessage?.({ command: "missingLinksResult", suggestions });
+        this.postMessageToWebview({ command: "missingLinksResult", suggestions });
         if (suggestions.length === 0) {
           vscode.window.showInformationMessage("No missing links found -- all issues appear well-connected.");
         }
@@ -6748,6 +9849,13 @@ export class PerformanceTab extends BaseTab {
   }
 
   private async clearAllDrafts(): Promise<void> {
+    const answer = await vscode.window.showWarningMessage(
+      "Clear all AI-generated drafts? You can re-generate them later.",
+      "Clear Drafts",
+      "Cancel",
+    );
+    if (answer !== "Clear Drafts") return;
+
     try {
       const result = await dbus.stats_clearDrafts();
       if (result.success) {
@@ -6763,6 +9871,53 @@ export class PerformanceTab extends BaseTab {
       }
     } catch (error) {
       vscode.window.showErrorMessage(`Error clearing drafts: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async saveQuestion(description: string): Promise<void> {
+    if (!description) return;
+
+    try {
+      const result = await dbus.stats_addQuestion(description);
+      if (result.success) {
+        const data = result.data as any;
+        if (data?.questions_summary) {
+          this.state.questions_summary = data.questions_summary;
+        }
+        vscode.window.showInformationMessage("Question added.");
+        this.notifyNeedsRender();
+      } else {
+        vscode.window.showErrorMessage(`Failed to add question: ${result.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error adding question: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async removeQuestion(questionId: string): Promise<void> {
+    if (!questionId) return;
+
+    const answer = await vscode.window.showWarningMessage(
+      "Remove this question? Evidence and notes will be lost.",
+      "Remove",
+      "Cancel",
+    );
+    if (answer !== "Remove") return;
+
+    try {
+      const result = await dbus.stats_removeQuestion(questionId);
+      if (result.success) {
+        const data = result.data as any;
+        if (data?.questions_summary) {
+          this.state.questions_summary = data.questions_summary;
+        }
+        vscode.window.showInformationMessage("Question removed.");
+        this.notifyNeedsRender();
+      } else {
+        vscode.window.showErrorMessage(`Failed to remove question: ${result.error}`);
+      }
+    } catch (error) {
+      vscode.window.showErrorMessage(`Error removing question: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -7055,9 +10210,22 @@ After saving, the QC tab will show the result inline on the card.`;
       const result = await dbus.stats_backfillExecutiveEmails();
       if (result.success) {
         const data = result.data as any;
-        vscode.window.showInformationMessage(
-          `Backfill complete: ${data?.new_emails ?? 0} new emails fetched`
-        );
+        const totalNew = data?.total_new ?? 0;
+        const senders: Array<{sender: string; found?: number; new?: number; error?: string}> = data?.senders ?? [];
+        const failed = senders.filter(s => s.error);
+        const empty = senders.filter(s => !s.error && (s.found ?? 0) === 0);
+        let msg = `Backfill complete: ${totalNew} new emails fetched`;
+        if (empty.length > 0) {
+          msg += ` | No emails found for: ${empty.map(s => s.sender).join(", ")}`;
+        }
+        if (failed.length > 0) {
+          msg += ` | Failed: ${failed.map(s => `${s.sender} (${s.error})`).join(", ")}`;
+        }
+        if (failed.length > 0) {
+          vscode.window.showWarningMessage(msg);
+        } else {
+          vscode.window.showInformationMessage(msg);
+        }
         await this.refreshExecutiveEmails();
       } else {
         vscode.window.showErrorMessage(`Backfill failed: ${result.error}`);
@@ -7258,7 +10426,7 @@ After saving, the QC tab will show the result inline on the card.`;
               <div class="perf-help-trace-step pass">
                 <div class="perf-help-trace-step-num">${idx + 1}</div>
                 <div class="perf-help-trace-step-content">
-                  <strong>${this.escapeHtml(ev.title || ev.item_id)}</strong>
+                  <strong>${this.safeText(ev.title || ev.item_id)}</strong>
                   <div class="text-secondary text-sm mt-4">
                     Source: <strong>${this.escapeHtml(ev.source)}</strong> &middot;
                     Type: <strong>${this.escapeHtml(ev.type)}</strong> &middot;

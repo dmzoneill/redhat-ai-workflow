@@ -513,6 +513,33 @@ export interface EnvironmentStatus {
   }>;
 }
 
+// ANSTRAT Ownership types
+export interface AnstratOwnerInfo {
+  display_name: string;
+  issues: string[];
+  themes: string[];
+}
+
+export interface AnstratIssueInfo {
+  summary: string;
+  owner: string;
+  type: string;
+  status: string;
+}
+
+export interface AnstratOwnership {
+  owners: Record<string, AnstratOwnerInfo>;
+  issues: Record<string, AnstratIssueInfo>;
+  last_synced: string | null;
+}
+
+export interface InferredRelationship {
+  sender: string;
+  anstrat_key: string;
+  reasoning: string;
+  confidence: number;
+}
+
 // Generic D-Bus Result
 export interface DBusResult<T = unknown> {
   success: boolean;
@@ -1858,10 +1885,104 @@ class DBusClient {
   }
 
   /**
-   * Collect data for all configured peers (current day or backfill entire quarter)
+   * Sync ANSTRAT issue ownership from Jira (fetches assignees for Initiative/Feature/Outcome)
    */
-  async stats_collectPeers(backfill: boolean = false): Promise<DBusResult> {
-    return this.callMethod("stats", "collect_peers", { backfill });
+  async stats_syncAnstratOwnership(): Promise<DBusResult<{ owners: number; issues: number; last_synced: string }>> {
+    return this.callMethod("stats", "sync_anstrat_ownership", {});
+  }
+
+  /**
+   * Get the cached ANSTRAT ownership map (owners -> issues -> themes)
+   */
+  async stats_getAnstratOwnership(): Promise<DBusResult<{ data: AnstratOwnership }>> {
+    return this.callMethod("stats", "get_anstrat_ownership", {});
+  }
+
+  /**
+   * Use LLM to infer non-obvious email-to-ANSTRAT relationships (on-demand, cached 24h)
+   */
+  async stats_inferRelationships(): Promise<DBusResult<{ relationships: InferredRelationship[] }>> {
+    return this.callMethod("stats", "infer_strategy_relationships", {});
+  }
+
+  /**
+   * Sync Jira activity and Google Drive docs for executive senders (last 90 days).
+   * Fetches issues from AAP/AAPRFE/ANSTRAT and strategy-related GDrive documents.
+   */
+  async stats_syncSenderSources(): Promise<DBusResult<{ jira_issues: number; jira_senders: number; gdrive_docs: number; last_synced: string }>> {
+    return this.callMethod("stats", "sync_sender_sources", {});
+  }
+
+  /**
+   * Get cached Jira activity and GDrive doc data for executive senders
+   */
+  async stats_getSenderSources(): Promise<DBusResult<{ jira_activity: Record<string, unknown>; gdrive_docs: Record<string, unknown> }>> {
+    return this.callMethod("stats", "get_sender_sources", {});
+  }
+
+  /**
+   * Collect data for all configured peers (current day or backfill entire quarter).
+   * Granular filters (only used when backfill=true):
+   *   sources   - e.g. ["git","jira","gitlab","github"]
+   *   usernames - limit to specific peers
+   *   dateStart/dateEnd - ISO date range within the quarter
+   */
+  async stats_collectPeers(
+    backfill: boolean = false,
+    options?: {
+      sources?: string[];
+      usernames?: string[];
+      dateStart?: string;
+      dateEnd?: string;
+    },
+  ): Promise<DBusResult> {
+    const params: Record<string, unknown> = { backfill };
+    if (options?.sources?.length) { params.sources = options.sources; }
+    if (options?.usernames?.length) { params.usernames = options.usernames; }
+    if (options?.dateStart) { params.date_start = options.dateStart; }
+    if (options?.dateEnd) { params.date_end = options.dateEnd; }
+    return this.callMethod("stats", "collect_peers", params);
+  }
+
+  /**
+   * Get peer backfill progress (poll during background backfill)
+   */
+  async stats_getPeerBackfillProgress(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_peer_backfill_progress");
+  }
+
+  /**
+   * Cancel a running backfill process
+   */
+  async stats_cancelBackfill(): Promise<DBusResult> {
+    return this.callMethod("stats", "cancel_backfill");
+  }
+
+  /**
+   * Scrub all collected performance data for the current quarter
+   */
+  async stats_scrubData(year?: number, quarter?: number): Promise<DBusResult> {
+    const params: Record<string, unknown> = {};
+    if (year) { params.year = year; }
+    if (quarter) { params.quarter = quarter; }
+    return this.callMethod("stats", "scrub_data", params);
+  }
+
+  /**
+   * Re-score all peer daily files without re-collecting data.
+   * Useful after scoring config changes or hierarchy/strategy updates.
+   */
+  async stats_rescorePeers(usernames?: string[]): Promise<DBusResult> {
+    const params: Record<string, unknown> = {};
+    if (usernames?.length) { params.usernames = usernames; }
+    return this.callMethod("stats", "rescore_peers", params);
+  }
+
+  /**
+   * Get org roster statistics (level distribution, headcounts, sampling info)
+   */
+  async stats_getOrgStats(): Promise<DBusResult> {
+    return this.callMethod("stats", "get_org_stats");
   }
 
   /**

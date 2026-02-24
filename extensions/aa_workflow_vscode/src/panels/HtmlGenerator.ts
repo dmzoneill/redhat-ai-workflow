@@ -499,6 +499,12 @@ export class HtmlGenerator {
                     if (document.getElementById('perfHelpData') && typeof window._initPerfHelp === 'function') {
                       setTimeout(function() { window._initPerfHelp(); }, 300);
                     }
+                    if (document.getElementById('qcOverviewChartData') && typeof window._initQcOverviewCharts === 'function') {
+                      setTimeout(function() { window._initQcOverviewCharts(); }, 150);
+                    }
+                    if (document.getElementById('issuesDashboardData') && typeof window._initIssuesDashboard === 'function') {
+                      setTimeout(function() { window._initIssuesDashboard(); }, 200);
+                    }
                   }
                 });
               } else {

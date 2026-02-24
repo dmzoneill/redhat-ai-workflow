@@ -47,7 +47,11 @@ The performance persona collects data from:
 1. **Git commits** - Code contributions
 2. **Jira issues** - Resolved issues
 3. **GitLab MRs** - Merged merge requests
-4. **Session logs** - Daily work activity
+4. **GitHub PRs** - Upstream contributions
+5. **Gmail** - Executive strategy emails
+6. **Google Drive** - Docs, Sheets, and Slides (personal and shared drives, with revision history for peer attribution)
+7. **Google Calendar / Meet** - Meeting attendance (RSVPs from Calendar API, actual participation from Meet API)
+8. **Session logs** - Daily work activity
 
 ## See Also
 

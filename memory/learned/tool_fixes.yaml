@@ -167,3 +167,14 @@ tool_fixes:
   root_cause: Unknown
   times_prevented: 0
   tool_name: systemctl_restart
+- date_learned: '2026-02-21'
+  error_pattern: This event loop is already running
+  fix_applied: Watcher restart from cron/skill context is expected to fail. Watchers
+    should be managed by the stats daemon process or started separately via CLI. The
+    reindex itself succeeds without watchers. This is a non-blocking issue for the
+    cron job.
+  root_cause: code_watch tries to start an asyncio event loop inside the MCP server
+    which already has a running event loop. The nest_asyncio workaround does not fully
+    resolve this for file watchers.
+  times_prevented: 0
+  tool_name: code_watch

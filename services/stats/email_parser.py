@@ -10,6 +10,22 @@ from server.paths import AA_CONFIG_DIR
 
 logger = logging.getLogger(__name__)
 
+_CALENDAR_SUBJECT_RE = re.compile(
+    r"^\s*("
+    r"(Updated\s+)?Invitation:\s"
+    r"|Accepted:\s"
+    r"|Declined:\s"
+    r"|Tentatively\s+accepted:\s"
+    r"|Canceled(\s+event)?:\s"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def is_calendar_event(subject: str) -> bool:
+    """Return True if the subject looks like a Google Calendar notification."""
+    return bool(_CALENDAR_SUBJECT_RE.search(subject))
+
 
 def parse_email_text(text: str) -> dict:
     """Parse executive email text into structured data.
@@ -187,7 +203,8 @@ def get_executive_senders() -> list[str]:
         with open(cfg_path, encoding="utf-8") as f:
             config = json.load(f)
         return config.get("performance", {}).get("executive_senders", [])
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to load executive_senders from config: %s", e)
         return []
 
 
@@ -248,8 +265,8 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
         try:
             with open(p, encoding="utf-8") as fh:
                 existing_ids.add(json.load(fh).get("gmail_message_id", ""))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to read cached email %s: %s", p.name, e)
 
     after_str = target.isoformat()
     before_date = target + timedelta(days=1)
@@ -280,6 +297,11 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
                 payload = msg_data.get("payload", {})
                 headers = payload.get("headers", [])
                 header_map = {h["name"]: h["value"] for h in headers}
+
+                subject = header_map.get("Subject", "")
+                if is_calendar_event(subject):
+                    logger.debug("Skipping calendar event: %s", subject[:80])
+                    continue
 
                 body = ""
                 parts = payload.get("parts", [])

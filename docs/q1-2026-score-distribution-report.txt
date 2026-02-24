@@ -1,0 +1,277 @@
+======================================================================
+Q1 2026 PERFORMANCE SCORE DISTRIBUTION ANALYSIS
+======================================================================
+
+SELF (daoneill, PSE): overall=77%, comparable=70%
+  total_events=1172 (main summary), days_with_events=34
+
+======================================================================
+1. SCORE HISTOGRAM PER LEVEL
+======================================================================
+
+--- ASE (n=9) ---
+  overall_percentage:
+    0-5%       0 ░░░░░░░░░░░░░░░
+    5-10%      2 ██░░░░░░░░░░░░░
+    10-20%     2 ██░░░░░░░░░░░░░
+    20-30%     2 ██░░░░░░░░░░░░░
+    30-40%     1 █░░░░░░░░░░░░░░
+    40-50%     2 ██░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       0 ░░░░░░░░░░░░░░░
+    5-10%      2 ██░░░░░░░░░░░░░
+    10-20%     2 ██░░░░░░░░░░░░░
+    20-30%     2 ██░░░░░░░░░░░░░
+    30-40%     2 ██░░░░░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+--- SE (n=26) ---
+  overall_percentage:
+    0-5%       1 █░░░░░░░░░░░░░░
+    5-10%      3 ███░░░░░░░░░░░░
+    10-20%     8 ████████░░░░░░░
+    20-30%     7 ███████░░░░░░░░
+    30-40%     5 █████░░░░░░░░░░
+    40-50%     2 ██░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       1 █░░░░░░░░░░░░░░
+    5-10%      3 ███░░░░░░░░░░░░
+    10-20%     8 ████████░░░░░░░
+    20-30%     7 ███████░░░░░░░░
+    30-40%     6 ██████░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+--- SSE (n=59) ---
+  overall_percentage:
+    0-5%       5 █████░░░░░░░░░░
+    5-10%     11 ███████████░░░░
+    10-20%    23 ███████████████████████
+    20-30%     9 █████████░░░░░░
+    30-40%     6 ██████░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     1 █░░░░░░░░░░░░░░
+    60-70%     3 ███░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       5 █████░░░░░░░░░░
+    5-10%     12 ████████████░░░
+    10-20%    22 ██████████████████████
+    20-30%    10 ██████████░░░░░
+    30-40%     5 █████░░░░░░░░░░
+    40-50%     2 ██░░░░░░░░░░░░░
+    50-60%     1 █░░░░░░░░░░░░░░
+    60-70%     2 ██░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+--- PSE (n=27) ---
+  overall_percentage:
+    0-5%       4 ████░░░░░░░░░░░
+    5-10%      6 ██████░░░░░░░░░
+    10-20%     7 ███████░░░░░░░░
+    20-30%     4 ████░░░░░░░░░░░
+    30-40%     4 ████░░░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     1 █░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       4 ████░░░░░░░░░░░
+    5-10%      6 ██████░░░░░░░░░
+    10-20%     7 ███████░░░░░░░░
+    20-30%     5 █████░░░░░░░░░░
+    30-40%     4 ████░░░░░░░░░░░
+    40-50%     0 ░░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     1 █░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+--- SPSE (n=13) ---
+  overall_percentage:
+    0-5%       4 ████░░░░░░░░░░░
+    5-10%      2 ██░░░░░░░░░░░░░
+    10-20%     5 █████░░░░░░░░░░
+    20-30%     0 ░░░░░░░░░░░░░░░
+    30-40%     1 █░░░░░░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       4 ████░░░░░░░░░░░
+    5-10%      3 ███░░░░░░░░░░░░
+    10-20%     4 ████░░░░░░░░░░░
+    20-30%     1 █░░░░░░░░░░░░░░
+    30-40%     0 ░░░░░░░░░░░░░░░
+    40-50%     1 █░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+--- DE (n=1) ---
+  overall_percentage:
+    0-5%       1 █░░░░░░░░░░░░░░
+    5-10%      0 ░░░░░░░░░░░░░░░
+    10-20%     0 ░░░░░░░░░░░░░░░
+    20-30%     0 ░░░░░░░░░░░░░░░
+    30-40%     0 ░░░░░░░░░░░░░░░
+    40-50%     0 ░░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+  comparable_overall:
+    0-5%       1 █░░░░░░░░░░░░░░
+    5-10%      0 ░░░░░░░░░░░░░░░
+    10-20%     0 ░░░░░░░░░░░░░░░
+    20-30%     0 ░░░░░░░░░░░░░░░
+    30-40%     0 ░░░░░░░░░░░░░░░
+    40-50%     0 ░░░░░░░░░░░░░░░
+    50-60%     0 ░░░░░░░░░░░░░░░
+    60-70%     0 ░░░░░░░░░░░░░░░
+    70-80%     0 ░░░░░░░░░░░░░░░
+    80-90%     0 ░░░░░░░░░░░░░░░
+    90-100%    0 ░░░░░░░░░░░░░░░
+
+======================================================================
+2. PSE PEER RANKINGS (where self ranks)
+======================================================================
+
+PSE peers by overall_percentage (descending):
+   1. daoneill     overall= 77% comparable= 70% events=  782 <-- SELF
+   2. simaishi     overall= 40% comparable= 36% events=  648
+   3. ssbarnea     overall= 38% comparable= 38% events=  399
+   4. mabashia     overall= 37% comparable= 31% events=  148
+   5. audgirka     overall= 30% comparable= 30% events=  365
+   6. jowestco     overall= 30% comparable= 28% events=  343
+   7. gleboude     overall= 29% comparable= 28% events=  230
+   8. ttakamiy     overall= 25% comparable= 21% events=  164
+   9. qwa          overall= 24% comparable= 23% events=  130
+  10. dhageman     overall= 21% comparable= 21% events=  124
+  11. drodowic     overall= 17% comparable= 17% events=  130
+  12. pbraun       overall= 13% comparable= 13% events=   99
+  13. ylahav       overall= 12% comparable= 11% events=  106
+  14. mhradil      overall= 12% comparable= 12% events=   77
+  15. jwong        overall= 12% comparable= 11% events=   61
+  16. ptoscano     overall= 12% comparable= 11% events=  144
+  17. sagpaul      overall= 11% comparable= 11% events=  188
+  18. cmeyers      overall=  9% comparable=  9% events=  119
+  19. jamarsha     overall=  8% comparable=  8% events=   55
+  20. gosriniv     overall=  7% comparable=  7% events=   32
+  21. jajackso     overall=  7% comparable=  7% events=   87
+  22. mkanoor      overall=  6% comparable=  6% events=   81
+  23. jneedle      overall=  5% comparable=  5% events=   55
+  24. mlara        overall=  4% comparable=  4% events=   28
+  25. dshrewsb     overall=  4% comparable=  4% events=   29
+  26. soli         overall=  3% comparable=  3% events=   15
+  27. bbhavsar     overall=  2% comparable=  2% events=   14
+
+  Self rank: 1/27 by overall (77%)
+  Self rank: 1/27 by comparable (70%)
+
+======================================================================
+3. CROSS-LEVEL PERCENTILE (all 135 peers)
+======================================================================
+
+  All peers sorted by comparable_overall (descending):
+  Self (70%) ranks #1 of 135 peers
+  Percentile: 99.3th (top 0.7%)
+
+======================================================================
+4. TOP 3 PERFORMERS PER LEVEL
+======================================================================
+
+  ASE:
+    apotozni     comparable= 48% events=  184 days=35
+    nmonk        comparable= 37% events=  351 days=23
+    aoladele     comparable= 34% events=  103 days=35
+
+  SE:
+    hebailey     comparable= 49% events=  168 days=33
+    palonso      comparable= 38% events=  143 days=37
+    jemarmol     comparable= 35% events=   71 days=28
+
+  SSE:
+    dvernier     comparable= 67% events=  658 days=31 *** >60%
+    tshinhar     comparable= 61% events=  167 days=30 *** >60%
+    olebaran     comparable= 52% events=  316 days=34
+
+  PSE:
+    daoneill     comparable= 70% events=  782 days=34 *** >60%
+    ssbarnea     comparable= 38% events=  399 days=37
+    simaishi     comparable= 36% events=  648 days=35
+
+  SPSE:
+    smcdonal     comparable= 41% events=  385 days=35
+    nmalik       comparable= 29% events=  362 days=33
+    rbobbitt     comparable= 17% events=  113 days=31
+
+  DE:
+    majones      comparable=  3% events=   12 days=11
+
+======================================================================
+5. EVENT COUNT vs SCORE CORRELATION
+======================================================================
+
+  Peers with >0 events: 135
+  Pearson correlation (total_events, comparable_overall): 0.767
+  Mean events: 124.3, Mean score: 18.3%
+
+  Score by event bin:
+       0-  50 events: n= 40 avg_score=8.1%
+      50- 150 events: n= 59 avg_score=16.3%
+     150- 300 events: n= 23 avg_score=27.4%
+     300- 500 events: n= 10 avg_score=37.9%
+     500-1000 events: n=  3 avg_score=57.7%
+
+======================================================================
+6. DAYS WITH EVENTS ANALYSIS
+======================================================================
+
+  Peers with days_with_events: 135
+  Mean days_with_events: 24.9
+  Median days_with_events: 26.0
+
+  Per level:
+    ASE: mean_days=22.4 median_days=23 mean_score=21.7% corr(days,score)=0.822
+    SE: mean_days=24.6 median_days=26 mean_score=21.4% corr(days,score)=0.694
+    SSE: mean_days=25.6 median_days=27 mean_score=18.5% corr(days,score)=0.600
+    PSE: mean_days=26.4 median_days=27 mean_score=17.3% corr(days,score)=0.652
+    SPSE: mean_days=22.2 median_days=26 mean_score=12.2% corr(days,score)=0.786
+    DE: mean_days=11.0 median_days=11 mean_score=3.0% corr(days,score)=0.000
+
+======================================================================
+END REPORT
+======================================================================

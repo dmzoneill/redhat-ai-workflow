@@ -46,12 +46,16 @@ sequenceDiagram
     participant Jira as Jira API
     participant Git as Git History
     participant GitLab as GitLab API
+    participant GDrive as Google Drive API
+    participant Cal as Calendar / Meet API
     participant DB as SQLite DB
 
     Tool->>Collector: performance_refresh()
     Collector->>Jira: Get issues worked on
     Collector->>Git: Get commits
     Collector->>GitLab: Get MRs and reviews
+    Collector->>GDrive: Get Docs/Sheets/Slides contributions
+    Collector->>Cal: Get meeting attendance
     Collector->>Collector: Calculate competency scores
     Collector->>DB: Store daily metrics
     DB-->>Tool: Success

@@ -404,6 +404,35 @@ export abstract class BaseTab {
   }
 
   /**
+   * Decode HTML entities back to plain text so we don't double-encode
+   * values that arrive pre-encoded from Jira / CLI tools.
+   */
+  protected decodeHtmlEntities(text: string): string {
+    if (!text) return "";
+    return text
+      .replace(/&#0?39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+  }
+
+  /**
+   * Render Jinja2-style template variables that were never substituted.
+   * Replaces `{{ today }}` with the current date, and strips remaining
+   * `{{ var }}` placeholders down to the variable name.
+   */
+  protected renderTemplateVars(text: string): string {
+    if (!text) return "";
+    const today = new Date().toISOString().slice(0, 10);
+    return text
+      .replace(/\{\{\s*today\s*\}\}/gi, today)
+      .replace(/\{\{\s*date\s*\}\}/gi, today)
+      .replace(/\{\{\s*(\w+)\s*\}\}/g, "$1");
+  }
+
+  /**
    * Escape HTML special characters.
    */
   protected escapeHtml(text: string): string {
@@ -414,6 +443,14 @@ export abstract class BaseTab {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  /**
+   * Prepare user-visible text: decode entities, render templates, then escape.
+   */
+  protected safeText(text: string): string {
+    if (!text) return "";
+    return this.escapeHtml(this.renderTemplateVars(this.decodeHtmlEntities(text)));
   }
 
   /**

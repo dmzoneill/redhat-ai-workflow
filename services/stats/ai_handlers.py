@@ -481,7 +481,8 @@ def _compute_trend(
             "daily_rate": round(float(coeffs[0]), 2),
             "status": status,
         }
-    except Exception:
+    except Exception as e:
+        logger.warning("Computing trend projection with numpy polyfit: %s", e)
         if day_of_quarter > 0:
             rate = current_overall / day_of_quarter
             projected = int(rate * 65)
@@ -1090,7 +1091,8 @@ def compute_peer_growth_data(
                         "competencies": dict(cumulative),
                     }
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning("Loading daily series from JSON file: %s", e)
                 continue
         return series
 

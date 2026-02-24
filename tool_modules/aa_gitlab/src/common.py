@@ -99,7 +99,11 @@ async def run_glab(
         else:
             cmd.extend(["--repo", repo])
 
-    # Use unified run_cmd with GITLAB_HOST env var
+    # Disable pager to prevent glab (especially `mr diff`) from hanging
+    # in non-interactive subprocess contexts
     return await run_cmd(
-        cmd, cwd=run_cwd, env={"GITLAB_HOST": GITLAB_HOST}, timeout=timeout
+        cmd,
+        cwd=run_cwd,
+        env={"GITLAB_HOST": GITLAB_HOST, "GLAB_PAGER": "", "GIT_PAGER": ""},
+        timeout=timeout,
     )

@@ -4,7 +4,7 @@
 
 ## Overview
 
-The `collect_daily` skill automatically gathers work evidence from multiple sources (Jira, GitLab, GitHub, Git) and maps each item to PSE (Principal Software Engineer) competencies using keyword rules. This is the foundation of the performance tracking system, running daily to build your evidence portfolio.
+The `collect_daily` skill automatically gathers work evidence from multiple sources (Jira, GitLab, GitHub, Git, Google Calendar/Meet, Google Drive) and maps each item to PSE (Principal Software Engineer) competencies using keyword rules. This is the foundation of the performance tracking system, running daily to build your evidence portfolio.
 
 ## Quick Start
 
@@ -44,10 +44,12 @@ skill_run("performance_collect_daily", '{"date": "2026-01-25"}')
 5. **Fetch GitLab MRs** - Gets merge requests merged on the target date
 6. **Fetch GitHub PRs** - Gets upstream contributions merged
 7. **Fetch Git Commits** - Gets commits from configured repositories
-8. **Map Events** - Maps each item to competencies using keyword rules
-9. **Calculate Points** - Scores each item with daily caps
-10. **Save Daily File** - Writes to the performance data directory
-11. **Update Summary** - Recalculates quarter summary statistics
+8. **Fetch Google Drive** - Discovers Docs, Sheets, and Slides created/contributed to (personal + shared drives)
+9. **Fetch Calendar / Meet** - Collects meeting attendance from Google Calendar RSVPs and Google Meet participant data
+10. **Map Events** - Maps each item to competencies using keyword rules
+11. **Calculate Points** - Scores each item with daily caps
+12. **Save Daily File** - Writes to the performance data directory
+13. **Update Summary** - Recalculates quarter summary statistics
 
 ## Data Flow
 
@@ -58,6 +60,8 @@ graph LR
         GITLAB[GitLab<br/>MRs merged, reviews]
         GITHUB[GitHub<br/>PRs merged]
         GIT[Git<br/>Commits]
+        GDRIVE[Google Drive<br/>Docs, Sheets, Slides]
+        CALENDAR[Calendar / Meet<br/>Meeting attendance]
     end
 
     subgraph Processing["Processing"]
@@ -74,6 +78,8 @@ graph LR
     GITLAB --> FETCH
     GITHUB --> FETCH
     GIT --> FETCH
+    GDRIVE --> FETCH
+    CALENDAR --> FETCH
 
     FETCH --> MAP
     MAP --> SCORE
@@ -84,19 +90,21 @@ graph LR
 
 Each work item is mapped to one or more PSE competencies based on keywords:
 
-| Competency | Keywords | Base Points |
-|------------|----------|-------------|
+| Competency | Keywords / Event Types | Base Points |
+|------------|------------------------|-------------|
 | Technical Contribution | PR merged, MR merged | 2 (up to 6 for large changes) |
-| Planning & Execution | planning, roadmap, spike | 2 |
-| Collaboration | review, pair, feedback | 2 |
-| Mentorship | mentor, onboard, training | 3 |
-| Continuous Improvement | ci/cd, pipeline, automation, refactor | 3 |
-| Creativity & Innovation | poc, prototype, innovation, ai | 4 |
-| Leadership | cross-team, lead, architecture | 3 |
+| Planning & Execution | planning, roadmap, spike, tracker, spreadsheet, standup, daily sync, `gdrive_sheet_*`, `meeting_*_standup` | 2 |
+| Collaboration | review, pair, feedback, `meeting_attended_*` | 2 |
+| Mentorship | mentor, onboard, training, `meeting_organized_1on1`, `meeting_attended_onboarding` | 3 |
+| Continuous Improvement | ci/cd, pipeline, automation, refactor, `meeting_*_retrospective` | 3 |
+| Creativity & Innovation | poc, prototype, innovation, ai, `gdrive_doc_*` | 4 |
+| Leadership | cross-team, lead, architecture, `meeting_organized_*` | 3 |
 | Portfolio Impact | api, schema, app-interface | 4 |
 | End-to-End Delivery | release, deploy, production | 3 |
 | Opportunity Recognition | (GitHub upstream contributions) | 4 |
-| Technical Knowledge | doc, readme, documentation | 3 |
+| Technical Knowledge | doc, readme, documentation, `gdrive_doc_*` | 3 |
+| Speaking & Publicity | deck, google slides, presentation, `gdrive_slides_*`, `meeting_organized_demo` | 3 |
+| Evidence Record | meeting, attended, organized, `gdrive_*`, `meeting_*` | 1 |
 
 ## Output File Format
 

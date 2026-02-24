@@ -17,7 +17,8 @@ COMPETENCY_DEFS: dict[str, dict] = {
         "goal": "Deliver high-quality code through commits, merge requests, and bug fixes.",
         "description": (
             "Measures direct code contributions: commits, MRs merged, bugs fixed, "
-            "and upstream patches. Each shipped change demonstrates hands-on engineering."
+            "and upstream patches. Also recognises architecture oversight, code review "
+            "meetings, and alert investigation as hands-on engineering."
         ),
         "base_points": 2,
         "event_types": [
@@ -28,6 +29,12 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "pr_opened",
             "pr_merged",
             "debugging_outcome",
+            "architecture_decision",
+            "alert_investigated",
+            "meeting_organized_architecture_review",
+            "meeting_attended_architecture_review",
+            "meeting_organized_code_review",
+            "meeting_attended_code_review",
         ],
         "phrases": [
             "fix:",
@@ -57,7 +64,24 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "knowledge-base articles, and technical blog posts."
         ),
         "base_points": 3,
-        "event_types": ["commit", "alert_investigated", "architecture_decision"],
+        "event_types": [
+            "commit",
+            "alert_investigated",
+            "architecture_decision",
+            "debugging_outcome",
+            "gdrive_doc_created",
+            "gdrive_doc_contributed",
+            "gdrive_sheet_created",
+            "gdrive_sheet_contributed",
+            "meeting_organized_architecture_review",
+            "meeting_attended_architecture_review",
+            "meeting_organized_training",
+            "meeting_attended_training",
+            "meeting_organized_incident_response",
+            "meeting_attended_incident_response",
+            "meeting_organized_code_review",
+            "meeting_attended_code_review",
+        ],
         "phrases": [
             "update readme",
             "add documentation",
@@ -117,6 +141,12 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "commit",
             "architecture_decision",
             "process_improvement",
+            "gdrive_doc_created",
+            "gdrive_doc_contributed",
+            "gdrive_slides_created",
+            "gdrive_slides_contributed",
+            "meeting_organized_architecture_review",
+            "meeting_attended_architecture_review",
         ],
         "phrases": [
             "proof of concept",
@@ -190,6 +220,10 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "alert_investigated",
             "debugging_outcome",
             "process_improvement",
+            "meeting_organized_retrospective",
+            "meeting_attended_retrospective",
+            "meeting_organized_incident_response",
+            "meeting_attended_incident_response",
         ],
         "phrases": [
             "ci/cd",
@@ -238,6 +272,17 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "meeting_participated",
             "architecture_decision",
             "collaboration_activity",
+            "leadership_activity",
+            "meeting_organized_planning",
+            "meeting_organized_sprint_planning",
+            "meeting_organized_architecture_review",
+            "meeting_organized_all_hands",
+            "meeting_organized_one_on_one",
+            "meeting_attended_planning",
+            "meeting_attended_sprint_planning",
+            "meeting_attended_architecture_review",
+            "meeting_attended_all_hands",
+            "meeting_attended_one_on_one",
         ],
         "phrases": [
             "cross-team",
@@ -254,6 +299,10 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "roadmap owner",
             "initiative lead",
             "project lead",
+            "facilitated",
+            "drove",
+            "coordinated",
+            "mentored",
         ],
         "keywords": [
             "cross-team",
@@ -264,6 +313,9 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "strategy",
             "proposal",
             "stakeholder",
+            "facilitated",
+            "drove",
+            "coordinated",
         ],
     },
     "collaboration": {
@@ -282,6 +334,9 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "meeting_participated",
             "collaboration_activity",
             "recognition_given",
+            "meeting_attended_cross_team",
+            "meeting_organized_cross_team",
+            "meeting_attended_code_review",
         ],
         "phrases": [
             "review",
@@ -308,7 +363,20 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "sessions, knowledge-sharing talks, and supporting junior team members."
         ),
         "base_points": 3,
-        "event_types": ["mr_review_given", "recognition_given"],
+        "event_types": [
+            "mr_review_given",
+            "recognition_given",
+            "meeting_organized_training",
+            "meeting_attended_training",
+            "meeting_organized_one_on_one",
+            "meeting_attended_one_on_one",
+            "meeting_organized_interview",
+            "meeting_attended_interview",
+            "meeting_organized_onboarding",
+            "meeting_attended_onboarding",
+            "meeting_organized_code_review",
+            "meeting_attended_code_review",
+        ],
         "phrases": [
             "mentor",
             "onboard",
@@ -344,7 +412,15 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "lightning talks, and any outward communication about the team's work."
         ),
         "base_points": 4,
-        "event_types": [],
+        "event_types": [
+            "gdrive_slides_created",
+            "gdrive_slides_contributed",
+            "meeting_organized_presentation",
+            "meeting_attended_presentation",
+            "meeting_organized_sprint_review",
+            "meeting_attended_sprint_review",
+            "meeting_organized_all_hands",
+        ],
         "phrases": [
             "presentation",
             "demo",
@@ -381,6 +457,8 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "retro",
             "slides",
             "recording",
+            "deck",
+            "google slides",
         ],
     },
     "portfolio_impact": {
@@ -389,10 +467,23 @@ COMPETENCY_DEFS: dict[str, dict] = {
         "goal": "Deliver cross-cutting impact through APIs, schemas, and service integrations.",
         "description": (
             "Measures work that spans multiple services or products: API design, "
-            "schema changes, app-interface updates, and cross-service integrations."
+            "schema changes, app-interface updates, cross-service integrations, "
+            "and cross-team architecture discussions."
         ),
         "base_points": 4,
-        "event_types": [],
+        "event_types": [
+            "architecture_decision",
+            "mr_merged",
+            "pr_merged",
+            "meeting_organized_architecture_review",
+            "meeting_attended_architecture_review",
+            "meeting_organized_cross_team",
+            "meeting_attended_cross_team",
+            "meeting_organized_planning",
+            "meeting_attended_planning",
+            "gdrive_doc_created",
+            "gdrive_doc_contributed",
+        ],
         "phrases": [
             "api",
             "schema",
@@ -431,7 +522,14 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "issue_created",
             "issue_opened",
             "issue_closed",
+            "meeting_organized_sprint_planning",
+            "meeting_attended_sprint_planning",
+            "meeting_organized_planning",
+            "meeting_attended_planning",
+            "meeting_organized_standup",
             "session_documented",
+            "gdrive_sheet_created",
+            "gdrive_sheet_contributed",
         ],
         "phrases": [
             "planning",
@@ -471,6 +569,9 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "requirement",
             "specification",
             "estimate",
+            "standup",
+            "daily sync",
+            "ceremony",
             "issue",
             "task",
             "ticket",
@@ -481,6 +582,8 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "triage",
             "grooming",
             "milestone",
+            "tracker",
+            "spreadsheet",
         ],
     },
     "end_to_end_delivery": {
@@ -489,10 +592,23 @@ COMPETENCY_DEFS: dict[str, dict] = {
         "goal": "Ship features from development all the way to production.",
         "description": (
             "Tracks full delivery lifecycle: releasing to production, deploying "
-            "and validating, customer-facing fixes, and closing delivery loops."
+            "and validating, customer-facing fixes, closing delivery loops, and "
+            "shepherding releases through reviews and incident response."
         ),
         "base_points": 3,
-        "event_types": ["pr_merged", "mr_merged", "issue_resolved", "issue_closed"],
+        "event_types": [
+            "pr_merged",
+            "mr_merged",
+            "issue_resolved",
+            "issue_closed",
+            "meeting_organized_sprint_review",
+            "meeting_attended_sprint_review",
+            "meeting_organized_customer_meeting",
+            "meeting_attended_customer_meeting",
+            "meeting_organized_incident_response",
+            "meeting_attended_incident_response",
+            "session_documented",
+        ],
         "phrases": [
             "release",
             "deploy",
@@ -544,10 +660,22 @@ COMPETENCY_DEFS: dict[str, dict] = {
         "goal": "Identify opportunities and contribute beyond assigned work, including open-source.",
         "description": (
             "Measures proactive contributions: open-source work on GitHub, identifying "
-            "improvement opportunities, proposing new features, and self-directed initiatives."
+            "improvement opportunities, proposing new features, self-directed initiatives, "
+            "and driving cross-team discussions that surface new opportunities."
         ),
         "base_points": 4,
-        "event_types": ["issue_opened", "issue_created", "pr_opened", "mr_opened"],
+        "event_types": [
+            "issue_opened",
+            "issue_created",
+            "pr_opened",
+            "mr_opened",
+            "process_improvement",
+            "architecture_decision",
+            "gdrive_doc_created",
+            "meeting_organized_architecture_review",
+            "meeting_organized_cross_team",
+            "meeting_organized_planning",
+        ],
         "phrases": [
             "open source",
             "github",
@@ -569,6 +697,12 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "hackathon",
             "20% time",
             "personal project",
+            "refactor",
+            "tech debt",
+            "cleanup",
+            "automated",
+            "streamlined",
+            "cve fix",
         ],
         "keywords": [
             "open-source",
@@ -583,6 +717,10 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "improvement",
             "proactive",
             "hackathon",
+            "refactor",
+            "tech debt",
+            "cleanup",
+            "automated",
         ],
     },
     "customer_focus": {
@@ -599,6 +737,9 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "issue_closed",
             "issue_opened",
             "alert_investigated",
+            "customer_engagement",
+            "meeting_organized_customer_meeting",
+            "meeting_attended_customer_meeting",
         ],
         "phrases": [
             "customer",
@@ -656,6 +797,10 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "issue_closed",
             "issue_created",
             "commit",
+            "meeting_organized_all_hands",
+            "meeting_attended_all_hands",
+            "meeting_organized_cross_team",
+            "meeting_attended_cross_team",
         ],
         "phrases": [
             "subsystem",
@@ -716,6 +861,28 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "pr_merged",
             "meeting_participated",
             "session_documented",
+            "customer_engagement",
+            "leadership_activity",
+            "gdrive_doc_created",
+            "gdrive_doc_contributed",
+            "gdrive_sheet_created",
+            "gdrive_sheet_contributed",
+            "gdrive_slides_created",
+            "gdrive_slides_contributed",
+            "meeting_organized_standup",
+            "meeting_organized_sprint_review",
+            "meeting_organized_sprint_planning",
+            "meeting_organized_retrospective",
+            "meeting_organized_one_on_one",
+            "meeting_organized_planning",
+            "meeting_attended_standup",
+            "meeting_attended_sprint_review",
+            "meeting_attended_sprint_planning",
+            "meeting_attended_retrospective",
+            "meeting_attended_one_on_one",
+            "meeting_attended_planning",
+            "meeting_attended_general_meeting",
+            "meeting_organized_general_meeting",
         ],
         "phrases": [
             "delivered",
@@ -728,6 +895,8 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "done",
             "finished",
             "ready for release",
+            "accomplished",
+            "addressed feedback",
         ],
         "keywords": [
             "delivered",
@@ -736,6 +905,10 @@ COMPETENCY_DEFS: dict[str, dict] = {
             "resolved",
             "closed",
             "done",
+            "accomplished",
+            "meeting",
+            "attended",
+            "organized",
         ],
     },
     "execution_as_mentee": {
@@ -789,10 +962,12 @@ COMPETENCY_DEFS: dict[str, dict] = {
 DEFAULT_GLOBALS = {
     "min_signals": 2,
     "daily_cap": 15,
-    "target_per_competency": 100,
+    "target_per_competency": 50,
     "engineering_level": "sse",
     "scope_multipliers": {
         "commit": 1,
+        "doc": 2,
+        "meeting": 1,
         "story": 2,
         "epic": 4,
         "anstrat": 7,
@@ -819,6 +994,42 @@ DEFAULT_GLOBALS = {
         ],
         "noise_skip_types": ["session"],
         "min_details_length": 10,
+    },
+    "max_competencies_per_event": 4,
+    "max_classification_length": 200,
+    "source_daily_caps": {
+        "github": 30,
+        "gitlab": 30,
+        "git": 20,
+        "meeting": 20,
+        "jira": 25,
+        "gdrive": 15,
+        "session": 15,
+    },
+    "peer_comparable": {
+        "work_github_orgs": [
+            "ansible",
+            "RedHatInsights",
+            "aap-ci",
+            "aap-cpaas",
+        ],
+        "work_gitlab_groups": [
+            "automation-analytics",
+            "aap-cpaas",
+        ],
+        "work_project_repos": [
+            "automation-analytics-backend",
+            "pdf-generator",
+            "app-interface",
+            "konflux-release-data",
+            "dataproduct-config",
+            "aws-ingestion",
+        ],
+        "max_meetings_per_day": 3,
+        "min_peer_events": 30,
+        "min_peer_active_days": 15,
+        "blacklisted_peers": [],
+        "max_daily_comparable_total": 20,
     },
 }
 
@@ -866,9 +1077,12 @@ def get_merged_config() -> dict:
         }
         if comp_id in user_comps:
             uc = user_comps[comp_id]
-            for field in ("base_points", "phrases", "keywords", "event_types"):
-                if field in uc:
-                    base[field] = uc[field]
+            if "base_points" in uc:
+                base["base_points"] = uc["base_points"]
+            for list_field in ("phrases", "keywords", "event_types"):
+                if list_field in uc:
+                    merged = list(dict.fromkeys(uc[list_field] + base[list_field]))
+                    base[list_field] = merged
         merged_comps[comp_id] = base
 
     return {**merged_globals, "competencies": merged_comps}
@@ -912,6 +1126,18 @@ def get_npu_settings() -> dict:
     """Return NPU classification settings."""
     cfg = get_merged_config()
     return cfg.get("npu_settings", DEFAULT_GLOBALS["npu_settings"])
+
+
+def get_peer_comparable_config() -> dict:
+    """Return peer-comparable filtering configuration."""
+    cfg = get_merged_config()
+    return cfg.get("peer_comparable", DEFAULT_GLOBALS["peer_comparable"])
+
+
+def get_source_daily_caps() -> dict[str, int]:
+    """Return per-source daily point caps."""
+    cfg = get_merged_config()
+    return cfg.get("source_daily_caps", DEFAULT_GLOBALS["source_daily_caps"])
 
 
 def get_session_integration_config() -> dict:
@@ -1003,13 +1229,21 @@ def map_competencies(
     if npu_classifier is not None and hasattr(npu_classifier, "get_bonus_signals"):
         try:
             npu_bonus = npu_classifier.get_bonus_signals(classification_text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("NPU classifier get_bonus_signals failed: %s", e)
+
+    max_class_len = cfg.get(
+        "max_classification_length",
+        DEFAULT_GLOBALS["max_classification_length"],
+    )
+    max_comps = cfg.get(
+        "max_competencies_per_event",
+        DEFAULT_GLOBALS["max_competencies_per_event"],
+    )
 
     points: dict[str, int] = {}
-    text = classification_text.lower()
+    text = classification_text.lower()[:max_class_len]
 
-    # Pre-compute bonus signal sets based on event metadata
     _contrib_bonus_comps: set[str] = set()
     if contribution_type in ("upstream", "fork"):
         _contrib_bonus_comps.update(("opportunity_recognition", "scope"))
@@ -1089,6 +1323,10 @@ def map_competencies(
                 max(final, 1),
             )
 
+    if max_comps and len(points) > max_comps:
+        top = sorted(points.items(), key=lambda kv: kv[1], reverse=True)[:max_comps]
+        points = dict(top)
+
     return points
 
 
@@ -1154,12 +1392,21 @@ def map_competencies_with_signals(
     if npu_classifier is not None and hasattr(npu_classifier, "get_bonus_signals"):
         try:
             npu_bonus = npu_classifier.get_bonus_signals(classification_text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("NPU classifier get_bonus_signals failed: %s", e)
+
+    max_class_len = cfg.get(
+        "max_classification_length",
+        DEFAULT_GLOBALS["max_classification_length"],
+    )
+    max_comps = cfg.get(
+        "max_competencies_per_event",
+        DEFAULT_GLOBALS["max_competencies_per_event"],
+    )
 
     points: dict[str, int] = {}
     signal_counts: dict[str, int] = {}
-    text = classification_text.lower()
+    text = classification_text.lower()[:max_class_len]
 
     _contrib_bonus_comps: set[str] = set()
     if contribution_type in ("upstream", "fork"):
@@ -1242,6 +1489,10 @@ def map_competencies_with_signals(
                 points.get(comp_id, 0),
                 max(final, 1),
             )
+
+    if max_comps and len(points) > max_comps:
+        top = sorted(points.items(), key=lambda kv: kv[1], reverse=True)[:max_comps]
+        points = dict(top)
 
     return points, signal_counts
 

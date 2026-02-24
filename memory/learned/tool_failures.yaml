@@ -3,20 +3,6 @@ failures:
   error_type: auth
   fix_applied: kube_login
   source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:27:39.955542'
-  tool: kubectl_get_pods
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:27:40.116191'
-  tool: target_tool
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
   success: false
   timestamp: '2026-02-08T00:27:40.172252'
   tool: t
@@ -718,8 +704,23 @@ failures:
   success: true
   timestamp: '2026-02-21T10:00:57.781727'
   tool: git_fetch
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-21T21:00:53.395055'
+  tool: jira_my_issues
+- error_snippet: "\u274C Failed: E0223 09:35:35.526141 1683481 memcache.go:265] \"\
+    Unhandled Error\" err=\"couldn't get current"
+  error_type: auth
+  fix_applied: kube_login
+  success: true
+  timestamp: '2026-02-23T09:36:10.958044'
+  tool: _konflux_list_pipelines_impl
 stats:
-  auto_fixed: 173
+  auto_fixed: 175
   daily:
     '2026-02-17':
       auto_fixed: 1
@@ -727,9 +728,15 @@ stats:
     '2026-02-18':
       auto_fixed: 1
       total: 1
+    '2026-02-23':
+      auto_fixed: 1
+      total: 1
   manual_required: 201
-  total_failures: 374
+  total_failures: 376
   weekly:
     2026-W07:
       auto_fixed: 2
       total: 2
+    2026-W08:
+      auto_fixed: 1
+      total: 1

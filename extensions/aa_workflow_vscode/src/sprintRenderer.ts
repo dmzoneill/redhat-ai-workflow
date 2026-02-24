@@ -412,6 +412,26 @@ export function loadToolGapRequests(): ToolGapRequest[] {
 
 // ==================== HELPER FUNCTIONS ====================
 
+function decodeHtmlEntities(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function renderTemplateVars(text: string): string {
+  if (!text) return "";
+  const today = new Date().toISOString().slice(0, 10);
+  return text
+    .replace(/\{\{\s*today\s*\}\}/gi, today)
+    .replace(/\{\{\s*date\s*\}\}/gi, today)
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, "$1");
+}
+
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -419,6 +439,11 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+function safeText(text: string): string {
+  if (!text) return "";
+  return escapeHtml(renderTemplateVars(decodeHtmlEntities(text)));
 }
 
 function getStatusColor(status: SprintIssue["approvalStatus"]): string {
@@ -517,6 +542,87 @@ function formatTimestamp(timestamp: string): string {
 
 // ==================== HTML GENERATION ====================
 
+function renderSprintSection(
+  sectionClass: string,
+  config: StatusMappingConfig | undefined,
+  issues: SprintIssue[],
+  jiraUrl: string,
+  emptyMessage: string,
+  showBulkApprove: boolean = false
+): string {
+  const icon = config?.icon || "";
+  const name = config?.displayName || sectionClass;
+  const desc = config?.description || "";
+  const subtitle = config?.botMonitors ? `${desc} - bot monitors for comments` : desc;
+
+  return `
+    <div class="section sprint-section ${sectionClass}">
+      <div class="flex-between">
+        <div class="section-title sprint-section-title">
+          ${icon} ${escapeHtml(name)} (${issues.length})
+          <span class="sprint-section-desc">${escapeHtml(subtitle)}</span>
+        </div>
+        ${showBulkApprove && issues.length > 0 ? `
+          <div class="flex-row gap-6">
+            <button class="btn btn-xs btn-success" data-action="approveAll">&#10003; Approve All</button>
+            <button class="btn btn-xs" data-action="rejectAll">&#10007; Unapprove All</button>
+          </div>
+        ` : ""}
+      </div>
+      ${issues.length > 0 ? `
+        <div class="card sprint-issue-card">
+          ${issues.map((issue) => renderIssueRow(issue, jiraUrl, false)).join("")}
+        </div>
+      ` : `
+        <div class="sprint-empty-inline">${escapeHtml(emptyMessage)}</div>
+      `}
+    </div>
+  `;
+}
+
+function renderIssueRow(issue: SprintIssue, jiraUrl: string, ignored: boolean = false): string {
+  const priorityIcon = getPriorityIcon(issue.priority);
+  const jiraStatusColor = getJiraStatusColor(issue.jiraStatus);
+  const approvalIcon = getStatusIcon(issue.approvalStatus);
+  const displayStatus = issue.jiraStatus || "Unknown";
+  const ignoredClass = ignored ? "ignored" : "";
+
+  const showStartIssue = !ignored && ["pending", "waiting", "approved", "blocked"].includes(issue.approvalStatus);
+  const showApproveReject = !ignored && (issue.approvalStatus === "pending" || issue.approvalStatus === "waiting");
+  const showUnapprove = !ignored && issue.approvalStatus === "approved";
+  const showAbort = !ignored && issue.approvalStatus === "in_progress";
+  const showChat = !ignored && !!issue.chatId;
+  const showOpenInCursor = !ignored && issue.hasWorkLog && !issue.chatId;
+  const showViewTrace = !ignored && issue.hasTrace;
+
+  return `
+    <div class="sprint-issue-row ${issue.approvalStatus} ${ignoredClass}" data-issue-key="${escapeHtml(issue.key)}">
+      <div class="sprint-issue-main">
+        <span class="sprint-issue-indicator" title="Bot status: ${issue.approvalStatus}">${approvalIcon}</span>
+        <a class="issue-key ${ignoredClass}" href="${jiraUrl}/browse/${escapeHtml(issue.key)}" target="_blank">${escapeHtml(issue.key)}</a>
+        <span class="sprint-issue-summary ${ignoredClass}">${safeText(issue.summary)}</span>
+      </div>
+      <div class="sprint-issue-meta">
+        <span class="issue-badge points ${!issue.storyPoints ? "missing" : ""}">&#128202; ${issue.storyPoints || "?"} pts</span>
+        <span class="issue-badge priority">${priorityIcon} ${escapeHtml(issue.priority)}</span>
+        <span class="issue-badge status" data-status-color="${jiraStatusColor}">${escapeHtml(displayStatus)}</span>
+      </div>
+      <div class="sprint-issue-actions">
+        ${ignored ? "" : `
+          ${showStartIssue ? `<button class="btn btn-xs btn-success" data-action="startIssue" data-issue="${escapeHtml(issue.key)}" title="Start this issue immediately">&#9654; Force Start</button>` : ""}
+          ${showApproveReject ? `<button class="btn btn-xs btn-success" data-action="approve" data-issue="${escapeHtml(issue.key)}">&#10003; Approve</button>` : ""}
+          ${showUnapprove ? `<button class="btn btn-xs" data-action="reject" data-issue="${escapeHtml(issue.key)}">&#10007; Unapprove</button>` : ""}
+          ${showAbort ? `<button class="btn btn-xs btn-danger" data-action="abort" data-issue="${escapeHtml(issue.key)}">&#9209; Abort</button>` : ""}
+          ${showChat ? `<button class="btn btn-xs btn-info" data-action="openChat" data-issue="${escapeHtml(issue.key)}" data-chat-id="${escapeHtml(issue.chatId || "")}">&#128172; Chat</button>` : ""}
+          ${showOpenInCursor ? `<button class="btn btn-xs" data-action="openInCursor" data-issue="${escapeHtml(issue.key)}" title="Open background work in Cursor">&#128194; Open</button>` : ""}
+          ${showViewTrace ? `<button class="btn btn-xs" data-action="viewTrace" data-issue="${escapeHtml(issue.key)}" title="View execution trace">&#128269; Trace</button>` : ""}
+        `}
+      </div>
+    </div>
+    ${issue.waitingReason ? `<div class="sprint-issue-waiting">&#9203; ${safeText(issue.waitingReason)}</div>` : ""}
+  `;
+}
+
 function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean = false): string {
   const priorityIcon = getPriorityIcon(issue.priority);
   const isMajor = issue.priority.toLowerCase() === "major" || issue.priority.toLowerCase() === "critical";
@@ -555,8 +661,8 @@ function renderIssueCard(issue: SprintIssue, jiraUrl: string, ignored: boolean =
         ${issue.hasTrace ? `<span class="trace-indicator" title="Has execution trace">🔍</span>` : ""}
       </div>
       <div class="issue-col-summary">
-        <div class="issue-summary ${ignoredClass}">${escapeHtml(issue.summary)}</div>
-        ${issue.waitingReason ? `<div class="waiting-reason">⏳ ${escapeHtml(issue.waitingReason)}</div>` : ""}
+        <div class="issue-summary ${ignoredClass}">${safeText(issue.summary)}</div>
+        ${issue.waitingReason ? `<div class="waiting-reason">⏳ ${safeText(issue.waitingReason)}</div>` : ""}
         ${ignored ? `<div class="ignored-reason">🚫 User-managed</div>` : ""}
       </div>
       <div class="issue-col-points">
@@ -983,11 +1089,6 @@ export function getSprintTabContent(
 
   return `
     <div class="sprint-container">
-      <!-- Sprint Bot Header -->
-      <div class="section mb-8">
-        <h2 class="section-title m-0">🎯 Sprint Bot</h2>
-      </div>
-
       <!-- Sprint Headers - Current and Next -->
       <div class="sprint-headers">
         <!-- Current Sprint -->
@@ -1088,118 +1189,12 @@ export function getSprintTabContent(
       </div>
 
       <!-- All Issues Tab - Split into Not Ready, Ready, In Progress, Review, Done -->
-      <!-- Status mappings loaded from workflow config (config.json -> sprint section) -->
       <div class="sprint-subtab-content active" id="subtab-all">
-        <!-- Not Ready Section - Need refinement first -->
-        <div class="sprint-section not-ready">
-          <div class="item-row sprint-section-header">
-            <span class="sprint-section-title">${notReadyConfig?.icon || "⚠️"} ${notReadyConfig?.displayName || "Not Ready"} (${notReadyIssues.length})</span>
-            <span class="sprint-section-subtitle">${notReadyConfig?.description || "Need refinement before bot can work"}</span>
-          </div>
-          ${
-            notReadyIssues.length > 0
-              ? `
-            <div class="sprint-issues">
-              ${notReadyIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
-            </div>
-          `
-              : `
-            <div class="sprint-empty-inline">
-              <span>No issues need refinement</span>
-            </div>
-          `
-          }
-        </div>
-
-        <!-- Ready Section - Bot can work on these -->
-        <div class="sprint-section ready">
-          <div class="item-row sprint-section-header">
-            <span class="sprint-section-title">${readyConfig?.icon || "📋"} ${readyConfig?.displayName || "Ready"} (${readyIssues.length})</span>
-            <span class="sprint-section-subtitle">${readyConfig?.description || "Refined and ready for bot to implement"}</span>
-            ${readyIssues.length > 0 && readyConfig?.showApproveButtons !== false ? `
-              <div class="section-actions">
-                <button class="btn btn-xs btn-success" data-action="approveAll">✓ Approve All</button>
-                <button class="btn btn-xs" data-action="rejectAll">✗ Unapprove All</button>
-              </div>
-            ` : ""}
-          </div>
-          ${
-            readyIssues.length > 0
-              ? `
-            <div class="sprint-issues">
-              ${readyIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
-            </div>
-          `
-              : `
-            <div class="sprint-empty-inline">
-              <span>No ready issues</span>
-            </div>
-          `
-          }
-        </div>
-
-        <!-- In Progress Section - Currently being worked on -->
-        <div class="sprint-section in-progress">
-          <div class="item-row sprint-section-header">
-            <span class="sprint-section-title">${inProgressConfig?.icon || "🔄"} ${inProgressConfig?.displayName || "In Progress"} (${inProgressIssues.length})</span>
-            <span class="sprint-section-subtitle">${inProgressConfig?.description || "Currently being worked on"}</span>
-          </div>
-          ${
-            inProgressIssues.length > 0
-              ? `
-            <div class="sprint-issues">
-              ${inProgressIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
-            </div>
-          `
-              : `
-            <div class="sprint-empty-inline">
-              <span>No issues in progress</span>
-            </div>
-          `
-          }
-        </div>
-
-        <!-- Review Section - Awaiting code review -->
-        <div class="sprint-section review">
-          <div class="item-row sprint-section-header">
-            <span class="sprint-section-title">${reviewConfig?.icon || "👀"} ${reviewConfig?.displayName || "Review"} (${reviewIssues.length})</span>
-            <span class="sprint-section-subtitle">${reviewConfig?.description || "Awaiting code review"}${reviewConfig?.botMonitors ? " - bot monitors for comments" : ""}</span>
-          </div>
-          ${
-            reviewIssues.length > 0
-              ? `
-            <div class="sprint-issues">
-              ${reviewIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
-            </div>
-          `
-              : `
-            <div class="sprint-empty-inline">
-              <span>No issues in review</span>
-            </div>
-          `
-          }
-        </div>
-
-        <!-- Done Section - Completed -->
-        <div class="sprint-section done">
-          <div class="item-row sprint-section-header">
-            <span class="sprint-section-title">${doneConfig?.icon || "✅"} ${doneConfig?.displayName || "Done"} (${doneIssues.length})</span>
-            <span class="sprint-section-subtitle">${doneConfig?.description || "Completed"}</span>
-          </div>
-          ${
-            doneIssues.length > 0
-              ? `
-            <div class="sprint-issues">
-              ${doneIssues.map((issue) => renderIssueCard(issue, jiraUrl, false)).join("")}
-            </div>
-          `
-              : `
-            <div class="sprint-empty-inline">
-              <span>No completed issues yet</span>
-            </div>
-          `
-          }
-        </div>
+        ${renderSprintSection("not-ready", notReadyConfig, notReadyIssues, jiraUrl, "No issues need refinement")}
+        ${renderSprintSection("ready", readyConfig, readyIssues, jiraUrl, "No ready issues", readyConfig?.showApproveButtons !== false)}
+        ${renderSprintSection("in-progress", inProgressConfig, inProgressIssues, jiraUrl, "No issues in progress")}
+        ${renderSprintSection("review", reviewConfig, reviewIssues, jiraUrl, "No issues in review")}
+        ${renderSprintSection("done", doneConfig, doneIssues, jiraUrl, "No completed issues yet")}
       </div>
 
       <!-- Tools Tab -->

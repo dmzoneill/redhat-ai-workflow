@@ -8,7 +8,7 @@ The Performance module provides:
 - **Daily performance data collection**: Track accomplishments and evidence
 - **PSE competency mapping**: Map work to Red Hat competencies
 - **Quarterly evaluation**: Answer evaluation questions with AI assistance
-- **Evidence aggregation**: Collect commits, MRs, reviews as evidence
+- **Evidence aggregation**: Collect commits, MRs, reviews, Google Drive contributions, and meeting attendance as evidence
 
 ## Architecture
 
@@ -19,6 +19,8 @@ graph TB
         GITLAB[GitLab MRs]
         JIRA[Jira Issues]
         REVIEWS[Code Reviews]
+        GDRIVE[Google Drive<br/>Docs / Sheets / Slides]
+        CALENDAR[Google Calendar / Meet<br/>Attendance]
     end
 
     subgraph Collection["Data Collection"]
@@ -40,6 +42,8 @@ graph TB
     GITLAB --> DAILY
     JIRA --> DAILY
     REVIEWS --> DAILY
+    GDRIVE --> DAILY
+    CALENDAR --> DAILY
 
     DAILY --> SCORING
     SCORING --> MAPPING

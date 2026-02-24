@@ -152,29 +152,49 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
             return {"success": False, "error": str(e)}
 
     async def _handle_get_current_work(self, **kwargs) -> dict:
-        """Get current work state."""
+        """Get current work state, aggregating across all projects."""
         try:
+            all_issues: list = []
+            all_mrs: list = []
+            all_follow_ups: list = []
+
+            # Check legacy top-level path first
             content = self._read_yaml("state/current_work")
             if content:
-                return {
-                    "success": True,
-                    "work": {
-                        "activeIssue": (
-                            content.get("active_issues", [{}])[0]
-                            if content.get("active_issues")
-                            else None
-                        ),
-                        "activeMR": (
-                            content.get("open_mrs", [{}])[0]
-                            if content.get("open_mrs")
-                            else None
-                        ),
-                        "followUps": content.get("follow_ups", []),
-                        "activeIssues": content.get("active_issues", []),
-                        "openMRs": content.get("open_mrs", []),
-                    },
-                }
-            return {"success": True, "work": {}}
+                all_issues.extend(content.get("active_issues", []))
+                all_mrs.extend(content.get("open_mrs", []))
+                all_follow_ups.extend(content.get("follow_ups", []))
+
+            # Scan project-specific current_work files
+            projects_dir = MEMORY_DIR / "state" / "projects"
+            if projects_dir.exists():
+                for proj_dir in projects_dir.iterdir():
+                    if not proj_dir.is_dir():
+                        continue
+                    rel_path = f"state/projects/{proj_dir.name}/current_work"
+                    proj_content = self._read_yaml(rel_path)
+                    if not proj_content:
+                        continue
+                    for issue in proj_content.get("active_issues", []):
+                        if issue not in all_issues:
+                            all_issues.append(issue)
+                    for mr in proj_content.get("open_mrs", []):
+                        if mr not in all_mrs:
+                            all_mrs.append(mr)
+                    for fu in proj_content.get("follow_ups", []):
+                        if fu not in all_follow_ups:
+                            all_follow_ups.append(fu)
+
+            return {
+                "success": True,
+                "work": {
+                    "activeIssue": all_issues[0] if all_issues else None,
+                    "activeMR": all_mrs[0] if all_mrs else None,
+                    "followUps": all_follow_ups,
+                    "activeIssues": all_issues,
+                    "openMRs": all_mrs,
+                },
+            }
         except Exception as e:
             logger.error(f"Failed to get current work: {e}")
             return {"success": False, "error": str(e)}

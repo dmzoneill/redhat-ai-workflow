@@ -226,10 +226,14 @@ class MeetingScheduler:
 
         self.state.running = True
 
-        # Do initial poll before starting background loop
-        # This ensures we have meeting data immediately on startup
+        # Do initial poll with a timeout so we don't block daemon startup
+        # (systemd needs READY=1 within TimeoutStartSec or it kills us)
         try:
-            await self._poll_calendars()
+            await asyncio.wait_for(self._poll_calendars(), timeout=20.0)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Initial calendar poll timed out (20s) -- will retry in background"
+            )
         except Exception as e:
             logger.warning(f"Initial calendar poll failed: {e}")
 
@@ -416,33 +420,41 @@ class MeetingScheduler:
         Get events from a calendar.
 
         Uses the Google Calendar API via the aa_google_calendar module.
+        The API client is synchronous, so we run it in a thread to avoid
+        blocking the event loop (and starving the watchdog).
         """
         try:
-            # Import here to avoid circular imports
-            from tool_modules.aa_google_calendar.src.tools_basic import (
-                get_calendar_service,
-            )
 
-            service, error = get_calendar_service()
-            if error or not service:
+            def _fetch_events():
+                from tool_modules.aa_google_calendar.src.tools_basic import (
+                    get_calendar_service,
+                )
+
+                service, error = get_calendar_service()
+                if error or not service:
+                    return None, error
+
+                result = (
+                    service.events()
+                    .list(
+                        calendarId=calendar_id,
+                        timeMin=time_min.isoformat(),
+                        timeMax=time_max.isoformat(),
+                        maxResults=50,
+                        singleEvents=True,
+                        orderBy="startTime",
+                        timeZone=TIMEZONE,
+                    )
+                    .execute()
+                )
+                return result, None
+
+            events_result, error = await asyncio.to_thread(_fetch_events)
+            if error or events_result is None:
                 logger.error(f"Calendar service error: {error}")
                 return []
 
             tz = ZoneInfo(TIMEZONE)
-
-            events_result = (
-                service.events()
-                .list(
-                    calendarId=calendar_id,
-                    timeMin=time_min.isoformat(),
-                    timeMax=time_max.isoformat(),
-                    maxResults=50,
-                    singleEvents=True,
-                    orderBy="startTime",
-                    timeZone=TIMEZONE,
-                )
-                .execute()
-            )
 
             events = []
             for event in events_result.get("items", []):
