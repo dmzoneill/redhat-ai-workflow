@@ -26,10 +26,11 @@ Comment interactions captured:
 
 import json
 import logging
-import re
 import time
 from datetime import date, datetime
 from pathlib import Path
+
+from services.stats.quarter_utils import QUARTER_STARTS
 
 logger = logging.getLogger(__name__)
 
@@ -1011,7 +1012,7 @@ def collect_gdrive_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     m, d = quarter_starts[quarter]
     quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
 
@@ -1485,7 +1486,7 @@ def ensure_shared_drive_index(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     m, d = quarter_starts[quarter]
     quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
 
@@ -1567,7 +1568,7 @@ def collect_shared_drive_peer_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     m, d = quarter_starts[quarter]
     quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
 

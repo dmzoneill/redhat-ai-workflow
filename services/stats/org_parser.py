@@ -56,7 +56,7 @@ MANAGEMENT_PATTERNS = [
     ]
 ]
 
-ORG_CHART_NAMES: list[tuple[str, str]] = [
+_INLINE_ORG_CHART_NAMES: list[tuple[str, str]] = [
     ("Kevin Myers", "Senior Director, Software Engineering Global"),
     ("Aaron Withrow", "Director, Engineering"),
     ("Chuck Brant", "Director, Engineering"),
@@ -278,6 +278,24 @@ ORG_CHART_NAMES: list[tuple[str, str]] = [
 ]
 
 
+def _load_org_chart_names() -> list[tuple[str, str]]:
+    """Load org chart names from external YAML, falling back to inline list."""
+    yaml_path = ORG_DIR / "org_chart.yaml"
+    if yaml_path.exists():
+        try:
+            import yaml
+
+            with open(yaml_path, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or []
+            return [(entry["name"], entry.get("title", "")) for entry in data]
+        except Exception as e:
+            logger.warning("Failed to load org chart YAML: %s, using inline list", e)
+    return _INLINE_ORG_CHART_NAMES
+
+
+ORG_CHART_NAMES = _load_org_chart_names()
+
+
 def _strip_diacritics(s: str) -> str:
     nfkd = unicodedata.normalize("NFKD", s)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
@@ -439,7 +457,23 @@ def _build_kerberos_name_map() -> dict[str, str]:
     return mapping
 
 
-GITHUB_ORGS = ["ansible"]
+def _load_github_orgs() -> list[str]:
+    """Load GitHub org list from config.json, falling back to default."""
+    try:
+        cfg_path = Path(__file__).resolve().parent.parent.parent / "config.json"
+        if cfg_path.exists():
+            import json as _json
+
+            with open(cfg_path, encoding="utf-8") as f:
+                return (
+                    _json.load(f).get("performance", {}).get("github_orgs", ["ansible"])
+                )
+    except Exception as e:
+        logger.warning("Failed to load github orgs from config: %s", e)
+    return ["ansible"]
+
+
+GITHUB_ORGS = _load_github_orgs()
 
 _ansible_org_cache: dict[str, dict] | None = None
 
@@ -495,7 +529,9 @@ def _load_github_org_members() -> dict[str, dict]:
                     timeout=15,
                 )
                 batch = [
-                    l.strip() for l in result.stdout.strip().split("\n") if l.strip()
+                    line.strip()
+                    for line in result.stdout.strip().split("\n")
+                    if line.strip()
                 ]
                 if not batch:
                     break
@@ -510,7 +546,7 @@ def _load_github_org_members() -> dict[str, dict]:
             batch = members[i : i + 50]
             fragments = []
             for j, login in enumerate(batch):
-                safe = re.sub(r"[^a-zA-Z0-9_]", "_", login)
+                _safe = re.sub(r"[^a-zA-Z0-9_]", "_", login)  # noqa: F841
                 fragments.append(f'  u{j}: user(login: "{login}") {{ login name }}')
             query = "query {\n" + "\n".join(fragments) + "\n}"
             try:
@@ -672,7 +708,7 @@ def resolve_github_usernames(
     kerb_to_name = _build_kerberos_name_map()
 
     resolved_count = 0
-    for level, peer_list in peers.items():
+    for _level, peer_list in peers.items():
         for peer in peer_list:
             kerberos = peer["username"]
             cached = cache.get(kerberos)
@@ -848,7 +884,7 @@ if __name__ == "__main__":
     )
     print(f"Unresolved: {stats['total_unresolved']}")
     print(f"By level: {stats['by_level']}")
-    print(f"Selected peers:")
+    print("Selected peers:")
     for level, peers in roster["peers"].items():
         names = [p["username"] for p in peers]
         print(f"  {level}: {len(peers)} -- {', '.join(names)}")

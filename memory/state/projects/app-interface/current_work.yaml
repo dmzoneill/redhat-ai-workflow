@@ -1,0 +1,6 @@
+active_issues:
+- created: 2026-02-25
+  key: AAP-66507
+  status: New
+  summary: Create Lambda S3 sync functions for Dataverse Snowpipe repli
+  type: Story

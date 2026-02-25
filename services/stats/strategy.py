@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 
 from server.utils import run_cmd_sync
+from services.stats.collector_utils import rate_limited_api_call
+from services.stats.quarter_utils import QUARTER_STARTS
 from services.stats.scorer import COMPETENCY_DEFS
 
 logger = logging.getLogger(__name__)
@@ -237,7 +239,7 @@ def enrich_user_issues_from_jira(
 
     Merges results into user_issues dict so strategy alignment has full data.
     """
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     sm, _ = quarter_starts[quarter]
     q_start = f"{year}-{sm:02d}-01"
     next_q = quarter + 1
@@ -324,16 +326,22 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
     try:
         user_url = f"https://{gitlab_host}/api/v4/user"
         user_req = urllib.request.Request(user_url, headers={"PRIVATE-TOKEN": token})
-        with urllib.request.urlopen(user_req, timeout=10) as resp:
-            user_data = json.loads(resp.read())
-            username = user_data.get("username", "")
+
+        def _fetch_user() -> dict:
+            with urllib.request.urlopen(user_req, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        user_data = rate_limited_api_call(
+            _fetch_user, min_interval=0.5, max_retries=3, base_delay=1.0
+        )
+        username = user_data.get("username", "")
     except Exception as e:
         logger.warning("GitLab /api/v4/user failed: %s", e)
     if not username:
         logger.warning("Could not determine GitLab username")
         return []
 
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     sm, _ = quarter_starts[quarter]
     q_start = f"{year}-{sm:02d}-01T00:00:00Z"
     next_q = quarter + 1
@@ -378,8 +386,15 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
         )
         req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                _add_mrs(json.loads(resp.read()), repo_name)
+
+            def _fetch_mrs(_req=req) -> list:
+                with urllib.request.urlopen(_req, timeout=15) as resp:
+                    return json.loads(resp.read())
+
+            mrs_list = rate_limited_api_call(
+                _fetch_mrs, min_interval=0.5, max_retries=3, base_delay=1.0
+            )
+            _add_mrs(mrs_list, repo_name)
         except Exception as e:
             logger.warning("GitLab MR fetch (created) for %s: %s", repo_name, e)
 
@@ -390,8 +405,15 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
         )
         req = urllib.request.Request(url_open, headers={"PRIVATE-TOKEN": token})
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                _add_mrs(json.loads(resp.read()), repo_name)
+
+            def _fetch_mrs_open(_req=req) -> list:
+                with urllib.request.urlopen(_req, timeout=15) as resp:
+                    return json.loads(resp.read())
+
+            mrs_list = rate_limited_api_call(
+                _fetch_mrs_open, min_interval=0.5, max_retries=3, base_delay=1.0
+            )
+            _add_mrs(mrs_list, repo_name)
         except Exception as e:
             logger.warning("GitLab MR fetch (open) for %s: %s", repo_name, e)
 
@@ -402,8 +424,15 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
         )
         req = urllib.request.Request(url_merged, headers={"PRIVATE-TOKEN": token})
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                _add_mrs(json.loads(resp.read()), repo_name)
+
+            def _fetch_mrs_merged(_req=req) -> list:
+                with urllib.request.urlopen(_req, timeout=15) as resp:
+                    return json.loads(resp.read())
+
+            mrs_list = rate_limited_api_call(
+                _fetch_mrs_merged, min_interval=0.5, max_retries=3, base_delay=1.0
+            )
+            _add_mrs(mrs_list, repo_name)
         except Exception as e:
             logger.warning("GitLab MR fetch (merged) for %s: %s", repo_name, e)
 
@@ -411,7 +440,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
     return all_mrs
 
 
-def build_sender_relationships(
+def build_sender_relationships(  # noqa: C901
     emails_dir: Path,
     ownership: dict,
     jira_activity: dict | None = None,
@@ -1270,7 +1299,6 @@ def build_strategy_alignment(  # noqa: C901
     jira_count = sum(1 for k in user_issues if not k.startswith("ANSTRAT-"))
 
     sender_rel: dict = {"relationships": [], "sender_summaries": {}, "data_sources": {}}
-    owner_data: dict = {}
     if ownership and ownership.get("issues"):
         sender_rel = build_sender_relationships(
             emails_dir,
@@ -1279,7 +1307,7 @@ def build_strategy_alignment(  # noqa: C901
             gdrive_docs=gdrive_docs,
         )
 
-        sender_summaries = sender_rel.get("sender_summaries", {})
+        _sender_summaries = sender_rel.get("sender_summaries", {})  # noqa: F841
         for prio_out in priorities_out:
             prio_senders = prio_out.get("senders", [])
             prio_keys = set(prio_out.get("issue_keys", []))

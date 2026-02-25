@@ -13,10 +13,11 @@ gdrive_collector's filename classification.
 
 import json
 import logging
-import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
+
+from services.stats.quarter_utils import QUARTER_STARTS
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +370,9 @@ def _collect_single_calendar(
         if page_token:
             kwargs["pageToken"] = page_token
 
-        resp = _api_call_with_backoff(lambda: service.events().list(**kwargs).execute())
+        resp = _api_call_with_backoff(
+            lambda _kw=kwargs: service.events().list(**_kw).execute()
+        )
         items = resp.get("items", [])
 
         for ev in items:
@@ -500,7 +503,9 @@ def collect_meet_attendance(
 
         try:
             resp = _api_call_with_backoff(
-                lambda: meet_service.conferenceRecords().list(**kwargs).execute()
+                lambda _kw=kwargs: meet_service.conferenceRecords()
+                .list(**_kw)
+                .execute()
             )
         except Exception as e:
             logger.warning("Meet API conferenceRecords.list failed: %s", e)
@@ -595,16 +600,16 @@ def link_calendar_to_meet(
         if code not in unique_codes:
             unique_codes[code] = m
 
-    for code, meeting in unique_codes.items():
+    for code, _meeting in unique_codes.items():
         if code in meet_codes_seen:
             continue
         meet_codes_seen.add(code)
 
         try:
             resp = _api_call_with_backoff(
-                lambda: meet_service.conferenceRecords()
+                lambda _c=code: meet_service.conferenceRecords()
                 .list(
-                    filter=f'space.meeting_code="{code}"',
+                    filter=f'space.meeting_code="{_c}"',
                     pageSize=10,
                 )
                 .execute()
@@ -622,10 +627,10 @@ def link_calendar_to_meet(
             try:
                 rec_name = rec["name"]
                 parts_resp = _api_call_with_backoff(
-                    lambda: meet_service.conferenceRecords()
+                    lambda _rn=rec_name: meet_service.conferenceRecords()
                     .participants()
                     .list(
-                        parent=rec_name,
+                        parent=_rn,
                         pageSize=250,
                     )
                     .execute()
@@ -1018,7 +1023,7 @@ def collect_meeting_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     m, d = quarter_starts[quarter]
     quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
 
@@ -1114,7 +1119,7 @@ def ensure_meeting_peer_index(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+    quarter_starts = QUARTER_STARTS
     m, d = quarter_starts[quarter]
     quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
 

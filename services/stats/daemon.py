@@ -26,9 +26,7 @@ Systemd:
 import asyncio
 import json
 import logging
-import os
 import re
-import statistics
 import time
 from datetime import date, datetime, timedelta
 from html import unescape as html_unescape
@@ -60,8 +58,25 @@ from services.stats.email_parser import (
     parse_email_text,
     set_executive_senders,
 )
+from services.stats.peer_backfill import (
+    build_filter_label,
+    compute_peer_benchmarks,
+    get_weekdays_in_quarter_range,
+)
+from services.stats.performance_scoring import (
+    comparable_points,
+    compute_competency_percentages,
+    compute_daily_points,
+    dedup_events_by_jira_key,
+    is_personal_repo_event,
+    is_primary_only_event,
+    normalize_strategy_bonus,
+    process_daily_events_for_summary,
+)
+from services.stats.quarter_utils import QUARTER_STARTS
 from services.stats.scorer import (
     COMPETENCY_DEFS,
+    DEFAULT_GLOBALS,
     SCORING_CONFIG_FILE,
     get_competency_meta,
     get_effective_defs,
@@ -76,7 +91,6 @@ from services.stats.scorer import (
     get_source_daily_caps,
     get_strategy_alignment_config,
     load_scoring_config,
-    map_competencies,
     save_scoring_config,
 )
 from services.stats.strategy import (
@@ -102,24 +116,6 @@ def get_performance_summary_path() -> Path:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _is_work_repo(
-    repo: str,
-    work_orgs: list[str],
-    work_gl_groups: list[str],
-    work_repos: list[str],
-) -> bool:
-    """Return True if a repo belongs to a known work org or project list."""
-    if repo in work_repos:
-        return True
-    for org in work_orgs:
-        if repo.startswith(f"{org}/"):
-            return True
-    for grp in work_gl_groups:
-        if repo.startswith(f"{grp}/"):
-            return True
-    return False
 
 
 class StatsDaemon(DaemonDBusBase, BaseDaemon):
@@ -570,173 +566,38 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
     @staticmethod
     def _is_personal_repo_event(ev: dict) -> bool:
-        """Return True if the event is from a personal/non-work repo.
-
-        Checks git, github, gitlab sources against configured work repos/orgs.
-        Used to exclude personal hobby projects from ALL scoring (full + comparable).
-        """
-        source = ev.get("source", "")
-        pc_cfg = get_peer_comparable_config()
-        work_orgs = pc_cfg.get("work_github_orgs", [])
-        work_gl_groups = pc_cfg.get("work_gitlab_groups", [])
-        work_repos = pc_cfg.get("work_project_repos", [])
-
-        if source in ("github", "gitlab"):
-            item_id = ev.get("item_id", "")
-            repo = ""
-            if "#" in item_id:
-                repo = item_id.split("#")[0]
-            elif "!" in item_id:
-                repo = item_id.split("!")[0]
-            if repo and not _is_work_repo(repo, work_orgs, work_gl_groups, work_repos):
-                return True
-
-        if source == "git":
-            title = ev.get("title", "")
-            m = re.match(r"\[([^\]]+)\]", title)
-            repo_name = m.group(1) if m else ""
-            if repo_name and repo_name not in work_repos:
-                return True
-
-        return False
+        """Return True if the event is from a personal/non-work repo."""
+        return is_personal_repo_event(ev, get_peer_comparable_config())
 
     @staticmethod
     def _is_primary_only_event(ev: dict) -> bool:
-        """Return True if the event should be excluded from the peer-comparable score.
-
-        Excluded categories (beyond personal repos which are excluded from all scores):
-        - Session events (no peer equivalent)
-        - Personal GDrive (not shared drive)
-        """
-        if StatsDaemon._is_personal_repo_event(ev):
-            return True
-        source = ev.get("source", "")
-        if source == "session":
-            return True
-        if source == "gdrive" and not ev.get("gdrive_shared_drive"):
-            return True
-        return False
+        """Return True if the event should be excluded from the peer-comparable score."""
+        return is_primary_only_event(ev, get_peer_comparable_config())
 
     @staticmethod
     def _normalize_strategy_bonus(points: dict[str, int], ev: dict) -> dict[str, int]:
-        """Remove strategy alignment bonus from event points for fair comparison.
-
-        Peers CAN receive strategy bonuses when their Jira work matches the
-        strategy index (built from executive emails).  Stripping the bonus
-        from both self and peer scores ensures an apples-to-apples comparison.
-        """
-        if not ev.get("strategy_aligned"):
-            return points
-        bonus = 1.5
-        return {comp_id: max(1, round(pts / bonus)) for comp_id, pts in points.items()}
+        """Remove strategy alignment bonus from event points for fair comparison."""
+        bonus = get_strategy_alignment_config().get("bonus_multiplier", 1.5)
+        return normalize_strategy_bonus(points, ev, bonus_multiplier=bonus)
 
     @staticmethod
     def _comparable_points(ev: dict) -> dict[str, int]:
-        """Return event points suitable for peer-comparable scoring.
-
-        If the event was enriched with session narrative
-        (extra_classification_text), re-score using the base
-        classification text only so the comparison is fair -- peers
-        never have session enrichment.
-        """
-        extra = ev.get("extra_classification_text", "")
-        if not extra:
-            return ev.get("points", {})
-
-        class_text = ev.get("classification_text", "")
-        if extra and extra in class_text:
-            class_text = class_text.replace(extra, "").rstrip()
-
-        return map_competencies(
-            class_text,
-            ev.get("source", ""),
-            ev.get("type", ""),
-            ev.get("scope", "story"),
-            ev.get("role", "assignee"),
-            strategy_aligned=ev.get("strategy_aligned", False),
-            contribution_type=ev.get("contribution_type"),
-            is_cross_team=ev.get("is_cross_team", False),
-            review_decision=ev.get("review_decision"),
-        )
+        """Return event points suitable for peer-comparable scoring."""
+        return comparable_points(ev)
 
     @staticmethod
     def _dedup_events_by_jira_key(events: list[dict]) -> list[dict]:
-        """Deduplicate and cap events for fair daily scoring.
-
-        1. Cross-source dedup: keep only the highest-scoring event per Jira key
-        2. Meeting cap: keep only the top N meeting events by point value
-        """
-        pc_cfg = get_peer_comparable_config()
-        max_meetings = pc_cfg.get("max_meetings_per_day", 3)
-
-        keyed: dict[str, list[dict]] = {}
-        unkeyed: list[dict] = []
-        for ev in events:
-            item_id = ev.get("item_id", "")
-            title = ev.get("title", "")
-            jira_key = ""
-            if re.match(r"[A-Z]+-\d+$", item_id):
-                jira_key = item_id
-            else:
-                m = re.search(r"([A-Z]+-\d+)", title)
-                if m:
-                    jira_key = m.group(1)
-            if jira_key:
-                keyed.setdefault(jira_key, []).append(ev)
-            else:
-                unkeyed.append(ev)
-        result = list(unkeyed)
-        for _jk, evts in keyed.items():
-            best = max(evts, key=lambda e: sum(e.get("points", {}).values()))
-            result.append(best)
-
-        meetings = [e for e in result if e.get("source") == "meeting"]
-        if len(meetings) > max_meetings:
-            meetings.sort(key=lambda e: sum(e.get("points", {}).values()), reverse=True)
-            drop = set(id(e) for e in meetings[max_meetings:])
-            result = [e for e in result if id(e) not in drop]
-
-        return result
+        """Deduplicate and cap events for fair daily scoring."""
+        return dedup_events_by_jira_key(events, get_peer_comparable_config())
 
     @staticmethod
     def _compute_daily_points(
         events: list[dict], daily_cap: int, strip_enrichment: bool = False
     ) -> dict[str, int]:
-        """Aggregate event points into daily competency totals.
-
-        Applies per-competency daily_cap and per-source daily caps to
-        prevent any single data source from dominating the daily score.
-
-        When strip_enrichment=True, uses _comparable_points() to re-score
-        each event without session enrichment text before aggregating.
-        """
-        source_caps = get_source_daily_caps()
-        daily_points: dict[str, int] = {}
-        source_totals: dict[str, int] = {}
-
-        for ev in events:
-            src = ev.get("source", "unknown")
-            src_cap = source_caps.get(src)
-            if src_cap is not None and source_totals.get(src, 0) >= src_cap:
-                continue
-
-            pts_dict = (
-                StatsDaemon._comparable_points(ev)
-                if strip_enrichment
-                else ev.get("points", {})
-            )
-
-            ev_added = 0
-            for comp_id, pts in pts_dict.items():
-                current = daily_points.get(comp_id, 0)
-                added = min(pts, daily_cap - current)
-                daily_points[comp_id] = current + added
-                ev_added += added
-
-            if src_cap is not None:
-                source_totals[src] = source_totals.get(src, 0) + ev_added
-
-        return daily_points
+        """Aggregate event points into daily competency totals."""
+        return compute_daily_points(
+            events, daily_cap, get_source_daily_caps(), strip_enrichment
+        )
 
     def _update_summary(
         self, year: int | None = None, quarter: int | None = None
@@ -748,8 +609,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         _, _, daily_cap, target_per_competency = get_effective_defs()
         pc_cfg = get_peer_comparable_config()
-        max_daily_total = pc_cfg.get("max_daily_comparable_total", 0)
-        max_meetings_per_day = pc_cfg.get("max_meetings_per_day", 3)
+        source_caps = get_source_daily_caps()
+        strategy_bonus = get_strategy_alignment_config().get("bonus_multiplier", 1.5)
 
         cumulative_points: dict[str, int] = {}
         no_enrichment_points: dict[str, int] = {}
@@ -768,57 +629,44 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
                 events = data.get("events", [])
 
-                work_events = [
-                    ev for ev in events if not self._is_personal_repo_event(ev)
-                ]
-                deduped = self._dedup_events_by_jira_key(work_events)
-                ne_daily = self._compute_daily_points(
-                    deduped, daily_cap, strip_enrichment=True
+                (
+                    ne_daily,
+                    pc_daily,
+                    pc_events,
+                    counts_by_source,
+                    comparable_counts_by_source,
+                ) = process_daily_events_for_summary(
+                    events,
+                    daily_cap,
+                    source_caps,
+                    pc_cfg,
+                    strategy_bonus_multiplier=strategy_bonus,
                 )
                 for comp_id, pts in ne_daily.items():
                     no_enrichment_points[comp_id] = (
                         no_enrichment_points.get(comp_id, 0) + pts
                     )
-
-                pc_daily: dict[str, int] = {}
-                day_meeting_count = 0
-                for ev in events:
-                    if self._is_personal_repo_event(ev):
-                        continue
-                    src = ev.get("source", "unknown")
-                    total_events += 1
-                    event_counts_by_source[src] = event_counts_by_source.get(src, 0) + 1
-
-                    if not self._is_primary_only_event(ev):
-                        if src == "meeting":
-                            day_meeting_count += 1
-                            if day_meeting_count > max_meetings_per_day:
-                                continue
-                        peer_comparable_events += 1
-                        comparable_event_counts_by_source[src] = (
-                            comparable_event_counts_by_source.get(src, 0) + 1
-                        )
-                        raw_pts = self._comparable_points(ev)
-                        ev_pts = self._normalize_strategy_bonus(raw_pts, ev)
-                        for comp_id, pts in ev_pts.items():
-                            current = pc_daily.get(comp_id, 0)
-                            pc_daily[comp_id] = min(current + pts, daily_cap)
-
-                if max_daily_total and pc_daily:
-                    pc_day_sum = sum(pc_daily.values())
-                    if pc_day_sum > max_daily_total:
-                        scale = max_daily_total / pc_day_sum
-                        pc_daily = {
-                            k: max(1, round(v * scale)) for k, v in pc_daily.items()
-                        }
-
                 for comp_id, pts in pc_daily.items():
                     peer_comparable_points[comp_id] = (
                         peer_comparable_points.get(comp_id, 0) + pts
                     )
+                peer_comparable_events += pc_events
+                total_events += sum(counts_by_source.values())
+                for src, count in counts_by_source.items():
+                    event_counts_by_source[src] = (
+                        event_counts_by_source.get(src, 0) + count
+                    )
+                for src, count in comparable_counts_by_source.items():
+                    comparable_event_counts_by_source[src] = (
+                        comparable_event_counts_by_source.get(src, 0) + count
+                    )
 
+                highlights_max = get_merged_config().get(
+                    "highlights_max_count",
+                    DEFAULT_GLOBALS["highlights_max_count"],
+                )
                 for ev in events[:3]:
-                    if ev.get("title") and len(highlights) < 10:
+                    if ev.get("title") and len(highlights) < highlights_max:
                         highlights.append(ev["title"][:80])
             except Exception as e:
                 logger.warning(
@@ -834,30 +682,28 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         target_scale = lw.get("target_scale", 1.0)
         effective_target = max(round(target_per_competency * target_scale), 1)
 
-        cumulative_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in cumulative_points.items()
-        }
+        cumulative_pct = compute_competency_percentages(
+            cumulative_points, effective_target
+        )
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
 
-        ne_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in no_enrichment_points.items()
-        }
+        ne_pct = compute_competency_percentages(no_enrichment_points, effective_target)
         ne_overall = round(sum(ne_pct.values()) / max(len(ne_pct), 1))
 
-        pc_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in peer_comparable_points.items()
-        }
+        pc_pct = compute_competency_percentages(
+            peer_comparable_points, effective_target
+        )
         pc_overall = round(sum(pc_pct.values()) / max(len(pc_pct), 1))
 
-        gaps = [k for k, v in cumulative_pct.items() if v < 25]
+        gaps_threshold = get_merged_config().get(
+            "gaps_threshold_pct", DEFAULT_GLOBALS["gaps_threshold_pct"]
+        )
+        gaps = [k for k, v in cumulative_pct.items() if v < gaps_threshold]
 
         now = datetime.now()
         y = year or now.year
         q = quarter or ((now.month - 1) // 3 + 1)
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[q]
         day_of_quarter = (now.date() - date(y, sm, sd)).days + 1
 
@@ -917,98 +763,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         return summary
 
-    def _compute_peer_comparable_from_daily(
-        self, year: int | None = None, quarter: int | None = None
-    ) -> tuple[dict[str, int], int, dict[str, int], dict[str, int], dict[str, int]]:
-        """Scan daily files and aggregate points excluding primary-only events.
-
-        Also computes no-enrichment points (all non-personal events but with
-        session enrichment text stripped) for the enrichment toggle.
-
-        Returns (peer_comparable_points, peer_comparable_event_count,
-        event_counts_by_source, comparable_event_counts_by_source,
-        no_enrichment_points).
-        """
-        daily_dir = self._get_daily_dir(year, quarter)
-        _, _, daily_cap, _ = get_effective_defs()
-        pc_cfg = get_peer_comparable_config()
-        max_daily_total = pc_cfg.get("max_daily_comparable_total", 0)
-        max_meetings_per_day = pc_cfg.get("max_meetings_per_day", 3)
-        pc_points: dict[str, int] = {}
-        ne_points: dict[str, int] = {}
-        pc_events = 0
-        counts_by_source: dict[str, int] = {}
-        comparable_counts_by_source: dict[str, int] = {}
-
-        if not daily_dir.exists():
-            return (
-                pc_points,
-                pc_events,
-                counts_by_source,
-                comparable_counts_by_source,
-                ne_points,
-            )
-
-        for daily_file in sorted(daily_dir.glob("*.json")):
-            try:
-                with open(daily_file, encoding="utf-8") as f:
-                    data = json.load(f)
-                events = data.get("events", [])
-                work_events = [
-                    ev for ev in events if not self._is_personal_repo_event(ev)
-                ]
-                deduped = self._dedup_events_by_jira_key(work_events)
-                ne_daily = self._compute_daily_points(
-                    deduped, daily_cap, strip_enrichment=True
-                )
-                for comp_id, pts in ne_daily.items():
-                    ne_points[comp_id] = ne_points.get(comp_id, 0) + pts
-
-                pc_daily: dict[str, int] = {}
-                day_meeting_count = 0
-                for ev in events:
-                    if self._is_personal_repo_event(ev):
-                        continue
-                    src = ev.get("source", "unknown")
-                    counts_by_source[src] = counts_by_source.get(src, 0) + 1
-
-                    if not self._is_primary_only_event(ev):
-                        if src == "meeting":
-                            day_meeting_count += 1
-                            if day_meeting_count > max_meetings_per_day:
-                                continue
-                        pc_events += 1
-                        comparable_counts_by_source[src] = (
-                            comparable_counts_by_source.get(src, 0) + 1
-                        )
-                        raw_pts = self._comparable_points(ev)
-                        ev_pts = self._normalize_strategy_bonus(raw_pts, ev)
-                        for comp_id, pts in ev_pts.items():
-                            current = pc_daily.get(comp_id, 0)
-                            pc_daily[comp_id] = min(current + pts, daily_cap)
-
-                if max_daily_total and pc_daily:
-                    pc_day_sum = sum(pc_daily.values())
-                    if pc_day_sum > max_daily_total:
-                        scale = max_daily_total / pc_day_sum
-                        pc_daily = {
-                            k: max(1, round(v * scale)) for k, v in pc_daily.items()
-                        }
-
-                for comp_id, pts in pc_daily.items():
-                    pc_points[comp_id] = pc_points.get(comp_id, 0) + pts
-            except Exception as e:
-                logger.warning("Failed to read daily file for peer comparable: %s", e)
-                continue
-
-        return (
-            pc_points,
-            pc_events,
-            counts_by_source,
-            comparable_counts_by_source,
-            ne_points,
-        )
-
     def _update_summary_from_data(
         self,
         cumulative_points: dict[str, int],
@@ -1017,11 +771,19 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         year: int | None = None,
         quarter: int | None = None,
         skip_strategy: bool = False,
+        *,
+        pc_points: dict[str, int],
+        pc_events: int,
+        counts_by_source: dict[str, int],
+        comparable_counts_by_source: dict[str, int],
+        ne_points: dict[str, int],
     ) -> dict:
         """Build and write quarter summary from pre-computed scoring data.
 
         Avoids re-reading daily files when the caller already has the
-        aggregated data (e.g. after _rescore).
+        aggregated data (e.g. after _rescore). Callers must pass
+        pc_points, pc_events, counts_by_source, comparable_counts_by_source,
+        and ne_points from the same file scan that produced cumulative_points.
 
         When skip_strategy=True, reuses the existing strategy_alignment and
         questions_summary from the current summary.json instead of rebuilding
@@ -1035,30 +797,26 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         target_scale = lw.get("target_scale", 1.0)
         effective_target = max(round(target_per_competency * target_scale), 1)
 
-        cumulative_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in cumulative_points.items()
-        }
-        overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
-        gaps = [k for k, v in cumulative_pct.items() if v < 25]
-
-        pc_points, pc_events, counts_by_source, comp_counts_by_source, ne_points = (
-            self._compute_peer_comparable_from_daily(year, quarter)
+        cumulative_pct = compute_competency_percentages(
+            cumulative_points, effective_target
         )
-        pc_pct = {
-            k: min(round(v / effective_target * 100), 100) for k, v in pc_points.items()
-        }
+        overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
+        gaps_threshold = get_merged_config().get(
+            "gaps_threshold_pct", DEFAULT_GLOBALS["gaps_threshold_pct"]
+        )
+        gaps = [k for k, v in cumulative_pct.items() if v < gaps_threshold]
+
+        comp_counts_by_source = comparable_counts_by_source
+        pc_pct = compute_competency_percentages(pc_points, effective_target)
         pc_overall = round(sum(pc_pct.values()) / max(len(pc_pct), 1))
 
-        ne_pct = {
-            k: min(round(v / effective_target * 100), 100) for k, v in ne_points.items()
-        }
+        ne_pct = compute_competency_percentages(ne_points, effective_target)
         ne_overall = round(sum(ne_pct.values()) / max(len(ne_pct), 1))
 
         now = datetime.now()
         y = year or now.year
         q = quarter or ((now.month - 1) // 3 + 1)
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[q]
         day_of_quarter = (now.date() - date(y, sm, sd)).days + 1
 
@@ -1233,7 +991,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         now = datetime.now()
         year = now.year
         quarter = (now.month - 1) // 3 + 1
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[quarter]
         quarter_start = date(year, sm, sd)
 
@@ -1445,16 +1203,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         target_scale = lw.get("target_scale", 1.0)
         effective_target = max(round(target_per_competency * target_scale), 1)
 
-        cumulative_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in cumulative_points.items()
-        }
+        cumulative_pct = compute_competency_percentages(
+            cumulative_points, effective_target
+        )
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
 
-        comparable_pct = {
-            k: min(round(v / effective_target * 100), 100)
-            for k, v in comparable_points.items()
-        }
+        comparable_pct = compute_competency_percentages(
+            comparable_points, effective_target
+        )
         comparable_overall = round(
             sum(comparable_pct.values()) / max(len(comparable_pct), 1)
         )
@@ -1496,27 +1252,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
     @staticmethod
     def _compute_distribution(values: list[float | int]) -> dict:
         """Compute min/max/median/p25/p75/avg from a list of numeric values."""
-        if not values:
-            return {
-                "min": 0,
-                "max": 0,
-                "median": 0,
-                "p25": 0,
-                "p75": 0,
-                "avg": 0,
-                "count": 0,
-            }
-        sv = sorted(values)
-        n = len(sv)
-        return {
-            "min": round(sv[0], 1),
-            "max": round(sv[-1], 1),
-            "median": round(statistics.median(sv), 1),
-            "p25": round(sv[max(0, n // 4)], 1),
-            "p75": round(sv[min(n - 1, 3 * n // 4)], 1),
-            "avg": round(statistics.mean(sv), 1),
-            "count": n,
-        }
+        from services.stats.peer_backfill import compute_distribution
+
+        return compute_distribution(values)
 
     def _update_peer_benchmarks(
         self,
@@ -1540,186 +1278,15 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self_username = self._collector.get_jira_username()
         peers_config = self._load_peers_config()
         pc_cfg = get_peer_comparable_config()
-        min_events = pc_cfg.get("min_peer_events", 30)
-        min_days = pc_cfg.get("min_peer_active_days", 15)
-        blacklist = set(pc_cfg.get("blacklisted_peers", []))
-        levels: dict[str, dict] = {}
 
-        for level_key, peer_list in peers_config.items():
-            level_data: dict[str, Any] = {
-                "engineers": [],
-                "excluded_sparse": [],
-                "summaries": [],
-                "avg_competency_pct": {},
-                "avg_competency_points": {},
-                "avg_overall_pct": 0,
-                "comparable_avg_competency_pct": {},
-                "comparable_avg_overall_pct": 0,
-                "comparable_stats_competency": {},
-                "comparable_stats_overall": {},
-                "avg_daily_events": 0.0,
-                "avg_event_counts_by_source": {},
-                "avg_days_with_events": 0.0,
-                "stats_overall": {},
-                "stats_competency": {},
-            }
-
-            roster_count = 0
-            for peer in peer_list:
-                uname = peer["username"]
-                if uname == self_username:
-                    continue
-                roster_count += 1
-                if uname in blacklist:
-                    level_data["excluded_sparse"].append(uname)
-                    continue
-                summary_file = peers_dir / uname / "summary.json"
-                if summary_file.exists():
-                    try:
-                        with open(summary_file, encoding="utf-8") as f:
-                            s = json.load(f)
-                        total_ev = s.get("total_events", 0)
-                        active_days = s.get(
-                            "days_with_events", s.get("days_captured", 0)
-                        )
-                        if total_ev < min_events or active_days < min_days:
-                            level_data["excluded_sparse"].append(uname)
-                            continue
-                        if total_ev > 0:
-                            level_data["engineers"].append(uname)
-                            level_data["summaries"].append(s)
-                    except Exception as e:
-                        logger.warning("Failed to read peer summary.json: %s", e)
-                        continue
-
-            if not level_data["summaries"] and level_data["excluded_sparse"]:
-                for uname in list(level_data["excluded_sparse"]):
-                    if uname in blacklist:
-                        continue
-                    summary_file = peers_dir / uname / "summary.json"
-                    if summary_file.exists():
-                        try:
-                            with open(summary_file, encoding="utf-8") as f:
-                                s = json.load(f)
-                            if s.get("total_events", 0) > 0:
-                                level_data["engineers"].append(uname)
-                                level_data["summaries"].append(s)
-                                level_data["excluded_sparse"].remove(uname)
-                        except Exception:
-                            continue
-
-            n = len(level_data["summaries"])
-            if n > 0:
-                all_comp_ids: set[str] = set()
-                for s in level_data["summaries"]:
-                    all_comp_ids.update(s.get("cumulative_percentage", {}).keys())
-
-                excluded_comps: set[str] = set()
-                for comp_id in all_comp_ids:
-                    all_zero = all(
-                        s.get("cumulative_points", {}).get(comp_id, 0) == 0
-                        for s in level_data["summaries"]
-                    )
-                    if all_zero:
-                        excluded_comps.add(comp_id)
-
-                comparable_comps = all_comp_ids - excluded_comps
-                for comp_id in comparable_comps:
-                    pct_sum = sum(
-                        s.get("cumulative_percentage", {}).get(comp_id, 0)
-                        for s in level_data["summaries"]
-                    )
-                    pts_sum = sum(
-                        s.get("cumulative_points", {}).get(comp_id, 0)
-                        for s in level_data["summaries"]
-                    )
-                    level_data["avg_competency_pct"][comp_id] = round(pct_sum / n)
-                    level_data["avg_competency_points"][comp_id] = round(pts_sum / n)
-
-                    comp_values = [
-                        s.get("cumulative_percentage", {}).get(comp_id, 0)
-                        for s in level_data["summaries"]
-                    ]
-                    level_data["stats_competency"][comp_id] = (
-                        self._compute_distribution(comp_values)
-                    )
-
-                    comp_comparable_pct_sum = sum(
-                        s.get(
-                            "comparable_percentage", s.get("cumulative_percentage", {})
-                        ).get(comp_id, 0)
-                        for s in level_data["summaries"]
-                    )
-                    level_data["comparable_avg_competency_pct"][comp_id] = round(
-                        comp_comparable_pct_sum / n
-                    )
-
-                    comp_comparable_values = [
-                        s.get(
-                            "comparable_percentage", s.get("cumulative_percentage", {})
-                        ).get(comp_id, 0)
-                        for s in level_data["summaries"]
-                    ]
-                    level_data["comparable_stats_competency"][comp_id] = (
-                        self._compute_distribution(comp_comparable_values)
-                    )
-
-                level_data["excluded_competencies"] = sorted(excluded_comps)
-
-                overall_values = [
-                    s.get("overall_percentage", 0) for s in level_data["summaries"]
-                ]
-                level_data["avg_overall_pct"] = round(sum(overall_values) / n)
-                level_data["stats_overall"] = self._compute_distribution(overall_values)
-
-                comparable_overall_values = [
-                    s.get("comparable_overall", s.get("overall_percentage", 0))
-                    for s in level_data["summaries"]
-                ]
-                level_data["comparable_avg_overall_pct"] = round(
-                    sum(comparable_overall_values) / n
-                )
-                level_data["comparable_stats_overall"] = self._compute_distribution(
-                    comparable_overall_values
-                )
-
-                level_data["avg_daily_events"] = round(
-                    sum(s.get("avg_daily_events", 0) for s in level_data["summaries"])
-                    / n,
-                    1,
-                )
-
-                level_data["avg_days_with_events"] = round(
-                    sum(
-                        s.get("days_with_events", s.get("days_captured", 0))
-                        for s in level_data["summaries"]
-                    )
-                    / n,
-                    1,
-                )
-
-                all_sources: set[str] = set()
-                for s in level_data["summaries"]:
-                    all_sources.update(s.get("event_counts_by_source", {}).keys())
-                for src in all_sources:
-                    level_data["avg_event_counts_by_source"][src] = round(
-                        sum(
-                            s.get("event_counts_by_source", {}).get(src, 0)
-                            for s in level_data["summaries"]
-                        )
-                        / n,
-                        1,
-                    )
-
-            level_data["peer_count"] = n
-            level_data["roster_count"] = roster_count
-            del level_data["summaries"]
-            levels[level_key] = level_data
-
-        benchmarks = {
-            "levels": levels,
-            "last_updated": datetime.now().isoformat(),
-        }
+        benchmarks = compute_peer_benchmarks(
+            peers_dir,
+            peers_config,
+            pc_cfg,
+            self_username,
+        )
+        if not benchmarks:
+            return {}
 
         peers_dir.mkdir(parents=True, exist_ok=True)
         with open(peers_dir / "benchmarks.json", "w", encoding="utf-8") as f:
@@ -1918,7 +1485,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "results": results,
         }
 
-    async def _run_peer_backfill(
+    async def _run_peer_backfill(  # noqa: C901
         self,
         peers_config: dict[str, list[dict]],
         target: date,
@@ -1942,15 +1509,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         start_time = time.monotonic()
 
         src_set = set(sources) if sources else None
-        filter_label = []
-        if sources:
-            filter_label.append(f"sources={sources}")
-        if usernames:
-            filter_label.append(f"peers={usernames}")
-        if date_start or date_end:
-            filter_label.append(
-                f"range={date_start or 'q-start'}..{date_end or 'today'}"
-            )
+        filter_info = build_filter_label(sources, usernames, date_start, date_end)
 
         self._peer_backfill_cancelled = False
         self._peer_backfill_progress.update(
@@ -1971,7 +1530,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "cancelled": False,
                 "phases_completed": [],
                 "sources": sources or [],
-                "filter_info": ", ".join(filter_label) if filter_label else "all",
+                "filter_info": filter_info,
             }
         )
 
@@ -1993,29 +1552,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             )
             return
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
-        sm, sd = quarter_starts[quarter]
-        quarter_start = date(year, sm, sd)
-        all_weekdays: list[date] = []
-        current = quarter_start
-        today = date.today()
-        while current <= today:
-            if current.weekday() < 5:
-                all_weekdays.append(current)
-            current += timedelta(days=1)
-
-        if date_start:
-            try:
-                ds = date.fromisoformat(date_start)
-                all_weekdays = [d for d in all_weekdays if d >= ds]
-            except ValueError:
-                pass
-        if date_end:
-            try:
-                de = date.fromisoformat(date_end)
-                all_weekdays = [d for d in all_weekdays if d <= de]
-            except ValueError:
-                pass
+        all_weekdays = get_weekdays_in_quarter_range(
+            year, quarter, date_start, date_end
+        )
 
         all_peers = [
             (level_key, peer)
@@ -2040,7 +1579,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self._ensure_strategy_and_hierarchy(year, quarter)
 
         perf_dir = self._get_perf_dir(year, quarter)
-        for level_key, peer in all_peers:
+        for _level_key, peer in all_peers:
             if not src_set or "gitlab" in src_set:
                 gl_user = peer.get("gitlab_username", "")
                 if gl_user:
@@ -2201,8 +1740,11 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             }
         )
 
-        PARALLEL_PEERS = 4
-        sem = asyncio.Semaphore(PARALLEL_PEERS)
+        parallel_peers = get_merged_config().get(
+            "backfill_parallel_peers",
+            DEFAULT_GLOBALS["backfill_parallel_peers"],
+        )
+        sem = asyncio.Semaphore(parallel_peers)
         completed_peers_count = 0
         total_events = 0
         _progress_lock = asyncio.Lock()
@@ -2234,7 +1776,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
                 peer_events = 0
                 peers_daily_dir = perf_dir / "peers" / username / "daily"
-                for day_idx, d in enumerate(all_weekdays):
+                for _day_idx, d in enumerate(all_weekdays):
                     if self._peer_backfill_cancelled:
                         return 0
 
@@ -2246,20 +1788,26 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             if existing.get("events"):
                                 peer_events += len(existing["events"])
                                 continue
-                        except Exception:
+                        except Exception as exc:
+                            logger.debug(
+                                "Skipped existing peer daily file due to: %s", exc
+                            )
                             pass
 
                     try:
-                        daily_data = await loop.run_in_executor(
-                            None,
-                            lambda _d=d, _p=peer, _l=level_key, _s=sources, _r=peer_repos: self._collector.collect_for_date(
+
+                        def _collect(
+                            _d=d, _p=peer, _l=level_key, _s=sources, _r=peer_repos
+                        ):
+                            return self._collector.collect_for_date(
                                 _d,
                                 user_override=_p,
                                 level_override=_l,
                                 sources=_s,
                                 peer_repos=_r,
-                            ),
-                        )
+                            )
+
+                        daily_data = await loop.run_in_executor(None, _collect)
                         peer_events += len(daily_data.get("events", []))
                     except Exception as e:
                         async with _progress_lock:
@@ -2324,7 +1872,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 total_peers,
                 total_events,
                 int(time.monotonic() - start_time),
-                ", ".join(filter_label) if filter_label else "all",
+                filter_info,
             )
         except Exception as e:
             logger.error("Peer backfill failed: %s", e)
@@ -2773,7 +2321,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         if daily_dir.exists():
             captured = sorted(f.stem for f in daily_dir.glob("*.json"))
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts.get(quarter, (1, 1))
         q_start = date(year, sm, sd)
         today = date.today()
@@ -3205,10 +2753,24 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         loop = asyncio.get_event_loop()
 
-        def _rethreshold() -> tuple[int, dict[str, int], int, list[str]]:
-            eff_defs, _, _, _ = get_effective_defs()
+        def _rethreshold() -> tuple[
+            int,
+            dict[str, int],
+            int,
+            list[str],
+            dict[str, int],
+            int,
+            dict[str, int],
+            dict[str, int],
+            dict[str, int],
+        ]:
+            eff_defs, _, daily_cap, _ = get_effective_defs()
             cfg = get_merged_config()
             level = cfg.get("engineering_level", "sse")
+            pc_cfg = get_peer_comparable_config()
+            strategy_bonus = get_strategy_alignment_config().get(
+                "bonus_multiplier", 1.5
+            )
 
             scope_multipliers = cfg.get("scope_multipliers", {})
             lw = get_level_weights(level)
@@ -3237,6 +2799,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             total_events = 0
             highlights: list[str] = []
             missing_signal_counts = 0
+            pc_points: dict[str, int] = {}
+            ne_points: dict[str, int] = {}
+            pc_events = 0
+            counts_by_source: dict[str, int] = {}
+            comparable_counts_by_source: dict[str, int] = {}
+            source_caps = get_source_daily_caps()
 
             for daily_file in sorted(daily_dir.glob("*.json")):
                 try:
@@ -3302,9 +2870,35 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
                 for comp_id, pts in daily_points.items():
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
-                total_events += len(events)
+
+                ne_daily, pc_daily, day_pc_events, day_counts, day_comp_counts = (
+                    process_daily_events_for_summary(
+                        events,
+                        daily_cap,
+                        source_caps,
+                        pc_cfg,
+                        strategy_bonus_multiplier=strategy_bonus,
+                    )
+                )
+                for comp_id, pts in ne_daily.items():
+                    ne_points[comp_id] = ne_points.get(comp_id, 0) + pts
+                for comp_id, pts in pc_daily.items():
+                    pc_points[comp_id] = pc_points.get(comp_id, 0) + pts
+                pc_events += day_pc_events
+                total_events += sum(day_counts.values())
+                for src, cnt in day_counts.items():
+                    counts_by_source[src] = counts_by_source.get(src, 0) + cnt
+                for src, cnt in day_comp_counts.items():
+                    comparable_counts_by_source[src] = (
+                        comparable_counts_by_source.get(src, 0) + cnt
+                    )
+
+                highlights_max = get_merged_config().get(
+                    "highlights_max_count",
+                    DEFAULT_GLOBALS["highlights_max_count"],
+                )
                 for ev in events[:3]:
-                    if ev.get("title") and len(highlights) < 10:
+                    if ev.get("title") and len(highlights) < highlights_max:
                         highlights.append(ev["title"][:80])
 
             return (
@@ -3313,10 +2907,26 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 total_events,
                 highlights,
                 missing_signal_counts,
+                pc_points,
+                pc_events,
+                counts_by_source,
+                comparable_counts_by_source,
+                ne_points,
             )
 
         result = await loop.run_in_executor(None, _rethreshold)
-        files_updated, cumulative_points, total_events, highlights, missing_sc = result
+        (
+            files_updated,
+            cumulative_points,
+            total_events,
+            highlights,
+            missing_sc,
+            pc_points,
+            pc_events,
+            counts_by_source,
+            comparable_counts_by_source,
+            ne_points,
+        ) = result
 
         if missing_sc > 0:
             logger.warning(
@@ -3334,6 +2944,11 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 year,
                 quarter,
                 skip_strategy=True,
+                pc_points=pc_points,
+                pc_events=pc_events,
+                counts_by_source=counts_by_source,
+                comparable_counts_by_source=comparable_counts_by_source,
+                ne_points=ne_points,
             ),
         )
 
@@ -3378,16 +2993,34 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         self._collector.hierarchy_cache = hierarchy_cache
         self._collector.strategy_index = strategy_index
 
-        def _rescore() -> tuple[int, dict[str, int], int, list[str]]:
+        def _rescore() -> tuple[
+            int,
+            dict[str, int],
+            int,
+            list[str],
+            dict[str, int],
+            int,
+            dict[str, int],
+            dict[str, int],
+            dict[str, int],
+        ]:
             eff_defs, min_sig, daily_cap, _ = get_effective_defs()
             cfg = get_merged_config()
             _level = cfg.get("engineering_level", "sse")  # noqa: F841
             strategy_cfg = get_strategy_alignment_config()
             _min_overlap = strategy_cfg.get("min_text_overlap_words", 4)  # noqa: F841
+            pc_cfg = get_peer_comparable_config()
+            strategy_bonus = strategy_cfg.get("bonus_multiplier", 1.5)
+            source_caps = get_source_daily_caps()
             updated = 0
             cumulative_points: dict[str, int] = {}
             total_events = 0
             highlights: list[str] = []
+            pc_points: dict[str, int] = {}
+            ne_points: dict[str, int] = {}
+            pc_events = 0
+            counts_by_source: dict[str, int] = {}
+            comparable_counts_by_source: dict[str, int] = {}
 
             for daily_file in sorted(daily_dir.glob("*.json")):
                 try:
@@ -3417,22 +3050,74 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 for comp_id, pts in daily_points.items():
                     cumulative_points[comp_id] = cumulative_points.get(comp_id, 0) + pts
                 total_events += len(work_events)
+
+                ne_daily, pc_daily, day_pc_events, day_counts, day_comp_counts = (
+                    process_daily_events_for_summary(
+                        events,
+                        daily_cap,
+                        source_caps,
+                        pc_cfg,
+                        strategy_bonus_multiplier=strategy_bonus,
+                    )
+                )
+                for comp_id, pts in ne_daily.items():
+                    ne_points[comp_id] = ne_points.get(comp_id, 0) + pts
+                for comp_id, pts in pc_daily.items():
+                    pc_points[comp_id] = pc_points.get(comp_id, 0) + pts
+                pc_events += day_pc_events
+                for src, cnt in day_counts.items():
+                    counts_by_source[src] = counts_by_source.get(src, 0) + cnt
+                for src, cnt in day_comp_counts.items():
+                    comparable_counts_by_source[src] = (
+                        comparable_counts_by_source.get(src, 0) + cnt
+                    )
+
+                highlights_max = get_merged_config().get(
+                    "highlights_max_count",
+                    DEFAULT_GLOBALS["highlights_max_count"],
+                )
                 for ev in events[:3]:
-                    if ev.get("title") and len(highlights) < 10:
+                    if ev.get("title") and len(highlights) < highlights_max:
                         highlights.append(ev["title"][:80])
 
-            return updated, cumulative_points, total_events, highlights
+            return (
+                updated,
+                cumulative_points,
+                total_events,
+                highlights,
+                pc_points,
+                pc_events,
+                counts_by_source,
+                comparable_counts_by_source,
+                ne_points,
+            )
 
         result = await loop.run_in_executor(None, _rescore)
-        files_updated, cumulative_points, total_events, highlights = result
-        await loop.run_in_executor(
-            None,
-            self._update_summary_from_data,
+        (
+            files_updated,
             cumulative_points,
             total_events,
             highlights,
-            year,
-            quarter,
+            pc_points,
+            pc_events,
+            counts_by_source,
+            comparable_counts_by_source,
+            ne_points,
+        ) = result
+        await loop.run_in_executor(
+            None,
+            lambda: self._update_summary_from_data(
+                cumulative_points,
+                total_events,
+                highlights,
+                year,
+                quarter,
+                pc_points=pc_points,
+                pc_events=pc_events,
+                counts_by_source=counts_by_source,
+                comparable_counts_by_source=comparable_counts_by_source,
+                ne_points=ne_points,
+            ),
         )
 
         # Rebuild question evidence after rescoring (points may have changed)
@@ -3637,7 +3322,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         }
                     )
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[quarter]
         q_start = date(year, sm, sd)
         today = date.today()
@@ -4995,7 +4680,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         now = datetime.now()
         year = now.year
         quarter = (now.month - 1) // 3 + 1
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[quarter]
         q_start = date(year, sm, sd)
         q_end = min(now.date(), date(year, sm + 2, 1) + timedelta(days=30))
@@ -5167,8 +4852,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             "error": str(e),
                         }
                     )
-
-                import time
 
                 time.sleep(1)
 

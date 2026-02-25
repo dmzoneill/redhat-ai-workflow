@@ -1,55 +1,4 @@
 failures:
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:27:40.172252'
-  tool: t
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:27:40.227721'
-  tool: t
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:27:43.507255'
-  tool: kubectl_get_pods
-- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
-    host api.example.com...'
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:27:43.581829'
-  tool: t
-- error_snippet: unauthorized - 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:38.309391'
-  tool: kubectl_get_pods
-- error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
-    - 401 must authenticate...'
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:38.751088'
-  tool: kubectl_get_pods
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:29:39.958630'
-  tool: kubectl_get_pods
 - error_snippet: unauthorized 401 error
   error_type: auth
   fix_applied: kube_login
@@ -719,8 +668,61 @@ failures:
   success: true
   timestamp: '2026-02-23T09:36:10.958044'
   tool: _konflux_list_pipelines_impl
+- error_snippet: "HTTP 403 - access forbidden: ...!171\tautomation-analytics/pdf-generator!171\t\
+    AAP-58403 - chore(ci): u"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-25T14:51:21.215001'
+  tool: gitlab_mr_list
+- error_snippet: "\u274C Failed to get alerts: HTTP 403: \n<!DOCTYPE html>\n<html\
+    \ lang=\"en\" charset=\"utf-8\">\n<head>\n  <title>"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-25T14:52:59.534396'
+  tool: alertmanager_alerts
+- error_snippet: "\u274C Failed: E0225 15:44:35.569611 1370553 memcache.go:265] \"\
+    Unhandled Error\" err=\"couldn't get current"
+  error_type: network
+  fix_applied: vpn_connect
+  success: true
+  timestamp: '2026-02-25T15:44:43.080886'
+  tool: _kubectl_get_pods_impl
+- error_snippet: "\u274C Failed: E0225 15:45:39.668020 1376197 memcache.go:265] \"\
+    Unhandled Error\" err=\"couldn't get current"
+  error_type: network
+  fix_applied: vpn_connect
+  success: true
+  timestamp: '2026-02-25T15:45:43.629973'
+  tool: _kubectl_exec_impl
+- error_snippet: "\u274C Failed to reserve namespace:\n\n2026-02-25 15:53:29 [   ERROR]\
+    \ [          MainThread] hit unexpected"
+  error_type: network
+  fix_applied: vpn_connect
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-25T15:54:13.204582'
+  tool: bonfire_namespace_reserve
+- error_snippet: "\u274C Failed: E0225 16:24:37.066923 1426408 memcache.go:265] \"\
+    Unhandled Error\" err=\"couldn't get current"
+  error_type: network
+  fix_applied: vpn_connect
+  success: true
+  timestamp: '2026-02-25T16:24:41.022782'
+  tool: _kubectl_get_pods_impl
+- error_snippet: "\u274C Failed to get tag: time=\"2026-02-25T18:39:06Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-02-25T18:39:51.776084'
+  tool: quay_get_tag
 stats:
-  auto_fixed: 175
+  auto_fixed: 180
   daily:
     '2026-02-17':
       auto_fixed: 1
@@ -731,12 +733,15 @@ stats:
     '2026-02-23':
       auto_fixed: 1
       total: 1
-  manual_required: 201
-  total_failures: 376
+    '2026-02-25':
+      auto_fixed: 3
+      total: 3
+  manual_required: 203
+  total_failures: 383
   weekly:
     2026-W07:
       auto_fixed: 2
       total: 2
     2026-W08:
-      auto_fixed: 1
-      total: 1
+      auto_fixed: 4
+      total: 4

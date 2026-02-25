@@ -997,6 +997,9 @@ DEFAULT_GLOBALS = {
     },
     "max_competencies_per_event": 4,
     "max_classification_length": 200,
+    "gaps_threshold_pct": 25,
+    "highlights_max_count": 10,
+    "backfill_parallel_peers": 4,
     "source_daily_caps": {
         "github": 30,
         "gitlab": 30,
@@ -1190,147 +1193,25 @@ def map_competencies(
       - cross-team Jira bonus
       - review_decision bonus (CHANGES_REQUESTED = mentorship)
     """
-    if effective_defs is not None and min_signals is not None:
-        defs, min_sig = effective_defs, min_signals
-    else:
-        defs, min_sig, _, _ = get_effective_defs()
-
-    cfg = get_merged_config()
-    if not level:
-        level = cfg.get("engineering_level", "sse")
-
-    scope_multipliers = cfg.get(
-        "scope_multipliers", DEFAULT_GLOBALS["scope_multipliers"]
+    points, _ = map_competencies_with_signals(
+        classification_text,
+        source,
+        event_type,
+        scope=scope,
+        role=role,
+        effective_defs=effective_defs,
+        min_signals=min_signals,
+        level=level,
+        strategy_aligned=strategy_aligned,
+        npu_classifier=npu_classifier,
+        contribution_type=contribution_type,
+        is_cross_team=is_cross_team,
+        review_decision=review_decision,
     )
-    scope_mult = scope_multipliers.get(scope, 1)
-
-    lw = get_level_weights(level)
-    user_cfg = load_scoring_config()
-    user_lw = user_cfg.get("level_weight_overrides", {}).get(level, {})
-    if user_lw.get("role_weights"):
-        merged_rw = dict(lw.get("role_weights", {}))
-        for s, roles in user_lw["role_weights"].items():
-            if isinstance(roles, dict):
-                merged_rw[s] = {**merged_rw.get(s, {}), **roles}
-        role_weights_table = merged_rw
-    else:
-        role_weights_table = lw.get("role_weights", {})
-    if user_lw.get("pillar_weights"):
-        pillar_weights = {**lw.get("pillar_weights", {}), **user_lw["pillar_weights"]}
-    else:
-        pillar_weights = lw.get("pillar_weights", {})
-
-    strategy_cfg = cfg.get("strategy_alignment", DEFAULT_GLOBALS["strategy_alignment"])
-    strategy_bonus = 1.0
-    if strategy_aligned and strategy_cfg.get("enabled", True):
-        strategy_bonus = strategy_cfg.get("bonus_multiplier", 1.5)
-
-    npu_bonus: dict[str, int] = {}
-    if npu_classifier is not None and hasattr(npu_classifier, "get_bonus_signals"):
-        try:
-            npu_bonus = npu_classifier.get_bonus_signals(classification_text)
-        except Exception as e:
-            logger.warning("NPU classifier get_bonus_signals failed: %s", e)
-
-    max_class_len = cfg.get(
-        "max_classification_length",
-        DEFAULT_GLOBALS["max_classification_length"],
-    )
-    max_comps = cfg.get(
-        "max_competencies_per_event",
-        DEFAULT_GLOBALS["max_competencies_per_event"],
-    )
-
-    points: dict[str, int] = {}
-    text = classification_text.lower()[:max_class_len]
-
-    _contrib_bonus_comps: set[str] = set()
-    if contribution_type in ("upstream", "fork"):
-        _contrib_bonus_comps.update(("opportunity_recognition", "scope"))
-    if contribution_type == "cross-org":
-        _contrib_bonus_comps.update(("scope", "collaboration"))
-    _cross_team_bonus_comps: set[str] = set()
-    if is_cross_team:
-        _cross_team_bonus_comps.update(("scope", "collaboration", "leadership"))
-    _review_decision_bonus: dict[str, set[str]] = {}
-    if review_decision:
-        rd = review_decision.upper()
-        if rd == "CHANGES_REQUESTED":
-            _review_decision_bonus = {"mentorship": {rd}, "collaboration": {rd}}
-        elif rd == "APPROVED":
-            _review_decision_bonus = {"collaboration": {rd}}
-
-    for comp_id, defn in defs.items():
-        signals = 0
-
-        if event_type in defn.get("event_types", []):
-            signals += 1
-
-        for phrase in defn.get("phrases", []):
-            if phrase in text:
-                signals += 1
-
-        for kw in defn.get("keywords", []):
-            if kw in text:
-                signals += 1
-
-        signals += npu_bonus.get(comp_id, 0)
-
-        if comp_id in _contrib_bonus_comps:
-            signals += 1
-        if comp_id in _cross_team_bonus_comps:
-            signals += 1
-        if comp_id in _review_decision_bonus:
-            signals += 1
-
-        if signals >= min_sig:
-            base = defn["base_points"]
-            scope_role_weights = role_weights_table.get(scope, {})
-            role_weight = scope_role_weights.get(role, 1.0)
-            category = defn.get("category", "")
-            pillar_weight = pillar_weights.get(category, 1.0)
-            final = round(
-                base * scope_mult * role_weight * pillar_weight * strategy_bonus
-            )
-            points[comp_id] = max(final, 1)
-
-    if source in ("github", "gitlab") and "opportunity_recognition" in defs:
-        comp_id = "opportunity_recognition"
-        defn = defs[comp_id]
-        extra_signals = 1
-        if event_type in defn.get("event_types", []):
-            extra_signals += 1
-        for phrase in defn.get("phrases", []):
-            if phrase in text:
-                extra_signals += 1
-        for kw in defn.get("keywords", []):
-            if kw in text:
-                extra_signals += 1
-        extra_signals += npu_bonus.get(comp_id, 0)
-        if comp_id in _contrib_bonus_comps:
-            extra_signals += 1
-        if extra_signals >= min_sig:
-            base = defn["base_points"]
-            scope_role_weights = role_weights_table.get(scope, {})
-            role_weight = scope_role_weights.get(role, 1.0)
-            category = defn.get("category", "")
-            pillar_weight = pillar_weights.get(category, 1.0)
-            final = round(
-                base * scope_mult * role_weight * pillar_weight * strategy_bonus
-            )
-            points[comp_id] = max(
-                points.get(comp_id, 0),
-                max(final, 1),
-            )
-
-    if max_comps and len(points) > max_comps:
-        top = sorted(points.items(), key=lambda kv: kv[1], reverse=True)[:max_comps]
-        points = dict(top)
-
     return points
 
 
-def map_competencies_with_signals(
+def map_competencies_with_signals(  # noqa: C901
     classification_text: str,
     source: str,
     event_type: str,

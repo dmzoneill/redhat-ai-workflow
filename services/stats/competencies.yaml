@@ -270,7 +270,7 @@ competencies:
           enter new markets
       fellow:
         title: Acclaimed Creativity
-        description: <tbd>
+        description: TBD
   technical_knowledge:
     name: Technical Knowledge
     category: Technical Contribution
@@ -467,8 +467,8 @@ competencies:
           market segments by driving major enhancements across the portfolio. Recognized as market segment leader internally
           at the company. Driving discussions including top level management, sales, marketing in addition to engineering
       fellow:
-        title: <TBD>
-        description: <tbd>
+        title: TBD
+        description: TBD
   collaboration:
     name: Collaboration
     category: Leadership
@@ -520,8 +520,8 @@ competencies:
           plans around strategic technology initiatives working across functional departments and product teams in collaboration
           with senior management
       fellow:
-        title: Expert across Pconverortfolio/Industry
-        description: Recognized leader and iconversanfluencer across the portfolio, industry, upstream, and research communities
+        title: Expert across Portfolio/Industry
+        description: Recognized leader and influencer across the portfolio, industry, upstream, and research communities
   growth_impact:
     name: Growth Impact
     category: Mentorship
@@ -616,7 +616,7 @@ competencies:
       sde:
         title: Mastering Global Market Dynamics
         description: Leads by example, looks for opportunities to develop, lead, delegate or pair on stretch assignments with
-          teammates and associates inside and outside the organization; able to grow other associates and their globalmen
+          teammates and associates inside and outside the organization; able to grow other associates and their global
           market dynamics.
       fellow:
         title: Mastering Corporate Value Dynamics

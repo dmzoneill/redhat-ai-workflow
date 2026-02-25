@@ -34,4 +34,14 @@ last_ci_health_check:
   pipeline_count: 5
   project: dataverse/data-products/source-aligned/aapautomationanalytics/aapautomationanalytics-dbt
   timestamp: '2026-02-18T15:21:08.643925'
-last_updated: '2026-02-23T14:46:08.784921'
+last_coffee:
+  active_ephemeral: 0
+  alerts:
+    production: 0
+    stage: 0
+  failed_pipelines: 0
+  feedback_waiting: 1
+  pr_count: 12
+  review_assignments: 0
+  timestamp: '2026-02-25T14:54:15.024439'
+last_updated: '2026-02-25T14:54:15.024505'

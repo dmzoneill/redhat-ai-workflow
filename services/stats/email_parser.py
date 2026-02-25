@@ -265,7 +265,7 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
         try:
             with open(p, encoding="utf-8") as fh:
                 existing_ids.add(json.load(fh).get("gmail_message_id", ""))
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read cached email %s: %s", p.name, e)
 
     after_str = target.isoformat()
@@ -359,7 +359,7 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
                     f"Cached executive email from {sender}: {parsed.get('subject', '')[:60]}"
                 )
 
-        except Exception as e:
-            logger.warning(f"Gmail search for {sender} on {target} failed: {e}")
+        except (json.JSONDecodeError, OSError, KeyError, ValueError, TypeError) as e:
+            logger.warning("Gmail search for %s on %s failed: %s", sender, target, e)
 
     return new_ids

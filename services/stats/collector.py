@@ -18,12 +18,12 @@ from services.stats.email_parser import collect_executive_emails_for_date
 from services.stats.gdrive_collector import (
     collect_gdrive_contributions,
     collect_shared_drive_peer_contributions,
-    ensure_shared_drive_index,
 )
 from services.stats.meeting_collector import (
     collect_meeting_contributions,
     collect_meeting_peer_contributions,
 )
+from services.stats.quarter_utils import QUARTER_STARTS
 from services.stats.scorer import (
     get_effective_defs,
     get_merged_config,
@@ -963,7 +963,7 @@ class DataCollector:
             logger.warning("Could not determine GitLab username")
             return {"mrs_authored": [], "reviews_given": [], "reviews_received": []}
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, _ = quarter_starts[quarter]
         q_start = f"{year}-{sm:02d}-01T00:00:00Z"
         if quarter < 4:
@@ -1488,7 +1488,7 @@ class DataCollector:
                 self._jira_quarter_cache[cache_key] = {}
             return {}
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, _ = quarter_starts[quarter]
         q_start = date(year, sm, 1).isoformat()
         if quarter < 4:
@@ -1814,7 +1814,7 @@ class DataCollector:
                     e,
                 )
 
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[quarter]
         q_start = date(year, sm, sd)
         if quarter < 4:
@@ -2857,7 +2857,7 @@ class DataCollector:
             self._user_override = None
             self._level_override = None
 
-    def _collect_for_date_impl(
+    def _collect_for_date_impl(  # noqa: C901
         self,
         target: date,
         user_override: dict | None = None,
@@ -2866,7 +2866,7 @@ class DataCollector:
     ) -> dict:
         year = target.year
         quarter = (target.month - 1) // 3 + 1
-        quarter_starts = {1: (1, 1), 2: (4, 1), 3: (7, 1), 4: (10, 1)}
+        quarter_starts = QUARTER_STARTS
         start_month, start_day = quarter_starts[quarter]
         quarter_start = date(year, start_month, start_day)
         day_of_quarter = (target - quarter_start).days + 1
@@ -2983,8 +2983,6 @@ class DataCollector:
             jira_user = user_override.get("jira_username", "") if user_override else ""
             jira_date = target.strftime("%Y-%m-%d")
             jira_next = (target + timedelta(days=1)).strftime("%Y-%m-%d")
-            jira_log_level = logger.info if user_override else logger.debug
-
             if user_override and jira_user:
                 prefetched = self.prefetch_jira_quarter(jira_user, year, quarter)
                 for ev in prefetched.get(target_str, []):

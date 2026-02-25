@@ -15,6 +15,7 @@ strategic direction.
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -54,19 +55,43 @@ STOP_WORDS = {
     "than",
 }
 
-# Target executives whose strategic ownership we want to discover passively.
-# The usernames list is used for JQL reporter/creator queries.
-SENDER_JIRA_USERNAMES = {
-    "sharwell@redhat.com": ["sharwell", "rh-ee-sharwell"],
-    "jhardy@redhat.com": ["jhardy", "rh-ee-jhardy"],
-    "dmendoza@redhat.com": ["dmendoza", "rh-ee-dmendoza"],
-}
 
-DISPLAY_NAME_TO_EMAIL: dict[str, str] = {
-    "scott harwell": "sharwell@redhat.com",
-    "john hardy": "jhardy@redhat.com",
-    "dafne mendoza": "dmendoza@redhat.com",
-}
+def _load_performance_config() -> dict:
+    """Load performance section from config.json."""
+    try:
+        cfg_path = Path(__file__).resolve().parent.parent.parent / "config.json"
+        if cfg_path.exists():
+            with open(cfg_path, encoding="utf-8") as f:
+                return json.load(f).get("performance", {})
+    except Exception as e:
+        logger.warning("Failed to load performance config: %s", e)
+    return {}
+
+
+def _get_sender_jira_usernames() -> dict[str, list[str]]:
+    return _load_performance_config().get(
+        "sender_jira_usernames",
+        {
+            "sharwell@redhat.com": ["sharwell", "rh-ee-sharwell"],
+            "jhardy@redhat.com": ["jhardy", "rh-ee-jhardy"],
+            "dmendoza@redhat.com": ["dmendoza", "rh-ee-dmendoza"],
+        },
+    )
+
+
+def _get_display_name_to_email() -> dict[str, str]:
+    return _load_performance_config().get(
+        "display_name_to_email",
+        {
+            "scott harwell": "sharwell@redhat.com",
+            "john hardy": "jhardy@redhat.com",
+            "dafne mendoza": "dmendoza@redhat.com",
+        },
+    )
+
+
+SENDER_JIRA_USERNAMES = _get_sender_jira_usernames()
+DISPLAY_NAME_TO_EMAIL = _get_display_name_to_email()
 
 
 def _extract_themes(summary: str, max_themes: int = 5) -> list[str]:
@@ -380,22 +405,37 @@ def sync_sender_gdrive_docs(
     documents: list[dict] = []
 
     for query in queries:
+        time.sleep(0.3)
         escaped = query.replace("\\", "\\\\").replace("'", "\\'")
         search_query = (
             f"fullText contains '{escaped}' and trashed = false "
             f"and modifiedTime > '{_ninety_days_ago()}'"
         )
         try:
-            results = (
-                service.files()
-                .list(
-                    q=search_query,
-                    pageSize=10,
-                    fields="files(id, name, mimeType, modifiedTime, webViewLink, owners, lastModifyingUser)",
-                    orderBy="modifiedTime desc",
-                )
-                .execute()
-            )
+            results = None
+            for attempt in range(3):
+                try:
+                    results = (
+                        service.files()
+                        .list(
+                            q=search_query,
+                            pageSize=10,
+                            fields="files(id, name, mimeType, modifiedTime, webViewLink, owners, lastModifyingUser)",
+                            orderBy="modifiedTime desc",
+                        )
+                        .execute()
+                    )
+                    break
+                except Exception as e:
+                    err_str = str(e)
+                    is_retryable = any(
+                        p in err_str for p in ("429", "500", "503", "rateLimitExceeded")
+                    )
+                    if not is_retryable or attempt >= 2:
+                        raise
+                    time.sleep(2**attempt)
+            if results is None:
+                continue
             for f in results.get("files", []):
                 fid = f.get("id", "")
                 if fid in seen_ids:

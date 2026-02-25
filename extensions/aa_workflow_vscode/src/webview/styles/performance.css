@@ -1,6 +1,237 @@
 /* Performance tab styles - perf-* and scoring-* selectors */
 /* Extracted from unified.css for maintainability */
 
+/* ============================================================
+   Performance CSS variables (theme-aware)
+   ============================================================ */
+:root {
+  /* RAG (Red-Amber-Green) thresholds */
+  --perf-excellent: #10b981;
+  --perf-good: #f59e0b;
+  --perf-warning: #f97316;
+  --perf-poor: #ef4444;
+
+  /* Data source colors */
+  --perf-source-git: #f97316;
+  --perf-source-jira: #3b82f6;
+  --perf-source-gitlab: #8b5cf6;
+  --perf-source-github: #10b981;
+  --perf-source-gdrive: #22c55e;
+  --perf-source-meeting: #ec4899;
+
+  /* Pillar colors */
+  --perf-pillar-tech: #2196F3;
+  --perf-pillar-lead: #F44336;
+  --perf-pillar-mentor: #FF9800;
+  --perf-pillar-delivery: #4CAF50;
+
+  /* Level colors */
+  --perf-level-ase: #64748b;
+  --perf-level-se: #3b82f6;
+  --perf-level-sse: #06b6d4;
+  --perf-level-pse: #8b5cf6;
+  --perf-level-spse: #f59e0b;
+  --perf-level-de: #ef4444;
+  --perf-level-you: #10b981;
+
+  /* Scope colors */
+  --perf-scope-commit: #3b82f6;
+  --perf-scope-story: #10b981;
+  --perf-scope-epic: #f59e0b;
+  --perf-scope-anstrat: #ef4444;
+  --perf-scope-meeting: #8b5cf6;
+  --perf-scope-doc: #06b6d4;
+
+  /* Tag category colors */
+  --perf-tag-worktype: #3b82f6;
+  --perf-tag-quality: #10b981;
+  --perf-tag-domain: #8b5cf6;
+  --perf-tag-ops: #f97316;
+  --perf-tag-monitoring: #ef4444;
+  --perf-tag-other: #6b7280;
+}
+
+/* ============================================================
+   Extracted inline styles (from PerformanceTab.ts)
+   ============================================================ */
+
+/* ---- Toggle / comparison layout ---- */
+.heatmap-mode-toggle--comparison {
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.heatmap-mode-toggle--stacked {
+  margin-bottom: 6px;
+}
+
+/* ---- Physics panel (JS toggled) ---- */
+.mindmap-physics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mindmap-physics-panel.hidden {
+  display: none;
+}
+
+/* ---- Backfill panel (JS toggled) ---- */
+.backfill-progress-panel.hidden {
+  display: none;
+}
+
+/* ---- Backfill options ---- */
+.perf-backfill-section-label {
+  margin-bottom: 4px;
+}
+
+.perf-backfill-option-label {
+  display: block;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.perf-backfill-option-label--spaced {
+  margin-bottom: 4px;
+}
+
+.perf-backfill-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border);
+  border-radius: 3px;
+}
+
+.perf-backfill-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.perf-btn-ghost-subtle {
+  opacity: 0.8;
+}
+
+.perf-btn-close-subtle {
+  opacity: 0.7;
+}
+
+/* ---- QC chart legend (static swatches) ---- */
+.qc-chart-legend-swatch--actual {
+  background: #10b981;
+}
+
+.qc-chart-legend-swatch--projected {
+  background: #10b981;
+  opacity: 0.4;
+  border-top: 2px dashed #10b981;
+  height: 0;
+}
+
+.qc-heatmap-legend-cell--1 { background: rgba(16, 185, 129, 0.1); }
+.qc-heatmap-legend-cell--2 { background: rgba(16, 185, 129, 0.3); }
+.qc-heatmap-legend-cell--3 { background: rgba(16, 185, 129, 0.6); }
+.qc-heatmap-legend-cell--4 { background: #10b981; }
+
+/* ---- Help legend pillar colors (static) ---- */
+.perf-help-dot-input { background: #60a5fa; }
+.perf-help-dot-multiplier { background: #a78bfa; }
+.perf-help-dot-gate { background: #f59e0b; }
+.perf-help-dot-output { background: #10b981; }
+.perf-help-dot-cap { background: #ef4444; }
+
+/* ---- Mindmap / competencies legend ---- */
+.perf-mm-legend-owner {
+  background: #e0e0e0;
+}
+
+.perf-mm-legend-evidence-link {
+  border: 2px dashed #f59e0b;
+  background: transparent;
+}
+
+/* ---- Peer table row highlight ---- */
+.peer-volume-table tr.peer-row-highlight {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.05));
+}
+
+.peer-volume-table th.peer-level-header,
+.peer-volume-table td.peer-level-cell {
+  font-weight: 700;
+}
+
+.peer-warning-mark {
+  color: var(--warning);
+}
+
+.chart-subtitle--warning {
+  color: var(--warning, #f59e0b);
+}
+
+.perf-enrich-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.perf-enrich-toggle--overview {
+  margin-top: 2px;
+}
+
+.perf-enrich-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.perf-backfill-panel {
+  margin-bottom: 8px;
+  padding: 12px;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 6px;
+  background: var(--vscode-editor-background);
+}
+
+.perf-backfill-panel.hidden {
+  display: none;
+}
+
+.perf-backfill-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.perf-backfill-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: start;
+}
+
+.peer-volume-total {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+}
+
+.perf-scope-legend-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 3px;
+}
+
+/* ============================================================
+   Original styles
+   ============================================================ */
+
 .perf-question-cards {
   display: flex;
   flex-direction: column;
@@ -925,13 +1156,17 @@
       font-size: var(--text-xs);
       color: var(--text-secondary);
     }
-    .issues-gauge-dot {
-      display: inline-block;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 4px;
-    }
+.issues-gauge-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.issues-gauge-dot--other {
+  background: var(--bg-tertiary);
+}
     .issues-dash-card-wide .issues-dash-chart {
       overflow-y: auto;
     }
@@ -3196,6 +3431,7 @@
 .cal-dow-sub {
   font-size: 9px;
   margin-top: 2px;
+  color: var(--text-secondary);
 }
 
 .cal-dow-bars {

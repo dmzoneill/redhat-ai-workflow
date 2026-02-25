@@ -91,7 +91,6 @@ export class HtmlGenerator {
       <script nonce="${nonce}" src="${morphdomUri}"></script>
     </head>
     <body>
-      <script nonce="${nonce}">fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:sentinel-A',message:'Sentinel A: script at body start',data:{ts:Date.now()},timestamp:Date.now(),hypothesisId:'H7'})}).catch(function(){});</script>
       <div class="main-content">
         ${header}
         ${tabs}
@@ -117,21 +116,10 @@ export class HtmlGenerator {
         })();
         ${scripts}
       </script>
-      <script nonce="${nonce}">fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:sentinel-B',message:'Sentinel B: script after main block',data:{ts:Date.now()},timestamp:Date.now(),hypothesisId:'H7'})}).catch(function(){});</script>
     </body>
     </html>`;
 
     logger.log(`generateHtml() - total HTML length: ${html.length} chars`);
-
-    // #region agent log
-    // Dump combined scripts to a file for offline syntax checking
-    try {
-      const fs = require('fs');
-      const dumpPath = '/tmp/webview-scripts-df259b.js';
-      fs.writeFileSync(dumpPath, scripts, 'utf8');
-      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:scriptDump',message:'Scripts dumped to file',data:{path:dumpPath,len:scripts.length},timestamp:Date.now(),hypothesisId:'H7'})}).catch(()=>{});
-    } catch(e) {}
-    // #endregion
 
     return html;
   }
@@ -303,10 +291,6 @@ export class HtmlGenerator {
    */
   private getInitScript(): string {
     return `
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:initScriptStart',message:'Init script STARTING',data:{initTabsDefined:typeof initTabs==='function',switchTabDefined:typeof switchTab==='function',vscodeApiDefined:typeof vscode!=='undefined',bodyChildCount:document.body?document.body.childElementCount:0},timestamp:Date.now(),hypothesisId:'H6'})}).catch(function(){});
-      // #endregion
-
       // Initialize tabs
       if (typeof initTabs === 'function') {
         initTabs();
@@ -314,38 +298,12 @@ export class HtmlGenerator {
 
       // Set initial active tab
       const initialTab = '${this.context.currentTab}';
-      // #region agent log
-      (function() {
-        var tabContents = document.querySelectorAll('.tab-content');
-        var tabBtns = document.querySelectorAll('.tab');
-        var ids = [];
-        tabContents.forEach(function(tc) { ids.push(tc.id); });
-        fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:initScript',message:'Before switchTab',data:{initialTab:initialTab,tabContentCount:tabContents.length,tabBtnCount:tabBtns.length,tabContentIds:ids,switchTabDefined:typeof switchTab === 'function',initTabsDefined:typeof initTabs === 'function'},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
-      })();
-      // #endregion
       if (typeof switchTab === 'function') {
         try {
           switchTab(initialTab);
-          // #region agent log
-          (function() {
-            var activeContents = document.querySelectorAll('.tab-content.active');
-            var allContents = document.querySelectorAll('.tab-content');
-            var activeIds = []; allContents.forEach(function(c) { if (c.classList.contains('active')) activeIds.push(c.id); });
-            var firstContentStyle = allContents.length > 0 ? window.getComputedStyle(allContents[0]).display : 'N/A';
-            var activeContentStyle = activeContents.length > 0 ? window.getComputedStyle(activeContents[0]).display : 'N/A';
-            var activeContentLen = activeContents.length > 0 ? activeContents[0].innerHTML.length : 0;
-            fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:afterSwitchTab',message:'After switchTab',data:{initialTab:initialTab,activeContentCount:activeContents.length,totalContentCount:allContents.length,activeIds:activeIds,firstContentDisplay:firstContentStyle,activeContentDisplay:activeContentStyle,activeContentLen:activeContentLen},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
-          })();
-          // #endregion
         } catch(e) {
-          // #region agent log
-          fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:switchTabError',message:'switchTab CRASHED',data:{error:e.message,stack:e.stack},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
-          // #endregion
+          // switchTab error - fall through
         }
-      } else {
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/b464bf17-3382-4be8-aea7-602ee73036e8',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'df259b'},body:JSON.stringify({sessionId:'df259b',location:'HtmlGenerator.ts:noSwitchTab',message:'switchTab NOT defined',data:{},timestamp:Date.now(),hypothesisId:'H2'})}).catch(function(){});
-        // #endregion
       }
 
       // Track user interaction on tab content areas.
