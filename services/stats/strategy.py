@@ -5,8 +5,11 @@ import logging
 import os
 import re
 import subprocess
+import urllib.error
 from datetime import timedelta
 from pathlib import Path
+
+import yaml
 
 from server.utils import run_cmd_sync
 from services.stats.collector_utils import STOP_WORDS, rate_limited_api_call
@@ -55,7 +58,7 @@ def build_strategy_context_index(emails_dir: Path) -> dict:
         try:
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to read executive email %s: %s", f.name, e)
             continue
 
@@ -189,7 +192,7 @@ def enrich_user_issues_from_jira(
             )
         else:
             logger.warning(f"Jira API query failed: {output}")
-    except Exception as e:
+    except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning(f"Jira API enrichment failed: {e}")
 
     return user_issues
@@ -204,7 +207,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
     try:
         with open(config_file, encoding="utf-8") as fh:
             cfg = json.load(fh)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.error("Failed to load config.json for GitLab MR query: %s", e)
         return []
 
@@ -215,15 +218,13 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
         glab_config = Path.home() / ".config" / "glab-cli" / "config.yml"
         if glab_config.exists():
             try:
-                import yaml
-
                 with open(glab_config, encoding="utf-8") as fh:
                     gc = yaml.safe_load(fh)
                 for host_data in gc.get("hosts", {}).values():
                     token = host_data.get("token", "")
                     if token:
                         break
-            except Exception as e:
+            except (OSError, yaml.YAMLError) as e:
                 logger.warning("Failed to read GitLab token from glab config: %s", e)
     if not token:
         logger.warning("No GitLab token found for MR enrichment")
@@ -242,7 +243,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
             _fetch_user, min_interval=0.5, max_retries=3, base_delay=1.0
         )
         username = user_data.get("username", "")
-    except Exception as e:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
         logger.warning("GitLab /api/v4/user failed: %s", e)
     if not username:
         logger.warning("Could not determine GitLab username")
@@ -297,7 +298,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
                 _fetch_mrs, min_interval=0.5, max_retries=3, base_delay=1.0
             )
             _add_mrs(mrs_list, repo_name)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
             logger.warning("GitLab MR fetch (created) for %s: %s", repo_name, e)
 
         url_open = (
@@ -316,7 +317,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
                 _fetch_mrs_open, min_interval=0.5, max_retries=3, base_delay=1.0
             )
             _add_mrs(mrs_list, repo_name)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
             logger.warning("GitLab MR fetch (open) for %s: %s", repo_name, e)
 
         url_merged = (
@@ -335,7 +336,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
                 _fetch_mrs_merged, min_interval=0.5, max_retries=3, base_delay=1.0
             )
             _add_mrs(mrs_list, repo_name)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
             logger.warning("GitLab MR fetch (merged) for %s: %s", repo_name, e)
 
     logger.info(f"Loaded {len(all_mrs)} GitLab MRs for Q{quarter} {year}")
@@ -373,7 +374,7 @@ def build_sender_relationships(  # noqa: C901
             try:
                 with open(f, encoding="utf-8") as fh:
                     data = json.load(fh)
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning("Failed to read email file %s: %s", f.name, e)
                 continue
 
@@ -653,12 +654,12 @@ def infer_relationships_with_llm(
                 try:
                     inferred_dt = _dt.fromisoformat(cached["inferred_at"])
                     age_hours = (_dt.now() - inferred_dt).total_seconds() / 3600
-                except Exception as e:
+                except (ValueError, TypeError) as e:
                     logger.warning("Failed to parse inferred_at timestamp: %s", e)
                     age_hours = INFERRED_CACHE_AGE_FALLBACK_HOURS
             if age_hours < INFERRED_CACHE_FRESH_HOURS:
                 return cached.get("relationships", [])
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to read inferred relationships cache: %s", e)
 
     email_summaries: list[str] = []
@@ -673,7 +674,7 @@ def infer_relationships_with_llm(
                 prios = [p.get("name", "") for p in data.get("priorities", [])]
                 if prios:
                     email_summaries.append(f"From {sender}: {', '.join(prios[:5])}")
-            except Exception as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.warning("Failed to read email file for inference: %s", e)
                 continue
 
@@ -728,7 +729,7 @@ def infer_relationships_with_llm(
                 return inferred[:20]
     except subprocess.TimeoutExpired:
         logger.warning("LLM inference timed out")
-    except Exception as e:
+    except (subprocess.CalledProcessError, OSError, json.JSONDecodeError) as e:
         logger.warning(f"LLM inference failed: {e}")
 
     return []
@@ -780,7 +781,7 @@ def build_strategy_alignment(  # noqa: C901
         try:
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning(
                 "Failed to read email file %s for strategy alignment: %s", f.name, e
             )
@@ -885,7 +886,7 @@ def build_strategy_alignment(  # noqa: C901
                 bridged,
                 len(all_priorities),
             )
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to load ANSTRAT catalog for bridging: %s", e)
 
     cache_file = perf_dir / "jira_hierarchy_cache.json"
@@ -894,18 +895,18 @@ def build_strategy_alignment(  # noqa: C901
         try:
             with open(cache_file, encoding="utf-8") as fh:
                 user_issues = json.load(fh).get("issues", {})
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Failed to load Jira hierarchy cache %s: %s", cache_file, e)
 
     try:
         user_issues = enrich_user_issues_from_jira(year, quarter, user_issues)
-    except Exception as e:
+    except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning(f"Failed to enrich from Jira API: {e}")
 
     gitlab_mrs: list[dict] = []
     try:
         gitlab_mrs = get_quarter_gitlab_mrs(year, quarter)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, urllib.error.URLError) as e:
         logger.warning(f"Failed to load GitLab MRs: {e}")
 
     anstrat_to_user_issues: dict[str, list[str]] = {}
@@ -963,7 +964,7 @@ def build_strategy_alignment(  # noqa: C901
                                     "parent_initiative": anstrat_key,
                                     "source": "anstrat_child_query",
                                 }
-            except Exception as e:
+            except (subprocess.TimeoutExpired, OSError) as e:
                 logger.warning("Failed to query children of %s: %s", anstrat_key, e)
         discovered = sum(len(v) for v in anstrat_to_user_issues.values())
         if discovered:

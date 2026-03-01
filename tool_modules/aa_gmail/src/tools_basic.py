@@ -16,10 +16,13 @@ Setup:
 """
 
 import base64
+import json
 import logging
 import re
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING
+
+from googleapiclient.errors import HttpError
 
 from tool_modules.common import (
     PROJECT_ROOT,
@@ -67,7 +70,7 @@ def get_gmail_service():
     if TOKEN_FILE.exists():
         try:
             creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-        except Exception as exc:
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             logger.debug("Suppressed error: %s", exc)
 
     # Refresh if expired
@@ -76,7 +79,7 @@ def get_gmail_service():
             creds.refresh(Request())
             with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
-        except Exception:
+        except (HttpError, OSError, ValueError, KeyError, json.JSONDecodeError):
             creds = None
 
     # Need to authenticate via calendar first
@@ -90,7 +93,7 @@ def get_gmail_service():
     try:
         service = build("gmail", "v1", credentials=creds)
         return service, None
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return None, f"Failed to build Gmail service: {e}"
 
 
@@ -101,7 +104,7 @@ def _decode_body(payload: dict) -> str:
     if "body" in payload and payload["body"].get("data"):
         try:
             body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
-        except Exception as exc:
+        except (ValueError, KeyError) as exc:
             logger.debug("Suppressed error: %s", exc)
 
     # Check parts for multipart messages
@@ -115,7 +118,7 @@ def _decode_body(payload: dict) -> str:
                             "utf-8"
                         )
                         break
-                    except Exception as exc:
+                    except (ValueError, KeyError) as exc:
                         logger.debug("Suppressed error: %s", exc)
             elif mime_type.startswith("multipart/"):
                 # Recursively check nested parts
@@ -142,7 +145,7 @@ def _format_email_date(date_str: str) -> str:
     try:
         dt = parsedate_to_datetime(date_str)
         return dt.strftime("%Y-%m-%d %H:%M")
-    except Exception:
+    except (ValueError, TypeError):
         return date_str[:20] if len(date_str) > 20 else date_str
 
 
@@ -234,7 +237,7 @@ async def _gmail_list_emails_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to list emails: {e}"
 
 
@@ -298,7 +301,7 @@ async def _gmail_search_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Search failed: {e}"
 
 
@@ -373,7 +376,7 @@ async def _gmail_read_email_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to read email: {e}"
 
 
@@ -432,7 +435,7 @@ async def _gmail_get_thread_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to get thread: {e}"
 
 
@@ -477,7 +480,7 @@ async def _gmail_list_labels_impl() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to list labels: {e}"
 
 
@@ -509,7 +512,7 @@ async def _gmail_unread_count_impl() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to get unread count: {e}"
 
 
@@ -542,7 +545,7 @@ async def _gmail_status_impl() -> str:
             lines.append(f"   Email: {profile.get('emailAddress', '?')}")
             lines.append(f"   Messages: {profile.get('messagesTotal', '?')}")
             lines.append(f"   Threads: {profile.get('threadsTotal', '?')}")
-        except Exception as e:
+        except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
             lines.append(f"   (Could not fetch profile: {e})")
     else:
         lines.append(f"❌ **Not connected:** {error}")

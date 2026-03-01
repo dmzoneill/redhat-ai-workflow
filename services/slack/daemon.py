@@ -30,6 +30,7 @@ Configuration:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -166,7 +167,7 @@ def refresh_slack_credentials() -> bool:
     except subprocess.TimeoutExpired:
         logger.warning("Credential refresh timed out")
         return False
-    except Exception as e:
+    except OSError as e:
         logger.warning("Credential refresh error: %s", e)
         return False
 
@@ -354,7 +355,14 @@ class CommandHandler:
 
             return response, should_send
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             logger.error(f"Error handling command {parsed.command}: {e}", exc_info=True)
             return f"\u274c Error: {str(e)}", True
 
@@ -475,12 +483,19 @@ Format the output for Slack (use *bold*, `code`, bullet points).
                         "result": "success",
                     }
                 )
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
                 pass
 
             return response
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             logger.error(f"Failed to run skill {skill_name}: {e}")
             return f"\u274c Failed to run skill `{skill_name}`: {str(e)}"
 
@@ -523,7 +538,14 @@ Format the output for Slack (use *bold*, `code`, bullet points).
             )
             return response
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             logger.error(f"Failed to run tool {tool_name}: {e}")
             return f"\u274c Failed to run tool `{tool_name}`: {str(e)}"
 
@@ -567,7 +589,7 @@ Format the output for Slack (use *bold*, `code`, bullet points).
                     return {"result": result}
             return {"result": result}
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             logger.error(f"D-Bus call failed: {service}.{method}: {e}")
             return {"error": str(e)}
 
@@ -717,7 +739,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
         except ImportError as e:
             logger.warning(f"Background sync module not available: {e}")
             print(f"⚠️  Background sync not available: {e}")
-        except Exception as e:
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"Failed to start background sync: {e}")
             print(f"⚠️  Background sync failed to start: {e}")
 
@@ -727,7 +749,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 await self._background_sync.stop()
                 logger.info("Background sync stopped")
-            except Exception as e:
+            except (OSError, asyncio.CancelledError) as e:
                 logger.error(f"Error stopping background sync: {e}")
 
     async def _on_system_wake(self):
@@ -744,14 +766,14 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                         f"Slack session still valid: {auth.get('user', 'unknown')}"
                     )
                     print("   ✅ Slack session valid")
-                except Exception as e:
+                except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
                     logger.warning(f"Slack session invalid after wake: {e}")
                     print(f"   ⚠️  Slack session needs refresh: {e}")
                     # Could trigger re-auth here if needed
 
             print("   ✅ Wake handling complete\n")
 
-        except Exception as e:
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.error(f"Error handling system wake: {e}")
             print(f"   ⚠️  Wake handling error: {e}\n")
 
@@ -775,7 +797,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 pending = await self.state_db.get_pending_messages(limit=100)
                 stats["messages_pending"] = len(pending)
-            except Exception as exc:
+            except (OSError, KeyError, IndexError, TypeError) as exc:
                 logger.debug("Suppressed error: %s", exc)
 
         return stats
@@ -927,7 +949,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                         if not stats:
                             logger.warning("Watchdog: Listener not responding")
                             healthy = False
-                    except Exception as e:
+                    except (KeyError, IndexError, TypeError, AttributeError) as e:
                         logger.warning(f"Watchdog: Listener check failed: {e}")
                         healthy = False
 
@@ -936,7 +958,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
                 else:
                     logger.warning("Watchdog: Health check failed, not sending ping")
 
-            except Exception as e:
+            except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
                 logger.error(f"Watchdog loop error: {e}")
 
             # Wait for next interval
@@ -977,7 +999,7 @@ class SlackDaemon(DaemonDBusBase, BaseDaemon):
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
                 self.ui.print_error(str(e))
                 # Track failures for health monitoring
                 if self._dbus_handler:
@@ -1096,13 +1118,20 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                             "source": "slack",
                         }
                     )
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
                     pass
             else:
                 # Fallback: just acknowledge the alert
                 logger.warning("Claude agent not available for alert investigation")
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             logger.error(f"Error handling alert: {e}")
             self.ui.print_error(f"Alert handling failed: {e}")
 
@@ -1208,7 +1237,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 )
 
                 notify_slack_message(msg.channel_name, msg.user_name, msg.text[:100])
-            except Exception as exc:
+            except OSError as exc:
                 logger.debug("Suppressed error: %s", exc)
         else:
             logger.debug(
@@ -1348,7 +1377,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                     user_name=msg.user_name,
                     channel_name=msg.channel_name,
                 )
-            except Exception as e:
+            except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
                 success = False
                 status = "failed"
                 self.ui.print_error(f"Failed to send: {e}")
@@ -1376,7 +1405,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                         "source": "slack",
                     }
                 )
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
                 pass
 
         # Record sent message in D-Bus history
@@ -1484,7 +1513,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                     self._dbus_handler.session = self.session
                 break
 
-            except Exception as e:
+            except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
                 if attempt == 0:
                     print(f"⚠️  Authentication failed: {e}")
                     print("   Attempting to refresh credentials from Chrome...")
@@ -1593,7 +1622,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                         f"Discovered {len(discovered)} DMs via client.counts ({dm_count} DMs, {mpdm_count} MPDMs)"
                     )
                     return discovered
-        except Exception as e:
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
             logger.debug(f"client.counts failed: {e}")
 
         # Method 2: Try channel sections API (sidebar) as fallback
@@ -1615,7 +1644,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                         f"Discovered {len(discovered)} DMs from sidebar ({dm_count} DMs, {mpdm_count} MPDMs)"
                     )
                     return discovered
-        except Exception as exc:
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as exc:
             logger.debug("Suppressed error: %s", exc)
 
         # Method 3: Try conversations.list API (usually blocked on enterprise)
@@ -1637,7 +1666,7 @@ Do NOT just describe what you found - you MUST call slack_send_message to actual
                 logger.info(
                     f"Discovered {len(discovered)} DMs ({dm_count} DMs, {mpdm_count} MPDMs)"
                 )
-        except Exception as e:
+        except (OSError, KeyError, IndexError, TypeError, ValueError) as e:
             if "enterprise_is_restricted" in str(e):
                 logger.info(
                     "DM auto-discovery blocked - use @me watch to get channel IDs"

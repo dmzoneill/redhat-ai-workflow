@@ -128,6 +128,13 @@ MAX_TEXT_PREVIEW_LENGTH = 300
 GMAIL_MAX_RESULTS = 100
 
 
+def _run_rh_issue(args: list[str], timeout: int = 15) -> str:
+    ok, out = run_cmd_sync(["rh-issue"] + args, timeout=timeout)
+    if not ok:
+        raise RuntimeError(out)
+    return out
+
+
 def get_performance_summary_path() -> Path:
     """Get current quarter's performance summary file path."""
     now = datetime.now()
@@ -3395,25 +3402,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         }
 
     @staticmethod
-    def _refresh_issue_hierarchy_from_jira(  # noqa: C901
+    def _refresh_fetch_aap_issues(
         issue_keys: dict[str, dict],
         issue_info: dict[str, dict],
-        perf_dir: Path,
-    ) -> dict[str, dict]:
-        """Fetch issue metadata from Jira via subprocess (blocking I/O)."""
-
-        def _rh_issue(args: list[str], timeout: int = 15) -> str:
-            """Run rh-issue with proper user shell env (bashrc, PATH, JIRA_JPAT)."""
-            ok, out = run_cmd_sync(["rh-issue"] + args, timeout=timeout)
-            if not ok:
-                raise RuntimeError(out)
-            return out
-
+    ) -> None:
         aap_keys = [k for k in issue_keys if k.startswith("AAP-")]
-
         for key in aap_keys[:MAX_HIERARCHY_KEYS_PER_BATCH]:
             try:
-                result = _rh_issue(["view-issue", key])
+                result = _run_rh_issue(["view-issue", key])
                 info: dict[str, str] = {"key": key, "type": "story"}
                 desc_lines: list[str] = []
                 in_description = False
@@ -3463,16 +3459,15 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             except Exception as e:
                 logger.debug("Failed to fetch %s: %s", key, e)
 
-        epic_keys_set: set[str] = set()
-        for info_val in issue_info.values():
-            epic_key = info_val.get("epic", "")
-            if epic_key and epic_key.startswith("AAP-"):
-                epic_keys_set.add(epic_key)
-
+    @staticmethod
+    def _refresh_fetch_epics(
+        epic_keys_set: set[str],
+        issue_info: dict[str, dict],
+    ) -> None:
         for epic_key in epic_keys_set:
             if epic_key not in issue_info:
                 try:
-                    result = _rh_issue(["view-issue", epic_key])
+                    result = _run_rh_issue(["view-issue", epic_key])
                     einfo: dict[str, str] = {"key": epic_key, "issue_type": "Epic"}
                     for line in result.split("\n"):
                         m = re.match(
@@ -3494,10 +3489,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 except Exception as e:
                     logger.debug("Failed to fetch epic %s: %s", epic_key, e)
 
-        # Discover user-assigned ANSTRATs (exclude Closed/Done)
+    @staticmethod
+    def _refresh_discover_user_anstrats(
+        issue_info: dict[str, dict],
+    ) -> set[str]:
         user_assigned_anstrats: set[str] = set()
         try:
-            result = _rh_issue(
+            result = _run_rh_issue(
                 [
                     "search",
                     "project = ANSTRAT AND assignee = currentUser() "
@@ -3528,57 +3526,55 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             }
         except Exception as e:
             logger.debug("Failed to search user-assigned ANSTRATs: %s", e)
+        return user_assigned_anstrats
 
-        # Collect ANSTRATs discovered as parents of user's epics
-        hierarchy_anstrats: set[str] = set()
-        for info_val in issue_info.values():
-            parent = info_val.get("parent_initiative", "")
-            if parent.startswith("ANSTRAT-"):
-                hierarchy_anstrats.add(parent)
+    @staticmethod
+    def _refresh_map_unmapped_epics(
+        epic_keys_set: set[str],
+        issue_info: dict[str, dict],
+        user_assigned_anstrats: set[str],
+        hierarchy_anstrats: set[str],
+    ) -> None:
+        unmapped_epics = {
+            k
+            for k in epic_keys_set
+            if not issue_info.get(k, {}).get("parent_initiative")
+        }
+        if not unmapped_epics:
+            return
+        epic_list_str = ", ".join(sorted(epic_keys_set))
+        for anstrat_key in user_assigned_anstrats:
+            if not unmapped_epics:
+                break
+            try:
+                jql = f'"Parent Link" = {anstrat_key}' f" AND key in ({epic_list_str})"
+                result = _run_rh_issue(
+                    ["search", jql, "--max-results", "20"],
+                    timeout=20,
+                )
+                child_epics = re.findall(r"(AAP-\d+)", result)
+                for ce in child_epics:
+                    if ce in issue_info:
+                        issue_info[ce]["parent_initiative"] = anstrat_key
+                    else:
+                        issue_info[ce] = {
+                            "key": ce,
+                            "parent_initiative": anstrat_key,
+                        }
+                    unmapped_epics.discard(ce)
+                    hierarchy_anstrats.add(anstrat_key)
+            except Exception as e:
+                logger.debug("Failed to query children of %s: %s", anstrat_key, e)
 
-        # For epics still unmapped, query user-assigned ANSTRATs for children
-        if epic_keys_set:
-            unmapped_epics = {
-                k
-                for k in epic_keys_set
-                if not issue_info.get(k, {}).get("parent_initiative")
-            }
-            if unmapped_epics:
-                epic_list_str = ", ".join(sorted(epic_keys_set))
-                for anstrat_key in user_assigned_anstrats:
-                    if not unmapped_epics:
-                        break
-                    try:
-                        jql = (
-                            f'"Parent Link" = {anstrat_key}'
-                            f" AND key in ({epic_list_str})"
-                        )
-                        result = _rh_issue(
-                            ["search", jql, "--max-results", "20"],
-                            timeout=20,
-                        )
-                        child_epics = re.findall(r"(AAP-\d+)", result)
-                        for ce in child_epics:
-                            if ce in issue_info:
-                                issue_info[ce]["parent_initiative"] = anstrat_key
-                            else:
-                                issue_info[ce] = {
-                                    "key": ce,
-                                    "parent_initiative": anstrat_key,
-                                }
-                            unmapped_epics.discard(ce)
-                            hierarchy_anstrats.add(anstrat_key)
-                    except Exception as e:
-                        logger.debug(
-                            "Failed to query children of %s: %s", anstrat_key, e
-                        )
-
-        # Discover child epics assigned to user under user-assigned ANSTRATs
-        relevant_anstrats = user_assigned_anstrats | hierarchy_anstrats
+    @staticmethod
+    def _refresh_discover_child_epics(
+        issue_info: dict[str, dict],
+        relevant_anstrats: set[str],
+    ) -> None:
         for anstrat_key in relevant_anstrats:
             try:
                 jql = f'"Parent Link" = {anstrat_key}' f" AND assignee = currentUser()"
-                result = _rh_issue(
+                result = _run_rh_issue(
                     ["search", jql, "--max-results", "20"],
                     timeout=20,
                 )
@@ -3605,166 +3601,159 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             except Exception as e:
                 logger.debug("Failed to query user children of %s: %s", anstrat_key, e)
 
-        # Track which ANSTRATs are user-relevant for display filtering
-        issue_info["_user_relevant_anstrats"] = {
-            "keys": sorted(user_assigned_anstrats | hierarchy_anstrats)
-        }
-
+    @staticmethod
+    def _refresh_save_hierarchy_cache(
+        issue_info: dict[str, dict],
+        perf_dir: Path,
+    ) -> None:
         perf_dir.mkdir(parents=True, exist_ok=True)
         cache_file = perf_dir / "jira_hierarchy_cache.json"
         cache_data = {"issues": issue_info, "updated": datetime.now().isoformat()}
         with open(cache_file, "w", encoding="utf-8") as fh:
             json.dump(cache_data, fh, indent=2)
 
+    @staticmethod
+    def _refresh_issue_hierarchy_from_jira(
+        issue_keys: dict[str, dict],
+        issue_info: dict[str, dict],
+        perf_dir: Path,
+    ) -> dict[str, dict]:
+        """Fetch issue metadata from Jira via subprocess (blocking I/O)."""
+        StatsDaemon._refresh_fetch_aap_issues(issue_keys, issue_info)
+
+        epic_keys_set: set[str] = set()
+        for info_val in issue_info.values():
+            epic_key = info_val.get("epic", "")
+            if epic_key and epic_key.startswith("AAP-"):
+                epic_keys_set.add(epic_key)
+
+        StatsDaemon._refresh_fetch_epics(epic_keys_set, issue_info)
+        user_assigned_anstrats = StatsDaemon._refresh_discover_user_anstrats(issue_info)
+
+        hierarchy_anstrats: set[str] = set()
+        for info_val in issue_info.values():
+            parent = info_val.get("parent_initiative", "")
+            if parent.startswith("ANSTRAT-"):
+                hierarchy_anstrats.add(parent)
+
+        StatsDaemon._refresh_map_unmapped_epics(
+            epic_keys_set, issue_info, user_assigned_anstrats, hierarchy_anstrats
+        )
+        relevant_anstrats = user_assigned_anstrats | hierarchy_anstrats
+        StatsDaemon._refresh_discover_child_epics(issue_info, relevant_anstrats)
+
+        issue_info["_user_relevant_anstrats"] = {
+            "keys": sorted(user_assigned_anstrats | hierarchy_anstrats)
+        }
+
+        StatsDaemon._refresh_save_hierarchy_cache(issue_info, perf_dir)
         return issue_info
 
-    async def _handle_get_issue_hierarchy(self, **kwargs) -> dict:  # noqa: C901
-        """Extract issue keys from daily data and build hierarchy tree."""
-        from services.stats.scorer import COMPETENCY_DEFS
-
-        refresh = kwargs.get("refresh_from_jira", False)
-        now = datetime.now()
-        year = now.year
-        quarter = (now.month - 1) // 3 + 1
-
-        perf_dir = self._get_perf_dir(year, quarter)
-        daily_dir = self._get_daily_dir(year, quarter)
-        cache_file = perf_dir / "jira_hierarchy_cache.json"
-
-        comp_to_pillar: dict[str, str] = {}
-        pillar_short: dict[str, str] = {
-            "Technical Contribution": "technical",
-            "Leadership": "leadership",
-            "Mentorship": "mentorship",
-            "End-to-End Delivery": "delivery",
-        }
-        for cid, defn in COMPETENCY_DEFS.items():
-            cat = defn.get("category", "Technical Contribution")
-            comp_to_pillar[cid] = pillar_short.get(cat, "technical")
-
-        emails_dir = self._get_executive_emails_dir(year, quarter)
-        strategy_index = build_strategy_context_index(emails_dir)
-        strat_issue_keys = strategy_index.get("all_issue_keys", {})
-
+    @staticmethod
+    def _hierarchy_collect_issue_keys(
+        daily_dir: Path,
+        comp_to_pillar: dict[str, str],
+    ) -> dict[str, dict]:
         issue_keys: dict[str, dict] = {}
-        if daily_dir.exists():
-            for f in sorted(daily_dir.glob("*.json")):
-                try:
-                    with open(f, encoding="utf-8") as fh:
-                        data = json.load(fh)
-                    for ev in data.get("events", []):
-                        title = ev.get("title", "")
-                        ev_points = ev.get("points", {})
-                        pts = sum(ev_points.values())
-                        ev_scope = ev.get("scope", "commit")
-                        ev_strategy = ev.get("strategy_aligned", False)
-                        ev_strat_names = ev.get("strategy_priorities", [])
-
-                        pillar_pts: dict[str, int] = {
-                            "technical": 0,
-                            "leadership": 0,
-                            "mentorship": 0,
-                            "delivery": 0,
-                        }
-                        for comp_id, comp_pts in ev_points.items():
-                            pillar = comp_to_pillar.get(comp_id, "technical")
-                            pillar_pts[pillar] += comp_pts
-
-                        keys_in_title = re.findall(r"((?:AAP|ANSTRAT)-\d+)", title)
-                        for key in keys_in_title:
-                            if key not in issue_keys:
-                                issue_keys[key] = {
-                                    "points": 0,
-                                    "titles": [],
-                                    "event_count": 0,
-                                    "strategy_aligned": False,
-                                    "strategy_names": set(),
-                                    "pillar_points": {
-                                        "technical": 0,
-                                        "leadership": 0,
-                                        "mentorship": 0,
-                                        "delivery": 0,
-                                    },
-                                    "scope_points": {},
-                                }
-                            ik = issue_keys[key]
-                            ik["points"] += pts
-                            ik["event_count"] += 1
-                            if title not in ik["titles"]:
-                                ik["titles"].append(title[:120])
-                            if ev_strategy:
-                                ik["strategy_aligned"] = True
-                            for sn in ev_strat_names:
-                                ik["strategy_names"].add(sn)
-                            for p, v in pillar_pts.items():
-                                ik["pillar_points"][p] += v
-                            ik["scope_points"][ev_scope] = (
-                                ik["scope_points"].get(ev_scope, 0) + pts
-                            )
-                except Exception as e:
-                    logger.warning("Failed to process daily event for hierarchy: %s", e)
-                    continue
-
-        for key, ik in issue_keys.items():
-            if not ik["strategy_aligned"] and key in strat_issue_keys:
-                ik["strategy_aligned"] = True
-                for sn in strat_issue_keys[key]:
-                    ik["strategy_names"].add(sn)
-            ik["strategy_names"] = sorted(ik["strategy_names"])
-
-        def extract_keywords(titles: list[str]) -> list[str]:
-            kw_patterns = [
-                "billing",
-                "mock",
-                "test",
-                "ci/cd",
-                "pipeline",
-                "deploy",
-                "api",
-                "fix",
-                "feat",
-                "refactor",
-                "config",
-                "auth",
-                "grafana",
-                "monitoring",
-                "alert",
-                "release",
-                "review",
-                "docs",
-                "migration",
-                "performance",
-                "security",
-                "integration",
-            ]
-            found = set()
-            for t in titles:
-                t_lower = t.lower()
-                for kw in kw_patterns:
-                    if kw in t_lower:
-                        found.add(kw)
-            return sorted(found)
-
-        cached: dict = {}
-        if cache_file.exists() and not refresh:
+        if not daily_dir.exists():
+            return issue_keys
+        for f in sorted(daily_dir.glob("*.json")):
             try:
-                with open(cache_file, encoding="utf-8") as fh:
-                    cached = json.load(fh)
-            except (json.JSONDecodeError, OSError) as e:
-                logger.warning("Failed to load hierarchy cache: %s", e)
-                pass
+                with open(f, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                for ev in data.get("events", []):
+                    title = ev.get("title", "")
+                    ev_points = ev.get("points", {})
+                    pts = sum(ev_points.values())
+                    ev_scope = ev.get("scope", "commit")
+                    ev_strategy = ev.get("strategy_aligned", False)
+                    ev_strat_names = ev.get("strategy_priorities", [])
 
-        issue_info: dict[str, dict] = cached.get("issues", {})
+                    pillar_pts: dict[str, int] = {
+                        "technical": 0,
+                        "leadership": 0,
+                        "mentorship": 0,
+                        "delivery": 0,
+                    }
+                    for comp_id, comp_pts in ev_points.items():
+                        pillar = comp_to_pillar.get(comp_id, "technical")
+                        pillar_pts[pillar] += comp_pts
 
-        if refresh and issue_keys:
-            issue_info = await asyncio.to_thread(
-                self._refresh_issue_hierarchy_from_jira,
-                issue_keys,
-                issue_info,
-                perf_dir,
-            )
+                    keys_in_title = re.findall(r"((?:AAP|ANSTRAT)-\d+)", title)
+                    for key in keys_in_title:
+                        if key not in issue_keys:
+                            issue_keys[key] = {
+                                "points": 0,
+                                "titles": [],
+                                "event_count": 0,
+                                "strategy_aligned": False,
+                                "strategy_names": set(),
+                                "pillar_points": {
+                                    "technical": 0,
+                                    "leadership": 0,
+                                    "mentorship": 0,
+                                    "delivery": 0,
+                                },
+                                "scope_points": {},
+                            }
+                        ik = issue_keys[key]
+                        ik["points"] += pts
+                        ik["event_count"] += 1
+                        if title not in ik["titles"]:
+                            ik["titles"].append(title[:120])
+                        if ev_strategy:
+                            ik["strategy_aligned"] = True
+                        for sn in ev_strat_names:
+                            ik["strategy_names"].add(sn)
+                        for p, v in pillar_pts.items():
+                            ik["pillar_points"][p] += v
+                        ik["scope_points"][ev_scope] = (
+                            ik["scope_points"].get(ev_scope, 0) + pts
+                        )
+            except Exception as e:
+                logger.warning("Failed to process daily event for hierarchy: %s", e)
+                continue
+        return issue_keys
 
-        # Build the tree: ANSTRAT -> Epic -> Issue
+    @staticmethod
+    def _hierarchy_extract_keywords(titles: list[str]) -> list[str]:
+        kw_patterns = [
+            "billing",
+            "mock",
+            "test",
+            "ci/cd",
+            "pipeline",
+            "deploy",
+            "api",
+            "fix",
+            "feat",
+            "refactor",
+            "config",
+            "auth",
+            "grafana",
+            "monitoring",
+            "alert",
+            "release",
+            "review",
+            "docs",
+            "migration",
+            "performance",
+            "security",
+            "integration",
+        ]
+        found = set()
+        for t in titles:
+            t_lower = t.lower()
+            for kw in kw_patterns:
+                if kw in t_lower:
+                    found.add(kw)
+        return sorted(found)
+
+    @staticmethod
+    def _hierarchy_build_tree(
+        issue_keys: dict[str, dict],
+        issue_info: dict[str, dict],
+    ) -> tuple[dict[str, dict], dict[str, dict], list[dict], list[dict]]:
         strategies: dict[str, dict] = {}
         epics: dict[str, dict] = {}
         uncategorized: list[dict] = []
@@ -3772,8 +3761,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         def _empty_pillar() -> dict:
             return {"technical": 0, "leadership": 0, "mentorship": 0, "delivery": 0}
 
-        def _summary_from_titles(titles: list[str], issue_key: str) -> str:
-            """Extract a display summary from event titles when Jira summary is missing."""
+        def _summary_from_titles(titles: list[str]) -> str:
             for t in titles:
                 cleaned = re.sub(r"(?:AAP|ANSTRAT)-\d+\s*[-:]\s*", "", t).strip()
                 if cleaned and len(cleaned) > 5:
@@ -3785,14 +3773,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             if jira_summary:
                 jira_summary = html_unescape(jira_summary)
             if not jira_summary:
-                jira_summary = _summary_from_titles(data.get("titles", []), key)
+                jira_summary = _summary_from_titles(data.get("titles", []))
             node = {
                 "key": key,
                 "summary": jira_summary,
                 "type": issue_info.get(key, {}).get("issue_type", "story").lower(),
                 "points": data["points"],
                 "event_count": data["event_count"],
-                "keywords": extract_keywords(data["titles"]),
+                "keywords": StatsDaemon._hierarchy_extract_keywords(data["titles"]),
                 "strategy_aligned": data.get("strategy_aligned", False),
                 "strategy_names": data.get("strategy_names", []),
                 "pillar_points": data.get("pillar_points", _empty_pillar()),
@@ -3876,8 +3864,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             if not attached:
                 unattached_epics.append(epic_node)
 
-        # Add user-relevant ANSTRATs that have no events yet
-        # Only ANSTRATs the user is assigned to or that are parents of user epics
         relevant_set = set(
             issue_info.get("_user_relevant_anstrats", {}).get("keys", [])
         )
@@ -3901,6 +3887,15 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     "children": [],
                 }
 
+        return strategies, epics, uncategorized, unattached_epics
+
+    @staticmethod
+    def _hierarchy_sort_and_aggregate(
+        strategies: dict[str, dict],
+        uncategorized: list[dict],
+        unattached_epics: list[dict],
+        issue_keys: dict[str, dict],
+    ) -> tuple[list[dict], list[dict], list[dict], dict]:
         strat_list = sorted(strategies.values(), key=lambda x: -x["points"])
         for s in strat_list:
             s["children"] = sorted(s["children"], key=lambda x: -x["points"])
@@ -3930,8 +3925,87 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 agg_scope[sc] = agg_scope.get(sc, 0) + sv
             for p in ("technical", "leadership", "mentorship", "delivery"):
                 agg_pillar[p] += ik.get("pillar_points", {}).get(p, 0)
-            for kw in extract_keywords(ik.get("titles", [])):
+            for kw in StatsDaemon._hierarchy_extract_keywords(ik.get("titles", [])):
                 agg_tags[kw] = agg_tags.get(kw, 0) + 1
+
+        summary = {
+            "total_points": total_points,
+            "aligned_points": aligned_points,
+            "unaligned_points": total_points - aligned_points,
+            "alignment_pct": (
+                round(aligned_points / total_points * 100) if total_points else 0
+            ),
+            "scope_points": agg_scope,
+            "pillar_points": agg_pillar,
+            "tag_counts": dict(sorted(agg_tags.items(), key=lambda x: -x[1])),
+        }
+        return strat_list, unattached_epics, uncategorized, summary
+
+    async def _handle_get_issue_hierarchy(self, **kwargs) -> dict:
+        """Extract issue keys from daily data and build hierarchy tree."""
+        from services.stats.scorer import COMPETENCY_DEFS
+
+        refresh = kwargs.get("refresh_from_jira", False)
+        now = datetime.now()
+        year = now.year
+        quarter = (now.month - 1) // 3 + 1
+
+        perf_dir = self._get_perf_dir(year, quarter)
+        daily_dir = self._get_daily_dir(year, quarter)
+        cache_file = perf_dir / "jira_hierarchy_cache.json"
+
+        comp_to_pillar: dict[str, str] = {}
+        pillar_short: dict[str, str] = {
+            "Technical Contribution": "technical",
+            "Leadership": "leadership",
+            "Mentorship": "mentorship",
+            "End-to-End Delivery": "delivery",
+        }
+        for cid, defn in COMPETENCY_DEFS.items():
+            cat = defn.get("category", "Technical Contribution")
+            comp_to_pillar[cid] = pillar_short.get(cat, "technical")
+
+        emails_dir = self._get_executive_emails_dir(year, quarter)
+        strategy_index = build_strategy_context_index(emails_dir)
+        strat_issue_keys = strategy_index.get("all_issue_keys", {})
+
+        issue_keys = StatsDaemon._hierarchy_collect_issue_keys(
+            daily_dir, comp_to_pillar
+        )
+        for key, ik in issue_keys.items():
+            if not ik["strategy_aligned"] and key in strat_issue_keys:
+                ik["strategy_aligned"] = True
+                for sn in strat_issue_keys[key]:
+                    ik["strategy_names"].add(sn)
+            ik["strategy_names"] = sorted(ik["strategy_names"])
+
+        cached: dict = {}
+        if cache_file.exists() and not refresh:
+            try:
+                with open(cache_file, encoding="utf-8") as fh:
+                    cached = json.load(fh)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load hierarchy cache: %s", e)
+                pass
+
+        issue_info: dict[str, dict] = cached.get("issues", {})
+
+        if refresh and issue_keys:
+            issue_info = await asyncio.to_thread(
+                self._refresh_issue_hierarchy_from_jira,
+                issue_keys,
+                issue_info,
+                perf_dir,
+            )
+
+        strategies, _, uncategorized, unattached_epics = (
+            StatsDaemon._hierarchy_build_tree(issue_keys, issue_info)
+        )
+        strat_list, unattached_epics, uncategorized, summary = (
+            StatsDaemon._hierarchy_sort_and_aggregate(
+                strategies, uncategorized, unattached_epics, issue_keys
+            )
+        )
 
         return {
             "success": True,
@@ -3940,17 +4014,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             "uncategorized": uncategorized,
             "total_issues": len(issue_keys),
             "cached": not refresh and bool(cached),
-            "summary": {
-                "total_points": total_points,
-                "aligned_points": aligned_points,
-                "unaligned_points": total_points - aligned_points,
-                "alignment_pct": (
-                    round(aligned_points / total_points * 100) if total_points else 0
-                ),
-                "scope_points": agg_scope,
-                "pillar_points": agg_pillar,
-                "tag_counts": dict(sorted(agg_tags.items(), key=lambda x: -x[1])),
-            },
+            "summary": summary,
         }
 
     # ==================== Report Export ====================

@@ -428,7 +428,8 @@ class SlackPersonaSync:
                     try:
                         dt = datetime.fromtimestamp(float(ts))
                         datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except Exception:
+                    except (ValueError, TypeError, OverflowError, OSError) as e:
+                        logger.debug("Failed to parse timestamp %s: %s", ts, e)
                         datetime_str = ""
 
                     messages.append(
@@ -476,7 +477,17 @@ class SlackPersonaSync:
                                     reply_datetime_str = reply_dt.strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     )
-                                except Exception:
+                                except (
+                                    ValueError,
+                                    TypeError,
+                                    OverflowError,
+                                    OSError,
+                                ) as e:
+                                    logger.debug(
+                                        "Failed to parse reply timestamp %s: %s",
+                                        reply_ts,
+                                        e,
+                                    )
                                     reply_datetime_str = ""
 
                                 messages.append(
@@ -494,7 +505,7 @@ class SlackPersonaSync:
                                         "datetime_str": reply_datetime_str,
                                     }
                                 )
-                        except Exception as e:
+                        except (OSError, ValueError, KeyError, AttributeError) as e:
                             logger.debug(f"Error fetching thread {thread_ts}: {e}")
 
                 # Check for more pages
@@ -506,7 +517,8 @@ class SlackPersonaSync:
                 if not cursor:
                     break
 
-        except Exception as e:
+        except (OSError, ValueError, KeyError, AttributeError) as e:
+            logger.debug("Channel fetch error for %s: %s", display_name, e)
             await progress.update_worker(
                 worker_id=worker_id,
                 channel=display_name,

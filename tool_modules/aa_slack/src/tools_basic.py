@@ -83,7 +83,7 @@ async def _send_via_dbus(
         else:
             logger.debug("D-Bus connect failed")
             return None
-    except Exception as e:
+    except (ImportError, OSError, AttributeError, KeyError) as e:
         # D-Bus not available, will fall back to direct API
         logger.debug(f"D-Bus not available: {e}")
         return None
@@ -115,7 +115,11 @@ async def get_manager():
                 sys.modules["slack_listener_dynamic"] = mod
                 spec.loader.exec_module(mod)
                 SlackListenerManager = mod.SlackListenerManager
-            except Exception as e:
+            except (
+                ImportError,
+                AttributeError,
+                FileNotFoundError,
+            ) as e:
                 logger.error(f"Failed to load SlackListenerManager dynamically: {e}")
                 # Fallback to standard imports
                 try:
@@ -195,7 +199,7 @@ async def _slack_dm_gitlab_user_impl(
             }
         )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e), "success": False})
 
 
@@ -223,7 +227,7 @@ async def _slack_get_user_impl(user_id: str) -> str:
             indent=2,
         )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e)})
 
 
@@ -256,7 +260,7 @@ async def _slack_list_channels_impl(types: str, limit: int) -> str:
             indent=2,
         )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e)})
 
 
@@ -325,7 +329,7 @@ async def _slack_post_team_impl(text: str, thread_ts: str) -> str:
             }
         )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e), "success": False})
 
 
@@ -358,7 +362,7 @@ async def _slack_search_messages_impl(query: str, count: int) -> str:
             indent=2,
         )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e)})
 
 
@@ -461,7 +465,7 @@ async def _slack_send_message_impl(
                 }
             )
 
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"error": str(e), "success": False})
 
 
@@ -503,7 +507,7 @@ async def _query_via_dbus(method_name: str, *args) -> dict | None:
             await client.disconnect()
             return result
         return None
-    except Exception as e:
+    except (ImportError, OSError, AttributeError, KeyError) as e:
         logger.debug(f"D-Bus query failed: {e}")
         return None
 
@@ -689,7 +693,7 @@ async def _slack_find_channel_impl(query: str, member_only: bool) -> str:
             },
             indent=2,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -747,7 +751,7 @@ async def _slack_find_user_impl(query: str) -> str:
             },
             indent=2,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -793,7 +797,7 @@ async def _slack_list_my_channels_impl() -> str:
             },
             indent=2,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -802,7 +806,7 @@ async def _slack_resolve_target_impl(target: str) -> str:
     try:
         result = await _query_knowledge_cache("resolve_target", target)
         return json.dumps(result, indent=2)
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -849,7 +853,7 @@ async def _slack_list_groups_impl() -> str:
             },
             indent=2,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -858,7 +862,7 @@ async def _slack_cache_stats_impl() -> str:
     try:
         result = await _query_knowledge_cache("get_channel_cache_stats")
         return json.dumps(result, indent=2)
-    except Exception as e:
+    except (OSError, ValueError, KeyError, AttributeError, json.JSONDecodeError) as e:
         return json.dumps({"success": False, "error": str(e)})
 
 
@@ -914,7 +918,13 @@ def register_tools(server: FastMCP) -> int:
                 },
                 indent=2,
             )
-        except Exception as e:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            json.JSONDecodeError,
+        ) as e:
             return json.dumps({"error": str(e)})
 
     @server.resource("slack://listener_status")
@@ -924,7 +934,13 @@ def register_tools(server: FastMCP) -> int:
             manager = await get_manager()
             status = await manager.get_status()
             return json.dumps(status, indent=2)
-        except Exception as e:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            json.JSONDecodeError,
+        ) as e:
             return json.dumps({"error": str(e), "status": "error"})
 
     # ==================== Message Tools ====================

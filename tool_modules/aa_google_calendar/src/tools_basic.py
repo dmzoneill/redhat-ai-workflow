@@ -15,11 +15,13 @@ Setup:
 3. Run the server once to complete OAuth flow and save token.json
 """
 
+import json
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastmcp import FastMCP
+from googleapiclient.errors import HttpError
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import (  # noqa: E402  # Sets up sys.path
@@ -60,7 +62,7 @@ def _try_load_oauth_token(credentials_cls, scopes):
     if TOKEN_FILE.exists():
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
-        except Exception as exc:
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             logger.debug("Suppressed error: %s", exc)
     return None
 
@@ -73,7 +75,7 @@ def _try_refresh_credentials(creds, request_cls):
             with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds
-        except Exception as exc:
+        except (HttpError, OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             logger.debug("Suppressed error: %s", exc)
     return None
 
@@ -85,7 +87,7 @@ def _try_service_account(service_account, scopes):
             return service_account.Credentials.from_service_account_file(
                 str(SERVICE_ACCOUNT_FILE), scopes=scopes
             )
-        except Exception as exc:
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             logger.debug("Suppressed error: %s", exc)
     return None
 
@@ -104,7 +106,13 @@ def _try_oauth_flow(scopes):
             with open(TOKEN_FILE, "w", encoding="utf-8") as f:
                 f.write(creds.to_json())
             return creds, None
-        except Exception as e:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            json.JSONDecodeError,
+        ) as e:
             return None, f"OAuth flow failed: {e}"
     return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
 
@@ -145,7 +153,7 @@ def get_calendar_service():
     try:
         service = build("calendar", "v3", credentials=creds)
         return service, None
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return None, f"Failed to build calendar service: {e}"
 
 
@@ -185,7 +193,7 @@ def get_freebusy(service, calendars: list[str], start: datetime, end: datetime) 
                 busy_info[email] = cal_info.get("busy", [])
 
         return busy_info
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return {"error": str(e)}
 
 
@@ -229,7 +237,7 @@ def find_free_slots(
                 start = start.astimezone(tz)
                 end = end.astimezone(tz)
                 all_busy.append((start, end))
-            except Exception:
+            except (ValueError, TypeError, KeyError):
                 continue
 
     # Sort busy periods by start time
@@ -371,7 +379,7 @@ def find_existing_meeting(
 
         return None
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return {"error": str(e)}
 
 
@@ -490,7 +498,7 @@ async def _google_calendar_check_mutual_availability_impl(
     try:
         profile = service.calendars().get(calendarId="primary").execute()
         my_email = profile.get("id", "primary")
-    except Exception:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError):
         my_email = "primary"
 
     calendars_to_check = [my_email, attendee_email]
@@ -672,7 +680,7 @@ async def _google_calendar_list_events_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to list events: {e}"
 
 
@@ -849,7 +857,7 @@ def _find_next_available_slot(service, now, attendee_email: str, duration_minute
     try:
         profile = service.calendars().get(calendarId="primary").execute()
         my_email = profile.get("id", "primary")
-    except Exception:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError):
         my_email = "primary"
 
     calendars_to_check = [my_email, attendee_email]
@@ -1033,7 +1041,7 @@ async def _google_calendar_schedule_meeting_impl(
 
         return "\n".join(result)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to create event: {e}"
 
 
@@ -1085,7 +1093,7 @@ async def _google_calendar_status_impl() -> str:
             calendar = service.calendars().get(calendarId="primary").execute()
             lines.append(f"   Calendar: {calendar.get('summary', 'Primary')}")
             lines.append(f"   Email: {calendar.get('id', 'Unknown')}")
-        except Exception as e:
+        except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
             lines.append(f"   (Could not fetch calendar details: {e})")
     else:
         lines.append(f"❌ **Not connected:** {error}")
@@ -1196,7 +1204,7 @@ async def _google_calendar_list_calendars_impl() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to list calendars: {e}"
 
 
@@ -1225,7 +1233,7 @@ async def _google_calendar_list_events_from_impl(
         try:
             cal_info = service.calendars().get(calendarId=calendar_id).execute()
             cal_name = cal_info.get("summary", calendar_id)
-        except Exception:
+        except (HttpError, OSError, ValueError, KeyError, AttributeError):
             cal_name = calendar_id
 
         events_result = (
@@ -1310,7 +1318,7 @@ async def _google_calendar_list_events_from_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         error_str = str(e)
         if "404" in error_str or "notFound" in error_str:
             return f"❌ Calendar not found: `{calendar_id}`\n\nMake sure the calendar is shared with your account."
@@ -1432,7 +1440,7 @@ async def _google_calendar_get_events_with_meet_impl(
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except (HttpError, OSError, ValueError, KeyError, AttributeError) as e:
         return f"❌ Failed to get events: {e}"
 
 

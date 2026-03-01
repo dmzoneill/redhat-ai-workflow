@@ -39,6 +39,8 @@ import os
 from datetime import datetime, time
 from pathlib import Path
 
+import yaml
+
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
 from services.base.daemon import BaseDaemon
@@ -376,7 +378,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         try:
             await self._refresh_from_jira()
             return {"success": True, "message": "Refreshed from Jira"}
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             return {"success": False, "error": str(e)}
 
     async def _handle_enable(self, **kwargs) -> dict:
@@ -554,7 +563,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             state = self._load_state()
             history = state.get("sprint_history", [])
             return {"success": True, "history": history}
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             logger.error(f"Failed to get sprint history: {e}")
             return {"success": False, "error": str(e), "history": []}
 
@@ -580,7 +589,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 trace = yaml.safe_load(f)
 
             return {"success": True, "trace": trace}
-        except Exception as e:
+        except (OSError, yaml.YAMLError) as e:
             logger.error(f"Failed to get trace for {issue_key}: {e}")
             return {"success": False, "error": str(e)}
 
@@ -610,13 +619,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                                     "started_at": trace.get("started_at", ""),
                                 }
                             )
-                    except Exception as e:
+                    except (OSError, yaml.YAMLError) as e:
                         logger.warning(f"Failed to parse trace {trace_file}: {e}")
 
             # Sort by started_at descending
             traces.sort(key=lambda t: t.get("started_at", ""), reverse=True)
             return {"success": True, "traces": traces}
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Failed to list traces: {e}")
             return {"success": False, "error": str(e), "traces": []}
 
@@ -643,7 +652,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             state = self._load_state()
             self._save_state(state)
             return {"success": True, "file": str(SPRINT_STATE_FILE)}
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             return {"success": False, "error": str(e)}
 
     async def _handle_start_issue(self, params: dict) -> dict:
@@ -910,7 +919,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             return {"success": False, "error": "Failed to create Cursor chat"}
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             logger.error(f"Failed to open {issue_key} in Cursor: {e}")
             return {"success": False, "error": str(e)}
 
@@ -1024,7 +1033,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     state["nextSprint"] = None
 
                 return state
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             logger.error(f"Failed to load state: {e}")
         return self._default_state()
 
@@ -1050,14 +1059,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 with os.fdopen(temp_fd, "w") as f:
                     json.dump(sprint_state, f, indent=2, default=str)
                 Path(temp_path).replace(SPRINT_STATE_FILE)
-            except Exception:
+            except (OSError, TypeError):
                 try:
                     Path(temp_path).unlink()
                 except OSError as exc:
                     logger.debug("OS operation failed: %s", exc)
                 raise
 
-        except Exception as e:
+        except (OSError, TypeError) as e:
             logger.error(f"Failed to save state: {e}")
 
     def _export_workflow_config(self) -> dict:
@@ -1300,7 +1309,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             )
             self._last_jira_refresh = datetime.now()
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             logger.error(f"Failed to refresh sprint: {e}")
             import traceback
 
@@ -1358,7 +1374,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             try:
                 await self._check_single_review_issue(issue, dont_merge_patterns, state)
-            except Exception as e:
+            except (
+                OSError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+                AttributeError,
+            ) as e:
                 logger.error(f"Error checking review issue {issue_key}: {e}")
                 continue
 
@@ -1476,7 +1499,14 @@ Also output the MR ID if found: [MR_ID: <number>]
             elif mr_status == "NO_MR":
                 logger.warning(f"{issue_key}: No MR found but issue is in Review")
 
-        except Exception as e:
+        except (
+            OSError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ) as e:
             logger.error(f"Error checking MR status for {issue_key}: {e}")
 
     async def _merge_and_close(
@@ -1581,7 +1611,13 @@ Also output the MR ID if found: [MR_ID: <number>]
                                 "source": "sprint",
                             }
                         )
-                    except Exception:
+                    except (
+                        OSError,
+                        json.JSONDecodeError,
+                        KeyError,
+                        IndexError,
+                        TypeError,
+                    ):
                         pass
                 else:
                     logger.warning(f"Merge/close failed for {issue_key}: {error}")
@@ -1596,7 +1632,14 @@ Also output the MR ID if found: [MR_ID: <number>]
             else:
                 logger.warning(f"Could not parse merge result for {issue_key}")
 
-        except Exception as e:
+        except (
+            OSError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+            AttributeError,
+        ) as e:
             logger.error(f"Error merging/closing {issue_key}: {e}")
 
     # ==================== Issue Processing ====================
@@ -1758,7 +1801,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 logger.warning(f"Failed to transition {issue_key}: {error[:200]}")
                 return False
 
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Error transitioning {issue_key}: {e}")
             return False
 
@@ -2214,7 +2257,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             return None
 
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             logger.error(f"Failed to launch chat via D-Bus: {e}")
             logger.debug("Is VS Code running with the AA Workflow extension active?")
             return None
@@ -2334,7 +2377,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception as exc:
+        except OSError as exc:
             logger.debug("Suppressed error: %s", exc)
 
         # Log to daily session file
@@ -2350,7 +2393,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     "source": "sprint",
                 }
             )
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
             pass
 
         try:
@@ -2485,7 +2528,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
 
                     notify_sprint_issue_completed(issue_key)
-                except Exception as exc:
+                except OSError as exc:
                     logger.debug("Suppressed error: %s", exc)
 
                 # Log to daily session file
@@ -2504,7 +2547,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                             "source": "sprint",
                         }
                     )
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
                     pass
 
                 self._trace_step(
@@ -2542,7 +2585,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
 
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception as exc:
+                except OSError as exc:
                     logger.debug("Suppressed error: %s", exc)
 
                 # Log to daily session file
@@ -2560,7 +2603,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                             "source": "sprint",
                         }
                     )
-                except Exception:
+                except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
                     pass
 
                 self._trace_step(
@@ -2655,7 +2698,15 @@ Also output the MR ID if found: [MR_ID: <number>]
                         "error": f"Claude CLI failed: {error_output[:200]}",
                     }
 
-        except Exception as e:
+        except (
+            OSError,
+            json.JSONDecodeError,
+            yaml.YAMLError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as e:
             self._log_action(issue_key, "error", f"Exception: {str(e)}")
             work_log = self._load_work_log(issue_key)
             work_log["status"] = "failed"
@@ -2807,7 +2858,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             return result and "pong" in result
 
-        except Exception:
+        except OSError:
             return False
 
     # ==================== Main Loop ====================
@@ -2923,7 +2974,15 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.CancelledError:
                 logger.info("Main loop cancelled")
                 break
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                yaml.YAMLError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ) as e:
                 logger.exception(f"Error in main loop: {e}")
                 if await self._wait_with_shutdown(60):
                     break

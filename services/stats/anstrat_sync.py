@@ -15,9 +15,12 @@ strategic direction.
 import json
 import logging
 import re
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
+
+from googleapiclient.errors import HttpError
 
 from server.utils import run_cmd_sync
 from services.stats.collector_utils import STOP_WORDS
@@ -31,7 +34,7 @@ def _write_json_file(path: Path, data: object, label: str) -> bool:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
         return True
-    except Exception as e:
+    except (OSError, TypeError) as e:
         logger.warning("Failed to write %s: %s", label, e)
         return False
 
@@ -46,7 +49,7 @@ def _load_performance_config() -> dict:
         if cfg_path.exists():
             with open(cfg_path, encoding="utf-8") as f:
                 return json.load(f).get("performance", {})
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning("Failed to load performance config: %s", e)
     return {}
 
@@ -134,7 +137,7 @@ def sync_anstrat_catalog(perf_dir: Path) -> dict:
                 "themes": _extract_themes(summary, max_themes=8),
             }
 
-    except Exception as e:
+    except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning(f"ANSTRAT catalog sync failed: {e}")
         return _load_cached_catalog(perf_dir)
 
@@ -160,7 +163,7 @@ def _load_cached_catalog(perf_dir: Path) -> dict:
         try:
             with open(out_file, encoding="utf-8") as fh:
                 return json.load(fh)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Loading cached ANSTRAT catalog: %s", e)
             pass
     return {"issues": {}, "last_synced": None}
@@ -283,7 +286,7 @@ def sync_sender_jira_activity(
                             themes.append(t)
             else:
                 logger.warning(f"Jira reporter query for {email}: {output[:200]}")
-        except Exception as e:
+        except (subprocess.TimeoutExpired, OSError) as e:
             logger.warning(f"Jira activity sync for {email} failed: {e}")
 
         activity[email] = {
@@ -312,7 +315,7 @@ def sync_sender_jira_activity(
             f"Sender Jira activity synced (reporter): "
             f"{len(activity)} senders, {total} issues"
         )
-    except Exception as e:
+    except (OSError, TypeError) as e:
         logger.warning(f"Failed to write sender activity file: {e}")
 
     return result_data
@@ -325,7 +328,7 @@ def load_sender_jira_activity(perf_dir: Path) -> dict:
         try:
             with open(out_file, encoding="utf-8") as fh:
                 return json.load(fh)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Loading cached sender Jira activity: %s", e)
             pass
     return {"sender_activity": {}, "last_synced": None}
@@ -403,7 +406,7 @@ def sync_sender_gdrive_docs(
                         .execute()
                     )
                     break
-                except Exception as e:
+                except (HttpError, OSError, ValueError) as e:
                     err_str = str(e)
                     is_retryable = any(
                         p in err_str for p in ("429", "500", "503", "rateLimitExceeded")
@@ -446,7 +449,7 @@ def sync_sender_gdrive_docs(
                     "matched_query": query,
                 }
                 documents.append(doc_entry)
-        except Exception as e:
+        except (HttpError, OSError, ValueError, KeyError) as e:
             logger.debug(f"Drive search for '{query}' failed: {e}")
 
     documents.sort(
@@ -467,7 +470,7 @@ def sync_sender_gdrive_docs(
         with open(out_file, "w", encoding="utf-8") as fh:
             json.dump(result_data, fh, indent=2)
         logger.info(f"Sender GDrive docs synced: {len(documents)} documents")
-    except Exception as e:
+    except (OSError, TypeError) as e:
         logger.warning(f"Failed to write GDrive docs file: {e}")
 
     return result_data
@@ -480,7 +483,7 @@ def load_sender_gdrive_docs(perf_dir: Path) -> dict:
         try:
             with open(out_file, encoding="utf-8") as fh:
                 return json.load(fh)
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Loading cached sender GDrive docs: %s", e)
             pass
     return {"documents": [], "last_synced": None}

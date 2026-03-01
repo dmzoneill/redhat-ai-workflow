@@ -13,8 +13,11 @@ gdrive_collector's filename classification.
 
 import json
 import logging
+import subprocess
 from datetime import date, datetime, timedelta
 from pathlib import Path
+
+from googleapiclient.errors import HttpError
 
 from services.stats.collector_utils import rate_limited_api_call, rate_limited_call
 from services.stats.quarter_utils import get_quarter_end, get_quarter_start
@@ -234,7 +237,7 @@ def _get_qc_calendar_ids() -> list[dict]:
             config = json.load(f)
         cals = config.get("google", {}).get("qc_calendars", [])
         return cals if cals else [{"id": "primary", "name": "Personal"}]
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning("Reading QC calendar config from config.json: %s", e)
         return [{"id": "primary", "name": "Personal"}]
 
@@ -257,7 +260,7 @@ def _get_peer_calendar_ids() -> list[dict]:
         with open(config_path, encoding="utf-8") as f:
             config = json.load(f)
         return config.get("google", {}).get("peer_calendars", [])
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.warning("Reading peer calendar config from config.json: %s", e)
         return []
 
@@ -473,7 +476,7 @@ def collect_meet_attendance(
                 .execute(),
                 min_interval=0.1,
             )
-        except Exception as e:
+        except (HttpError, OSError, ValueError) as e:
             logger.warning("Meet API conferenceRecords.list failed: %s", e)
             break
 
@@ -504,7 +507,7 @@ def collect_meet_attendance(
                 .execute(),
                 min_interval=0.1,
             )
-        except Exception as e:
+        except (HttpError, OSError, ValueError) as e:
             logger.debug("Failed to get participants for %s: %s", rec_name, e)
             continue
 
@@ -581,7 +584,7 @@ def link_calendar_to_meet(
                 .execute(),
                 min_interval=0.1,
             )
-        except Exception as e:
+        except (HttpError, OSError, ValueError) as e:
             logger.debug("Meet lookup for code %s failed: %s", code, e)
             continue
 
@@ -629,7 +632,14 @@ def link_calendar_to_meet(
                                 "duration_minutes": round(duration_min, 1),
                             }
                         )
-            except Exception as e:
+            except (
+                HttpError,
+                OSError,
+                ValueError,
+                KeyError,
+                IndexError,
+                TypeError,
+            ) as e:
                 logger.debug("Participants for %s failed: %s", rec["name"], e)
 
         for m in meetings_with_meet:
@@ -777,7 +787,7 @@ def load_cache(perf_dir: Path) -> dict | None:
                 logger.info("Meeting cache expired (%.1f hours old)", age_hours)
                 return None
         return data
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.debug("Failed to load meeting cache: %s", e)
         return None
 
@@ -805,7 +815,7 @@ def save_cache(
             len(meetings),
             len(events),
         )
-    except Exception as e:
+    except (OSError, TypeError) as e:
         logger.warning("Failed to save meeting cache: %s", e)
 
 
@@ -932,11 +942,11 @@ def _get_services():
         if any("meetings" in s for s in (creds.scopes or [])):
             try:
                 meet_service = build("meet", "v2", credentials=creds)
-            except Exception as e:
+            except (HttpError, OSError, ValueError) as e:
                 logger.debug("Meet service unavailable: %s", e)
 
         return cal_service, meet_service, None
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError) as e:
         return None, None, str(e)
 
 
@@ -973,15 +983,17 @@ def collect_meeting_contributions(
             drive = build("drive", "v3", credentials=cal_service._http.credentials)
             about = drive.about().get(fields="user").execute()
             user_email = about["user"]["emailAddress"]
-        except Exception as e:
+        except (HttpError, OSError, ValueError, KeyError) as e:
             logger.warning("Getting user email from Drive about().get(): %s", e)
             try:
-                import subprocess
-
                 user_email = subprocess.check_output(
                     ["git", "config", "user.email"], text=True
                 ).strip()
-            except Exception as e2:
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                OSError,
+            ) as e2:
                 logger.warning("Getting user email from git config: %s", e2)
                 pass
 
@@ -1061,7 +1073,7 @@ def ensure_meeting_peer_index(
                         len(index),
                     )
                     return index
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning("Loading meeting peer index cache: %s", e)
             pass
 
@@ -1077,7 +1089,7 @@ def ensure_meeting_peer_index(
         user_email = subprocess.check_output(
             ["git", "config", "user.email"], text=True
         ).strip()
-    except Exception as e:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
         logger.warning("Getting user email from git config for peer index: %s", e)
         pass
 
@@ -1137,7 +1149,7 @@ def ensure_meeting_peer_index(
                 f,
                 indent=2,
             )
-    except Exception as e:
+    except (OSError, TypeError) as e:
         logger.warning("Failed to save meeting peer index: %s", e)
 
     logger.info(
