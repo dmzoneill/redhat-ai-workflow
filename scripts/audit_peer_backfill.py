@@ -5,13 +5,15 @@ Checks: daily file count, empty files, date gaps, suspicious patterns,
 summary vs daily mismatch, level distribution.
 """
 import json
-import os
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
 PEERS_DIR = Path.home() / ".config/aa-workflow/performance/2026/q1/performance/peers"
 EXPECTED_WEEKDAYS = 39  # Jan 1 - Feb 22, 2026
+
+logger = logging.getLogger(__name__)
 SUSPICIOUS_THRESHOLD = 35  # Peers with fewer than this are suspicious
 MIN_MEANINGFUL_EVENTS = 10
 
@@ -88,7 +90,7 @@ def get_sources_from_daily(daily_data) -> set:
     return sources
 
 
-def main():
+def main():  # noqa: C901
     expected_weekdays = get_expected_weekdays()
     print(
         f"Expected weekdays: {len(expected_weekdays)} ({expected_weekdays[0]} to {expected_weekdays[-1]})"
@@ -219,19 +221,10 @@ def main():
                     (p["username"], len(p["sources"]), p["level"], median)
                 )
 
-    # 5. Summary vs daily - sample 10 random
+    # 5. Summary vs daily - verify 10 random peers
     import random
 
     random.seed(42)
-    sample_peers = random.sample(
-        [
-            p
-            for p in all_peer_results
-            if p["total_events"] > 0 or (summary and summary.get("total_events", 0) > 0)
-        ],
-        min(10, len(all_peer_results)),
-    )
-    # Actually we already have summary_mismatches - let's also verify 10 random peers
     sample_for_verify = random.sample(all_peer_results, min(10, len(all_peer_results)))
     sample_mismatches = []
     for p in sample_for_verify:
@@ -244,8 +237,8 @@ def main():
                     sample_mismatches.append(
                         (p["username"], s.get("total_events"), p["total_events"])
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Suppressed summary read: %s", e, exc_info=True)
 
     # --- REPORT ---
     print("=" * 80)
@@ -289,7 +282,7 @@ def main():
     print("\n## 4. DATE GAPS (peers with >30 files, missing weekdays)")
     print("-" * 60)
     if peers_with_gaps:
-        for username, gaps, total in peers_with_gaps[:15]:
+        for username, gaps, _total in peers_with_gaps[:15]:
             gap_str = ", ".join(gaps[:5]) + ("..." if len(gaps) > 5 else "")
             print(f"  {username}: {len(gaps)} missing dates: {gap_str}")
         if len(peers_with_gaps) > 15:

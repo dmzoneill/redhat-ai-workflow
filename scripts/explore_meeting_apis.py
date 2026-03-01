@@ -8,9 +8,10 @@ Tests:
 """
 
 import json
+import logging
 import sys
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 TOKEN_FILE = Path.home() / ".config/google-calendar/token.json"
 QUARTER_START = "2026-01-01T00:00:00Z"
 TZ = ZoneInfo("Europe/Dublin")
+
+logger = logging.getLogger(__name__)
 
 
 def get_credentials():
@@ -116,24 +119,24 @@ def explore_calendar_attendees(creds):
     print(f"  Events with Google Meet: {with_meet}")
     print(f"  I organized: {my_organized}")
 
-    print(f"\n  RSVP distribution:")
+    print("\n  RSVP distribution:")
     for status, count in rsvp_counts.most_common():
         print(f"    {status}: {count}")
 
-    print(f"\n  Meeting type classification:")
+    print("\n  Meeting type classification:")
     for mtype, count in meeting_types.most_common():
         print(f"    {mtype}: {count}")
 
-    print(f"\n  Top 10 co-attendees:")
+    print("\n  Top 10 co-attendees:")
     for email, count in attendee_count.most_common(10):
         print(f"    {email:<45} {count} meetings")
 
-    print(f"\n  Top 10 organizers:")
+    print("\n  Top 10 organizers:")
     for email, count in organizer_count.most_common(10):
         print(f"    {email:<45} {count} meetings")
 
     # Sample: show a few events with attendee details
-    print(f"\n  Sample events:")
+    print("\n  Sample events:")
     samples = [e for e in events if e.get("attendees")][:3]
     for ev in samples:
         print(f"\n  '{ev.get('summary', '?')}'")
@@ -174,7 +177,7 @@ def explore_meet_api(creds):
         )
     except Exception as e:
         print(f"  ERROR listing conference records: {e}")
-        print(f"  (Make sure Google Meet API is enabled in Cloud Console)")
+        print("  (Make sure Google Meet API is enabled in Cloud Console)")
         return []
 
     records = response.get("conferenceRecords", [])
@@ -218,7 +221,6 @@ def explore_meet_api(creds):
             for p in participants[:5]:
                 user = p.get("signedinUser", {})
                 display = user.get("displayName", "?")
-                user_id = user.get("user", "?")
                 earliest = p.get("earliestStartTime", "?")
                 latest = p.get("latestEndTime", "?")
                 print(
@@ -231,7 +233,7 @@ def explore_meet_api(creds):
 
     print(f"\n  Total participants across sampled records: {total_participants}")
     if participant_counts:
-        print(f"  Top participants:")
+        print("  Top participants:")
         for name, count in participant_counts.most_common(10):
             print(f"    {name:<40} {count} meetings")
 
@@ -291,8 +293,8 @@ def explore_calendar_meet_link(creds, events):
                         print(
                             f"    Calendar attendees: {att_count}, Meet participants: {len(parts)}"
                         )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Suppressed calendar/Meet link: %s", e, exc_info=True)
 
     print(f"\n  Successfully linked {linked} events to Meet records")
 

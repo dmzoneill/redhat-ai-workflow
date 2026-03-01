@@ -57,7 +57,7 @@ def run_extraction(use_title: bool) -> dict:
     for f in sorted(DAILY_DIR.glob("*.json")):
         try:
             data = json.loads(f.read_text())
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             continue
         for ev in data.get("events", []):
             pts = sum_points(ev.get("points", {}))
@@ -121,7 +121,7 @@ def main():
     for f in sorted(DAILY_DIR.glob("*.json")):
         try:
             data = json.loads(f.read_text())
-        except Exception:
+        except (OSError, json.JSONDecodeError):
             continue
         for ev in data.get("events", []):
             pts = sum_points(ev.get("points", {}))
