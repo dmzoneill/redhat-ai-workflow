@@ -15,11 +15,122 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+SECONDS_PER_HOUR = 3600
+
+STOP_WORDS = {
+    "the",
+    "and",
+    "for",
+    "are",
+    "with",
+    "this",
+    "that",
+    "from",
+    "not",
+    "has",
+    "was",
+    "will",
+    "can",
+    "all",
+    "been",
+    "have",
+    "into",
+    "new",
+    "use",
+    "its",
+    "may",
+    "our",
+    "but",
+    "also",
+    "any",
+    "each",
+    "than",
+    "issue",
+    "issues",
+    "work",
+    "working",
+    "support",
+    "supports",
+    "supported",
+    "update",
+    "updates",
+    "updated",
+    "service",
+    "services",
+    "system",
+    "systems",
+    "data",
+    "process",
+    "processing",
+    "ensure",
+    "enable",
+    "enabled",
+    "current",
+    "currently",
+    "using",
+    "used",
+    "based",
+    "need",
+    "needs",
+    "required",
+    "provide",
+    "provides",
+    "allow",
+    "allows",
+    "including",
+    "include",
+    "includes",
+    "across",
+    "related",
+    "should",
+    "would",
+    "could",
+    "available",
+    "within",
+    "between",
+    "about",
+    "being",
+    "make",
+    "made",
+    "more",
+    "other",
+    "when",
+    "which",
+    "what",
+    "some",
+    "only",
+    "them",
+    "their",
+    "then",
+    "these",
+    "those",
+    "such",
+    "well",
+    "like",
+    "just",
+    "over",
+    "after",
+    "before",
+}
+
 # ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
 
-_last_request_time: float = 0.0
+
+class _RateLimiter:
+    def __init__(self) -> None:
+        self._last_request_time: float = 0.0
+
+    def wait(self, min_interval: float) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_request_time
+        if elapsed < min_interval:
+            time.sleep(min_interval - elapsed)
+        self._last_request_time = time.monotonic()
+
+
+_rate_limiter = _RateLimiter()
 
 
 def rate_limited_call(
@@ -32,12 +143,7 @@ def rate_limited_call(
 
     Uses module-level state to enforce spacing across all callers.
     """
-    global _last_request_time
-    now = time.monotonic()
-    elapsed = now - _last_request_time
-    if elapsed < min_interval:
-        time.sleep(min_interval - elapsed)
-    _last_request_time = time.monotonic()
+    _rate_limiter.wait(min_interval)
     return func(*args, **kwargs)
 
 
@@ -124,12 +230,12 @@ def load_json_cache(path: Path | str, ttl_hours: float = 24) -> dict | None:
         cached_at = data.get("cached_at", "")
         if cached_at:
             cached_dt = datetime.fromisoformat(cached_at)
-            age_hours = (datetime.now() - cached_dt).total_seconds() / 3600
+            age_hours = (datetime.now() - cached_dt).total_seconds() / SECONDS_PER_HOUR
             if age_hours > ttl_hours:
                 logger.info("Cache expired (%.1f hours old): %s", age_hours, path)
                 return None
         return data
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         logger.debug("Failed to load cache %s: %s", path, e)
         return None
 
@@ -145,5 +251,5 @@ def save_json_cache(path: Path | str, data: dict) -> None:
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(cache_data, f, indent=2)
-    except Exception as e:
+    except OSError as e:
         logger.warning("Failed to save cache %s: %s", path, e)

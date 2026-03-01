@@ -687,8 +687,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                         data = json.load(f)
                     for event in data.get("events", []):
                         question_mgr.tag_event_to_questions(event)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Could not tag events from %s: %s", daily_file, e)
             questions = question_mgr.get_questions()
 
         if question_id:
@@ -706,8 +706,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                         data = json.load(f)
                     for event in data.get("events", []):
                         all_events[event.get("id", "")] = event
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Could not load events from %s: %s", daily_file, e)
 
         # Load competency summary
         summary_file = perf_dir / "summary.json"
@@ -717,8 +717,8 @@ def register_tools(server: "FastMCP") -> int:  # noqa: C901
                 with open(summary_file, encoding="utf-8") as f:
                     summary = json.load(f)
                 comp_summary = summary.get("cumulative_percentage", {})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not load competency summary: %s", e)
 
         comp_text = "\n".join(f"- {k}: {v}%" for k, v in comp_summary.items())
 

@@ -1,3 +1,5 @@
+"""Executive email parser — extracts structured data from email text for strategy analysis."""
+
 import base64
 import hashlib
 import json
@@ -9,6 +11,13 @@ from pathlib import Path
 from server.paths import AA_CONFIG_DIR
 
 logger = logging.getLogger(__name__)
+
+ISSUE_KEY_CONTEXT_CHARS = 80
+PRIORITY_CONTEXT_CHARS = 120
+PRIORITY_BODY_CONTEXT_CHARS = 200
+SECTION_BODY_CHARS = 500
+BODY_TRUNCATION_CHARS = 10000
+TEXT_PREVIEW_CHARS = 300
 
 _CALENDAR_SUBJECT_RE = re.compile(
     r"^\s*("
@@ -36,7 +45,6 @@ def parse_email_text(text: str) -> dict:
     - Issue keys (ANSTRAT-xxxx, AAP-xxxx, CAP-xxxx)
     - Themes via keyword matching
     """
-    # Extract issue keys with context
     issue_keys_found: dict[str, list[str]] = {}
     for m in re.finditer(
         r"(?:^|\s)(.{0,80}?((?:ANSTRAT|AAP|CAP)-\d+).{0,80}?)(?:\s|$)",
@@ -44,13 +52,12 @@ def parse_email_text(text: str) -> dict:
         re.MULTILINE,
     ):
         key = m.group(2)
-        context = m.group(1).strip()[:120]
+        context = m.group(1).strip()[:PRIORITY_CONTEXT_CHARS]
         if key not in issue_keys_found:
             issue_keys_found[key] = []
         if context not in issue_keys_found[key]:
             issue_keys_found[key].append(context)
 
-    # Extract bracketed strategic priorities like [Build in 24], [Python 3.12]
     priorities: list[dict] = []
     seen_priorities: set[str] = set()
     for m in re.finditer(
@@ -59,11 +66,10 @@ def parse_email_text(text: str) -> dict:
         re.DOTALL,
     ):
         name = m.group(1).strip()
-        context = m.group(2).strip()[:200]
+        context = m.group(2).strip()[:PRIORITY_BODY_CONTEXT_CHARS]
         name_lower = name.lower()
         if name_lower not in seen_priorities:
             seen_priorities.add(name_lower)
-            # Find issue keys within this priority's context
             prio_keys = re.findall(r"((?:ANSTRAT|AAP|CAP)-\d+)", context)
             priorities.append(
                 {
@@ -73,7 +79,6 @@ def parse_email_text(text: str) -> dict:
                 }
             )
 
-    # Extract section headers (lines that look like "Executive Summary", "AI", etc.)
     sections: list[dict] = []
     section_pattern = re.compile(
         r"^(Executive Summary|AI|Customers?\s*[&]\s*Partners?|Risks?\s*/?\s*Issues?|"
@@ -88,7 +93,7 @@ def parse_email_text(text: str) -> dict:
 
     for i, (start, header) in enumerate(section_starts):
         end = section_starts[i + 1][0] if i + 1 < len(section_starts) else len(text)
-        body = text[start + len(header) : end].strip()[:500]
+        body = text[start + len(header) : end].strip()[:SECTION_BODY_CHARS]
         section_keys = re.findall(r"((?:ANSTRAT|AAP|CAP)-\d+)", body)
         section_priorities = [
             p
@@ -105,7 +110,6 @@ def parse_email_text(text: str) -> dict:
             }
         )
 
-    # Extract themes via keyword matching
     text_lower = text.lower()
     theme_keywords = {
         "AI / Machine Learning": [
@@ -254,7 +258,7 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
 
     service, error = get_gmail_service()
     if error:
-        logger.warning(f"Gmail auth failed – skipping executive emails: {error}")
+        logger.warning("Gmail auth failed – skipping executive emails: %s", error)
         return []
 
     emails_dir = get_executive_emails_dir(perf_dir)
@@ -335,7 +339,7 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
                 if not body:
                     continue
 
-                parsed = parse_email_text(body[:10000])
+                parsed = parse_email_text(body[:BODY_TRUNCATION_CHARS])
 
                 email_id = hashlib.sha256(f"{mid}:{sender}".encode()).hexdigest()[:12]
 
@@ -347,7 +351,7 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
                 parsed["email_date"] = header_map.get("Date", "")
                 parsed["collected_date"] = target.isoformat()
                 parsed["parsed_at"] = datetime.now().isoformat()
-                parsed["text_preview"] = body[:300].replace("\n", " ")
+                parsed["text_preview"] = body[:TEXT_PREVIEW_CHARS].replace("\n", " ")
 
                 cache_file = emails_dir / f"{email_id}.json"
                 with open(cache_file, "w", encoding="utf-8") as fh:
@@ -356,7 +360,9 @@ def collect_executive_emails_for_date(target: date, perf_dir: Path) -> list[str]
                 new_ids.append(email_id)
                 existing_ids.add(mid)
                 logger.info(
-                    f"Cached executive email from {sender}: {parsed.get('subject', '')[:60]}"
+                    "Cached executive email from %s: %s",
+                    sender,
+                    parsed.get("subject", "")[:60],
                 )
 
         except (json.JSONDecodeError, OSError, KeyError, ValueError, TypeError) as e:

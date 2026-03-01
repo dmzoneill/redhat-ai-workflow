@@ -1,25 +1,4 @@
 failures:
-- error_snippet: unauthorized 401 error
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:29:40.028346'
-  tool: kubectl_get_pods
-- error_snippet: no route to host
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:40.078497'
-  tool: some_tool
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:29:44.338340'
-  tool: kubectl_get_pods
 - error_snippet: unauthorized 401
   error_type: auth
   fix_applied: kube_login
@@ -721,8 +700,32 @@ failures:
   success: false
   timestamp: '2026-02-25T18:39:51.776084'
   tool: quay_get_tag
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-25T21:01:30.097680'
+  tool: jira_my_issues
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-26T21:01:22.083407'
+  tool: jira_my_issues
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-02-28T21:01:23.923076'
+  tool: jira_my_issues
 stats:
-  auto_fixed: 180
+  auto_fixed: 183
   daily:
     '2026-02-17':
       auto_fixed: 1
@@ -737,7 +740,7 @@ stats:
       auto_fixed: 3
       total: 3
   manual_required: 203
-  total_failures: 383
+  total_failures: 386
   weekly:
     2026-W07:
       auto_fixed: 2

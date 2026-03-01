@@ -23,6 +23,7 @@ Business logic is delegated to handler modules:
 """
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -83,6 +84,33 @@ except ImportError:
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 logger = logging.getLogger(__name__)
+
+
+def _dbus_json_handler(error_defaults=None):
+    if error_defaults is None:
+        error_defaults = {}
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"{func.__name__} error: {e}")
+                return json.dumps({"success": False, "error": str(e), **error_defaults})
+
+        @functools.wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"{func.__name__} error: {e}")
+                return json.dumps({"success": False, "error": str(e), **error_defaults})
+
+        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+
+    return decorator
+
 
 # D-Bus configuration
 DBUS_SERVICE_NAME = "com.aiworkflow.BotSlack"
@@ -311,17 +339,15 @@ if DBUS_AVAILABLE:
             return json.dumps(handle_set_sync_config(config_json))
 
         @method()
+        @_dbus_json_handler()
         def GetPhotoPath(self, user_id: "s") -> "s":
             """Get the local cached photo path for a user."""
-            try:
-                return json.dumps(format_photo_path_response(user_id))
-            except Exception as e:
-                logger.error(f"GetPhotoPath error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+            return json.dumps(format_photo_path_response(user_id))
 
         # ==================== Knowledge Cache Methods ====================
 
         @method()
+        @_dbus_json_handler({"channels": []})
         async def FindChannel(self, query: "s") -> "s":
             """Find channels by name, purpose, or topic."""
             if not self.daemon.state_db:
@@ -332,43 +358,30 @@ if DBUS_AVAILABLE:
                         "channels": [],
                     }
                 )
-
-            try:
-                channels = await self.daemon.state_db.find_channels(
-                    query=query, limit=500
-                )
-                return json.dumps(
-                    {
-                        "success": True,
-                        "query": query,
-                        "count": len(channels),
-                        "channels": [c.to_dict() for c in channels],
-                    }
-                )
-            except Exception as e:
-                logger.error(f"FindChannel error: {e}")
-                return json.dumps({"success": False, "error": str(e), "channels": []})
+            channels = await self.daemon.state_db.find_channels(query=query, limit=500)
+            return json.dumps(
+                {
+                    "success": True,
+                    "query": query,
+                    "count": len(channels),
+                    "channels": [c.to_dict() for c in channels],
+                }
+            )
 
         @method()
+        @_dbus_json_handler({"channels": []})
         async def SearchChannels(self, query: "s", count: "i") -> "s":
             """Search for channels using Slack's edge API."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "channels": []}
                 )
-
             count = min(max(count, 1), 100) if count > 0 else 30
-
-            try:
-                result = await self.daemon.session.search_channels_and_cache(
-                    query, count
-                )
-                return json.dumps(result)
-            except Exception as e:
-                logger.error(f"SearchChannels error: {e}")
-                return json.dumps({"success": False, "error": str(e), "channels": []})
+            result = await self.daemon.session.search_channels_and_cache(query, count)
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"channels": []})
         async def SearchAndCacheChannels(self, query: "s", count: "i") -> "s":
             """Search for channels and add results to the local cache."""
             if not self.daemon.session or not self.daemon.state_db:
@@ -379,85 +392,64 @@ if DBUS_AVAILABLE:
                         "channels": [],
                     }
                 )
-
             count = min(max(count, 1), 100) if count > 0 else 30
-
-            try:
-                result = await self.daemon.session.search_channels_and_cache(
-                    query, count
-                )
-
-                if not result.get("success"):
-                    return json.dumps(result)
-
-                from tool_modules.aa_slack.src.persistence import CachedChannel
-
-                channels_to_cache = []
-                for ch in result.get("channels", []):
-                    if ch.get("channel_id"):
-                        channels_to_cache.append(
-                            CachedChannel(
-                                channel_id=ch["channel_id"],
-                                name=ch.get("name", ""),
-                                display_name=ch.get("display_name", ""),
-                                is_private=ch.get("is_private", False),
-                                is_member=ch.get("is_member", False),
-                                purpose=ch.get("purpose", ""),
-                                topic=ch.get("topic", ""),
-                                num_members=ch.get("num_members", 0),
-                            )
-                        )
-
-                if channels_to_cache:
-                    await self.daemon.state_db.cache_channels_bulk(channels_to_cache)
-
-                result["cached"] = len(channels_to_cache)
+            result = await self.daemon.session.search_channels_and_cache(query, count)
+            if not result.get("success"):
                 return json.dumps(result)
+            from tool_modules.aa_slack.src.persistence import CachedChannel
 
-            except Exception as e:
-                logger.error(f"SearchAndCacheChannels error: {e}")
-                return json.dumps({"success": False, "error": str(e), "channels": []})
+            channels_to_cache = []
+            for ch in result.get("channels", []):
+                if ch.get("channel_id"):
+                    channels_to_cache.append(
+                        CachedChannel(
+                            channel_id=ch["channel_id"],
+                            name=ch.get("name", ""),
+                            display_name=ch.get("display_name", ""),
+                            is_private=ch.get("is_private", False),
+                            is_member=ch.get("is_member", False),
+                            purpose=ch.get("purpose", ""),
+                            topic=ch.get("topic", ""),
+                            num_members=ch.get("num_members", 0),
+                        )
+                    )
+            if channels_to_cache:
+                await self.daemon.state_db.cache_channels_bulk(channels_to_cache)
+            result["cached"] = len(channels_to_cache)
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"users": []})
         async def FindUser(self, query: "s") -> "s":
             """Find users by name, email, or GitLab username."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "users": []}
                 )
-
-            try:
-                users = await self.daemon.state_db.find_users(query=query, limit=500)
-                return json.dumps(
-                    {
-                        "success": True,
-                        "query": query,
-                        "count": len(users),
-                        "users": users,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"FindUser error: {e}")
-                return json.dumps({"success": False, "error": str(e), "users": []})
+            users = await self.daemon.state_db.find_users(query=query, limit=500)
+            return json.dumps(
+                {
+                    "success": True,
+                    "query": query,
+                    "count": len(users),
+                    "users": users,
+                }
+            )
 
         @method()
+        @_dbus_json_handler({"users": []})
         async def SearchUsers(self, query: "s", count: "i") -> "s":
             """Search for users using Slack's edge API."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "users": []}
                 )
-
             count = min(max(count, 1), 100) if count > 0 else 30
-
-            try:
-                result = await self.daemon.session.search_users_and_cache(query, count)
-                return json.dumps(result)
-            except Exception as e:
-                logger.error(f"SearchUsers error: {e}")
-                return json.dumps({"success": False, "error": str(e), "users": []})
+            result = await self.daemon.session.search_users_and_cache(query, count)
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"users": []})
         async def SearchAndCacheUsers(self, query: "s", count: "i") -> "s":
             """Search for users and add results to the local cache."""
             if not self.daemon.session or not self.daemon.state_db:
@@ -468,86 +460,64 @@ if DBUS_AVAILABLE:
                         "users": [],
                     }
                 )
-
             count = min(max(count, 1), 100) if count > 0 else 30
-
-            try:
-                result = await self.daemon.session.search_users_and_cache(query, count)
-
-                if not result.get("success"):
-                    return json.dumps(result)
-
-                from tool_modules.aa_slack.src.persistence import CachedUser
-
-                users_to_cache = []
-                for u in result.get("users", []):
-                    if (
-                        u.get("user_id")
-                        and not u.get("is_bot")
-                        and not u.get("deleted")
-                    ):
-                        users_to_cache.append(
-                            CachedUser(
-                                user_id=u["user_id"],
-                                user_name=u.get("user_name", ""),
-                                display_name=u.get("display_name", ""),
-                                real_name=u.get("real_name", ""),
-                                email=u.get("email", ""),
-                                gitlab_username="",
-                                avatar_url=u.get("avatar_url", ""),
-                            )
-                        )
-
-                if users_to_cache:
-                    await self.daemon.state_db.cache_users_bulk(users_to_cache)
-
-                result["cached"] = len(users_to_cache)
+            result = await self.daemon.session.search_users_and_cache(query, count)
+            if not result.get("success"):
                 return json.dumps(result)
+            from tool_modules.aa_slack.src.persistence import CachedUser
 
-            except Exception as e:
-                logger.error(f"SearchAndCacheUsers error: {e}")
-                return json.dumps({"success": False, "error": str(e), "users": []})
+            users_to_cache = []
+            for u in result.get("users", []):
+                if u.get("user_id") and not u.get("is_bot") and not u.get("deleted"):
+                    users_to_cache.append(
+                        CachedUser(
+                            user_id=u["user_id"],
+                            user_name=u.get("user_name", ""),
+                            display_name=u.get("display_name", ""),
+                            real_name=u.get("real_name", ""),
+                            email=u.get("email", ""),
+                            gitlab_username="",
+                            avatar_url=u.get("avatar_url", ""),
+                        )
+                    )
+            if users_to_cache:
+                await self.daemon.state_db.cache_users_bulk(users_to_cache)
+            result["cached"] = len(users_to_cache)
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"profile": {}})
         async def GetUserProfile(self, user_id: "s") -> "s":
             """Get detailed user profile with sections."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "profile": {}}
                 )
-
-            try:
-                result = await self.daemon.session.get_user_profile_details(user_id)
-                return json.dumps(result)
-            except Exception as e:
-                logger.error(f"GetUserProfile error: {e}")
-                return json.dumps({"success": False, "error": str(e), "profile": {}})
+            result = await self.daemon.session.get_user_profile_details(user_id)
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"url": ""})
         def GetAvatarUrl(self, user_id: "s", avatar_hash: "s", size: "i") -> "s":
             """Construct a Slack avatar URL from user ID and avatar hash."""
             if not self.daemon.session:
                 return json.dumps(
                     {"success": False, "error": "Session not available", "url": ""}
                 )
-
-            try:
-                size = size if size > 0 else 512
-                url = self.daemon.session.get_avatar_url(user_id, avatar_hash, size)
-                return json.dumps(
-                    {
-                        "success": True,
-                        "user_id": user_id,
-                        "avatar_hash": avatar_hash,
-                        "size": size,
-                        "url": url,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetAvatarUrl error: {e}")
-                return json.dumps({"success": False, "error": str(e), "url": ""})
+            size = size if size > 0 else 512
+            url = self.daemon.session.get_avatar_url(user_id, avatar_hash, size)
+            return json.dumps(
+                {
+                    "success": True,
+                    "user_id": user_id,
+                    "avatar_hash": avatar_hash,
+                    "size": size,
+                    "url": url,
+                }
+            )
 
         @method()
+        @_dbus_json_handler({"channels": []})
         async def GetMyChannels(self) -> "s":
             """Get channels the bot is a member of."""
             if not self.daemon.state_db:
@@ -558,98 +528,74 @@ if DBUS_AVAILABLE:
                         "channels": [],
                     }
                 )
-
-            try:
-                channels = await self.daemon.state_db.get_my_channels(limit=100)
-                return json.dumps(
-                    {
-                        "success": True,
-                        "count": len(channels),
-                        "channels": [c.to_dict() for c in channels],
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetMyChannels error: {e}")
-                return json.dumps({"success": False, "error": str(e), "channels": []})
+            channels = await self.daemon.state_db.get_my_channels(limit=100)
+            return json.dumps(
+                {
+                    "success": True,
+                    "count": len(channels),
+                    "channels": [c.to_dict() for c in channels],
+                }
+            )
 
         @method()
+        @_dbus_json_handler({"groups": []})
         async def GetUserGroups(self) -> "s":
             """Get all cached user groups (for @team mentions)."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "groups": []}
                 )
-
-            try:
-                groups = await self.daemon.state_db.get_all_groups()
-                return json.dumps(
-                    {
-                        "success": True,
-                        "count": len(groups),
-                        "groups": [g.to_dict() for g in groups],
-                    }
-                )
-            except Exception as e:
-                logger.error(f"GetUserGroups error: {e}")
-                return json.dumps({"success": False, "error": str(e), "groups": []})
+            groups = await self.daemon.state_db.get_all_groups()
+            return json.dumps(
+                {
+                    "success": True,
+                    "count": len(groups),
+                    "groups": [g.to_dict() for g in groups],
+                }
+            )
 
         # ==================== User Lookup Methods ====================
 
         @method()
+        @_dbus_json_handler()
         async def LookupUserByEmail(self, email: "s") -> "s":
             """Find a Slack user by their email address."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
-
-            try:
-                user = await self.daemon.state_db.find_user_by_email(email)
-                if user:
-                    return json.dumps(format_email_lookup_found(user))
-                else:
-                    return json.dumps(format_email_lookup_not_found(email))
-            except Exception as e:
-                logger.error(f"LookupUserByEmail error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+            user = await self.daemon.state_db.find_user_by_email(email)
+            if user:
+                return json.dumps(format_email_lookup_found(user))
+            return json.dumps(format_email_lookup_not_found(email))
 
         @method()
+        @_dbus_json_handler({"users": []})
         async def LookupUserByName(self, name: "s", threshold: "d") -> "s":
             """Find Slack users by fuzzy name matching."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "users": []}
                 )
-
-            try:
-                if threshold <= 0:
-                    threshold = 0.7
-
-                users = await self.daemon.state_db.find_user_by_name_fuzzy(
-                    name, threshold=threshold, limit=5
-                )
-
-                results = [format_user_match_with_photo(u) for u in users]
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "query": name,
-                        "threshold": threshold,
-                        "count": len(results),
-                        "users": results,
-                    }
-                )
-            except Exception as e:
-                logger.error(f"LookupUserByName error: {e}")
-                return json.dumps({"success": False, "error": str(e), "users": []})
+            if threshold <= 0:
+                threshold = 0.7
+            users = await self.daemon.state_db.find_user_by_name_fuzzy(
+                name, threshold=threshold, limit=5
+            )
+            results = [format_user_match_with_photo(u) for u in users]
+            return json.dumps(
+                {
+                    "success": True,
+                    "query": name,
+                    "threshold": threshold,
+                    "count": len(results),
+                    "users": results,
+                }
+            )
 
         @method()
+        @_dbus_json_handler({"photo_path": ""})
         def GetUserPhotoPath(self, user_id: "s") -> "s":
             """Get the local file path to a cached Slack user's profile photo."""
-            try:
-                return json.dumps(format_photo_path_response(user_id))
-            except Exception as e:
-                logger.error(f"GetUserPhotoPath error: {e}")
-                return json.dumps({"success": False, "error": str(e), "photo_path": ""})
+            return json.dumps(format_photo_path_response(user_id))
 
         @method()
         async def ResolveTarget(self, target: "s") -> "s":
@@ -684,150 +630,123 @@ if DBUS_AVAILABLE:
                 )
 
         @method()
+        @_dbus_json_handler()
         async def GetChannelCacheStats(self) -> "s":
             """Get statistics about the knowledge cache."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
-
-            try:
-                stats = await self.daemon.state_db.get_channel_cache_stats()
-                stats["success"] = True
-                return json.dumps(stats)
-            except Exception as e:
-                logger.error(f"GetChannelCacheStats error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+            stats = await self.daemon.state_db.get_channel_cache_stats()
+            stats["success"] = True
+            return json.dumps(stats)
 
         @method()
+        @_dbus_json_handler()
         async def RefreshChannelCache(self) -> "s":
             """Trigger a refresh of the channel cache from Slack API."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "Session or State DB not available"}
                 )
+            from tool_modules.aa_slack.src.persistence import CachedChannel
 
-            try:
-                from tool_modules.aa_slack.src.persistence import CachedChannel
-
-                channels_data = await self.daemon.session.get_conversations_list(
-                    types="public_channel,private_channel",
-                    limit=1000,
+            channels_data = await self.daemon.session.get_conversations_list(
+                types="public_channel,private_channel",
+                limit=1000,
+            )
+            channels = [
+                CachedChannel(
+                    channel_id=c.get("id", ""),
+                    name=c.get("name", ""),
+                    display_name=c.get("name_normalized", c.get("name", "")),
+                    is_private=c.get("is_private", False),
+                    is_member=c.get("is_member", False),
+                    purpose=c.get("purpose", {}).get("value", ""),
+                    topic=c.get("topic", {}).get("value", ""),
+                    num_members=c.get("num_members", 0),
                 )
-
-                channels = [
-                    CachedChannel(
-                        channel_id=c.get("id", ""),
-                        name=c.get("name", ""),
-                        display_name=c.get("name_normalized", c.get("name", "")),
-                        is_private=c.get("is_private", False),
-                        is_member=c.get("is_member", False),
-                        purpose=c.get("purpose", {}).get("value", ""),
-                        topic=c.get("topic", {}).get("value", ""),
-                        num_members=c.get("num_members", 0),
-                    )
-                    for c in channels_data
-                    if c.get("id")
-                ]
-
-                await self.daemon.state_db.cache_channels_bulk(channels)
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "message": "Channel cache refreshed",
-                        "channels_cached": len(channels),
-                    }
-                )
-            except Exception as e:
-                logger.error(f"RefreshChannelCache error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+                for c in channels_data
+                if c.get("id")
+            ]
+            await self.daemon.state_db.cache_channels_bulk(channels)
+            return json.dumps(
+                {
+                    "success": True,
+                    "message": "Channel cache refreshed",
+                    "channels_cached": len(channels),
+                }
+            )
 
         @method()
+        @_dbus_json_handler()
         async def ImportSidebarChannels(self, file_path: "s") -> "s":
             """Import channels from a Slack sidebar HTML file."""
             if not self.daemon.state_db:
                 return json.dumps({"success": False, "error": "State DB not available"})
-
-            try:
-                expanded_path = os.path.expanduser(file_path)
-                result = await self.daemon.state_db.import_channels_from_sidebar(
-                    expanded_path
-                )
-                return json.dumps(result)
-            except Exception as e:
-                logger.error(f"ImportSidebarChannels error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+            expanded_path = os.path.expanduser(file_path)
+            result = await self.daemon.state_db.import_channels_from_sidebar(
+                expanded_path
+            )
+            return json.dumps(result)
 
         @method()
+        @_dbus_json_handler({"dms": []})
         async def GetSidebarDMs(self) -> "s":
             """Get DMs that were imported from the sidebar."""
             if not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "State DB not available", "dms": []}
                 )
-
-            try:
-                dms = await self.daemon.state_db.get_sidebar_dms()
-                return json.dumps({"success": True, "dms": dms, "count": len(dms)})
-            except Exception as e:
-                logger.error(f"GetSidebarDMs error: {e}")
-                return json.dumps({"success": False, "error": str(e), "dms": []})
+            dms = await self.daemon.state_db.get_sidebar_dms()
+            return json.dumps({"success": True, "dms": dms, "count": len(dms)})
 
         @method()
+        @_dbus_json_handler()
         async def RefreshUserCache(self) -> "s":
             """Trigger a refresh of the user cache from Slack API."""
             if not self.daemon.session or not self.daemon.state_db:
                 return json.dumps(
                     {"success": False, "error": "Session or State DB not available"}
                 )
+            from tool_modules.aa_slack.src.persistence import CachedUser
 
-            try:
-                from tool_modules.aa_slack.src.persistence import CachedUser
-
-                stats = await self.daemon.state_db.get_user_cache_stats()
-                cache_age = stats.get("cache_age_seconds")
-                if cache_age is not None and cache_age < 3600:
-                    return json.dumps(
-                        {
-                            "success": True,
-                            "message": "User cache is recent, skipping refresh",
-                            "cache_age_seconds": cache_age,
-                            "users_cached": stats.get("total_users", 0),
-                            "skipped": True,
-                        }
-                    )
-
-                users_data = await self.daemon.session.get_users_list(limit=1000)
-
-                users = []
-                for u in users_data:
-                    if u.get("id") and not u.get("is_bot") and not u.get("deleted"):
-                        profile = u.get("profile", {})
-                        users.append(
-                            CachedUser(
-                                user_id=u.get("id", ""),
-                                user_name=u.get("name", ""),
-                                display_name=profile.get("display_name", ""),
-                                real_name=profile.get("real_name", ""),
-                                email=profile.get("email", ""),
-                                gitlab_username="",
-                                avatar_url=profile.get(
-                                    "image_72", profile.get("image_48", "")
-                                ),
-                            )
-                        )
-
-                await self.daemon.state_db.cache_users_bulk(users)
-
+            stats = await self.daemon.state_db.get_user_cache_stats()
+            cache_age = stats.get("cache_age_seconds")
+            if cache_age is not None and cache_age < 3600:
                 return json.dumps(
                     {
                         "success": True,
-                        "message": "User cache refreshed",
-                        "users_cached": len(users),
+                        "message": "User cache is recent, skipping refresh",
+                        "cache_age_seconds": cache_age,
+                        "users_cached": stats.get("total_users", 0),
+                        "skipped": True,
                     }
                 )
-            except Exception as e:
-                logger.error(f"RefreshUserCache error: {e}")
-                return json.dumps({"success": False, "error": str(e)})
+            users_data = await self.daemon.session.get_users_list(limit=1000)
+            users = []
+            for u in users_data:
+                if u.get("id") and not u.get("is_bot") and not u.get("deleted"):
+                    profile = u.get("profile", {})
+                    users.append(
+                        CachedUser(
+                            user_id=u.get("id", ""),
+                            user_name=u.get("name", ""),
+                            display_name=profile.get("display_name", ""),
+                            real_name=profile.get("real_name", ""),
+                            email=profile.get("email", ""),
+                            gitlab_username="",
+                            avatar_url=profile.get(
+                                "image_72", profile.get("image_48", "")
+                            ),
+                        )
+                    )
+            await self.daemon.state_db.cache_users_bulk(users)
+            return json.dumps(
+                {
+                    "success": True,
+                    "message": "User cache refreshed",
+                    "users_cached": len(users),
+                }
+            )
 
         @method()
         async def GetUserCacheStats(self) -> "s":

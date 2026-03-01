@@ -331,8 +331,6 @@ def _load_openvino_npu_static():
     Uses optimum-intel's export with static shapes.
     """
     try:
-        pass
-
         import numpy as np
         import openvino as ov
         from optimum.intel import OVModelForFeatureExtraction

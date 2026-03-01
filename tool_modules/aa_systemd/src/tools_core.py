@@ -96,10 +96,14 @@ def register_tools(server: FastMCP) -> int:
     @auto_heal()
     @registry.tool()
     async def journalctl_unit(
-        unit: str, lines: int = 100, since: str = "", user: bool = False
+        unit: str,
+        lines: int = 100,
+        since: str = "",
+        until: str = "",
+        user: bool = False,
     ) -> str:
         """View logs for a systemd unit."""
-        return await _journalctl_unit_impl(unit, lines, since, user=user)
+        return await _journalctl_unit_impl(unit, lines, since, user=user, until=until)
 
     logger.info(f"Registered {registry.count} core systemd tools")
     return registry.count

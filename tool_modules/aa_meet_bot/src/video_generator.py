@@ -65,12 +65,6 @@ def maybe_gc(force: bool = False) -> None:
 
 # Live meeting data integration (avatar generation, matrix animation)
 _live_rendering_available = False
-try:
-    pass
-
-    _live_rendering_available = True
-except ImportError:
-    logger.debug("Live rendering components not available")
 
 # Optional GPU text rendering (smooth anti-aliased TrueType fonts)
 _gpu_text_available = False

@@ -846,8 +846,8 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
             session = workspace.get_active_session(refresh_tools=False)
             if session:
                 entry["session_id"] = session.session_id
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not attach session_id to log entry: %s", e)
 
     try:
         append_session_entry(entry)

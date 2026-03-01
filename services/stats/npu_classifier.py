@@ -36,7 +36,7 @@ class NPUCompetencyClassifier:
             "device_used": "",
         }
 
-    async def initialize(self, competency_defs: dict, level: str = "sse") -> bool:
+    def initialize(self, competency_defs: dict, level: str = "sse") -> bool:
         """Load model and pre-compute competency embeddings.
 
         Re-call when level changes to update level-specific descriptors.

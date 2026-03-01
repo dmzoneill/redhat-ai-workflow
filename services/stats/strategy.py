@@ -1,16 +1,29 @@
+"""ANSTRAT strategy alignment analysis — maps organizational priorities to individual contributions."""
+
 import json
 import logging
 import os
 import re
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 
 from server.utils import run_cmd_sync
-from services.stats.collector_utils import rate_limited_api_call
-from services.stats.quarter_utils import QUARTER_STARTS
+from services.stats.collector_utils import STOP_WORDS, rate_limited_api_call
+from services.stats.quarter_utils import get_quarter_end, get_quarter_start
 from services.stats.scorer import COMPETENCY_DEFS
 
 logger = logging.getLogger(__name__)
+
+PRIORITY_CONTEXT_TRUNCATE = 300
+TEXT_OVERLAP_THRESHOLD = 0.25
+CATALOG_BRIDGE_OVERLAP_THRESHOLD = 0.20
+MIN_OVERLAP_WORDS_EMAIL = 5
+MIN_OVERLAP_WORDS_GDRIVE = 4
+MIN_OVERLAP_WORDS_MATCH = 4
+QUARTER_WEEKDAYS = 65
+INFERRED_CACHE_AGE_FALLBACK_HOURS = 999
+INFERRED_CACHE_FRESH_HOURS = 24
 
 _EMAIL_DISPLAY_NAMES: dict[str, str] = {
     "sharwell@redhat.com": "Scott Harwell",
@@ -25,105 +38,6 @@ def _email_to_display(email: str) -> str:
         return _EMAIL_DISPLAY_NAMES[email]
     local = email.split("@")[0] if "@" in email else email
     return local.replace(".", " ").replace("-", " ").title()
-
-
-STOP_WORDS = {
-    "the",
-    "and",
-    "for",
-    "are",
-    "with",
-    "this",
-    "that",
-    "from",
-    "not",
-    "has",
-    "was",
-    "will",
-    "can",
-    "all",
-    "been",
-    "have",
-    "into",
-    "new",
-    "use",
-    "its",
-    "may",
-    "our",
-    "but",
-    "also",
-    "any",
-    "each",
-    "than",
-    # Domain-common words that appear in virtually every issue/priority
-    # and carry no discriminating signal for strategy alignment.
-    "issue",
-    "issues",
-    "work",
-    "working",
-    "support",
-    "supports",
-    "supported",
-    "update",
-    "updates",
-    "updated",
-    "service",
-    "services",
-    "system",
-    "systems",
-    "data",
-    "process",
-    "processing",
-    "ensure",
-    "enable",
-    "enabled",
-    "current",
-    "currently",
-    "using",
-    "used",
-    "based",
-    "need",
-    "needs",
-    "required",
-    "provide",
-    "provides",
-    "allow",
-    "allows",
-    "including",
-    "include",
-    "includes",
-    "across",
-    "related",
-    "should",
-    "would",
-    "could",
-    "available",
-    "within",
-    "between",
-    "about",
-    "being",
-    "make",
-    "made",
-    "more",
-    "other",
-    "when",
-    "which",
-    "what",
-    "some",
-    "only",
-    "them",
-    "their",
-    "then",
-    "these",
-    "those",
-    "such",
-    "well",
-    "like",
-    "just",
-    "over",
-    "after",
-    "before",
-}
 
 
 def build_strategy_context_index(emails_dir: Path) -> dict:
@@ -157,7 +71,7 @@ def build_strategy_context_index(emails_dir: Path) -> dict:
                 }
                 all_priorities[key] = {
                     "name": name,
-                    "context": prio.get("context", "")[:300],
+                    "context": prio.get("context", "")[:PRIORITY_CONTEXT_TRUNCATE],
                     "issue_keys": list(prio.get("issue_keys", [])),
                     "text_keywords": text_keywords,
                 }
@@ -185,7 +99,7 @@ def match_event_to_strategy(
     hierarchy: dict,
     classification_text: str,
     strategy_index: dict,
-    min_overlap_words: int = 4,
+    min_overlap_words: int = MIN_OVERLAP_WORDS_MATCH,
 ) -> tuple[bool, list[str]]:
     """Check if an event matches any strategy priority.
 
@@ -225,7 +139,7 @@ def match_event_to_strategy(
         if overlap < min_overlap_words:
             continue
         smaller = min(len(text_words), len(kw_set)) or 1
-        if overlap / smaller >= 0.25:
+        if overlap / smaller >= TEXT_OVERLAP_THRESHOLD:
             if prio["name"] not in matched_names:
                 matched_names.append(prio["name"])
 
@@ -239,15 +153,8 @@ def enrich_user_issues_from_jira(
 
     Merges results into user_issues dict so strategy alignment has full data.
     """
-    quarter_starts = QUARTER_STARTS
-    sm, _ = quarter_starts[quarter]
-    q_start = f"{year}-{sm:02d}-01"
-    next_q = quarter + 1
-    if next_q > 4:
-        q_end = f"{year + 1}-01-01"
-    else:
-        nsm = quarter_starts[next_q][0]
-        q_end = f"{year}-{nsm:02d}-01"
+    q_start = get_quarter_start(year, quarter).isoformat()
+    q_end = (get_quarter_end(year, quarter) + timedelta(days=1)).isoformat()
 
     jql = (
         f"assignee = currentUser() AND "
@@ -341,15 +248,10 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
         logger.warning("Could not determine GitLab username")
         return []
 
-    quarter_starts = QUARTER_STARTS
-    sm, _ = quarter_starts[quarter]
-    q_start = f"{year}-{sm:02d}-01T00:00:00Z"
-    next_q = quarter + 1
-    if next_q > 4:
-        q_end = f"{year + 1}-01-01T00:00:00Z"
-    else:
-        nsm = quarter_starts[next_q][0]
-        q_end = f"{year}-{nsm:02d}-01T00:00:00Z"
+    q_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
+    q_end = (
+        get_quarter_end(year, quarter) + timedelta(days=1)
+    ).isoformat() + "T00:00:00Z"
 
     repos = cfg.get("repositories", {})
     all_mrs: list[dict] = []
@@ -531,7 +433,10 @@ def build_sender_relationships(  # noqa: C901
                     }
                     overlap = len(email_words & summary_words)
                     smaller = min(len(email_words), len(summary_words)) or 1
-                    if overlap >= 5 and overlap / smaller >= 0.25:
+                    if (
+                        overlap >= MIN_OVERLAP_WORDS_EMAIL
+                        and overlap / smaller >= TEXT_OVERLAP_THRESHOLD
+                    ):
                         match_types.append("theme")
                         evidence.append(
                             f"Theme overlap ({overlap} words) with: "
@@ -679,7 +584,10 @@ def build_sender_relationships(  # noqa: C901
                     }
                     overlap = len(doc_words & summary_words)
                     smaller = min(len(doc_words), len(summary_words)) or 1
-                    if overlap >= 4 and overlap / smaller >= 0.25:
+                    if (
+                        overlap >= MIN_OVERLAP_WORDS_GDRIVE
+                        and overlap / smaller >= TEXT_OVERLAP_THRESHOLD
+                    ):
                         seen_pairs.add(pair)
                         relationships.append(
                             {
@@ -747,8 +655,8 @@ def infer_relationships_with_llm(
                     age_hours = (_dt.now() - inferred_dt).total_seconds() / 3600
                 except Exception as e:
                     logger.warning("Failed to parse inferred_at timestamp: %s", e)
-                    age_hours = 999
-            if age_hours < 24:
+                    age_hours = INFERRED_CACHE_AGE_FALLBACK_HOURS
+            if age_hours < INFERRED_CACHE_FRESH_HOURS:
                 return cached.get("relationships", [])
         except Exception as e:
             logger.warning("Failed to read inferred relationships cache: %s", e)
@@ -962,7 +870,10 @@ def build_strategy_alignment(  # noqa: C901
                         }
                         overlap = len(prio_words & a_words)
                         smaller = min(len(prio_words), len(a_words)) or 1
-                        if overlap >= 5 and overlap / smaller >= 0.20:
+                        if (
+                            overlap >= MIN_OVERLAP_WORDS_EMAIL
+                            and overlap / smaller >= CATALOG_BRIDGE_OVERLAP_THRESHOLD
+                        ):
                             prio_data["issue_keys"].append(akey)
             bridged = sum(
                 1
@@ -1207,10 +1118,10 @@ def build_strategy_alignment(  # noqa: C901
                 w for w in re.findall(r"[a-z]{3,}", text_lower) if w not in STOP_WORDS
             }
             overlap = len(_prio_words & text_words)
-            if overlap < 4:
+            if overlap < MIN_OVERLAP_WORDS_MATCH:
                 return False
             smaller = min(len(_prio_words), len(text_words)) or 1
-            return overlap / smaller >= 0.25
+            return overlap / smaller >= TEXT_OVERLAP_THRESHOLD
 
         if not matched_user_issues:
             for ukey, uinfo in user_issues.items():

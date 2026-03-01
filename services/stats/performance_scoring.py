@@ -203,9 +203,7 @@ def process_daily_events_for_summary(
     comparable_counts_by_source: dict[str, int] = {}
     day_meeting_count = 0
 
-    for ev in events:
-        if is_personal_repo_event(ev, peer_comparable_config):
-            continue
+    for ev in work_events:
         src = ev.get("source", "unknown")
         counts_by_source[src] = counts_by_source.get(src, 0) + 1
 

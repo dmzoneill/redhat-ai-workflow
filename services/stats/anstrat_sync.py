@@ -20,40 +20,23 @@ from datetime import datetime
 from pathlib import Path
 
 from server.utils import run_cmd_sync
+from services.stats.collector_utils import STOP_WORDS
 
 logger = logging.getLogger(__name__)
 
-ANSTRAT_ISSUE_TYPES = ("Initiative", "Feature", "Outcome")
 
-STOP_WORDS = {
-    "the",
-    "and",
-    "for",
-    "are",
-    "with",
-    "this",
-    "that",
-    "from",
-    "not",
-    "has",
-    "was",
-    "will",
-    "can",
-    "all",
-    "been",
-    "have",
-    "into",
-    "new",
-    "use",
-    "its",
-    "may",
-    "our",
-    "but",
-    "also",
-    "any",
-    "each",
-    "than",
-}
+def _write_json_file(path: Path, data: object, label: str) -> bool:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        return True
+    except Exception as e:
+        logger.warning("Failed to write %s: %s", label, e)
+        return False
+
+
+ANSTRAT_ISSUE_TYPES = ("Initiative", "Feature", "Outcome")
 
 
 def _load_performance_config() -> dict:
@@ -160,14 +143,8 @@ def sync_anstrat_catalog(perf_dir: Path) -> dict:
         "last_synced": datetime.now().isoformat(),
     }
 
-    perf_dir.mkdir(parents=True, exist_ok=True)
-    out_file = perf_dir / "anstrat_catalog.json"
-    try:
-        with open(out_file, "w", encoding="utf-8") as fh:
-            json.dump(catalog, fh, indent=2)
-        logger.info(f"ANSTRAT catalog synced: {len(issues)} issues")
-    except Exception as e:
-        logger.warning(f"Failed to write catalog file: {e}")
+    if _write_json_file(perf_dir / "anstrat_catalog.json", catalog, "catalog file"):
+        logger.info("ANSTRAT catalog synced: %d issues", len(issues))
 
     return catalog
 

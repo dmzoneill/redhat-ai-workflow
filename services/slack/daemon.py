@@ -138,10 +138,10 @@ def refresh_slack_credentials() -> bool:
 
     script_path = PROJECT_ROOT / "scripts" / "get_slack_creds.py"
     if not script_path.exists():
-        print(f"⚠️  Credential refresh script not found: {script_path}")
+        logger.warning("Credential refresh script not found: %s", script_path)
         return False
 
-    print("🔄 Attempting to refresh Slack credentials from Chrome...")
+    logger.info("Attempting to refresh Slack credentials from Chrome...")
     try:
         result = subprocess.run(
             [sys.executable, str(script_path)],
@@ -151,21 +151,23 @@ def refresh_slack_credentials() -> bool:
         )
 
         if result.returncode == 0:
-            print("✅ Credentials refreshed from Chrome")
+            logger.info("Credentials refreshed from Chrome")
             # Reload config to pick up new values
             global CONFIG, SLACK_CONFIG
             CONFIG = load_config()
             SLACK_CONFIG = CONFIG.get("slack", {})
             return True
         else:
-            print(f"⚠️  Credential refresh failed: {result.stderr or result.stdout}")
+            logger.warning(
+                "Credential refresh failed: %s", result.stderr or result.stdout
+            )
             return False
 
     except subprocess.TimeoutExpired:
-        print("⚠️  Credential refresh timed out")
+        logger.warning("Credential refresh timed out")
         return False
     except Exception as e:
-        print(f"⚠️  Credential refresh error: {e}")
+        logger.warning("Credential refresh error: %s", e)
         return False
 
 

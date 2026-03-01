@@ -764,7 +764,8 @@ class ContextInjector:
         """
         Async version of gather_context.
 
-        Runs searches in parallel for better performance.
+        Wraps sync gather_context via asyncio.to_thread. Prefer gather_context_unified
+        for new code; it uses the memory abstraction layer with true async queries.
 
         Args:
             query: The user's question/message
@@ -775,8 +776,6 @@ class ContextInjector:
             include_inscope: Query InScope AI assistants for documentation
             thread_context: Optional list of previous messages in thread (for Slack)
         """
-        # For now, just wrap the sync version
-        # TODO: Make individual searches async for true parallelism
         return await asyncio.to_thread(
             self.gather_context,
             query,

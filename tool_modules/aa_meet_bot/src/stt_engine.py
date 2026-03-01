@@ -426,8 +426,6 @@ class RealtimeSTT:
     async def _capture_audio(self, config: StreamingConfig):
         """Capture audio from PulseAudio source."""
         try:
-            pass
-
             # Use parec to capture audio
             cmd = [
                 "parec",

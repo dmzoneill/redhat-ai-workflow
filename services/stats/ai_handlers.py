@@ -15,32 +15,56 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-_cache: dict[str, tuple[float, Any]] = {}
-_DEFAULT_TTL = 4 * 3600  # 4 hours
+SECONDS_PER_HOUR = 3600
+CACHE_TTL_HOURS = 4
+_DEFAULT_TTL = CACHE_TTL_HOURS * SECONDS_PER_HOUR
+CLOSEST_DIFF_INIT = 999
+QUARTER_WEEKDAYS = 65
+MISSING_LINK_SIMILARITY_THRESHOLD = 0.35
+SHORT_CACHE_TTL_SECONDS = 3600
+
+
+class _CacheManager:
+    def __init__(self, default_ttl: float = _DEFAULT_TTL) -> None:
+        self._cache: dict[str, tuple[float, Any]] = {}
+        self._default_ttl = default_ttl
+
+    def get(self, key: str, ttl: float | None = None) -> Optional[Any]:
+        ttl = ttl if ttl is not None else self._default_ttl
+        entry = self._cache.get(key)
+        if entry and (time.time() - entry[0]) < ttl:
+            return entry[1]
+        return None
+
+    def set(self, key: str, value: Any) -> None:
+        self._cache[key] = (time.time(), value)
+
+    def invalidate(self, prefix: str = "") -> int:
+        if not prefix:
+            count = len(self._cache)
+            self._cache.clear()
+            return count
+        keys = [k for k in self._cache if k.startswith(prefix)]
+        for k in keys:
+            del self._cache[k]
+        return len(keys)
+
+
+_cache = _CacheManager()
 
 
 def _cache_get(key: str, ttl: float = _DEFAULT_TTL) -> Optional[Any]:
     """Return cached value if still valid, else None."""
-    entry = _cache.get(key)
-    if entry and (time.time() - entry[0]) < ttl:
-        return entry[1]
-    return None
+    return _cache.get(key, ttl)
 
 
 def _cache_set(key: str, value: Any) -> None:
-    _cache[key] = (time.time(), value)
+    _cache.set(key, value)
 
 
 def cache_invalidate(prefix: str = "") -> int:
     """Remove cache entries matching prefix. Empty prefix clears all."""
-    if not prefix:
-        count = len(_cache)
-        _cache.clear()
-        return count
-    keys = [k for k in _cache if k.startswith(prefix)]
-    for k in keys:
-        del _cache[k]
-    return len(keys)
+    return _cache.invalidate(prefix)
 
 
 def _get_ollama_client(
@@ -200,7 +224,7 @@ def _generate_peer_narrative_fallback(
 ) -> dict:
     """Rule-based fallback when LLM is unavailable."""
     closest_level = ""
-    closest_diff = 999
+    closest_diff = CLOSEST_DIFF_INIT
     for lk in ["se", "pse", "spse", "de"]:
         ld = peer_levels.get(lk)
         if not ld:
@@ -272,7 +296,7 @@ def compute_peer_differentiators(
     }
     """
     cache_key = f"peer_diff:{hash(json.dumps(user_pct, sort_keys=True))}:{target_level}"
-    cached = _cache_get(cache_key, ttl=3600)
+    cached = _cache_get(cache_key, ttl=SHORT_CACHE_TTL_SECONDS)
     if cached:
         return cached
 
@@ -465,7 +489,7 @@ def _compute_trend(
             return {"projected_final": None, "status": "insufficient_data"}
 
         coeffs = np.polyfit(days, values, 1)
-        total_days = 65  # ~13 weeks
+        total_days = QUARTER_WEEKDAYS
         projected = int(np.polyval(coeffs, total_days))
         projected = max(0, min(projected, 100))
 
@@ -485,7 +509,7 @@ def _compute_trend(
         logger.warning("Computing trend projection with numpy polyfit: %s", e)
         if day_of_quarter > 0:
             rate = current_overall / day_of_quarter
-            projected = int(rate * 65)
+            projected = int(rate * QUARTER_WEEKDAYS)
             projected = max(0, min(projected, 100))
             status = (
                 "on_track"
@@ -509,7 +533,7 @@ def generate_gap_coach(
 ) -> dict:
     """Generate AI coaching suggestion for a competency gap."""
     cache_key = f"gap_coach:{competency_id}:{user_pct}"
-    cached = _cache_get(cache_key, ttl=3600)
+    cached = _cache_get(cache_key, ttl=SHORT_CACHE_TTL_SECONDS)
     if cached:
         return cached
 
@@ -591,7 +615,7 @@ def generate_promotion_readiness(
         }
 
     cache_key = f"promo_readiness:{user_overall}:{next_level}"
-    cached = _cache_get(cache_key, ttl=3600)
+    cached = _cache_get(cache_key, ttl=SHORT_CACHE_TTL_SECONDS)
     if cached:
         return cached
 
@@ -756,7 +780,7 @@ def generate_calendar_insights(
     # Coverage forecast
     coverage_pct = round(len(dates) / max(total_weekdays, 1) * 100)
     remaining_days = max(total_weekdays - len(dates), 0)
-    total_quarter_weekdays = 65
+    total_quarter_weekdays = QUARTER_WEEKDAYS
     if total_weekdays > 0:
         capture_rate = len(dates) / total_weekdays
         projected = round(capture_rate * total_quarter_weekdays)
@@ -1189,7 +1213,7 @@ def detect_missing_links(
     anstrat_items: list[dict],
     orphan_issues: list[dict],
     npu_classifier=None,
-    threshold: float = 0.35,
+    threshold: float = MISSING_LINK_SIMILARITY_THRESHOLD,
     top_n: int = 5,
 ) -> list[dict]:
     """Find orphan issues that semantically match an ANSTRAT but aren't linked.

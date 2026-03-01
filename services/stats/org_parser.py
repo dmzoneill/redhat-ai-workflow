@@ -546,7 +546,6 @@ def _load_github_org_members() -> dict[str, dict]:
             batch = members[i : i + 50]
             fragments = []
             for j, login in enumerate(batch):
-                _safe = re.sub(r"[^a-zA-Z0-9_]", "_", login)  # noqa: F841
                 fragments.append(f'  u{j}: user(login: "{login}") {{ login name }}')
             query = "query {\n" + "\n".join(fragments) + "\n}"
             try:

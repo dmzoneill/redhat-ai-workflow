@@ -40,13 +40,20 @@ from server.utils import run_cmd, truncate_output
 logger = logging.getLogger(__name__)
 
 
-@auto_heal()
-async def _systemctl_status_impl(unit: str, user: bool = False) -> str:
-    """Get service status."""
+def _build_systemctl_cmd(user: bool, action: str, *args: str) -> list[str]:
+    """Build systemctl command. Args: user, action, then positional args (unit, --no-pager, etc)."""
     cmd = ["systemctl"]
     if user:
         cmd.append("--user")
-    cmd.extend(["status", unit, "--no-pager"])
+    cmd.append(action)
+    cmd.extend(args)
+    return cmd
+
+
+@auto_heal()
+async def _systemctl_status_impl(unit: str, user: bool = False) -> str:
+    """Get service status."""
+    cmd = _build_systemctl_cmd(user, "status", unit, "--no-pager")
 
     success, output = await run_cmd(cmd, timeout=30)
     # systemctl status returns non-zero for inactive services
@@ -56,10 +63,7 @@ async def _systemctl_status_impl(unit: str, user: bool = False) -> str:
 @auto_heal()
 async def _systemctl_start_impl(unit: str, user: bool = False) -> str:
     """Start service."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["start", unit])
+    cmd = _build_systemctl_cmd(user, "start", unit)
 
     success, output = await run_cmd(cmd, timeout=60)
     if success:
@@ -70,10 +74,7 @@ async def _systemctl_start_impl(unit: str, user: bool = False) -> str:
 @auto_heal()
 async def _systemctl_stop_impl(unit: str, user: bool = False) -> str:
     """Stop service."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["stop", unit])
+    cmd = _build_systemctl_cmd(user, "stop", unit)
 
     success, output = await run_cmd(cmd, timeout=60)
     if success:
@@ -84,10 +85,7 @@ async def _systemctl_stop_impl(unit: str, user: bool = False) -> str:
 @auto_heal()
 async def _systemctl_restart_impl(unit: str, user: bool = False) -> str:
     """Restart service."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["restart", unit])
+    cmd = _build_systemctl_cmd(user, "restart", unit)
 
     success, output = await run_cmd(cmd, timeout=60)
     if success:
@@ -100,12 +98,10 @@ async def _systemctl_enable_impl(
     unit: str, now: bool = False, user: bool = False
 ) -> str:
     """Enable service at boot."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["enable", unit])
+    args = ["enable", unit]
     if now:
-        cmd.append("--now")
+        args.append("--now")
+    cmd = _build_systemctl_cmd(user, *args)
 
     success, output = await run_cmd(cmd, timeout=30)
     if success:
@@ -118,12 +114,10 @@ async def _systemctl_disable_impl(
     unit: str, now: bool = False, user: bool = False
 ) -> str:
     """Disable service at boot."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["disable", unit])
+    args = ["disable", unit]
     if now:
-        cmd.append("--now")
+        args.append("--now")
+    cmd = _build_systemctl_cmd(user, *args)
 
     success, output = await run_cmd(cmd, timeout=30)
     if success:
@@ -138,14 +132,12 @@ async def _systemctl_list_units_impl(
     user: bool = False,
 ) -> str:
     """List units."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["list-units", "--no-pager"])
+    args = ["list-units", "--no-pager"]
     if type_filter:
-        cmd.extend(["--type", type_filter])
+        args.extend(["--type", type_filter])
     if state:
-        cmd.extend(["--state", state])
+        args.extend(["--state", state])
+    cmd = _build_systemctl_cmd(user, *args)
 
     success, output = await run_cmd(cmd, timeout=30)
     if success:
@@ -160,14 +152,12 @@ async def _systemctl_list_unit_files_impl(
     user: bool = False,
 ) -> str:
     """List unit files."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["list-unit-files", "--no-pager"])
+    args = ["list-unit-files", "--no-pager"]
     if type_filter:
-        cmd.extend(["--type", type_filter])
+        args.extend(["--type", type_filter])
     if state:
-        cmd.extend(["--state", state])
+        args.extend(["--state", state])
+    cmd = _build_systemctl_cmd(user, *args)
 
     success, output = await run_cmd(cmd, timeout=30)
     if success:
@@ -178,10 +168,7 @@ async def _systemctl_list_unit_files_impl(
 @auto_heal()
 async def _systemctl_is_active_impl(unit: str, user: bool = False) -> str:
     """Check if service is active."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["is-active", unit])
+    cmd = _build_systemctl_cmd(user, "is-active", unit)
 
     success, output = await run_cmd(cmd, timeout=30)
     status = output.strip()
@@ -192,10 +179,7 @@ async def _systemctl_is_active_impl(unit: str, user: bool = False) -> str:
 @auto_heal()
 async def _systemctl_is_enabled_impl(unit: str, user: bool = False) -> str:
     """Check if service is enabled."""
-    cmd = ["systemctl"]
-    if user:
-        cmd.append("--user")
-    cmd.extend(["is-enabled", unit])
+    cmd = _build_systemctl_cmd(user, "is-enabled", unit)
 
     success, output = await run_cmd(cmd, timeout=30)
     status = output.strip()
@@ -235,6 +219,7 @@ async def _journalctl_unit_impl(
     since: str = "",
     follow: bool = False,
     user: bool = False,
+    until: str = "",
 ) -> str:
     """View logs for specific unit."""
     cmd = ["journalctl", "--no-pager", "-u", unit, "-n", str(lines)]
@@ -242,6 +227,8 @@ async def _journalctl_unit_impl(
         cmd.insert(1, "--user")
     if since:
         cmd.extend(["--since", since])
+    if until:
+        cmd.extend(["--until", until])
 
     success, output = await run_cmd(cmd, timeout=60)
     if success:

@@ -63,214 +63,124 @@ def get_rule_files() -> list[Path]:
     return files
 
 
+def _write_if_changed(
+    output_file: Path,
+    new_content: str,
+    skip_lines: int,
+    label: str,
+    dry_run: bool = False,
+    ensure_parent: bool = False,
+) -> bool:
+    """Write content to file if changed. Returns True if file was updated."""
+    if output_file.exists():
+        existing = output_file.read_text()
+        existing_body = "\n".join(existing.split("\n")[skip_lines:])
+        new_body = "\n".join(new_content.split("\n")[skip_lines:])
+        if existing_body == new_body:
+            print(f"  ⏭️  {label} (unchanged)")
+            return False
+    if dry_run:
+        print(f"  📝 {label} (would update)")
+    else:
+        if ensure_parent:
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(new_content)
+        print(f"  ✅ {label} (updated)")
+    return True
+
+
+def _generate_md_with_header(
+    rule_files: list[Path],
+    output_file: Path,
+    header_title: str,
+    skip_lines: int,
+    dry_run: bool = False,
+    ensure_parent: bool = False,
+    label: str | None = None,
+) -> bool:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    header = f"""<!--
+  {header_title}
+
+  Source: docs/ai-rules/
+  Generated: {timestamp}
+-->
+
+"""
+    content_parts = [header]
+    for rule_file in rule_files:
+        content_parts.append(rule_file.read_text().strip())
+        content_parts.append("\n")
+    return _write_if_changed(
+        output_file,
+        "\n".join(content_parts),
+        skip_lines,
+        label or output_file.name,
+        dry_run,
+        ensure_parent,
+    )
+
+
 def generate_cursorrules(rule_files: list[Path], dry_run: bool = False) -> bool:
     """Generate .cursorrules by concatenating all rule files."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     header = GENERATED_HEADER.format(timestamp=timestamp)
-
     content_parts = [header]
-
     for rule_file in rule_files:
-        content = rule_file.read_text().strip()
-        content_parts.append(content)
-        content_parts.append("\n")  # Separator between files
-
-    new_content = "\n".join(content_parts)
-
-    # Check if changed
-    if CURSORRULES_FILE.exists():
-        existing = CURSORRULES_FILE.read_text()
-        # Compare without timestamp line
-        existing_body = "\n".join(existing.split("\n")[8:])  # Skip header
-        new_body = "\n".join(new_content.split("\n")[8:])
-        if existing_body == new_body:
-            print("  ⏭️  .cursorrules (unchanged)")
-            return False
-
-    if dry_run:
-        print("  📝 .cursorrules (would update)")
-    else:
-        CURSORRULES_FILE.write_text(new_content)
-        print("  ✅ .cursorrules (updated)")
-
-    return True
+        content_parts.append(rule_file.read_text().strip())
+        content_parts.append("\n")
+    return _write_if_changed(
+        CURSORRULES_FILE, "\n".join(content_parts), 8, ".cursorrules", dry_run
+    )
 
 
 def generate_claude_md(rule_files: list[Path], dry_run: bool = False) -> bool:
     """Generate CLAUDE.md with @import statements."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     header = GENERATED_HEADER.format(timestamp=timestamp)
-
-    # Build @import statements
-    imports = []
-    for rule_file in rule_files:
-        rel_path = rule_file.relative_to(PROJECT_ROOT)
-        imports.append(f"@import {rel_path}")
-
+    imports = [f"@import {rf.relative_to(PROJECT_ROOT)}" for rf in rule_files]
     content = header + "\n".join(imports) + "\n"
-
-    # Check if changed
-    if CLAUDE_MD_FILE.exists():
-        existing = CLAUDE_MD_FILE.read_text()
-        existing_body = "\n".join(existing.split("\n")[8:])
-        new_body = "\n".join(content.split("\n")[8:])
-        if existing_body == new_body:
-            print("  ⏭️  CLAUDE.md (unchanged)")
-            return False
-
-    if dry_run:
-        print("  📝 CLAUDE.md (would update)")
-    else:
-        CLAUDE_MD_FILE.write_text(content)
-        print("  ✅ CLAUDE.md (updated)")
-
-    return True
+    return _write_if_changed(CLAUDE_MD_FILE, content, 8, "CLAUDE.md", dry_run)
 
 
 def generate_agents_md(rule_files: list[Path], dry_run: bool = False) -> bool:
-    """Generate AGENTS.md (cross-tool standard format).
-
-    AGENTS.md is similar to CLAUDE.md but uses a slightly different format
-    that's compatible with multiple AI coding tools.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # AGENTS.md uses full content (like .cursorrules) for maximum compatibility
-    header = f"""<!--
-  AGENTS.md - Cross-tool AI assistant configuration
-
-  This file follows the agents.md standard for AI coding assistants.
-  Compatible with: Claude Code, Cursor, Codex, Gemini, Copilot, OpenCode, Amp, and others.
-
-  Source: docs/ai-rules/
-  Generated: {timestamp}
--->
-
-"""
-
-    content_parts = [header]
-
-    for rule_file in rule_files:
-        content = rule_file.read_text().strip()
-        content_parts.append(content)
-        content_parts.append("\n")
-
-    new_content = "\n".join(content_parts)
-
-    # Check if changed
-    if AGENTS_MD_FILE.exists():
-        existing = AGENTS_MD_FILE.read_text()
-        existing_body = "\n".join(existing.split("\n")[10:])  # Skip header
-        new_body = "\n".join(new_content.split("\n")[10:])
-        if existing_body == new_body:
-            print("  ⏭️  AGENTS.md (unchanged)")
-            return False
-
-    if dry_run:
-        print("  📝 AGENTS.md (would update)")
-    else:
-        AGENTS_MD_FILE.write_text(new_content)
-        print("  ✅ AGENTS.md (updated)")
-
-    return True
+    """Generate AGENTS.md (cross-tool standard format)."""
+    return _generate_md_with_header(
+        rule_files,
+        AGENTS_MD_FILE,
+        "AGENTS.md - Cross-tool AI assistant configuration\n"
+        "  Compatible with: Claude Code, Cursor, Codex, Gemini, Copilot, OpenCode, Amp, and others.",
+        10,
+        dry_run,
+        label="AGENTS.md",
+    )
 
 
 def generate_gemini_md(rule_files: list[Path], dry_run: bool = False) -> bool:
-    """Generate GEMINI.md for Gemini CLI.
-
-    Gemini CLI reads GEMINI.md from the project root for context.
-    Uses full concatenated content (like .cursorrules).
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    header = f"""<!--
-  GEMINI.md - Gemini CLI AI assistant configuration
-
-  Project-level context for Gemini CLI.
-  See also: AGENTS.md, CLAUDE.md, .cursorrules
-
-  Source: docs/ai-rules/
-  Generated: {timestamp}
--->
-
-"""
-
-    content_parts = [header]
-
-    for rule_file in rule_files:
-        content = rule_file.read_text().strip()
-        content_parts.append(content)
-        content_parts.append("\n")
-
-    new_content = "\n".join(content_parts)
-
-    # Check if changed
-    if GEMINI_MD_FILE.exists():
-        existing = GEMINI_MD_FILE.read_text()
-        existing_body = "\n".join(existing.split("\n")[10:])  # Skip header
-        new_body = "\n".join(new_content.split("\n")[10:])
-        if existing_body == new_body:
-            print("  ⏭️  GEMINI.md (unchanged)")
-            return False
-
-    if dry_run:
-        print("  📝 GEMINI.md (would update)")
-    else:
-        GEMINI_MD_FILE.write_text(new_content)
-        print("  ✅ GEMINI.md (updated)")
-
-    return True
+    """Generate GEMINI.md for Gemini CLI."""
+    return _generate_md_with_header(
+        rule_files,
+        GEMINI_MD_FILE,
+        "GEMINI.md - Gemini CLI AI assistant configuration\n"
+        "  See also: AGENTS.md, CLAUDE.md, .cursorrules",
+        10,
+        dry_run,
+        label="GEMINI.md",
+    )
 
 
 def generate_copilot_md(rule_files: list[Path], dry_run: bool = False) -> bool:
-    """Generate .github/copilot-instructions.md for GitHub Copilot.
-
-    GitHub Copilot reads .github/copilot-instructions.md for
-    repository-wide custom instructions.
-    Uses full concatenated content.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    header = f"""<!--
-  copilot-instructions.md - GitHub Copilot custom instructions
-
-  Repository-wide instructions for GitHub Copilot.
-  See also: AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules
-
-  Source: docs/ai-rules/
-  Generated: {timestamp}
--->
-
-"""
-
-    content_parts = [header]
-
-    for rule_file in rule_files:
-        content = rule_file.read_text().strip()
-        content_parts.append(content)
-        content_parts.append("\n")
-
-    new_content = "\n".join(content_parts)
-
-    # Ensure .github directory exists
-    COPILOT_MD_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    # Check if changed
-    if COPILOT_MD_FILE.exists():
-        existing = COPILOT_MD_FILE.read_text()
-        existing_body = "\n".join(existing.split("\n")[10:])  # Skip header
-        new_body = "\n".join(new_content.split("\n")[10:])
-        if existing_body == new_body:
-            print("  ⏭️  .github/copilot-instructions.md (unchanged)")
-            return False
-
-    if dry_run:
-        print("  📝 .github/copilot-instructions.md (would update)")
-    else:
-        COPILOT_MD_FILE.write_text(new_content)
-        print("  ✅ .github/copilot-instructions.md (updated)")
-
-    return True
+    """Generate .github/copilot-instructions.md for GitHub Copilot."""
+    return _generate_md_with_header(
+        rule_files,
+        COPILOT_MD_FILE,
+        "copilot-instructions.md - GitHub Copilot custom instructions\n"
+        "  See also: AGENTS.md, CLAUDE.md, GEMINI.md, .cursorrules",
+        10,
+        dry_run,
+        ensure_parent=True,
+        label=".github/copilot-instructions.md",
+    )
 
 
 def sync_commands(dry_run: bool = False) -> bool:
@@ -302,7 +212,9 @@ def sync_commands(dry_run: bool = False) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync AI rules from docs/ai-rules/ to all targets")
+    parser = argparse.ArgumentParser(
+        description="Sync AI rules from docs/ai-rules/ to all targets"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

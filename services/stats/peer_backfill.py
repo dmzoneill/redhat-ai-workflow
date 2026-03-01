@@ -158,6 +158,188 @@ def compute_distribution(values: list[float | int]) -> dict[str, float | int]:
     }
 
 
+def _load_peer_summaries_for_level(
+    peers_dir: Path,
+    peer_list: list[dict],
+    min_events: int,
+    min_days: int,
+    blacklist: set[str],
+    self_username: str,
+) -> tuple[dict[str, Any], int]:
+    level_data: dict[str, Any] = {
+        "engineers": [],
+        "excluded_sparse": [],
+        "summaries": [],
+        "avg_competency_pct": {},
+        "avg_competency_points": {},
+        "avg_overall_pct": 0,
+        "comparable_avg_competency_pct": {},
+        "comparable_avg_overall_pct": 0,
+        "comparable_stats_competency": {},
+        "comparable_stats_overall": {},
+        "avg_daily_events": 0.0,
+        "avg_event_counts_by_source": {},
+        "avg_days_with_events": 0.0,
+        "stats_overall": {},
+        "stats_competency": {},
+    }
+    roster_count = 0
+    for peer in peer_list:
+        uname = peer.get("username", "")
+        if uname == self_username:
+            continue
+        roster_count += 1
+        if uname in blacklist:
+            level_data["excluded_sparse"].append(uname)
+            continue
+        summary_file = peers_dir / uname / "summary.json"
+        if summary_file.exists():
+            try:
+                with open(summary_file, encoding="utf-8") as f:
+                    s = json.load(f)
+                total_ev = s.get("total_events", 0)
+                active_days = s.get("days_with_events", s.get("days_captured", 0))
+                if total_ev < min_events or active_days < min_days:
+                    level_data["excluded_sparse"].append(uname)
+                    continue
+                if total_ev > 0:
+                    level_data["engineers"].append(uname)
+                    level_data["summaries"].append(s)
+            except Exception as e:
+                logger.warning("Failed to load peer summary %s: %s", summary_file, e)
+                continue
+
+    if not level_data["summaries"] and level_data["excluded_sparse"]:
+        for uname in list(level_data["excluded_sparse"]):
+            if uname in blacklist:
+                continue
+            summary_file = peers_dir / uname / "summary.json"
+            if summary_file.exists():
+                try:
+                    with open(summary_file, encoding="utf-8") as f:
+                        s = json.load(f)
+                    if s.get("total_events", 0) > 0:
+                        level_data["engineers"].append(uname)
+                        level_data["summaries"].append(s)
+                        level_data["excluded_sparse"].remove(uname)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load peer summary %s: %s", summary_file, e
+                    )
+                    continue
+
+    return level_data, roster_count
+
+
+def _compute_level_benchmarks(
+    level_data: dict[str, Any], roster_count: int
+) -> dict[str, Any]:
+    n = len(level_data["summaries"])
+    if n > 0:
+        all_comp_ids: set[str] = set()
+        for s in level_data["summaries"]:
+            all_comp_ids.update(s.get("cumulative_percentage", {}).keys())
+
+        excluded_comps: set[str] = set()
+        for comp_id in all_comp_ids:
+            all_zero = all(
+                s.get("cumulative_points", {}).get(comp_id, 0) == 0
+                for s in level_data["summaries"]
+            )
+            if all_zero:
+                excluded_comps.add(comp_id)
+
+        comparable_comps = all_comp_ids - excluded_comps
+        for comp_id in comparable_comps:
+            pct_sum = sum(
+                s.get("cumulative_percentage", {}).get(comp_id, 0)
+                for s in level_data["summaries"]
+            )
+            pts_sum = sum(
+                s.get("cumulative_points", {}).get(comp_id, 0)
+                for s in level_data["summaries"]
+            )
+            level_data["avg_competency_pct"][comp_id] = round(pct_sum / n)
+            level_data["avg_competency_points"][comp_id] = round(pts_sum / n)
+
+            comp_values = [
+                s.get("cumulative_percentage", {}).get(comp_id, 0)
+                for s in level_data["summaries"]
+            ]
+            level_data["stats_competency"][comp_id] = compute_distribution(comp_values)
+
+            comp_comparable_pct_sum = sum(
+                s.get("comparable_percentage", s.get("cumulative_percentage", {})).get(
+                    comp_id, 0
+                )
+                for s in level_data["summaries"]
+            )
+            level_data["comparable_avg_competency_pct"][comp_id] = round(
+                comp_comparable_pct_sum / n
+            )
+
+            comp_comparable_values = [
+                s.get("comparable_percentage", s.get("cumulative_percentage", {})).get(
+                    comp_id, 0
+                )
+                for s in level_data["summaries"]
+            ]
+            level_data["comparable_stats_competency"][comp_id] = compute_distribution(
+                comp_comparable_values
+            )
+
+        level_data["excluded_competencies"] = sorted(excluded_comps)
+
+        overall_values = [
+            s.get("overall_percentage", 0) for s in level_data["summaries"]
+        ]
+        level_data["avg_overall_pct"] = round(sum(overall_values) / n)
+        level_data["stats_overall"] = compute_distribution(overall_values)
+
+        comparable_overall_values = [
+            s.get("comparable_overall", s.get("overall_percentage", 0))
+            for s in level_data["summaries"]
+        ]
+        level_data["comparable_avg_overall_pct"] = round(
+            sum(comparable_overall_values) / n
+        )
+        level_data["comparable_stats_overall"] = compute_distribution(
+            comparable_overall_values
+        )
+
+        level_data["avg_daily_events"] = round(
+            sum(s.get("avg_daily_events", 0) for s in level_data["summaries"]) / n,
+            1,
+        )
+
+        level_data["avg_days_with_events"] = round(
+            sum(
+                s.get("days_with_events", s.get("days_captured", 0))
+                for s in level_data["summaries"]
+            )
+            / n,
+            1,
+        )
+
+        all_sources: set[str] = set()
+        for s in level_data["summaries"]:
+            all_sources.update(s.get("event_counts_by_source", {}).keys())
+        for src in all_sources:
+            level_data["avg_event_counts_by_source"][src] = round(
+                sum(
+                    s.get("event_counts_by_source", {}).get(src, 0)
+                    for s in level_data["summaries"]
+                )
+                / n,
+                1,
+            )
+
+    level_data["peer_count"] = n
+    level_data["roster_count"] = roster_count
+    del level_data["summaries"]
+    return level_data
+
+
 def compute_peer_benchmarks(
     peers_dir: Path,
     peers_config: dict[str, list[dict]],
@@ -181,178 +363,10 @@ def compute_peer_benchmarks(
     levels: dict[str, dict[str, Any]] = {}
 
     for level_key, peer_list in peers_config.items():
-        level_data: dict[str, Any] = {
-            "engineers": [],
-            "excluded_sparse": [],
-            "summaries": [],
-            "avg_competency_pct": {},
-            "avg_competency_points": {},
-            "avg_overall_pct": 0,
-            "comparable_avg_competency_pct": {},
-            "comparable_avg_overall_pct": 0,
-            "comparable_stats_competency": {},
-            "comparable_stats_overall": {},
-            "avg_daily_events": 0.0,
-            "avg_event_counts_by_source": {},
-            "avg_days_with_events": 0.0,
-            "stats_overall": {},
-            "stats_competency": {},
-        }
-
-        roster_count = 0
-        for peer in peer_list:
-            uname = peer.get("username", "")
-            if uname == self_username:
-                continue
-            roster_count += 1
-            if uname in blacklist:
-                level_data["excluded_sparse"].append(uname)
-                continue
-            summary_file = peers_dir / uname / "summary.json"
-            if summary_file.exists():
-                try:
-                    with open(summary_file, encoding="utf-8") as f:
-                        s = json.load(f)
-                    total_ev = s.get("total_events", 0)
-                    active_days = s.get("days_with_events", s.get("days_captured", 0))
-                    if total_ev < min_events or active_days < min_days:
-                        level_data["excluded_sparse"].append(uname)
-                        continue
-                    if total_ev > 0:
-                        level_data["engineers"].append(uname)
-                        level_data["summaries"].append(s)
-                except Exception as e:
-                    logger.warning(
-                        "Failed to load peer summary %s: %s", summary_file, e
-                    )
-                    continue
-
-        # Include excluded peers with data if no one else qualified
-        if not level_data["summaries"] and level_data["excluded_sparse"]:
-            for uname in list(level_data["excluded_sparse"]):
-                if uname in blacklist:
-                    continue
-                summary_file = peers_dir / uname / "summary.json"
-                if summary_file.exists():
-                    try:
-                        with open(summary_file, encoding="utf-8") as f:
-                            s = json.load(f)
-                        if s.get("total_events", 0) > 0:
-                            level_data["engineers"].append(uname)
-                            level_data["summaries"].append(s)
-                            level_data["excluded_sparse"].remove(uname)
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to load peer summary %s: %s", summary_file, e
-                        )
-                        continue
-
-        n = len(level_data["summaries"])
-        if n > 0:
-            all_comp_ids: set[str] = set()
-            for s in level_data["summaries"]:
-                all_comp_ids.update(s.get("cumulative_percentage", {}).keys())
-
-            excluded_comps: set[str] = set()
-            for comp_id in all_comp_ids:
-                all_zero = all(
-                    s.get("cumulative_points", {}).get(comp_id, 0) == 0
-                    for s in level_data["summaries"]
-                )
-                if all_zero:
-                    excluded_comps.add(comp_id)
-
-            comparable_comps = all_comp_ids - excluded_comps
-            for comp_id in comparable_comps:
-                pct_sum = sum(
-                    s.get("cumulative_percentage", {}).get(comp_id, 0)
-                    for s in level_data["summaries"]
-                )
-                pts_sum = sum(
-                    s.get("cumulative_points", {}).get(comp_id, 0)
-                    for s in level_data["summaries"]
-                )
-                level_data["avg_competency_pct"][comp_id] = round(pct_sum / n)
-                level_data["avg_competency_points"][comp_id] = round(pts_sum / n)
-
-                comp_values = [
-                    s.get("cumulative_percentage", {}).get(comp_id, 0)
-                    for s in level_data["summaries"]
-                ]
-                level_data["stats_competency"][comp_id] = compute_distribution(
-                    comp_values
-                )
-
-                comp_comparable_pct_sum = sum(
-                    s.get(
-                        "comparable_percentage", s.get("cumulative_percentage", {})
-                    ).get(comp_id, 0)
-                    for s in level_data["summaries"]
-                )
-                level_data["comparable_avg_competency_pct"][comp_id] = round(
-                    comp_comparable_pct_sum / n
-                )
-
-                comp_comparable_values = [
-                    s.get(
-                        "comparable_percentage", s.get("cumulative_percentage", {})
-                    ).get(comp_id, 0)
-                    for s in level_data["summaries"]
-                ]
-                level_data["comparable_stats_competency"][comp_id] = (
-                    compute_distribution(comp_comparable_values)
-                )
-
-            level_data["excluded_competencies"] = sorted(excluded_comps)
-
-            overall_values = [
-                s.get("overall_percentage", 0) for s in level_data["summaries"]
-            ]
-            level_data["avg_overall_pct"] = round(sum(overall_values) / n)
-            level_data["stats_overall"] = compute_distribution(overall_values)
-
-            comparable_overall_values = [
-                s.get("comparable_overall", s.get("overall_percentage", 0))
-                for s in level_data["summaries"]
-            ]
-            level_data["comparable_avg_overall_pct"] = round(
-                sum(comparable_overall_values) / n
-            )
-            level_data["comparable_stats_overall"] = compute_distribution(
-                comparable_overall_values
-            )
-
-            level_data["avg_daily_events"] = round(
-                sum(s.get("avg_daily_events", 0) for s in level_data["summaries"]) / n,
-                1,
-            )
-
-            level_data["avg_days_with_events"] = round(
-                sum(
-                    s.get("days_with_events", s.get("days_captured", 0))
-                    for s in level_data["summaries"]
-                )
-                / n,
-                1,
-            )
-
-            all_sources: set[str] = set()
-            for s in level_data["summaries"]:
-                all_sources.update(s.get("event_counts_by_source", {}).keys())
-            for src in all_sources:
-                level_data["avg_event_counts_by_source"][src] = round(
-                    sum(
-                        s.get("event_counts_by_source", {}).get(src, 0)
-                        for s in level_data["summaries"]
-                    )
-                    / n,
-                    1,
-                )
-
-        level_data["peer_count"] = n
-        level_data["roster_count"] = roster_count
-        del level_data["summaries"]
-        levels[level_key] = level_data
+        level_data, roster_count = _load_peer_summaries_for_level(
+            peers_dir, peer_list, min_events, min_days, blacklist, self_username
+        )
+        levels[level_key] = _compute_level_benchmarks(level_data, roster_count)
 
     return {
         "levels": levels,

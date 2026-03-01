@@ -45,7 +45,7 @@ ENABLE_NOTIFY = "--notify" in sys.argv or os.environ.get(
 def log(msg: str):
     """Log with timestamp."""
     timestamp = time.strftime("%H:%M:%S")
-    print(f"[ext-watcher {timestamp}] {msg}", flush=True)
+    logger.info("[ext-watcher %s] %s", timestamp, msg)
 
 
 def send_notification(title: str, message: str):
@@ -117,6 +117,7 @@ def get_file_mtimes() -> dict[Path, float]:
 
 def main():
     """Main watcher loop."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     log(f"Watching: {EXTENSION_SRC}")
     log(f"Debounce: {DEBOUNCE_SECONDS}s")
     log(f"Notifications: {'enabled' if ENABLE_NOTIFY else 'disabled'}")

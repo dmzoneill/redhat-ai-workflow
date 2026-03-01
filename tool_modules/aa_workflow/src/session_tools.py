@@ -2038,8 +2038,8 @@ def register_session_tools(  # noqa: C901
                 session = workspace.get_active_session(refresh_tools=False)
                 if session:
                     entry["session_id"] = session.session_id
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not resolve session for log entry: %s", e)
 
         append_session_entry(entry)
 

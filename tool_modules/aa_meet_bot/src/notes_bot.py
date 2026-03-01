@@ -396,8 +396,8 @@ class NotesBot:
                 )
 
                 notify_meeting_joined(self.state.title, mode)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Could not emit meeting joined notification: %s", e)
 
             # Start buffer flush task
             self._flush_task = asyncio.create_task(self._flush_loop())
@@ -1462,8 +1462,8 @@ class NotesBot:
                 logger.warning("CLEANUP: Timeout closing controller, force killing...")
                 try:
                     await self._controller.force_kill()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Force kill failed: %s", e)
             except Exception as e:
                 logger.warning(f"CLEANUP: Error closing controller: {e}")
                 cleanup_errors.append(f"Controller close error: {e}")
@@ -1496,8 +1496,8 @@ class NotesBot:
                     "source": "meet",
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not log stale cleanup to session: %s", e)
 
         # 10. Reset state
         self.state.status = "idle"
@@ -1810,8 +1810,8 @@ class NotesBot:
                 logger.warning("CLOSE: Timeout closing controller, force killing...")
                 try:
                     await self._controller.force_kill()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Force kill failed: %s", e)
             except Exception as e:
                 logger.warning(f"CLOSE: Error closing browser controller: {e}")
             finally:

@@ -13,13 +13,18 @@ gdrive_collector's filename classification.
 
 import json
 import logging
-import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from services.stats.quarter_utils import QUARTER_STARTS
+from services.stats.collector_utils import rate_limited_api_call, rate_limited_call
+from services.stats.quarter_utils import get_quarter_end, get_quarter_start
 
 logger = logging.getLogger(__name__)
+
+CACHE_TTL_HOURS = 24
+CALENDAR_MAX_RESULTS = 250
+MEET_PARTICIPANTS_PAGE_SIZE = 250
+SECONDS_PER_HOUR = 3600
 
 # ---------------------------------------------------------------------------
 # Meeting Title Classification
@@ -215,46 +220,6 @@ _CLASSIFICATION_BOOST = {
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting (shared with gdrive_collector style)
-# ---------------------------------------------------------------------------
-
-_MIN_REQUEST_INTERVAL = 0.1
-_last_request_time = 0.0
-
-
-def _rate_limit():
-    global _last_request_time
-    now = time.monotonic()
-    elapsed = now - _last_request_time
-    if elapsed < _MIN_REQUEST_INTERVAL:
-        time.sleep(_MIN_REQUEST_INTERVAL - elapsed)
-    _last_request_time = time.monotonic()
-
-
-def _api_call_with_backoff(call_fn, max_retries: int = 3):
-    """Execute a Google API call with exponential backoff on 429/5xx errors."""
-    for attempt in range(max_retries + 1):
-        try:
-            _rate_limit()
-            return call_fn()
-        except Exception as e:
-            err_str = str(e)
-            is_retryable = "429" in err_str or "500" in err_str or "503" in err_str
-            if not is_retryable or attempt >= max_retries:
-                raise
-            wait = (2**attempt) + 0.5
-            logger.debug(
-                "API rate limited (attempt %d/%d), waiting %.1fs: %s",
-                attempt + 1,
-                max_retries,
-                wait,
-                err_str[:100],
-            )
-            time.sleep(wait)
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Calendar API: Attendee/RSVP Collection
 # ---------------------------------------------------------------------------
 
@@ -358,7 +323,7 @@ def _collect_single_calendar(
             "calendarId": calendar_id,
             "timeMin": quarter_start,
             "timeMax": quarter_end,
-            "maxResults": 250,
+            "maxResults": CALENDAR_MAX_RESULTS,
             "singleEvents": True,
             "orderBy": "startTime",
             "fields": (
@@ -370,8 +335,9 @@ def _collect_single_calendar(
         if page_token:
             kwargs["pageToken"] = page_token
 
-        resp = _api_call_with_backoff(
-            lambda _kw=kwargs: service.events().list(**_kw).execute()
+        resp = rate_limited_api_call(
+            lambda _kw=kwargs: service.events().list(**_kw).execute(),
+            min_interval=0.1,
         )
         items = resp.get("items", [])
 
@@ -493,7 +459,6 @@ def collect_meet_attendance(
         filter_str += f' AND end_time<"{quarter_end}"'
 
     while True:
-        _rate_limit()
         kwargs = {
             "filter": filter_str,
             "pageSize": min(max_records, 100),
@@ -502,10 +467,11 @@ def collect_meet_attendance(
             kwargs["pageToken"] = page_token
 
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda _kw=kwargs: meet_service.conferenceRecords()
                 .list(**_kw)
-                .execute()
+                .execute(),
+                min_interval=0.1,
             )
         except Exception as e:
             logger.warning("Meet API conferenceRecords.list failed: %s", e)
@@ -528,15 +494,15 @@ def collect_meet_attendance(
         end = rec.get("endTime", "")
 
         try:
-            _rate_limit()
-            parts_resp = (
-                meet_service.conferenceRecords()
+            parts_resp = rate_limited_call(
+                lambda _rn=rec_name: meet_service.conferenceRecords()
                 .participants()
                 .list(
-                    parent=rec_name,
-                    pageSize=250,
+                    parent=_rn,
+                    pageSize=MEET_PARTICIPANTS_PAGE_SIZE,
                 )
-                .execute()
+                .execute(),
+                min_interval=0.1,
             )
         except Exception as e:
             logger.debug("Failed to get participants for %s: %s", rec_name, e)
@@ -606,13 +572,14 @@ def link_calendar_to_meet(
         meet_codes_seen.add(code)
 
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda _c=code: meet_service.conferenceRecords()
                 .list(
                     filter=f'space.meeting_code="{_c}"',
                     pageSize=10,
                 )
-                .execute()
+                .execute(),
+                min_interval=0.1,
             )
         except Exception as e:
             logger.debug("Meet lookup for code %s failed: %s", code, e)
@@ -626,14 +593,15 @@ def link_calendar_to_meet(
         for rec in records:
             try:
                 rec_name = rec["name"]
-                parts_resp = _api_call_with_backoff(
+                parts_resp = rate_limited_api_call(
                     lambda _rn=rec_name: meet_service.conferenceRecords()
                     .participants()
                     .list(
                         parent=_rn,
-                        pageSize=250,
+                        pageSize=MEET_PARTICIPANTS_PAGE_SIZE,
                     )
-                    .execute()
+                    .execute(),
+                    min_interval=0.1,
                 )
                 for p in parts_resp.get("participants", []):
                     user = p.get("signedinUser", {})
@@ -804,8 +772,8 @@ def load_cache(perf_dir: Path) -> dict | None:
         cached_at = data.get("cached_at", "")
         if cached_at:
             cached_dt = datetime.fromisoformat(cached_at)
-            age_hours = (datetime.now() - cached_dt).total_seconds() / 3600
-            if age_hours > 24:
+            age_hours = (datetime.now() - cached_dt).total_seconds() / SECONDS_PER_HOUR
+            if age_hours > CACHE_TTL_HOURS:
                 logger.info("Meeting cache expired (%.1f hours old)", age_hours)
                 return None
         return data
@@ -1023,16 +991,10 @@ def collect_meeting_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = QUARTER_STARTS
-    m, d = quarter_starts[quarter]
-    quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
-
-    next_q = quarter + 1
-    if next_q > 4:
-        next_q = 1
-        year += 1
-    nm, nd = quarter_starts[next_q]
-    quarter_end = date(year, nm, nd).isoformat() + "T00:00:00Z"
+    quarter_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
+    quarter_end = (
+        get_quarter_end(year, quarter) + timedelta(days=1)
+    ).isoformat() + "T00:00:00Z"
 
     now_str = datetime.utcnow().isoformat() + "Z"
     effective_end = min(quarter_end, now_str)
@@ -1089,8 +1051,10 @@ def ensure_meeting_peer_index(
             cached_at = data.get("cached_at", "")
             if cached_at:
                 cached_dt = datetime.fromisoformat(cached_at)
-                age_hours = (datetime.now() - cached_dt).total_seconds() / 3600
-                if age_hours <= 24:
+                age_hours = (
+                    datetime.now() - cached_dt
+                ).total_seconds() / SECONDS_PER_HOUR
+                if age_hours <= CACHE_TTL_HOURS:
                     index = data.get("index", {})
                     logger.info(
                         "Using cached meeting peer index: %d users",
@@ -1119,16 +1083,10 @@ def ensure_meeting_peer_index(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = QUARTER_STARTS
-    m, d = quarter_starts[quarter]
-    quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
-
-    next_q = quarter + 1
-    if next_q > 4:
-        next_q = 1
-        year += 1
-    nm, nd = quarter_starts[next_q]
-    quarter_end = date(year, nm, nd).isoformat() + "T00:00:00Z"
+    quarter_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
+    quarter_end = (
+        get_quarter_end(year, quarter) + timedelta(days=1)
+    ).isoformat() + "T00:00:00Z"
 
     now_str = datetime.utcnow().isoformat() + "Z"
     effective_end = min(quarter_end, now_str)

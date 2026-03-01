@@ -28,6 +28,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from html import unescape as html_unescape
 from pathlib import Path
@@ -64,7 +65,6 @@ from services.stats.peer_backfill import (
     get_weekdays_in_quarter_range,
 )
 from services.stats.performance_scoring import (
-    comparable_points,
     compute_competency_percentages,
     compute_daily_points,
     dedup_events_by_jira_key,
@@ -98,6 +98,34 @@ from services.stats.strategy import (
     build_strategy_context_index,
 )
 from tool_modules.aa_performance.src.question_manager import QuestionManager
+
+MAX_PEER_BACKFILL_ERRORS = 50
+TARGET_POINTS_PER_COMPETENCY = 100
+
+
+@dataclass
+class SummaryUpdateContext:
+    cumulative_points: dict[str, int]
+    total_events: int
+    highlights: list[str]
+    pc_points: dict[str, int]
+    pc_events: int
+    counts_by_source: dict[str, int]
+    comparable_counts_by_source: dict[str, int]
+    ne_points: dict[str, int]
+    year: int | None = None
+    quarter: int | None = None
+    skip_strategy: bool = False
+
+
+GAP_PERCENTAGE_THRESHOLD = 50
+SECONDS_PER_HOUR = 3600
+MAX_HIERARCHY_KEYS_PER_BATCH = 30
+JIRA_QUERY_TIMEOUT = 30
+MAX_DESCRIPTION_LENGTH = 500
+MAX_SUMMARY_LENGTH = 100
+MAX_TEXT_PREVIEW_LENGTH = 300
+GMAIL_MAX_RESULTS = 100
 
 
 def get_performance_summary_path() -> Path:
@@ -401,7 +429,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             summary = qm.get_questions_summary()
             return summary if summary else None
         except Exception as e:
-            logger.debug(f"Failed to load questions summary: {e}")
+            logger.debug("Failed to load questions summary: %s", e)
             return None
 
     async def _handle_add_question(self, **kwargs) -> dict:
@@ -559,59 +587,28 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         for event in data.get("events", []):
                             tagged = qm.tag_event_to_questions(event)
                             tagged_total += len(tagged)
-                    except Exception as exc:
+                    except (json.JSONDecodeError, OSError) as exc:
                         logger.debug("Suppressed error tagging events: %s", exc)
 
         return tagged_total
 
-    @staticmethod
-    def _is_personal_repo_event(ev: dict) -> bool:
-        """Return True if the event is from a personal/non-work repo."""
-        return is_personal_repo_event(ev, get_peer_comparable_config())
-
-    @staticmethod
-    def _is_primary_only_event(ev: dict) -> bool:
-        """Return True if the event should be excluded from the peer-comparable score."""
-        return is_primary_only_event(ev, get_peer_comparable_config())
-
-    @staticmethod
-    def _normalize_strategy_bonus(points: dict[str, int], ev: dict) -> dict[str, int]:
-        """Remove strategy alignment bonus from event points for fair comparison."""
-        bonus = get_strategy_alignment_config().get("bonus_multiplier", 1.5)
-        return normalize_strategy_bonus(points, ev, bonus_multiplier=bonus)
-
-    @staticmethod
-    def _comparable_points(ev: dict) -> dict[str, int]:
-        """Return event points suitable for peer-comparable scoring."""
-        return comparable_points(ev)
-
-    @staticmethod
-    def _dedup_events_by_jira_key(events: list[dict]) -> list[dict]:
-        """Deduplicate and cap events for fair daily scoring."""
-        return dedup_events_by_jira_key(events, get_peer_comparable_config())
-
-    @staticmethod
-    def _compute_daily_points(
-        events: list[dict], daily_cap: int, strip_enrichment: bool = False
-    ) -> dict[str, int]:
-        """Aggregate event points into daily competency totals."""
-        return compute_daily_points(
-            events, daily_cap, get_source_daily_caps(), strip_enrichment
-        )
-
-    def _update_summary(
-        self, year: int | None = None, quarter: int | None = None
-    ) -> dict:
-        """Recalculate and update the quarter summary from all daily files."""
-        daily_dir = self._get_daily_dir(year, quarter)
-        if not daily_dir.exists():
-            return {}
-
-        _, _, daily_cap, target_per_competency = get_effective_defs()
-        pc_cfg = get_peer_comparable_config()
-        source_caps = get_source_daily_caps()
-        strategy_bonus = get_strategy_alignment_config().get("bonus_multiplier", 1.5)
-
+    def _accumulate_daily_points(
+        self,
+        daily_dir: Path,
+        daily_cap: int,
+        source_caps: dict,
+        pc_cfg: dict,
+        strategy_bonus: float,
+    ) -> tuple[
+        dict[str, int],
+        dict[str, int],
+        dict[str, int],
+        int,
+        int,
+        dict[str, int],
+        dict[str, int],
+        list[str],
+    ]:
         cumulative_points: dict[str, int] = {}
         no_enrichment_points: dict[str, int] = {}
         peer_comparable_points: dict[str, int] = {}
@@ -668,13 +665,50 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 for ev in events[:3]:
                     if ev.get("title") and len(highlights) < highlights_max:
                         highlights.append(ev["title"][:80])
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning(
                     "Failed to read daily file %s during summary update: %s",
                     daily_file,
                     e,
                 )
                 continue
+
+        return (
+            cumulative_points,
+            no_enrichment_points,
+            peer_comparable_points,
+            total_events,
+            peer_comparable_events,
+            event_counts_by_source,
+            comparable_event_counts_by_source,
+            highlights,
+        )
+
+    def _update_summary(
+        self, year: int | None = None, quarter: int | None = None
+    ) -> dict:
+        """Recalculate and update the quarter summary from all daily files."""
+        daily_dir = self._get_daily_dir(year, quarter)
+        if not daily_dir.exists():
+            return {}
+
+        _, _, daily_cap, target_per_competency = get_effective_defs()
+        pc_cfg = get_peer_comparable_config()
+        source_caps = get_source_daily_caps()
+        strategy_bonus = get_strategy_alignment_config().get("bonus_multiplier", 1.5)
+
+        (
+            cumulative_points,
+            no_enrichment_points,
+            peer_comparable_points,
+            total_events,
+            peer_comparable_events,
+            event_counts_by_source,
+            comparable_event_counts_by_source,
+            highlights,
+        ) = self._accumulate_daily_points(
+            daily_dir, daily_cap, source_caps, pc_cfg, strategy_bonus
+        )
 
         cfg = get_merged_config()
         level = cfg.get("engineering_level", "sse")
@@ -763,21 +797,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         return summary
 
-    def _update_summary_from_data(
-        self,
-        cumulative_points: dict[str, int],
-        total_events: int,
-        highlights: list[str],
-        year: int | None = None,
-        quarter: int | None = None,
-        skip_strategy: bool = False,
-        *,
-        pc_points: dict[str, int],
-        pc_events: int,
-        counts_by_source: dict[str, int],
-        comparable_counts_by_source: dict[str, int],
-        ne_points: dict[str, int],
-    ) -> dict:
+    def _update_summary_from_data(self, ctx: SummaryUpdateContext) -> dict:
         """Build and write quarter summary from pre-computed scoring data.
 
         Avoids re-reading daily files when the caller already has the
@@ -798,7 +818,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         effective_target = max(round(target_per_competency * target_scale), 1)
 
         cumulative_pct = compute_competency_percentages(
-            cumulative_points, effective_target
+            ctx.cumulative_points, effective_target
         )
         overall = round(sum(cumulative_pct.values()) / max(len(cumulative_pct), 1))
         gaps_threshold = get_merged_config().get(
@@ -806,23 +826,23 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         )
         gaps = [k for k, v in cumulative_pct.items() if v < gaps_threshold]
 
-        comp_counts_by_source = comparable_counts_by_source
-        pc_pct = compute_competency_percentages(pc_points, effective_target)
+        comp_counts_by_source = ctx.comparable_counts_by_source
+        pc_pct = compute_competency_percentages(ctx.pc_points, effective_target)
         pc_overall = round(sum(pc_pct.values()) / max(len(pc_pct), 1))
 
-        ne_pct = compute_competency_percentages(ne_points, effective_target)
+        ne_pct = compute_competency_percentages(ctx.ne_points, effective_target)
         ne_overall = round(sum(ne_pct.values()) / max(len(ne_pct), 1))
 
         now = datetime.now()
-        y = year or now.year
-        q = quarter or ((now.month - 1) // 3 + 1)
+        y = ctx.year or now.year
+        q = ctx.quarter or ((now.month - 1) // 3 + 1)
         quarter_starts = QUARTER_STARTS
         sm, sd = quarter_starts[q]
         day_of_quarter = (now.date() - date(y, sm, sd)).days + 1
 
-        perf_dir = self._get_perf_dir(year, quarter)
+        perf_dir = self._get_perf_dir(ctx.year, ctx.quarter)
 
-        if skip_strategy:
+        if ctx.skip_strategy:
             summary_file = perf_dir / "summary.json"
             strategy_alignment = {}
             questions_summary = {}
@@ -832,11 +852,11 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         prev = json.load(f)
                     strategy_alignment = prev.get("strategy_alignment", {})
                     questions_summary = prev.get("questions_summary", {})
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read existing summary.json: %s", e)
                     pass
         else:
-            emails_dir = self._get_executive_emails_dir(year, quarter)
+            emails_dir = self._get_executive_emails_dir(ctx.year, ctx.quarter)
             ownership = load_anstrat_ownership(perf_dir)
             jira_activity = load_sender_jira_activity(perf_dir)
             gdrive_docs = load_sender_gdrive_docs(perf_dir)
@@ -844,33 +864,33 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             strategy_alignment = build_strategy_alignment(
                 y,
                 q,
-                cumulative_points,
+                ctx.cumulative_points,
                 perf_dir,
                 emails_dir,
                 ownership=ownership,
                 jira_activity=jira_activity,
                 gdrive_docs=gdrive_docs,
             )
-            questions_summary = self._get_questions_summary(year, quarter)
+            questions_summary = self._get_questions_summary(ctx.year, ctx.quarter)
 
         summary = {
             "year": y,
             "quarter": q,
             "day_of_quarter": day_of_quarter,
-            "cumulative_points": cumulative_points,
+            "cumulative_points": ctx.cumulative_points,
             "cumulative_percentage": cumulative_pct,
             "overall_percentage": overall,
-            "no_enrichment_points": ne_points,
+            "no_enrichment_points": ctx.ne_points,
             "no_enrichment_percentage": ne_pct,
             "no_enrichment_overall": ne_overall,
-            "peer_comparable_points": pc_points,
+            "peer_comparable_points": ctx.pc_points,
             "peer_comparable_percentage": pc_pct,
             "peer_comparable_overall": pc_overall,
-            "peer_comparable_events": pc_events,
-            "total_events": total_events,
-            "event_counts_by_source": counts_by_source,
+            "peer_comparable_events": ctx.pc_events,
+            "total_events": ctx.total_events,
+            "event_counts_by_source": ctx.counts_by_source,
             "comparable_event_counts_by_source": comp_counts_by_source,
-            "highlights": highlights,
+            "highlights": ctx.highlights,
             "gaps": gaps,
             "strategy_alignment": strategy_alignment,
             "questions_summary": questions_summary,
@@ -910,7 +930,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as f:
                         self._collector.hierarchy_cache = json.load(f)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to load hierarchy cache %s: %s", cache_file, e
                     )
@@ -1095,7 +1115,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         len(peers),
                     )
                     return peers
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to load org_roster.json: %s", e)
 
         config_paths = [
@@ -1110,7 +1130,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     peers = config.get("peers", {})
                     if peers:
                         return peers
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to read config file: %s", e)
                 continue
         return {}
@@ -1185,9 +1205,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     src = ev.get("source", "unknown")
                     event_counts[src] = event_counts.get(src, 0) + 1
 
-                    if not self._is_primary_only_event(ev):
-                        ev_pts = self._normalize_strategy_bonus(
-                            ev.get("points", {}), ev
+                    if not is_primary_only_event(ev, get_peer_comparable_config()):
+                        ev_pts = normalize_strategy_bonus(
+                            ev.get("points", {}),
+                            ev,
+                            bonus_multiplier=get_strategy_alignment_config().get(
+                                "bonus_multiplier", 1.5
+                            ),
                         )
                         for comp_id, pts in ev_pts.items():
                             current = pc_daily.get(comp_id, 0)
@@ -1195,7 +1219,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
                 for comp_id, pts in pc_daily.items():
                     comparable_points[comp_id] = comparable_points.get(comp_id, 0) + pts
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to read peer daily file: %s", e)
                 continue
 
@@ -1345,7 +1369,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "daily_total": daily_data.get("daily_total", 0),
             }
         except Exception as e:
-            logger.error(f"Failed to collect peer data for {username}: {e}")
+            logger.error("Failed to collect peer data for %s: %s", username, e)
             return {"success": False, "error": str(e)}
 
     async def _handle_collect_peers(self, **kwargs) -> dict:
@@ -1426,7 +1450,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as f:
                         self._collector.hierarchy_cache = json.load(f)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to load hierarchy cache: %s", e)
                     self._collector.hierarchy_cache = {}
 
@@ -1788,7 +1812,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             if existing.get("events"):
                                 peer_events += len(existing["events"])
                                 continue
-                        except Exception as exc:
+                        except (json.JSONDecodeError, OSError) as exc:
                             logger.debug(
                                 "Skipped existing peer daily file due to: %s", exc
                             )
@@ -1811,7 +1835,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         peer_events += len(daily_data.get("events", []))
                     except Exception as e:
                         async with _progress_lock:
-                            if len(self._peer_backfill_progress["errors"]) < 50:
+                            if (
+                                len(self._peer_backfill_progress["errors"])
+                                < MAX_PEER_BACKFILL_ERRORS
+                            ):
                                 self._peer_backfill_progress["errors"].append(
                                     f"{username}/{d}: {e}"
                                 )
@@ -2007,7 +2034,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(cache_file, encoding="utf-8") as f:
                     hierarchy_cache = json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load hierarchy cache: %s", e)
                 pass
         self._collector.hierarchy_cache = hierarchy_cache
@@ -2033,7 +2060,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     try:
                         with open(daily_file, encoding="utf-8") as f:
                             data = json.load(f)
-                    except Exception as e:
+                    except (json.JSONDecodeError, OSError) as e:
                         logger.warning("Failed to read daily file for rescore: %s", e)
                         continue
 
@@ -2041,8 +2068,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in events:
                         self._collector._enrich_event(ev, eff_defs, min_sig)
 
-                    deduped = self._dedup_events_by_jira_key(events)
-                    daily_points = self._compute_daily_points(deduped, daily_cap)
+                    deduped = dedup_events_by_jira_key(
+                        events, get_peer_comparable_config()
+                    )
+                    daily_points = compute_daily_points(
+                        deduped, daily_cap, get_source_daily_caps()
+                    )
 
                     data["daily_points"] = daily_points
                     data["daily_total"] = sum(daily_points.values())
@@ -2128,7 +2159,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 with open(benchmarks_file, encoding="utf-8") as f:
                     benchmarks = json.load(f)
                 return {"success": True, "benchmarks": benchmarks}
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 return {"success": False, "error": f"Failed to read benchmarks: {e}"}
 
         return {
@@ -2159,7 +2190,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         src = ev.get("source", "unknown")
                         counts[src] = counts.get(src, 0) + 1
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for event counts: %s", e)
                     continue
         return counts
@@ -2173,7 +2204,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(bf, encoding="utf-8") as f:
                     return json.load(f).get("levels", {})
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load benchmarks.json: %s", e)
                 pass
         return {}
@@ -2237,7 +2268,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         cumulative[comp_id] = cumulative.get(comp_id, 0) + pts
                     total_pct = sum(cumulative.values())
                     daily_trend.append({"day": day_num, "cumulative_pct": total_pct})
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to read daily file for overview digest: %s", e
                     )
@@ -2274,7 +2305,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         if comp_id in ev.get("points", {}):
                             user_events.append(ev)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for gap coach: %s", e)
                     continue
 
@@ -2473,7 +2504,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         except ImportError:
             return {"success": False, "error": "Ollama client not available"}
         except Exception as e:
-            logger.error(f"Local question evaluation failed: {e}")
+            logger.error("Local question evaluation failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_ask_ai(self, **kwargs) -> dict:
@@ -2489,7 +2520,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             scoring_config = get_merged_config()
         except Exception as e:
             logger.warning("Failed to load scoring config: %s", e)
-            pass
 
         summary = self._load_file(get_performance_summary_path())
 
@@ -2521,7 +2551,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     for ev in data.get("events", []):
                         if comp_id in ev.get("points", {}):
                             events.append(ev)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for explain: %s", e)
                     continue
 
@@ -2530,7 +2560,6 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             scoring_config = get_merged_config()
         except Exception as e:
             logger.warning("Failed to load scoring config: %s", e)
-            pass
 
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
@@ -2614,7 +2643,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     "source": ev.get("source", ""),
                                 }
                             )
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for clustering: %s", e)
                     continue
 
@@ -2660,7 +2689,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         except ImportError as e:
             return {"success": False, "error": f"sklearn not available: {e}"}
         except Exception as e:
-            logger.error(f"Clustering failed: {e}")
+            logger.error("Clustering failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_detect_missing_links(self, **kwargs) -> dict:
@@ -2810,7 +2839,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(daily_file, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for rethreshold: %s", e)
                     continue
 
@@ -2856,8 +2885,10 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         ev["points"] = new_points
                         file_changed = True
 
-                deduped = self._dedup_events_by_jira_key(events)
-                daily_points = self._compute_daily_points(deduped, daily_cap)
+                deduped = dedup_events_by_jira_key(events, get_peer_comparable_config())
+                daily_points = compute_daily_points(
+                    deduped, daily_cap, get_source_daily_caps()
+                )
 
                 old_points = data.get("daily_points", {})
                 if daily_points != old_points or file_changed:
@@ -2938,17 +2969,19 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         await loop.run_in_executor(
             None,
             lambda: self._update_summary_from_data(
-                cumulative_points,
-                total_events,
-                highlights,
-                year,
-                quarter,
-                skip_strategy=True,
-                pc_points=pc_points,
-                pc_events=pc_events,
-                counts_by_source=counts_by_source,
-                comparable_counts_by_source=comparable_counts_by_source,
-                ne_points=ne_points,
+                SummaryUpdateContext(
+                    cumulative_points=cumulative_points,
+                    total_events=total_events,
+                    highlights=highlights,
+                    pc_points=pc_points,
+                    pc_events=pc_events,
+                    counts_by_source=counts_by_source,
+                    comparable_counts_by_source=comparable_counts_by_source,
+                    ne_points=ne_points,
+                    year=year,
+                    quarter=quarter,
+                    skip_strategy=True,
+                )
             ),
         )
 
@@ -2986,7 +3019,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(cache_file, encoding="utf-8") as f:
                     hierarchy_cache = json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load hierarchy cache: %s", e)
                 pass
 
@@ -3026,7 +3059,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(daily_file, encoding="utf-8") as f:
                         data = json.load(f)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for rescore: %s", e)
                     continue
 
@@ -3035,10 +3068,16 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     self._collector._enrich_event(ev, eff_defs, min_sig)
 
                 work_events = [
-                    ev for ev in events if not self._is_personal_repo_event(ev)
+                    ev
+                    for ev in events
+                    if not is_personal_repo_event(ev, get_peer_comparable_config())
                 ]
-                deduped = self._dedup_events_by_jira_key(work_events)
-                daily_points = self._compute_daily_points(deduped, daily_cap)
+                deduped = dedup_events_by_jira_key(
+                    work_events, get_peer_comparable_config()
+                )
+                daily_points = compute_daily_points(
+                    deduped, daily_cap, get_source_daily_caps()
+                )
 
                 data["daily_points"] = daily_points
                 data["daily_total"] = sum(daily_points.values())
@@ -3107,16 +3146,18 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         await loop.run_in_executor(
             None,
             lambda: self._update_summary_from_data(
-                cumulative_points,
-                total_events,
-                highlights,
-                year,
-                quarter,
-                pc_points=pc_points,
-                pc_events=pc_events,
-                counts_by_source=counts_by_source,
-                comparable_counts_by_source=comparable_counts_by_source,
-                ne_points=ne_points,
+                SummaryUpdateContext(
+                    cumulative_points=cumulative_points,
+                    total_events=total_events,
+                    highlights=highlights,
+                    pc_points=pc_points,
+                    pc_events=pc_events,
+                    counts_by_source=counts_by_source,
+                    comparable_counts_by_source=comparable_counts_by_source,
+                    ne_points=ne_points,
+                    year=year,
+                    quarter=quarter,
+                )
             ),
         )
 
@@ -3256,7 +3297,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "fast_path": result.get("fast_path", False),
             }
         except Exception as e:
-            logger.error(f"Failed to set scoring config: {e}")
+            logger.error("Failed to set scoring config: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_reset_scoring_config(self, **kwargs) -> dict:
@@ -3271,7 +3312,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "re_evaluated": result.get("files_updated", 0),
             }
         except Exception as e:
-            logger.error(f"Failed to reset scoring config: {e}")
+            logger.error("Failed to reset scoring config: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_get_captured_days(self, **kwargs) -> dict:
@@ -3310,7 +3351,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             "category_points": cat_points,
                         }
                     )
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for captured days: %s", e)
                     days.append(
                         {
@@ -3370,7 +3411,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         aap_keys = [k for k in issue_keys if k.startswith("AAP-")]
 
-        for key in aap_keys[:30]:
+        for key in aap_keys[:MAX_HIERARCHY_KEYS_PER_BATCH]:
             try:
                 result = _rh_issue(["view-issue", key])
                 info: dict[str, str] = {"key": key, "type": "story"}
@@ -3408,17 +3449,19 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     elif in_description:
                         desc_lines.append(line.strip())
                 if desc_lines:
-                    info["description"] = " ".join(desc_lines)[:500]
+                    info["description"] = " ".join(desc_lines)[:MAX_DESCRIPTION_LENGTH]
                 if "summary" not in info:
                     for line in result.split("\n"):
                         if key in line:
-                            info["summary"] = line.split(key)[-1].strip(": ")[:100]
+                            info["summary"] = line.split(key)[-1].strip(": ")[
+                                :MAX_SUMMARY_LENGTH
+                            ]
                             break
                 if "summary" in info:
                     info["summary"] = html_unescape(info["summary"])
                 issue_info[key] = info
             except Exception as e:
-                logger.debug(f"Failed to fetch {key}: {e}")
+                logger.debug("Failed to fetch %s: %s", key, e)
 
         epic_keys_set: set[str] = set()
         for info_val in issue_info.values():
@@ -3449,7 +3492,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     einfo["parent_initiative"] = val
                     issue_info[epic_key] = einfo
                 except Exception as e:
-                    logger.debug(f"Failed to fetch epic {epic_key}: {e}")
+                    logger.debug("Failed to fetch epic %s: %s", epic_key, e)
 
         # Discover user-assigned ANSTRATs (exclude Closed/Done)
         user_assigned_anstrats: set[str] = set()
@@ -3463,7 +3506,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     "--max-results",
                     "20",
                 ],
-                timeout=30,
+                timeout=JIRA_QUERY_TIMEOUT,
             )
             for line in result.split("\n"):
                 found = re.findall(r"(ANSTRAT-\d+)", line)
@@ -3478,11 +3521,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     parts[1].strip() if len(parts) > 1 else "Initiative"
                                 ),
                                 "summary": html_unescape(
-                                    parts[4].strip()[:100] if len(parts) > 4 else ak
+                                    parts[4].strip()[:MAX_SUMMARY_LENGTH]
+                                    if len(parts) > 4
+                                    else ak
                                 ),
                             }
         except Exception as e:
-            logger.debug(f"Failed to search user-assigned ANSTRATs: {e}")
+            logger.debug("Failed to search user-assigned ANSTRATs: %s", e)
 
         # Collect ANSTRATs discovered as parents of user's epics
         hierarchy_anstrats: set[str] = set()
@@ -3524,7 +3569,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             unmapped_epics.discard(ce)
                             hierarchy_anstrats.add(anstrat_key)
                     except Exception as e:
-                        logger.debug(f"Failed to query children of {anstrat_key}: {e}")
+                        logger.debug(
+                            "Failed to query children of %s: %s", anstrat_key, e
+                        )
 
         # Discover child epics assigned to user under user-assigned ANSTRATs
         relevant_anstrats = user_assigned_anstrats | hierarchy_anstrats
@@ -3550,11 +3597,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                     parts[1].strip() if len(parts) > 1 else "Epic"
                                 ),
                                 "summary": (
-                                    parts[4].strip()[:100] if len(parts) > 4 else ce
+                                    parts[4].strip()[:MAX_SUMMARY_LENGTH]
+                                    if len(parts) > 4
+                                    else ce
                                 ),
                             }
             except Exception as e:
-                logger.debug(f"Failed to query user children of {anstrat_key}: {e}")
+                logger.debug("Failed to query user children of %s: %s", anstrat_key, e)
 
         # Track which ANSTRATs are user-relevant for display filtering
         issue_info["_user_relevant_anstrats"] = {
@@ -3701,7 +3750,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(cache_file, encoding="utf-8") as fh:
                     cached = json.load(fh)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load hierarchy cache: %s", e)
                 pass
 
@@ -3728,7 +3777,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             for t in titles:
                 cleaned = re.sub(r"(?:AAP|ANSTRAT)-\d+\s*[-:]\s*", "", t).strip()
                 if cleaned and len(cleaned) > 5:
-                    return html_unescape(cleaned[:100])
+                    return html_unescape(cleaned[:MAX_SUMMARY_LENGTH])
             return ""
 
         for key, data in issue_keys.items():
@@ -3925,7 +3974,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     with open(f, encoding="utf-8") as fh:
                         data = json.load(fh)
                     all_events.extend(data.get("events", []))
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read daily file for report: %s", e)
                     continue
 
@@ -4027,7 +4076,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             if hier_result.get("strategies") or hier_result.get("unattached_epics"):
                 hierarchy = hier_result
         except Exception as e:
-            logger.warning(f"Failed to load hierarchy for PDF: {e}")
+            logger.warning("Failed to load hierarchy for PDF: %s", e)
 
         comp_evidence: dict = {}
         gap_suggestions_data: dict = {}
@@ -4036,14 +4085,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             comp_evidence = ev_result.get("competency_evidence", {})
             gap_suggestions_data = ev_result.get("gap_suggestions", {})
         except Exception as e:
-            logger.warning(f"Failed to load competency evidence for PDF: {e}")
+            logger.warning("Failed to load competency evidence for PDF: %s", e)
 
         captured_days: list[dict] = []
         try:
             cap_result = await self._handle_get_captured_days()
             captured_days = cap_result.get("days", [])
         except Exception as e:
-            logger.warning(f"Failed to load captured days for PDF: {e}")
+            logger.warning("Failed to load captured days for PDF: %s", e)
 
         strategy_data: dict | None = None
         try:
@@ -4068,7 +4117,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                     "coverage_summary": map_result.get("coverage_summary"),
                 }
         except Exception as e:
-            logger.warning(f"Failed to load strategy data for PDF: {e}")
+            logger.warning("Failed to load strategy data for PDF: %s", e)
 
         questions_summary = summary.get("questions_summary") or []
 
@@ -4123,7 +4172,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 }
                 peer_volume_html = generate_volume_table_html(user_volume, peer_volumes)
             except Exception as e:
-                logger.debug(f"Failed to load peer benchmarks for report: {e}")
+                logger.debug("Failed to load peer benchmarks for report: %s", e)
 
         template_data = {
             "quarter": quarter_label,
@@ -4188,11 +4237,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         if not email_id:
             import hashlib
 
-            email_id = hashlib.sha256(text[:500].encode()).hexdigest()[:12]
+            email_id = hashlib.sha256(
+                text[:MAX_DESCRIPTION_LENGTH].encode()
+            ).hexdigest()[:12]
 
         parsed["email_id"] = email_id
         parsed["parsed_at"] = datetime.now().isoformat()
-        parsed["text_preview"] = text[:300].replace("\n", " ")
+        parsed["text_preview"] = text[:MAX_TEXT_PREVIEW_LENGTH].replace("\n", " ")
 
         emails_dir = self._get_executive_emails_dir()
         emails_dir.mkdir(parents=True, exist_ok=True)
@@ -4404,7 +4455,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                             "total_themes": data.get("total_themes", 0),
                         }
                     )
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to read executive email cache: %s", e)
                     continue
 
@@ -4479,7 +4530,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as fh:
                         hierarchy_cache = json.load(fh)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning("Failed to load hierarchy cache: %s", e)
                     pass
 
@@ -4597,7 +4648,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             email_list = await loop.run_in_executor(None, _search)
             return {"success": True, "emails": email_list, "count": len(email_list)}
         except Exception as e:
-            logger.error(f"Gmail search failed: {e}")
+            logger.error("Gmail search failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_read_gmail_message(self, **kwargs) -> dict:
@@ -4672,7 +4723,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             result = await loop.run_in_executor(None, _read)
             return {"success": True, **result}
         except Exception as e:
-            logger.error(f"Gmail read failed: {e}")
+            logger.error("Gmail read failed: %s", e)
             return {"success": False, "error": str(e)}
 
     async def _handle_backfill_executive_emails(self, **kwargs) -> dict:
@@ -4718,7 +4769,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             try:
                 with open(p, encoding="utf-8") as fh:
                     existing_gmail_ids.add(json.load(fh).get("gmail_message_id", ""))
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to read existing email cache file: %s", e)
                 pass
 
@@ -4739,7 +4790,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         kwargs_api: dict = {
                             "userId": "me",
                             "q": query,
-                            "maxResults": 100,
+                            "maxResults": GMAIL_MAX_RESULTS,
                         }
                         if page_token:
                             kwargs_api["pageToken"] = page_token
@@ -4822,7 +4873,9 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         parsed["email_date"] = header_map.get("Date", "")
                         parsed["collected_date"] = now.date().isoformat()
                         parsed["parsed_at"] = datetime.now().isoformat()
-                        parsed["text_preview"] = body[:300].replace("\n", " ")
+                        parsed["text_preview"] = body[:MAX_TEXT_PREVIEW_LENGTH].replace(
+                            "\n", " "
+                        )
 
                         cf = emails_dir / f"{eid}.json"
                         with open(cf, "w", encoding="utf-8") as fh:
@@ -4845,7 +4898,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                         }
                     )
                 except Exception as e:
-                    logger.error(f"Backfill failed for {sender}: {e}")
+                    logger.error("Backfill failed for %s: %s", sender, e)
                     sender_results.append(
                         {
                             "sender": sender,
@@ -4908,7 +4961,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 try:
                     with open(cache_file, encoding="utf-8") as cfh:
                         issue_info = json.load(cfh).get("issues", {})
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to load hierarchy cache for day detail: %s", e
                     )
@@ -4962,7 +5015,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 "has_data": True,
             }
         except Exception as e:
-            logger.error(f"Failed to read day detail for {date_str}: {e}")
+            logger.error("Failed to read day detail for %s: %s", date_str, e)
             return {"success": False, "error": str(e)}
 
     @staticmethod
@@ -5037,14 +5090,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                                         "match_reason": reason,
                                     }
                                 )
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to read daily file for competency evidence: %s", e
                     )
                     continue
 
         all_competencies = list(COMPETENCY_DEFS.keys())
-        target_per_competency = 100
+        target_per_competency = TARGET_POINTS_PER_COMPETENCY
 
         competency_meta: dict[str, dict] = {}
         for comp_id in all_competencies:
@@ -5063,7 +5116,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         for comp_id in all_competencies:
             total = competency_totals.get(comp_id, 0)
             pct = min(round(total / target_per_competency * 100), 100)
-            if pct < 50:
+            if pct < GAP_PERCENTAGE_THRESHOLD:
                 suggestions = get_gap_suggestions(comp_id)
                 meta = get_competency_meta(comp_id)
                 gap_suggestions_data[comp_id] = {
@@ -5106,7 +5159,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
             return data
 
         except Exception as e:
-            logger.error(f"Failed to load {filepath}: {e}")
+            logger.error("Failed to load %s: %s", filepath, e)
             return self._stats_cache.get(key)
 
     # ==================== Lifecycle ====================
@@ -5122,7 +5175,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         try:
             with open(SCORING_CONFIG_FILE, encoding="utf-8") as f:
                 old_cfg = json.load(f)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read old scoring config for migration: %s", e)
             return
 
@@ -5133,8 +5186,8 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         try:
             SCORING_CONFIG_FILE.unlink()
             logger.info("Deleted old scoring_config.json")
-        except Exception as e:
-            logger.warning(f"Failed to delete old config: {e}")
+        except OSError as e:
+            logger.warning("Failed to delete old config: %s", e)
 
         new_config: dict = {}
         for k in ("engineering_level",):
@@ -5170,14 +5223,14 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 )
                 cfg = get_merged_config()
                 level = cfg.get("engineering_level", "sse")
-                success = await classifier.initialize(COMPETENCY_DEFS, level)
+                success = classifier.initialize(COMPETENCY_DEFS, level)
                 if success:
                     self._collector.npu_classifier = classifier
                     logger.info("NPU classifier initialized successfully")
                 else:
                     logger.info("NPU classifier failed to initialize, disabled")
             except Exception as e:
-                logger.info(f"NPU classifier unavailable: {e}")
+                logger.info("NPU classifier unavailable: %s", e)
 
         if self.enable_dbus:
             await self.start_dbus()
@@ -5206,7 +5259,7 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
 
         collection_stale = False
         if self._last_collection_time > 0:
-            hours_since = (time.time() - self._last_collection_time) / 3600
+            hours_since = (time.time() - self._last_collection_time) / SECONDS_PER_HOUR
             collection_stale = hours_since > 26
 
         checks = {

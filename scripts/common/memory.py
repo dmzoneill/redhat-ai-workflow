@@ -34,8 +34,10 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-# Memory directory - relative to project root
-MEMORY_DIR = Path.home() / "src/redhat-ai-workflow/memory"
+try:
+    from scripts.common.paths import MEMORY_DIR
+except ImportError:
+    MEMORY_DIR = Path(__file__).parent.parent.parent / "memory"
 
 # Keys that are project-specific (stored per-project)
 PROJECT_SPECIFIC_KEYS = {"state/current_work"}

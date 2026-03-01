@@ -249,9 +249,75 @@ follow_ups:
   task: send slack reply when skills return - alert resolved, likely transient issue,
     related to AAP-65191
   priority: low - already resolved
+- alert: AutomationAnalyticsProcessorAAPEdaStoppedProcessing (NEW)
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1772122659.477449'
+  status: blocked - all skills down including slack, cannot investigate or reply
+  task: eda processor <1 payload/24hrs - part of pattern with other stage processor
+    alerts
+  priority: medium - stage env, but recurring pattern suggests systemic issue
+  next: when skills return - check pod status/logs, message queue connectivity, verify
+    if related to other stage processor issues (billing processor errors feb 24)
+  investigation_draft: '*investigation status* :tools:
+
+
+    eda processor alert for tower-analytics-stage - cant fully investigate right now,
+    skill executor is down so cant check pod status or logs
+
+
+    *whats happening*
+
+    - alert: eda processor has processed <1 payload in past 24hrs
+
+    - 2 instances firing, 1 resolved
+
+    - namespace: `tower-analytics-stage`
+
+
+    *context*
+
+    this is part of a pattern im after seeing in stage lately - multiple processor
+    alerts (billing processor errors on feb 24, similar eda processing issues). suggests
+    somethin systemic with message ingestion or pod health in stage env
+
+
+    *next steps*
+
+    - need to wait for k8s access to return
+
+    - will check: pod status, recent restarts, processor logs, message queue connectivity
+
+    - verify if related to other stage alerts or separate issue
+
+
+    tagging this fo follow-up when tooling comes back online'
+- alert: MessagesRecoveryTarballProcessingFailedError (6th occurrence - NEW)
+  namespace: tower-analytics-stage
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1772381512.977259'
+  status: blocked - skill executor completely down, cannot reply to slack
+  priority: high - 6th occurrence in 5 days, needs urgent investigation
+  pattern: recurring tarball processing failures - s3 access/malformed data/storage
+    quota likely
+  next: when skills return - send slack reply with investigation status, check kibana
+    logs, verify s3 access, check cronjob pod status, look for corrupted tarballs
+  reply_text: "*investigation status* \U0001F50D\n\nmessages recovery tarball processing\
+    \ alert - this is the 6th time ive seen this alert recently. cant fully investigate\
+    \ right now cos skill executor is down\n\n*whats happening*\n- alert: `MessagesRecoveryTarballProcessingFailedError`\n\
+    - namespace: `tower-analytics-stage`\n- cronjob processing tarballs from s3 is\
+    \ failing\n\n*pattern*\nthis has fired 6 times in past few days (feb 21, 22, 23,\
+    \ 24, 25, and now). recurring failures like this usually point to:\n- s3 access\
+    \ issues (credentials, connectivity)\n- malformed tarballs in the bucket\n- storage\
+    \ quota problems\n- cronjob pod crashlooping\n\n*next steps when tooling returns*\n\
+    - check kibana logs at that dashboard link for specific error messages\n- verify\
+    \ s3 bucket access and perms\n- check cronjob pod status and recent logs\n- look\
+    \ for corrupted tarballs in s3\n\n*impact*\nhistorical message recovery is blocked\
+    \ but real-time processing should be unaffected\n\ntagging for follow-up when\
+    \ k8s access comes back"
 last_beer: '2026-02-09T23:28:48.052195'
 last_coffee: '2026-02-25T14:54:14.861514'
-last_updated: '2026-02-25T17:15:47.624821'
+last_updated: '2026-03-01T16:14:16.748535'
 open_mrs:
 - id: 1516
   status: open

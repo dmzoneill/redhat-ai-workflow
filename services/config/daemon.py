@@ -180,7 +180,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         try:
             skills = self._load_skills_list()
             return {"success": True, "skills": skills}
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to get skills list: {e}")
             return {"success": False, "error": str(e), "skills": []}
 
@@ -194,7 +194,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             if skill:
                 return {"success": True, "skill": skill}
             return {"success": False, "error": f"Skill '{name}' not found"}
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to get skill definition: {e}")
             return {"success": False, "error": str(e)}
 
@@ -203,7 +203,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         try:
             personas = self._load_personas_list()
             return {"success": True, "personas": personas}
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to get personas list: {e}")
             return {"success": False, "error": str(e), "personas": []}
 
@@ -217,7 +217,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
             if persona:
                 return {"success": True, "persona": persona}
             return {"success": False, "error": f"Persona '{name}' not found"}
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to get persona definition: {e}")
             return {"success": False, "error": str(e)}
 
@@ -235,7 +235,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
         try:
             config = self._load_config()
             return {"success": True, "config": config}
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to get config: {e}")
             return {"success": False, "error": str(e)}
 
@@ -569,7 +569,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                 data["_raw_yaml"] = content
                 self._skills_cache[name] = data
                 return data
-        except Exception as e:
+        except (yaml.YAMLError, OSError) as e:
             logger.error(f"Failed to load skill {name}: {e}")
 
         return None
@@ -791,7 +791,7 @@ class ConfigDaemon(DaemonDBusBase, BaseDaemon):
                         if line.strip() and not line.startswith("#"):
                             description = line.strip()
                             break
-                except Exception as exc:
+                except OSError as exc:
                     logger.debug("Suppressed error: %s", exc)
 
             modules.append(

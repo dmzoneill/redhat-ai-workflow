@@ -161,15 +161,7 @@ def generate_sunburst_svg(competencies: dict, overall: float) -> str:
 # ============================================================
 
 
-def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
-    """Generate a dense radial mindmap SVG for the issue hierarchy.
-
-    Levels:
-        Center  -- quarter label
-        Ring 1  -- ANSTRAT strategies (or unattached epics)
-        Ring 2  -- Epics (children of strategies)
-        Ring 3  -- Individual issues (children of epics)
-    """
+def _mindmap_setup(hierarchy: dict) -> tuple[list[dict], int, int, float, float]:
     strategies = hierarchy.get("strategies") or []
     unattached = hierarchy.get("unattached_epics") or []
     uncategorized = hierarchy.get("uncategorized") or []
@@ -187,17 +179,25 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
         ]
 
     if not groups:
-        return ""
+        return [], 0, 0, 0.0, 0.0
 
-    # Count total leaf nodes to estimate required canvas size
     total_epics = sum(len(g.get("children") or []) for g in groups)
     total_leaf = sum(
         len(c.get("children") or []) for g in groups for c in (g.get("children") or [])
     )
     canvas = max(700, min(1100, 500 + total_epics * 50 + total_leaf * 20))
-    width, height = canvas, canvas
-    cx, cy = width / 2, height / 2
+    cx = cy = canvas / 2
+    return groups, total, canvas, cx, cy
 
+
+def _mindmap_render_nodes(
+    groups: list[dict],
+    total: int,
+    quarter_label: str,
+    canvas: int,
+    cx: float,
+    cy: float,
+) -> str:
     colors = [
         "#3b82f6",
         "#8b5cf6",
@@ -209,7 +209,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
         "#f97316",
     ]
 
-    # Center node -- prominent
     center_r = 48
     paths = (
         f'<circle cx="{cx}" cy="{cy}" r="{center_r}" fill="#334155" opacity="0.12"/>'
@@ -235,7 +234,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
         gy = cy + strat_r * math.sin(angle)
         color = colors[gi % len(colors)]
 
-        # Line: center -> strategy
         paths += (
             f'<line x1="{cx}" y1="{cy}" x2="{gx:.1f}" y2="{gy:.1f}" '
             f'stroke="{color}" stroke-width="5" opacity="0.45"/>'
@@ -246,7 +244,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
         key = group.get("key", "")
         short_key = key.replace("ANSTRAT-", "AN-")
 
-        # Strategy node
         paths += (
             f'<circle cx="{gx:.1f}" cy="{gy:.1f}" r="{sz:.0f}" fill="{color}" opacity="0.2" '
             f'stroke="{color}" stroke-width="3"/>'
@@ -256,7 +253,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
             f'fill="#444" font-weight="600">{pts}pts</text>'
         )
 
-        # Ring 2: Epics
         children = (group.get("children") or [])[:max_epics]
         if children:
             n_ch = len(children)
@@ -273,7 +269,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
                 ckey = child.get("key", "")
                 short_ckey = ckey.replace("AAP-", "")
 
-                # Line: strategy -> epic
                 paths += (
                     f'<line x1="{gx:.1f}" y1="{gy:.1f}" x2="{ex:.1f}" y2="{ey:.1f}" '
                     f'stroke="{color}" stroke-width="3" opacity="0.4"/>'
@@ -283,7 +278,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
                     f'font-size="14" font-weight="700" fill="#1a1a1a">{escape(short_ckey)}</text>'
                 )
 
-                # Ring 3: Issues (children of epics)
                 issues = (child.get("children") or [])[:max_issues]
                 if issues:
                     n_iss = len(issues)
@@ -300,7 +294,6 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
                         ikey = issue.get("key", "")
                         short_ikey = ikey.replace("AAP-", "")
 
-                        # Line: epic -> issue
                         paths += (
                             f'<line x1="{ex:.1f}" y1="{ey:.1f}" x2="{ix:.1f}" y2="{iy:.1f}" '
                             f'stroke="{color}" stroke-width="2" opacity="0.35"/>'
@@ -320,6 +313,24 @@ def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
                             f'font-size="12" font-weight="bold" fill="#999">+{leftover}</text>'
                         )
 
+    return paths
+
+
+def generate_mindmap_svg(hierarchy: dict, quarter_label: str) -> str:
+    """Generate a dense radial mindmap SVG for the issue hierarchy.
+
+    Levels:
+        Center  -- quarter label
+        Ring 1  -- ANSTRAT strategies (or unattached epics)
+        Ring 2  -- Epics (children of strategies)
+        Ring 3  -- Individual issues (children of epics)
+    """
+    groups, total, canvas, cx, cy = _mindmap_setup(hierarchy)
+    if not groups:
+        return ""
+
+    paths = _mindmap_render_nodes(groups, total, quarter_label, canvas, cx, cy)
+    width = height = canvas
     return (
         f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
         f'style="width:100%;height:auto;">'

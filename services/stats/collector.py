@@ -1,3 +1,5 @@
+"""Data collection orchestrator for performance metrics across git, Jira, GitLab, GitHub, GDrive, and meetings."""
+
 import json
 import logging
 import os
@@ -5,8 +7,10 @@ import re
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +38,35 @@ from services.stats.scorer import (
 from services.stats.strategy import match_event_to_strategy
 
 logger = logging.getLogger(__name__)
+
+HTTP_TIMEOUT_LONG = 60
+HTTP_TIMEOUT_SHORT = 15
+HTTP_TIMEOUT_VERY_SHORT = 10
+TRUNCATE_DESCRIPTION = 500
+TRUNCATE_SUMMARY = 100
+TRUNCATE_CONTEXT = 200
+JIRA_MAX_RESULTS = 200
+PAGE_SIZE = 100
+PEER_REPO_LIMIT = 20
+HIERARCHY_FETCH_LIMIT = 20
+MR_NOTES_FETCH_LIMIT = 15
+GITLAB_MEM_TTL = 3600
+GITLAB_DISK_TTL = 86400
+REPO_CACHE_UPDATE_INTERVAL = 3600
+
+
+@dataclass
+class GitlabFetchContext:
+    cfg: dict
+    gitlab_host: str
+    token: str
+    username: str
+    q_start: str
+    q_end: str
+    mrs_authored: list[dict]
+    reviews_given: list[dict]
+    reviews_received: list[dict]
+    seen: set[str]
 
 
 class _CircuitBreaker:
@@ -199,7 +232,7 @@ def _build_classification_text(
     description = info.get("description", "")
     if description:
         clean = re.sub(r"\{[^}]+\}|\[~[^\]]+\]|h[1-6]\.", "", description)
-        parts.append(clean[:500])
+        parts.append(clean[:TRUNCATE_DESCRIPTION])
 
     epic_key = info.get("epic", "")
     if epic_key:
@@ -260,7 +293,7 @@ def _jira_project_from_key(key: str) -> str:
 def _jira_rest_search(
     jql: str,
     fields: str = "key,summary,resolutiondate,created",
-    max_results: int = 200,
+    max_results: int = JIRA_MAX_RESULTS,
 ) -> list[dict] | None:
     """Search Jira via REST API. Returns list of issue dicts or None on failure.
 
@@ -282,10 +315,10 @@ def _jira_rest_search(
         req = urllib.request.Request(url)
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_LONG) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return data.get("issues", [])
-    except Exception as e:
+    except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
         logger.warning("Jira REST search failed (jql=%s): %s", jql[:80], e)
         return None
 
@@ -331,7 +364,11 @@ class DataCollector:
                     timeout=5,
                 ).strip()
                 self._git_email_cache = email or ""
-            except Exception as e:
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                FileNotFoundError,
+            ) as e:
                 logger.warning("Failed to get git user.email: %s", e)
                 self._git_email_cache = ""
         return self._git_email_cache
@@ -353,7 +390,7 @@ class DataCollector:
                             username = config.get("user", {}).get("username", "")
                         if username:
                             break
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to read jira_username from %s: %s", cfg_path, e
                     )
@@ -432,7 +469,7 @@ class DataCollector:
                     None,
                 )
                 ctx = (
-                    prio_entry["context"][:200]
+                    prio_entry["context"][:TRUNCATE_CONTEXT]
                     if prio_entry and prio_entry.get("context")
                     else ""
                 )
@@ -503,7 +540,7 @@ class DataCollector:
     _repo_update_times: dict[str, float] = {}
     _resolved_repo_cache: dict[str, str | None] = {}
     _repo_update_lock = threading.Lock()
-    REPO_UPDATE_INTERVAL = 3600
+    REPO_UPDATE_INTERVAL = REPO_CACHE_UPDATE_INTERVAL
     LOCAL_SRC_DIR = Path.home() / "src"
     _SSH_ENV = {
         **os.environ,
@@ -536,7 +573,7 @@ class DataCollector:
                 timeout=10,
             )
             return out.strip() == ""
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.warning("git status --porcelain failed for %s: %s", repo_path, e)
             return False
 
@@ -550,7 +587,7 @@ class DataCollector:
                 ["git", "-C", repo_path, "pull", "--rebase", "--quiet"],
                 text=True,
                 stderr=subprocess.PIPE,
-                timeout=60,
+                timeout=HTTP_TIMEOUT_LONG,
                 env=self._SSH_ENV,
             )
             return True
@@ -565,7 +602,7 @@ class DataCollector:
                         stderr=subprocess.DEVNULL,
                         timeout=10,
                     )
-                except Exception as abort_err:
+                except (subprocess.SubprocessError, OSError) as abort_err:
                     logger.error(
                         "git rebase --abort failed for %s (repo may be in bad state): %s",
                         name,
@@ -574,7 +611,7 @@ class DataCollector:
             else:
                 logger.warning("Pull --rebase failed for %s: %s", name, stderr)
             return False
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.warning("Pull --rebase failed for %s: %s", name, e)
             return False
 
@@ -670,7 +707,7 @@ class DataCollector:
                 timeout=5,
             )
             return len(out.strip()) >= 7
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.warning("Bare repo validation failed for %s: %s", repo_path, e)
             return False
 
@@ -803,7 +840,11 @@ class DataCollector:
                     timeout=5,
                 ).strip()
                 self._git_author_cache = name if name else os.environ.get("USER", "")
-            except Exception as e:
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                FileNotFoundError,
+            ) as e:
                 logger.warning(
                     "Failed to get git user.name, falling back to $USER: %s", e
                 )
@@ -825,7 +866,7 @@ class DataCollector:
                         username = config.get("user", {}).get("github_username", "")
                         if username:
                             break
-                except Exception as e:
+                except (json.JSONDecodeError, OSError) as e:
                     logger.warning(
                         "Failed to read github_username from %s: %s", cfg_path, e
                     )
@@ -844,13 +885,17 @@ class DataCollector:
                             if len(parts) > 1:
                                 username = parts[1].strip().split()[0].strip("()")
                                 break
-                except Exception as e:
+                except (
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                    FileNotFoundError,
+                ) as e:
                     logger.warning(
                         "gh auth status failed, cannot determine GitHub username: %s", e
                     )
             self._github_username_cache = username
             if username:
-                logger.info(f"GitHub username: {username}")
+                logger.info("GitHub username: %s", username)
             else:
                 logger.warning("Could not determine GitHub username")
         return self._github_username_cache
@@ -866,7 +911,7 @@ class DataCollector:
                 if cfg_path.exists():
                     with open(cfg_path, encoding="utf-8") as f:
                         return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning("Failed to load project config from %s: %s", cfg_path, e)
                 continue
         return {}
@@ -887,7 +932,7 @@ class DataCollector:
                     t = host_data.get("token", "")
                     if t:
                         return t
-            except Exception as e:
+            except (OSError, yaml.YAMLError) as e:
                 logger.warning("Failed to read GitLab token from glab config: %s", e)
         return ""
 
@@ -898,7 +943,7 @@ class DataCollector:
             req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read()).get("username", "")
-        except Exception as e:
+        except (urllib.error.URLError, json.JSONDecodeError, OSError) as e:
             logger.warning("GitLab API /user failed for %s: %s", host, e)
             return ""
 
@@ -906,7 +951,7 @@ class DataCollector:
         """Make a GET request to GitLab API, returning parsed JSON."""
         url = f"https://{host}/api/v4/{path}"
         req = urllib.request.Request(url, headers={"PRIVATE-TOKEN": token})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SHORT) as resp:
             return json.loads(resp.read())
 
     # ------------------------------------------------------------------
@@ -925,26 +970,23 @@ class DataCollector:
         cache_file = perf_dir / f"gitlab_event_cache{cache_suffix}.json"
         mem_key = str(cache_file)
 
-        _MEM_TTL = 3600
-        _DISK_TTL = 86400
-
         with self._gitlab_mem_lock:
             if mem_key in self._gitlab_mem_cache:
                 ts, data = self._gitlab_mem_cache[mem_key]
-                if time.time() - ts < _MEM_TTL:
+                if time.time() - ts < GITLAB_MEM_TTL:
                     return data
 
         if cache_file.exists():
             try:
                 mtime = cache_file.stat().st_mtime
-                if time.time() - mtime < _DISK_TTL:
+                if time.time() - mtime < GITLAB_DISK_TTL:
                     with open(cache_file, encoding="utf-8") as f:
                         cached = json.load(f)
                     if cached.get("mrs_authored") or not username_override:
                         with self._gitlab_mem_lock:
                             self._gitlab_mem_cache[mem_key] = (time.time(), cached)
                         return cached
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning(
                     "Failed to read GitLab cache %s (will re-fetch from API): %s",
                     cache_file,
@@ -983,16 +1025,18 @@ class DataCollector:
             )
         else:
             cache_data = self._fetch_gitlab_per_repo(
-                cfg,
-                gitlab_host,
-                token,
-                username,
-                q_start,
-                q_end,
-                mrs_authored,
-                reviews_given,
-                reviews_received,
-                seen,
+                GitlabFetchContext(
+                    cfg=cfg,
+                    gitlab_host=gitlab_host,
+                    token=token,
+                    username=username,
+                    q_start=q_start,
+                    q_end=q_end,
+                    mrs_authored=mrs_authored,
+                    reviews_given=reviews_given,
+                    reviews_received=reviews_received,
+                    seen=seen,
+                )
             )
 
         has_data = bool(
@@ -1006,8 +1050,8 @@ class DataCollector:
             try:
                 with open(cache_file, "w", encoding="utf-8") as f:
                     json.dump(cache_data, f, indent=2)
-            except Exception as e:
-                logger.warning(f"Failed to save GitLab cache: {e}")
+            except OSError as e:
+                logger.warning("Failed to save GitLab cache: %s", e)
 
             with self._gitlab_mem_lock:
                 self._gitlab_mem_cache[str(cache_file)] = (time.time(), cache_data)
@@ -1074,7 +1118,7 @@ class DataCollector:
                     "web_url": mr.get("web_url", ""),
                     "created_at": mr.get("created_at", ""),
                     "merged_at": mr.get("merged_at") or "",
-                    "description": (mr.get("description") or "")[:200],
+                    "description": (mr.get("description") or "")[:TRUNCATE_CONTEXT],
                 }
             )
 
@@ -1082,22 +1126,22 @@ class DataCollector:
             (
                 f"merge_requests?scope=all&author_username={username}"
                 f"&created_after={q_start}&created_before={q_end}"
-                f"&per_page=100"
+                f"&per_page={PAGE_SIZE}"
             ),
             (
                 f"merge_requests?scope=all&author_username={username}"
                 f"&state=merged&updated_after={q_start}&updated_before={q_end}"
-                f"&per_page=100"
+                f"&per_page={PAGE_SIZE}"
             ),
             (
                 f"merge_requests?scope=all&author_username={username}"
                 f"&state=opened&updated_after={q_start}"
-                f"&per_page=100"
+                f"&per_page={PAGE_SIZE}"
             ),
             (
                 f"merge_requests?scope=all&author_username={username}"
                 f"&state=closed&updated_after={q_start}&updated_before={q_end}"
-                f"&per_page=100"
+                f"&per_page={PAGE_SIZE}"
             ),
         ]
         for endpoint in endpoints:
@@ -1110,14 +1154,14 @@ class DataCollector:
                         break
                     for mr in batch:
                         _add_global_mr(mr)
-                    if len(batch) < 100:
+                    if len(batch) < PAGE_SIZE:
                         break
                     page += 1
                 except Exception as e:
-                    logger.info(f"GitLab global MR fetch for {username}: {e}")
+                    logger.info("GitLab global MR fetch for %s: %s", username, e)
                     break
 
-        for mr_data in mrs_authored[:15]:
+        for mr_data in mrs_authored[:MR_NOTES_FETCH_LIMIT]:
             gl_path = mr_data.get("gitlab_path", "")
             if not gl_path:
                 continue
@@ -1196,21 +1240,9 @@ class DataCollector:
             "reviews_received": reviews_received,
         }
 
-    def _fetch_gitlab_per_repo(
-        self,
-        cfg: dict,
-        gitlab_host: str,
-        token: str,
-        username: str,
-        q_start: str,
-        q_end: str,
-        mrs_authored: list[dict],
-        reviews_given: list[dict],
-        reviews_received: list[dict],
-        seen: set[str],
-    ) -> dict:
+    def _fetch_gitlab_per_repo(self, ctx: GitlabFetchContext) -> dict:
         """Fetch GitLab MRs by iterating configured repos (for the current user)."""
-        repos = cfg.get("repositories", {})
+        repos = ctx.cfg.get("repositories", {})
 
         for repo_name, proj_cfg in repos.items():
             gl_path = proj_cfg.get("gitlab", "")
@@ -1225,10 +1257,10 @@ class DataCollector:
             ) -> None:
                 for mr in mr_list:
                     uid = f"{_repo}:{mr['iid']}"
-                    if uid in seen:
+                    if uid in ctx.seen:
                         continue
-                    seen.add(uid)
-                    mrs_authored.append(
+                    ctx.seen.add(uid)
+                    ctx.mrs_authored.append(
                         {
                             "project": _repo,
                             "gitlab_path": _gl_path,
@@ -1238,64 +1270,66 @@ class DataCollector:
                             "web_url": mr.get("web_url", ""),
                             "created_at": mr.get("created_at", ""),
                             "merged_at": mr.get("merged_at") or "",
-                            "description": (mr.get("description") or "")[:200],
+                            "description": (mr.get("description") or "")[
+                                :TRUNCATE_CONTEXT
+                            ],
                         }
                     )
 
             try:
                 _add_authored(
                     self._gitlab_api_get(
-                        gitlab_host,
-                        token,
+                        ctx.gitlab_host,
+                        ctx.token,
                         f"projects/{encoded}/merge_requests"
-                        f"?scope=all&author_username={username}"
-                        f"&created_after={q_start}&created_before={q_end}&per_page=100",
+                        f"?scope=all&author_username={ctx.username}"
+                        f"&created_after={ctx.q_start}&created_before={ctx.q_end}&per_page=100",
                     )
                 )
             except Exception as e:
-                logger.debug(f"GitLab MR fetch (created) for {repo_name}: {e}")
+                logger.debug("GitLab MR fetch (created) for %s: %s", repo_name, e)
 
             try:
                 _add_authored(
                     self._gitlab_api_get(
-                        gitlab_host,
-                        token,
+                        ctx.gitlab_host,
+                        ctx.token,
                         f"projects/{encoded}/merge_requests"
-                        f"?scope=all&author_username={username}"
+                        f"?scope=all&author_username={ctx.username}"
                         f"&state=opened&per_page=100",
                     )
                 )
             except Exception as e:
-                logger.debug(f"GitLab MR fetch (open) for {repo_name}: {e}")
+                logger.debug("GitLab MR fetch (open) for %s: %s", repo_name, e)
 
             try:
                 _add_authored(
                     self._gitlab_api_get(
-                        gitlab_host,
-                        token,
+                        ctx.gitlab_host,
+                        ctx.token,
                         f"projects/{encoded}/merge_requests"
-                        f"?scope=all&author_username={username}"
-                        f"&state=merged&updated_after={q_start}&updated_before={q_end}"
-                        f"&per_page=100",
+                        f"?scope=all&author_username={ctx.username}"
+                        f"&state=merged&updated_after={ctx.q_start}&updated_before={ctx.q_end}"
+                        f"&per_page={PAGE_SIZE}",
                     )
                 )
             except Exception as e:
-                logger.debug(f"GitLab MR fetch (merged) for {repo_name}: {e}")
+                logger.debug("GitLab MR fetch (merged) for %s: %s", repo_name, e)
 
             try:
                 recent_mrs = self._gitlab_api_get(
-                    gitlab_host,
-                    token,
+                    ctx.gitlab_host,
+                    ctx.token,
                     f"projects/{encoded}/merge_requests"
-                    f"?scope=all&updated_after={q_start}&per_page=50&state=all",
+                    f"?scope=all&updated_after={ctx.q_start}&per_page=50&state=all",
                 )
                 for mr in recent_mrs:
                     mr_author = (mr.get("author", {}) or {}).get("username", "")
                     iid = mr["iid"]
                     try:
                         notes = self._gitlab_api_get(
-                            gitlab_host,
-                            token,
+                            ctx.gitlab_host,
+                            ctx.token,
                             f"projects/{encoded}/merge_requests/{iid}/notes"
                             f"?per_page=100&sort=desc",
                         )
@@ -1313,11 +1347,11 @@ class DataCollector:
                             continue
                         note_author = (note.get("author", {}) or {}).get("username", "")
                         note_created = note.get("created_at", "")
-                        note_body = (note.get("body") or "")[:200]
+                        note_body = (note.get("body") or "")[:TRUNCATE_CONTEXT]
                         note_id = note.get("id", "")
 
-                        if note_author == username and mr_author != username:
-                            reviews_given.append(
+                        if note_author == ctx.username and mr_author != ctx.username:
+                            ctx.reviews_given.append(
                                 {
                                     "project": repo_name,
                                     "mr_iid": iid,
@@ -1329,8 +1363,8 @@ class DataCollector:
                                     "created_at": note_created,
                                 }
                             )
-                        elif note_author != username and mr_author == username:
-                            reviews_received.append(
+                        elif note_author != ctx.username and mr_author == ctx.username:
+                            ctx.reviews_received.append(
                                 {
                                     "project": repo_name,
                                     "mr_iid": iid,
@@ -1343,12 +1377,12 @@ class DataCollector:
                                 }
                             )
             except Exception as e:
-                logger.debug(f"GitLab review fetch for {repo_name}: {e}")
+                logger.debug("GitLab review fetch for %s: %s", repo_name, e)
 
         return {
-            "mrs_authored": mrs_authored,
-            "reviews_given": reviews_given,
-            "reviews_received": reviews_received,
+            "mrs_authored": ctx.mrs_authored,
+            "reviews_given": ctx.reviews_given,
+            "reviews_received": ctx.reviews_received,
         }
 
     def collect_gitlab_for_date(
@@ -1431,7 +1465,9 @@ class DataCollector:
                 "timestamp": review.get("created_at", target_str),
             }
             if note_body:
-                ev["extra_classification_text"] = f"review comment: {note_body[:200]}"
+                ev["extra_classification_text"] = (
+                    f"review comment: {note_body[:TRUNCATE_CONTEXT]}"
+                )
             events.append(self._enrich_event(ev))
 
         seen_received_mrs: set[str] = set()
@@ -1460,7 +1496,9 @@ class DataCollector:
                 "timestamp": review.get("created_at", target_str),
             }
             if note_body:
-                ev["extra_classification_text"] = f"review comment: {note_body[:200]}"
+                ev["extra_classification_text"] = (
+                    f"review comment: {note_body[:TRUNCATE_CONTEXT]}"
+                )
             events.append(self._enrich_event(ev))
 
         return events
@@ -1536,7 +1574,7 @@ class DataCollector:
             issues = _jira_rest_search(
                 jql,
                 fields=f"key,summary,{date_field}",
-                max_results=200,
+                max_results=JIRA_MAX_RESULTS,
             )
             if issues is not None:
                 rest_used = True
@@ -1547,13 +1585,12 @@ class DataCollector:
                     if not re.match(r"^[A-Z]+-\d+$", key):
                         continue
                     fields_data = raw.get("fields", raw)
-                    summary = (fields_data.get("summary") or "")[:100]
+                    summary = (fields_data.get("summary") or "")[:TRUNCATE_SUMMARY]
                     date_val = None
                     if date_field == "resolutiondate":
                         date_val = fields_data.get("resolutiondate")
                     else:
                         date_val = fields_data.get("created")
-                    # Extract YYYY-MM-DD from ISO datetime
                     if date_val:
                         date_str = date_val[:10] if len(date_val) >= 10 else q_start
                     else:
@@ -1613,7 +1650,9 @@ class DataCollector:
                             key = parts[0]
                             if not re.match(r"^[A-Z]+-\d+$", key):
                                 continue
-                            summary = (parts[4] if len(parts) > 4 else "")[:100]
+                            summary = (parts[4] if len(parts) > 4 else "")[
+                                :TRUNCATE_SUMMARY
+                            ]
                             jira_proj = _jira_project_from_key(key)
                             ev = {
                                 "id": f"jira:{key}:{id_suffix}",
@@ -1679,7 +1718,7 @@ class DataCollector:
                 result,
             ):
                 key = match.group(1)
-                summary = match.group(2).strip()[:100]
+                summary = match.group(2).strip()[:TRUNCATE_SUMMARY]
                 event_id = f"jira:{key}:created"
                 if event_id in seen_ids:
                     continue
@@ -1698,7 +1737,7 @@ class DataCollector:
                 events.append(self._enrich_event(ev))
         except Exception as e:
             _circuit.record_failure("jira")
-            logger.debug(f"Jira created fetch failed: {e}")
+            logger.debug("Jira created fetch failed: %s", e)
         return events
 
     # ------------------------------------------------------------------
@@ -1713,7 +1752,7 @@ class DataCollector:
             try:
                 with open(cache_file, encoding="utf-8") as f:
                     return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning(
                     "Failed to read GitHub repo metadata cache %s: %s", cache_file, e
                 )
@@ -1727,7 +1766,7 @@ class DataCollector:
                 perf_dir / "github_repo_metadata.json", "w", encoding="utf-8"
             ) as f:
                 json.dump(meta, f, indent=2)
-        except Exception as e:
+        except OSError as e:
             logger.warning("Failed to save GitHub repo metadata: %s", e)
 
     def _resolve_github_repo_info(self, repo_name: str, meta: dict) -> dict:
@@ -1751,7 +1790,7 @@ class DataCollector:
                 info["is_fork"] = lines[0].strip().lower() == "true"
             if len(lines) > 1 and lines[1].strip() and lines[1].strip() != "null":
                 info["parent_repo"] = lines[1].strip()
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.warning("gh api repos/%s failed: %s", repo_name, e)
         meta[repo_name] = info
         return info
@@ -1807,7 +1846,7 @@ class DataCollector:
                     with self._github_mem_lock:
                         self._github_mem_cache[mem_key] = (time.time(), cached)
                     return cached
-            except Exception as e:
+            except (json.JSONDecodeError, OSError) as e:
                 logger.warning(
                     "Failed to read GitHub cache %s (will re-fetch from API): %s",
                     cache_file,
@@ -1842,8 +1881,8 @@ class DataCollector:
             try:
                 with open(cache_file, "w", encoding="utf-8") as f:
                     json.dump(cache_data, f, indent=2)
-            except Exception as e:
-                logger.warning(f"Failed to save GitHub cache: {e}")
+            except OSError as e:
+                logger.warning("Failed to save GitHub cache: %s", e)
 
             with self._github_mem_lock:
                 self._github_mem_cache[str(cache_file)] = (time.time(), cache_data)
@@ -1943,7 +1982,12 @@ class DataCollector:
                     timeout=30,
                 )
                 data = json.loads(output).get("data", {})
-            except Exception as e:
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                FileNotFoundError,
+                json.JSONDecodeError,
+            ) as e:
                 logger.debug("GitHub GraphQL search failed for %s: %s", username, e)
                 continue
 
@@ -2059,9 +2103,14 @@ class DataCollector:
                 )
                 results = json.loads(output) if output.strip() else []
                 cache_data[key] = results
-                logger.info(f"GitHub {key}: fetched {len(results)} results")
-            except Exception as e:
-                logger.warning(f"GitHub search failed for {key}: {e}")
+                logger.info("GitHub %s: fetched %d results", key, len(results))
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                FileNotFoundError,
+                json.JSONDecodeError,
+            ) as e:
+                logger.warning("GitHub search failed for %s: %s", key, e)
         return cache_data
 
     def collect_github_for_date(
@@ -2578,8 +2627,8 @@ class DataCollector:
         try:
             with open(session_file, encoding="utf-8") as f:
                 session_data = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.debug(f"Session file read failed for {target}: {e}")
+        except (OSError, yaml.YAMLError) as e:
+            logger.debug("Session file read failed for %s: %s", target, e)
             return []
 
         entries = session_data.get("entries", [])
@@ -2666,7 +2715,7 @@ class DataCollector:
 
             title_parts = [action or event_type]
             if details and details.lower() not in (action or "").lower():
-                title_parts.append(details[:500])
+                title_parts.append(details[:TRUNCATE_DESCRIPTION])
             title = " ".join(title_parts)
 
             ev = {
@@ -2680,11 +2729,13 @@ class DataCollector:
                 ),
             }
             if summary_extra:
-                ev["extra_classification_text"] = summary_extra[:500]
+                ev["extra_classification_text"] = summary_extra[:TRUNCATE_DESCRIPTION]
             new_events.append(self._enrich_event(ev))
 
         if new_events:
-            logger.info(f"Session: collected {len(new_events)} events for {target_str}")
+            logger.info(
+                "Session: collected %d events for %s", len(new_events), target_str
+            )
 
         return new_events
 
@@ -2718,7 +2769,7 @@ class DataCollector:
             try:
                 ok, result = run_cmd_sync(
                     ["rh-issue", "view-issue", key],
-                    timeout=15,
+                    timeout=HTTP_TIMEOUT_SHORT,
                 )
                 if not ok:
                     raise RuntimeError(result)
@@ -2741,7 +2792,7 @@ class DataCollector:
                         if field in ("reporter", "assignee", "assigned_to"):
                             info[field.replace("assigned_to", "assignee")] = val
                         if field == "description":
-                            info["description"] = val[:500]
+                            info["description"] = val[:TRUNCATE_DESCRIPTION]
                 with self._hierarchy_lock:
                     if "issues" not in self.hierarchy_cache:
                         self.hierarchy_cache["issues"] = {}
@@ -2765,7 +2816,7 @@ class DataCollector:
             try:
                 ok, result = run_cmd_sync(
                     ["rh-issue", "view-issue", epic_key],
-                    timeout=15,
+                    timeout=HTTP_TIMEOUT_SHORT,
                 )
                 if not ok:
                     raise RuntimeError(result)
@@ -2944,7 +2995,10 @@ class DataCollector:
                         ]
                         cmd.append("--all")
                         output = subprocess.check_output(
-                            cmd, text=True, stderr=subprocess.DEVNULL, timeout=15
+                            cmd,
+                            text=True,
+                            stderr=subprocess.DEVNULL,
+                            timeout=HTTP_TIMEOUT_SHORT,
                         )
                         for record in output.split("\x00"):
                             record = record.strip()
@@ -3013,7 +3067,7 @@ class DataCollector:
                         result,
                     ):
                         key = match.group(1)
-                        summary = match.group(2).strip()[:100]
+                        summary = match.group(2).strip()[:TRUNCATE_SUMMARY]
                         event_id = f"jira:{key}:resolved"
                         if event_id in seen_ids:
                             continue
@@ -3097,7 +3151,7 @@ class DataCollector:
                         f"Gmail: cached {len(new_email_ids)} executive emails for {target_str}"
                     )
             except Exception as e:
-                logger.warning(f"Executive email collect failed (non-blocking): {e}")
+                logger.warning("Executive email collect failed (non-blocking): %s", e)
 
             try:
                 session_events = self._collect_session_events(target, events, seen_ids)

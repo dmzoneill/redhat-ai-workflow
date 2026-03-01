@@ -26,13 +26,18 @@ Comment interactions captured:
 
 import json
 import logging
-import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from services.stats.quarter_utils import QUARTER_STARTS
+from services.stats.collector_utils import rate_limited_api_call
+from services.stats.quarter_utils import get_quarter_end, get_quarter_start
 
 logger = logging.getLogger(__name__)
+
+DRIVE_RATE_LIMIT_INTERVAL = 0.1
+DRIVE_PAGE_SIZE = 200
+SHARED_DRIVE_PAGE_SIZE = 500
+DRIVE_CACHE_TTL_HOURS = 24
 
 GOOGLE_MIME_TYPES = {
     "application/vnd.google-apps.document": "doc",
@@ -234,46 +239,6 @@ def classify_filename(name: str, mime_short: str) -> tuple[str, list[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Rate-Limited Drive API Helpers
-# ---------------------------------------------------------------------------
-
-_MIN_REQUEST_INTERVAL = 0.1  # 100ms between requests
-_last_request_time = 0.0
-
-
-def _rate_limit():
-    """Enforce minimum interval between Drive API requests."""
-    global _last_request_time
-    now = time.monotonic()
-    elapsed = now - _last_request_time
-    if elapsed < _MIN_REQUEST_INTERVAL:
-        time.sleep(_MIN_REQUEST_INTERVAL - elapsed)
-    _last_request_time = time.monotonic()
-
-
-def _api_call_with_backoff(fn, max_retries: int = 3):
-    """Execute a Drive API call with exponential backoff on rate limit errors."""
-    for attempt in range(max_retries):
-        _rate_limit()
-        try:
-            return fn()
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "rateLimitExceeded" in error_str:
-                wait = (2**attempt) * 1.0
-                logger.warning(
-                    "Drive API rate limited, retrying in %.1fs (attempt %d/%d)",
-                    wait,
-                    attempt + 1,
-                    max_retries,
-                )
-                time.sleep(wait)
-                continue
-            raise
-    return fn()
-
-
-# ---------------------------------------------------------------------------
 # File Discovery
 # ---------------------------------------------------------------------------
 
@@ -304,20 +269,23 @@ def discover_files(
 
     all_files: list[dict] = []
     page_token = None
+    total_raw = 0
 
     while True:
-        resp = _api_call_with_backoff(
+        resp = rate_limited_api_call(
             lambda pt=page_token: service.files()
             .list(
                 q=q,
                 fields=fields,
-                pageSize=200,
+                pageSize=DRIVE_PAGE_SIZE,
                 orderBy="modifiedTime desc",
                 pageToken=pt,
             )
-            .execute()
+            .execute(),
+            min_interval=DRIVE_RATE_LIMIT_INTERVAL,
         )
         raw_files = resp.get("files", [])
+        total_raw += len(raw_files)
 
         for f in raw_files:
             mime = f.get("mimeType", "")
@@ -404,7 +372,7 @@ def discover_files(
 
     logger.info(
         "GDrive: discovered %d files (%d with user contributions) for quarter starting %s",
-        len(raw_files),
+        total_raw,
         len(all_files),
         quarter_start[:10],
     )
@@ -427,14 +395,15 @@ def get_revision_stats(
     Returns stats about the user's revisions in the quarter.
     """
     try:
-        resp = _api_call_with_backoff(
+        resp = rate_limited_api_call(
             lambda: service.revisions()
             .list(
                 fileId=file_id,
                 fields="revisions(id, modifiedTime, lastModifyingUser)",
-                pageSize=200,
+                pageSize=DRIVE_PAGE_SIZE,
             )
-            .execute()
+            .execute(),
+            min_interval=DRIVE_RATE_LIMIT_INTERVAL,
         )
     except Exception as e:
         logger.debug("Failed to get revisions for %s: %s", file_id, e)
@@ -523,7 +492,7 @@ def get_comment_stats(
     page_token = None
     while True:
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda pt=page_token: service.comments()
                 .list(
                     fileId=file_id,
@@ -532,7 +501,8 @@ def get_comment_stats(
                     startModifiedTime=quarter_start,
                     pageToken=pt,
                 )
-                .execute()
+                .execute(),
+                min_interval=DRIVE_RATE_LIMIT_INTERVAL,
             )
         except Exception as e:
             logger.debug("Failed to get comments for %s: %s", file_id, e)
@@ -594,7 +564,7 @@ def get_file_comment_stats_for_all_users(
 
     while True:
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda pt=page_token: service.comments()
                 .list(
                     fileId=file_id,
@@ -603,7 +573,8 @@ def get_file_comment_stats_for_all_users(
                     startModifiedTime=quarter_start,
                     pageToken=pt,
                 )
-                .execute()
+                .execute(),
+                min_interval=DRIVE_RATE_LIMIT_INTERVAL,
             )
         except Exception as e:
             logger.debug("Failed to get comments for shared file %s: %s", file_id, e)
@@ -705,6 +676,45 @@ def _has_comment_activity(cmt: dict) -> bool:
     ) > 0
 
 
+def _build_gdrive_event(
+    event_id: str,
+    event_type: str,
+    item_id: str,
+    title: str,
+    timestamp: str,
+    role: str,
+    classification: str,
+    competencies: list,
+    url: str,
+    mime_short: str,
+    cmt: dict,
+    classification_text: str,
+    rev_count: int = 0,
+    created_in_quarter: bool = False,
+) -> dict:
+    return {
+        "id": event_id,
+        "source": "gdrive",
+        "type": event_type,
+        "item_id": item_id,
+        "title": title,
+        "timestamp": timestamp,
+        "gdrive_role": role,
+        "gdrive_classification": classification,
+        "gdrive_competencies": competencies,
+        "gdrive_url": url,
+        "gdrive_mime_short": mime_short,
+        "gdrive_revision_count": rev_count,
+        "gdrive_created_in_quarter": created_in_quarter,
+        "gdrive_comments_authored": cmt.get("comments_authored", 0),
+        "gdrive_replies_authored": cmt.get("replies_authored", 0),
+        "gdrive_comments_resolved": cmt.get("comments_resolved", 0),
+        "gdrive_comments_mentioned_in": cmt.get("comments_mentioned_in", 0),
+        "gdrive_comments_assigned_to": cmt.get("comments_assigned_to", 0),
+        "extra_classification_text": classification_text,
+    }
+
+
 def generate_events(
     files: list[dict],
     user_email: str,
@@ -741,27 +751,22 @@ def generate_events(
         if _has_comment_activity(cmt):
             classification_text += " " + _COMMENT_ACTIVITY_BOOST_TEXT
 
-        event = {
-            "id": event_id,
-            "source": "gdrive",
-            "type": event_type,
-            "item_id": f["id"],
-            "title": f"[{MIME_TYPE_LABELS.get(f['mime_short'], 'GDrive')}] {f['name']}",
-            "timestamp": timestamp,
-            "gdrive_role": role,
-            "gdrive_classification": f.get("classification", ""),
-            "gdrive_competencies": f.get("competencies", []),
-            "gdrive_url": f.get("url", ""),
-            "gdrive_mime_short": f.get("mime_short", ""),
-            "gdrive_revision_count": rev_count,
-            "gdrive_created_in_quarter": f.get("created_in_quarter", False),
-            "gdrive_comments_authored": cmt.get("comments_authored", 0),
-            "gdrive_replies_authored": cmt.get("replies_authored", 0),
-            "gdrive_comments_resolved": cmt.get("comments_resolved", 0),
-            "gdrive_comments_mentioned_in": cmt.get("comments_mentioned_in", 0),
-            "gdrive_comments_assigned_to": cmt.get("comments_assigned_to", 0),
-            "extra_classification_text": classification_text,
-        }
+        event = _build_gdrive_event(
+            event_id,
+            event_type,
+            f["id"],
+            f"[{MIME_TYPE_LABELS.get(f['mime_short'], 'GDrive')}] {f['name']}",
+            timestamp,
+            role,
+            f.get("classification", ""),
+            f.get("competencies", []),
+            f.get("url", ""),
+            f.get("mime_short", ""),
+            cmt,
+            classification_text,
+            rev_count=rev_count,
+            created_in_quarter=f.get("created_in_quarter", False),
+        )
         events.append(event)
 
     return events
@@ -805,7 +810,7 @@ def generate_comment_only_events(
 
     while files_checked < max_files:
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda pt=page_token: service.files()
                 .list(
                     q=q,
@@ -814,7 +819,8 @@ def generate_comment_only_events(
                     orderBy="modifiedTime desc",
                     pageToken=pt,
                 )
-                .execute()
+                .execute(),
+                min_interval=DRIVE_RATE_LIMIT_INTERVAL,
             )
         except Exception as e:
             logger.debug("Comment-only file discovery failed: %s", e)
@@ -854,27 +860,20 @@ def generate_comment_only_events(
                 + _COMMENT_ACTIVITY_BOOST_TEXT
             )
 
-            event = {
-                "id": event_id,
-                "source": "gdrive",
-                "type": event_type,
-                "item_id": f["id"],
-                "title": f"[{MIME_TYPE_LABELS.get(mime_short, 'GDrive')}] {f['name']}",
-                "timestamp": f.get("modifiedTime", ""),
-                "gdrive_role": "commenter",
-                "gdrive_classification": classification,
-                "gdrive_competencies": competencies,
-                "gdrive_url": f.get("webViewLink", ""),
-                "gdrive_mime_short": mime_short,
-                "gdrive_revision_count": 0,
-                "gdrive_created_in_quarter": False,
-                "gdrive_comments_authored": cmt.get("comments_authored", 0),
-                "gdrive_replies_authored": cmt.get("replies_authored", 0),
-                "gdrive_comments_resolved": cmt.get("comments_resolved", 0),
-                "gdrive_comments_mentioned_in": cmt.get("comments_mentioned_in", 0),
-                "gdrive_comments_assigned_to": cmt.get("comments_assigned_to", 0),
-                "extra_classification_text": classification_text,
-            }
+            event = _build_gdrive_event(
+                event_id,
+                event_type,
+                f["id"],
+                f"[{MIME_TYPE_LABELS.get(mime_short, 'GDrive')}] {f['name']}",
+                f.get("modifiedTime", ""),
+                "commenter",
+                classification,
+                competencies,
+                f.get("webViewLink", ""),
+                mime_short,
+                cmt,
+                classification_text,
+            )
             events.append(event)
 
         page_token = resp.get("nextPageToken")
@@ -913,7 +912,7 @@ def load_cache(perf_dir: Path) -> dict | None:
         if cached_at:
             cached_dt = datetime.fromisoformat(cached_at)
             age_hours = (datetime.now() - cached_dt).total_seconds() / 3600
-            if age_hours > 24:
+            if age_hours > DRIVE_CACHE_TTL_HOURS:
                 logger.info("GDrive cache expired (%.1f hours old)", age_hours)
                 return None
         return data
@@ -1012,16 +1011,10 @@ def collect_gdrive_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = QUARTER_STARTS
-    m, d = quarter_starts[quarter]
-    quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
-
-    next_q = quarter + 1
-    if next_q > 4:
-        next_q = 1
-        year += 1
-    nm, nd = quarter_starts[next_q]
-    quarter_end = date(year, nm, nd).isoformat() + "T00:00:00Z"
+    quarter_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
+    quarter_end = (
+        get_quarter_end(year, quarter) + timedelta(days=1)
+    ).isoformat() + "T00:00:00Z"
 
     files = discover_files(service, user_email, quarter_start, quarter_end)
 
@@ -1101,7 +1094,7 @@ def load_shared_drive_cache(perf_dir: Path) -> dict | None:
         if cached_at:
             cached_dt = datetime.fromisoformat(cached_at)
             age_hours = (datetime.now() - cached_dt).total_seconds() / 3600
-            if age_hours > 24:
+            if age_hours > DRIVE_CACHE_TTL_HOURS:
                 logger.info("Shared drive cache expired (%.1f hours old)", age_hours)
                 return None
         return data
@@ -1179,12 +1172,12 @@ def discover_shared_drive_files(
     page_token = None
 
     while True:
-        resp = _api_call_with_backoff(
+        resp = rate_limited_api_call(
             lambda pt=page_token: service.files()
             .list(
                 q=q,
                 fields=fields,
-                pageSize=500,
+                pageSize=SHARED_DRIVE_PAGE_SIZE,
                 orderBy="modifiedTime desc",
                 pageToken=pt,
                 corpora="drive",
@@ -1192,7 +1185,8 @@ def discover_shared_drive_files(
                 includeItemsFromAllDrives=True,
                 supportsAllDrives=True,
             )
-            .execute()
+            .execute(),
+            min_interval=DRIVE_RATE_LIMIT_INTERVAL,
         )
         raw_files = resp.get("files", [])
         for f in raw_files:
@@ -1261,14 +1255,15 @@ def build_user_index_from_revisions(
     skipped = 0
     for f in files[:max_files]:
         try:
-            resp = _api_call_with_backoff(
+            resp = rate_limited_api_call(
                 lambda fid=f["id"]: service.revisions()
                 .list(
                     fileId=fid,
                     fields="revisions(id, modifiedTime, lastModifyingUser)",
-                    pageSize=200,
+                    pageSize=DRIVE_PAGE_SIZE,
                 )
-                .execute()
+                .execute(),
+                min_interval=DRIVE_RATE_LIMIT_INTERVAL,
             )
         except Exception as e:
             logger.debug("Revisions failed for %s: %s", f["id"], e)
@@ -1486,16 +1481,10 @@ def ensure_shared_drive_index(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = QUARTER_STARTS
-    m, d = quarter_starts[quarter]
-    quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
-
-    next_q = quarter + 1
-    if next_q > 4:
-        next_q = 1
-        year += 1
-    nm, nd = quarter_starts[next_q]
-    quarter_end = date(year, nm, nd).isoformat() + "T00:00:00Z"
+    quarter_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
+    quarter_end = (
+        get_quarter_end(year, quarter) + timedelta(days=1)
+    ).isoformat() + "T00:00:00Z"
 
     all_files: list[dict] = []
     combined_index: dict[str, list[dict]] = {}
@@ -1568,9 +1557,7 @@ def collect_shared_drive_peer_contributions(
 
     year = target.year
     quarter = (target.month - 1) // 3 + 1
-    quarter_starts = QUARTER_STARTS
-    m, d = quarter_starts[quarter]
-    quarter_start = date(year, m, d).isoformat() + "T00:00:00Z"
+    quarter_start = get_quarter_start(year, quarter).isoformat() + "T00:00:00Z"
 
     return generate_peer_events_from_index(peer_email, user_index, quarter_start)
 

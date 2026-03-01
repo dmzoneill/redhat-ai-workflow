@@ -71,6 +71,12 @@ SESSION_STALE_HOURS = 24
 # Maximum entries in tool_filter_cache per session to prevent memory leaks
 MAX_FILTER_CACHE_SIZE = 50
 
+MAX_TOOL_RESULTS_IN_TRANSCRIPT = 5
+MAX_TOOL_RESULT_CHARS = 200
+MAX_CODE_CHUNKS_IN_TRANSCRIPT = 3
+MAX_MESSAGE_TEXT_CHARS = 2000
+DEFAULT_MAX_TRANSCRIPT_CHARS = 5000
+
 # Persistence file location - centralized in server.paths
 from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE  # noqa: E402
 
@@ -110,6 +116,41 @@ def _generate_session_id() -> str:
     return str(uuid.uuid4())
 
 
+def _read_storage_dir_composer_data(
+    storage_dir: Path, workspace_uri: str
+) -> tuple[dict | None, str]:
+    """Read composer data from a storage dir. Returns (data, status).
+    status: 'ok' | 'no_match' | 'read_failed'"""
+    import subprocess
+
+    workspace_json = storage_dir / "workspace.json"
+    if not workspace_json.exists():
+        return None, "no_match"
+    try:
+        workspace_data = json.loads(workspace_json.read_text())
+    except (json.JSONDecodeError, KeyError):
+        return None, "no_match"
+    folder_uri = workspace_data.get("folder", "")
+    if folder_uri != workspace_uri:
+        return None, "no_match"
+    db_path = storage_dir / "state.vscdb"
+    if not db_path.exists():
+        return None, "no_match"
+    query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
+    result = subprocess.run(
+        ["sqlite3", str(db_path), query],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None, "read_failed"
+    try:
+        return json.loads(result.stdout.strip()), "ok"
+    except json.JSONDecodeError:
+        return None, "read_failed"
+
+
 def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | None]:
     """Read Cursor's database to get the current chat's UUID and name.
 
@@ -122,81 +163,39 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
     Returns:
         Tuple of (chat_id, chat_name) if found, (None, None) otherwise
     """
-    import subprocess
-
     try:
         workspace_storage_dir = _cursor_workspace_storage()
-
         if not workspace_storage_dir.exists():
             logger.debug("Cursor workspace storage not found")
             return None, None
 
-        # Find the workspace storage folder matching our workspace
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
                 continue
-
-            workspace_json = storage_dir / "workspace.json"
-            if not workspace_json.exists():
+            composer_data, status = _read_storage_dir_composer_data(
+                storage_dir, workspace_uri
+            )
+            if status == "no_match":
                 continue
-
-            try:
-                import json
-
-                workspace_data = json.loads(workspace_json.read_text())
-                folder_uri = workspace_data.get("folder", "")
-
-                # Check if this matches our workspace
-                if folder_uri == workspace_uri:
-                    # Found it! Now read the composer data
-                    db_path = storage_dir / "state.vscdb"
-                    if not db_path.exists():
-                        continue
-
-                    # Query the database for composer data
-                    query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
-                    result = subprocess.run(
-                        ["sqlite3", str(db_path), query],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-
-                    if result.returncode != 0 or not result.stdout.strip():
-                        logger.debug(f"No composer data in {db_path}")
-                        return None, None
-
-                    composer_data = json.loads(result.stdout.strip())
-                    all_composers = composer_data.get("allComposers", [])
-
-                    if not all_composers:
-                        logger.debug("No composers found in database")
-                        return None, None
-
-                    # Filter out archived/draft chats and sort by lastUpdatedAt
-                    active_chats = [
-                        c
-                        for c in all_composers
-                        if not c.get("isArchived") and not c.get("isDraft")
-                    ]
-
-                    if not active_chats:
-                        logger.debug("No active chats found")
-                        return None, None
-
-                    # Get the most recently updated chat (likely the current one)
-                    most_recent = max(
-                        active_chats, key=lambda x: x.get("lastUpdatedAt", 0)
-                    )
-                    chat_id = most_recent.get("composerId")
-                    chat_name = most_recent.get("name")
-
-                    logger.info(f"Found Cursor chat: {chat_id} ({chat_name})")
-                    return chat_id, chat_name
-
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.debug(f"Error parsing workspace.json in {storage_dir}: {e}")
-                continue
+            if status == "read_failed":
+                return None, None
+            all_composers = composer_data.get("allComposers", [])
+            if not all_composers:
+                logger.debug("No composers found in database")
+                return None, None
+            active_chats = [
+                c
+                for c in all_composers
+                if not c.get("isArchived") and not c.get("isDraft")
+            ]
+            if not active_chats:
+                logger.debug("No active chats found")
+                return None, None
+            most_recent = max(active_chats, key=lambda x: x.get("lastUpdatedAt", 0))
+            chat_id = most_recent.get("composerId")
+            chat_name = most_recent.get("name")
+            logger.info(f"Found Cursor chat: {chat_id} ({chat_name})")
+            return chat_id, chat_name
 
         logger.debug(f"No matching workspace storage found for {workspace_uri}")
         return None, None
@@ -232,89 +231,52 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
     Returns:
         Tuple of (list of chat info dicts, active_chat_id or None)
     """
-    import subprocess
-
     try:
         workspace_storage_dir = _cursor_workspace_storage()
-
         if not workspace_storage_dir.exists():
             return [], None
 
-        # Aggregate chats from all matching storage directories
-        all_chats: dict[str, dict] = {}  # composerId -> chat dict (dedup by ID)
+        all_chats: dict[str, dict] = {}
         active_chat_id = None
 
         for storage_dir in workspace_storage_dir.iterdir():
             if not storage_dir.is_dir():
                 continue
-
-            workspace_json = storage_dir / "workspace.json"
-            if not workspace_json.exists():
+            composer_data, status = _read_storage_dir_composer_data(
+                storage_dir, workspace_uri
+            )
+            if status != "ok":
                 continue
 
-            try:
-                import json
+            all_composers = composer_data.get("allComposers", [])
+            last_focused = composer_data.get("lastFocusedComposerIds", [])
+            if last_focused and not active_chat_id:
+                active_chat_id = last_focused[0]
 
-                workspace_data = json.loads(workspace_json.read_text())
-                folder_uri = workspace_data.get("folder", "")
+            for c in all_composers:
+                if c.get("isArchived") or c.get("isDraft"):
+                    continue
+                if c.get("name") is None and c.get("lastUpdatedAt") is None:
+                    continue
+                composer_id = c.get("composerId")
+                if not composer_id:
+                    continue
 
-                if folder_uri == workspace_uri:
-                    db_path = storage_dir / "state.vscdb"
-                    if not db_path.exists():
-                        continue
+                chat_dict = {
+                    "composerId": composer_id,
+                    "name": c.get("name"),
+                    "createdAt": c.get("createdAt", 0),
+                    "lastUpdatedAt": c.get("lastUpdatedAt", 0),
+                    "isArchived": c.get("isArchived", False),
+                    "isDraft": c.get("isDraft", False),
+                }
+                if (
+                    composer_id not in all_chats
+                    or chat_dict["lastUpdatedAt"]
+                    > all_chats[composer_id]["lastUpdatedAt"]
+                ):
+                    all_chats[composer_id] = chat_dict
 
-                    query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
-                    result = subprocess.run(
-                        ["sqlite3", str(db_path), query],
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-
-                    if result.returncode != 0 or not result.stdout.strip():
-                        continue  # Try other storage directories
-
-                    composer_data = json.loads(result.stdout.strip())
-                    all_composers = composer_data.get("allComposers", [])
-
-                    # Get the active/focused chat ID (use most recent if multiple dirs)
-                    last_focused = composer_data.get("lastFocusedComposerIds", [])
-                    if last_focused and not active_chat_id:
-                        active_chat_id = last_focused[0]
-
-                    # Add chats to aggregated dict, keeping newer versions
-                    for c in all_composers:
-                        if c.get("isArchived") or c.get("isDraft"):
-                            continue
-                        # Exclude ghost chats: no name AND no lastUpdatedAt (never actually used)
-                        if c.get("name") is None and c.get("lastUpdatedAt") is None:
-                            continue
-
-                        composer_id = c.get("composerId")
-                        if not composer_id:
-                            continue
-
-                        chat_dict = {
-                            "composerId": composer_id,
-                            "name": c.get("name"),  # Keep None if not set
-                            "createdAt": c.get("createdAt", 0),
-                            "lastUpdatedAt": c.get("lastUpdatedAt", 0),
-                            "isArchived": c.get("isArchived", False),
-                            "isDraft": c.get("isDraft", False),
-                        }
-
-                        # Keep the chat with the most recent lastUpdatedAt
-                        if (
-                            composer_id not in all_chats
-                            or chat_dict["lastUpdatedAt"]
-                            > all_chats[composer_id]["lastUpdatedAt"]
-                        ):
-                            all_chats[composer_id] = chat_dict
-
-            except (json.JSONDecodeError, KeyError):
-                continue
-
-        # Return sorted list
         chats = sorted(
             all_chats.values(), key=lambda x: x["lastUpdatedAt"], reverse=True
         )
@@ -376,18 +338,15 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
             logger.debug("Cursor global storage not found")
             return {}
 
-        # Use Python sqlite3 directly (faster than subprocess)
-        # Use context manager to ensure connection is always closed
         chat_issue_sets: dict[str, set[str]] = {}
         issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
 
-        with sqlite3.connect(str(global_db), timeout=10) as conn:
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        try:
             cursor = conn.cursor()
 
-            # Query each chat ID separately to avoid huge result sets
             for cid in chat_ids:
                 try:
-                    # Query for this specific chat's messages containing AAP-
                     cursor.execute(
                         "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? AND value LIKE '%AAP-%' LIMIT 100",
                         (f"bubbleId:{cid}:%",),
@@ -395,7 +354,6 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
 
                     for key, value in cursor.fetchall():
                         try:
-                            # Extract chat ID from key: bubbleId:<chatId>:<bubbleId>
                             parts = key.split(":")
                             if len(parts) < 2:
                                 continue
@@ -416,6 +374,8 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                 except sqlite3.Error as e:
                     logger.debug(f"Error querying chat {cid}: {e}")
                     continue
+        finally:
+            conn.close()
 
         # Return sorted, comma-separated issue keys for each chat
         result_map = {}
@@ -556,15 +516,19 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
                 # Extract tool results
                 tool_results = []
                 if data.get("toolResults"):
-                    for tr in data["toolResults"][:5]:  # Limit tool results
+                    for tr in data["toolResults"][:MAX_TOOL_RESULTS_IN_TRANSCRIPT]:
                         if isinstance(tr, dict) and tr.get("result"):
-                            tool_results.append(str(tr["result"])[:200])
+                            tool_results.append(
+                                str(tr["result"])[:MAX_TOOL_RESULT_CHARS]
+                            )
                     result["summary"]["tool_calls"] += len(data["toolResults"])
 
                 # Extract code chunks
                 code_chunks = []
                 if data.get("attachedCodeChunks"):
-                    for chunk in data["attachedCodeChunks"][:3]:
+                    for chunk in data["attachedCodeChunks"][
+                        :MAX_CODE_CHUNKS_IN_TRANSCRIPT
+                    ]:
                         if isinstance(chunk, dict):
                             file_path = chunk.get("filePath", "")
                             code_chunks.append(file_path)
@@ -579,7 +543,7 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
                     {
                         "bubble_id": bubble_id,
                         "type": msg_role,
-                        "text": text[:2000] if text else "",  # Truncate long messages
+                        "text": text[:MAX_MESSAGE_TEXT_CHARS] if text else "",
                         "timestamp": (
                             datetime.fromtimestamp(created_at / 1000).isoformat()
                             if created_at
@@ -625,7 +589,7 @@ def format_session_context_for_jira(
     chat_content: dict,
     session: "ChatSession | None" = None,
     include_transcript: bool = False,
-    max_transcript_chars: int = 5000,
+    max_transcript_chars: int = DEFAULT_MAX_TRANSCRIPT_CHARS,
 ) -> str:
     """Format session context as Jira wiki markup.
 
@@ -804,13 +768,12 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
             re.compile(r'Persona:\s*[`"\']?(\w+)[`"\']?', re.IGNORECASE),
         ]
 
-        # Collect all persona mentions per chat with their position (to find last one)
         chat_personas: dict[str, list[tuple[int, str]]] = {}
 
-        with sqlite3.connect(str(global_db), timeout=10) as conn:
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        try:
             cursor = conn.cursor()
 
-            # Query each chat ID separately
             for cid in chat_ids:
                 try:
                     cursor.execute(
@@ -848,6 +811,8 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
                 except sqlite3.Error as e:
                     logger.debug(f"Error querying chat {cid} for personas: {e}")
                     continue
+        finally:
+            conn.close()
 
         # Return the last (highest bubble_id) persona for each chat
         result_map = {}
@@ -961,16 +926,14 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
             )
             project_patterns.append((re.compile(rf"\b({escaped})\b", re.IGNORECASE), 5))
 
-        # Collect all project mentions per chat
         chat_projects: dict[str, list[tuple[int, int, str]]] = {}
 
-        with sqlite3.connect(str(global_db), timeout=10) as conn:
+        conn = sqlite3.connect(str(global_db), timeout=10)
+        try:
             cursor = conn.cursor()
 
-            # Query each chat ID separately
             for cid in chat_ids:
                 try:
-                    # Build a simple query for this chat - check for project-related content
                     cursor.execute(
                         """SELECT key, value FROM cursorDiskKV
                            WHERE key LIKE ?
@@ -1013,6 +976,8 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
                 except sqlite3.Error as e:
                     logger.debug(f"Error querying chat {cid} for projects: {e}")
                     continue
+        finally:
+            conn.close()
 
         # Return the best project for each chat
         result_map = {}
@@ -2389,14 +2354,14 @@ class WorkspaceRegistry:
             # Try current working directory for default workspace
             try:
                 workspace_path = Path.cwd()
-            except Exception:
+            except OSError:
                 return None
         else:
             workspace_path = Path(workspace_uri)
 
         try:
             workspace_path = workspace_path.resolve()
-        except Exception:
+        except OSError:
             return None
 
         repositories = config.get("repositories", {})

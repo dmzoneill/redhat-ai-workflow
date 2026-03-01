@@ -151,7 +151,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 data = json.loads(SESSION_STATE_FILE.read_text())
                 service["session_count"] = data.get("session_count", 0)
                 service["workspace_count"] = data.get("workspace_count", 0)
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             service["session_count"] = 0
             service["workspace_count"] = 0
 
@@ -243,13 +243,15 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     if not db_path.exists():
                         continue
 
-                    # Use context manager to ensure connection is always closed
-                    with sqlite3.connect(str(db_path)) as conn:
+                    conn = sqlite3.connect(str(db_path))
+                    try:
                         cursor = conn.cursor()
                         cursor.execute(
                             "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
                         )
                         row = cursor.fetchone()
+                    finally:
+                        conn.close()
 
                     if not row or not row[0]:
                         continue
@@ -344,7 +346,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     "updated_at": data.get("updated_at"),
                 }
             return {"sessions": [], "session_count": 0}
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             return {"sessions": [], "error": str(e)}
 
     async def _handle_refresh_now(self) -> dict:
@@ -361,7 +363,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if SESSION_STATE_FILE.exists():
                 return json.loads(SESSION_STATE_FILE.read_text())
             return {}
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             return {"error": str(e)}
 
     async def _handle_write_state(self) -> dict:
@@ -463,11 +465,11 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     if db_path.exists():
                         stat = db_path.stat()
                         hash_data.append(f"{db_path}:{stat.st_mtime}:{stat.st_size}")
-                except Exception:
+                except (json.JSONDecodeError, OSError):
                     continue
 
             return hashlib.md5("|".join(sorted(hash_data)).encode()).hexdigest()
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             logger.debug(f"Error computing state hash: {e}")
             return ""
 
@@ -554,14 +556,15 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     )
                     continue
 
-                # Use sqlite3 module directly (faster than subprocess)
-                # Use context manager to ensure connection is always closed
-                with sqlite3.connect(str(db_path)) as conn:
+                conn = sqlite3.connect(str(db_path))
+                try:
                     cursor = conn.cursor()
                     cursor.execute(
                         "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
                     )
                     row = cursor.fetchone()
+                finally:
+                    conn.close()
 
                 if row and row[0]:
                     composer_data = json.loads(row[0])

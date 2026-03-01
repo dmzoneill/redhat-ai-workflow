@@ -1,3 +1,5 @@
+"""Competency scoring engine with configurable weights, level-specific thresholds, and signal mapping."""
+
 import json
 import logging
 from pathlib import Path

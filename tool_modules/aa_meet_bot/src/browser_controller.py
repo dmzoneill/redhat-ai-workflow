@@ -1111,8 +1111,8 @@ class GoogleMeetController:
             if self._device_manager:
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Device cleanup failed during init error: %s", e)
                 self._device_manager = None
                 self._devices = None
 
@@ -1217,8 +1217,8 @@ class GoogleMeetController:
                     if await locator.count() > 0:
                         sign_in_button = locator
                         logger.info("Found Sign in span")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Sign in span fallback failed: %s", e)
 
             if sign_in_button:
                 logger.info("Clicking Sign in button...")
@@ -1644,8 +1644,8 @@ class GoogleMeetController:
                                     f"[JOIN] Found '{btn_text}' button on retry"
                                 )
                                 break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Join button locator fallback failed: %s", e)
 
             if join_button:
                 logger.info("[JOIN] Clicking join button...")

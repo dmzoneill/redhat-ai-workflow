@@ -794,8 +794,8 @@ class CronScheduler:
                     "source": "cron",
                 }
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not log cron job to session: %s", e)
 
         # Send notifications
         if notify and self.notification_callback:

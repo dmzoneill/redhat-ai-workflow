@@ -22,6 +22,9 @@ Environment=XDG_RUNTIME_DIR=/run/user/1000
 # Use the virtual environment's python
 ExecStart=/home/daoneill/src/redhat-ai-workflow/.venv/bin/python3 -m services.session
 
+# FD limit: session daemon opens many sqlite3 connections to Cursor DBs
+LimitNOFILE=65536
+
 # Restart policy
 Restart=on-failure
 RestartSec=5

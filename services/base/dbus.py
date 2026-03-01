@@ -451,7 +451,7 @@ class DaemonClient:
     async def connect(self) -> bool:
         """Connect to the D-Bus service."""
         if not DBUS_AVAILABLE:
-            print("Error: dbus-next not installed")
+            logger.error("dbus-next not installed")
             return False
 
         try:
@@ -466,8 +466,11 @@ class DaemonClient:
             )
             return True
         except Exception as e:
-            print(f"Failed to connect to {self.service_name}: {e}")
-            print("Is the daemon running?")
+            logger.error(
+                "Failed to connect to %s: %s. Is the daemon running?",
+                self.service_name,
+                e,
+            )
             return False
 
     async def disconnect(self):
