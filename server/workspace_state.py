@@ -61,7 +61,7 @@ def get_default_persona() -> str:
 
         cfg = load_config()
         return cfg.get("agent", {}).get("default_persona", "researcher")
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, ImportError):
         return "researcher"
 
 

@@ -2364,8 +2364,8 @@ class RealtimeVideoRenderer:
         if self._webrtc_pipeline:
             try:
                 self._webrtc_pipeline.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Suppressed WebRTC pipeline stop: %s", e, exc_info=True)
             self._webrtc_pipeline = None
 
         # Clean up GPU text renderer (CRITICAL: must cleanup GLFW context)
@@ -2390,8 +2390,8 @@ class RealtimeVideoRenderer:
         if self._webrtc_pipeline:
             try:
                 self._webrtc_pipeline.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Suppressed WebRTC pipeline stop: %s", e, exc_info=True)
             self._webrtc_pipeline = None
 
         # Clean up GPU text renderer (CRITICAL: must cleanup GLFW context)

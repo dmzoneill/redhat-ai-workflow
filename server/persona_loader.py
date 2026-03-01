@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import importlib.util
+import json
 import logging
 from typing import TYPE_CHECKING, cast
 
@@ -424,7 +425,7 @@ class PersonaLoader:
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             return workspace_state.persona
-        except Exception:
+        except (OSError, KeyError, ImportError, TypeError, AttributeError):
             if self.current_persona:
                 return self.current_persona
             # Fall back to config default
@@ -433,7 +434,7 @@ class PersonaLoader:
 
                 cfg = load_config()
                 return cfg.get("agent", {}).get("default_persona", "researcher")
-            except Exception:
+            except (OSError, json.JSONDecodeError, KeyError, ImportError):
                 return "researcher"
 
     async def set_workspace_persona(self, ctx: "Context", persona_name: str) -> None:
@@ -453,7 +454,7 @@ class PersonaLoader:
             workspace_state.persona = persona_name
             workspace_state.clear_filter_cache()
             logger.debug(f"Set workspace persona to '{persona_name}'")
-        except Exception as e:
+        except (OSError, KeyError, ImportError, TypeError, AttributeError) as e:
             logger.warning(f"Failed to set workspace persona: {e}")
 
     def get_status(self) -> dict:

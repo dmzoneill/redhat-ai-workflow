@@ -793,7 +793,7 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
         config = load_config()
         repos = config.get("repositories", {})
         VALID_PROJECTS = set(repos.keys())
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, ImportError):
         # Fallback to known projects
         VALID_PROJECTS = {
             "automation-analytics-backend",

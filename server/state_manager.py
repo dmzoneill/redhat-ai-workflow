@@ -144,7 +144,7 @@ class StateManager(JsonFileManager):
                 return bool(config_mgr.get(section, key, False))
             # Generic: check config.<service>.enabled
             return bool(config_mgr.get(service, "enabled", False))
-        except Exception:
+        except (OSError, KeyError, ImportError, TypeError):
             return False
 
     def set_service_enabled(

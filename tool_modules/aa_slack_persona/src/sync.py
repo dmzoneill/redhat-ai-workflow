@@ -719,7 +719,9 @@ class SlackPersonaSync:
 
         # Insert all messages to vector store (single write, no race condition)
         if all_messages:
-            print(f"\nIndexing {len(all_messages):,} messages to vector store...")
+            logger.info(
+                "Indexing %s messages to vector store...", f"{len(all_messages):,}"
+            )
             vector_store.add_messages(all_messages)
 
         # Get final stats

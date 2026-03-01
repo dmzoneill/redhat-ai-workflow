@@ -5,6 +5,8 @@ Creates one summary slide per section from the original 60-slide deck.
 Uses the same style as onboarding-outline.pptx.
 """
 
+from pathlib import Path
+
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
@@ -30,7 +32,9 @@ def add_section_divider(prs, title):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Purple background
-    bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+    bg = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height
+    )
     bg.fill.solid()
     bg.fill.fore_color.rgb = PURPLE_PRIMARY
     bg.line.fill.background()
@@ -48,72 +52,14 @@ def add_section_divider(prs, title):
     return slide
 
 
-def add_content_slide(prs, title, content_items):
-    """Content slide matching onboarding style."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-
-    # Title
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80))
-    tf = tb.text_frame
-    p = tf.paragraphs[0]
-    p.text = title
-    p.font.size = Pt(36)
-    p.font.bold = True
-    p.font.color.rgb = PURPLE_PRIMARY
-
-    # Content area
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50))
-    tf = tb.text_frame
-    tf.word_wrap = True
-
-    first = True
-    for item in content_items:
-        if not item:  # Skip empty lines
-            continue
-
-        if first:
-            p = tf.paragraphs[0]
-            first = False
-        else:
-            p = tf.add_paragraph()
-
-        if item.startswith("##"):
-            # Subheading - purple accent, bold
-            p.text = item[2:].strip()
-            p.font.size = Pt(20)
-            p.font.bold = True
-            p.font.color.rgb = PURPLE_ACCENT
-            p.space_before = Pt(12)
-        elif item.startswith("•"):
-            # Bullet point
-            p.text = item
-            p.font.size = Pt(18)
-            p.font.color.rgb = DARK_TEXT
-        elif item.startswith("  •"):
-            # Sub-bullet
-            p.text = item
-            p.font.size = Pt(16)
-            p.font.color.rgb = DARK_TEXT
-        elif item.startswith("`"):
-            # Code/command
-            p.text = item
-            p.font.size = Pt(12)
-            p.font.name = "Courier New"
-            p.font.color.rgb = DARK_TEXT
-        else:
-            p.text = item
-            p.font.size = Pt(18)
-            p.font.color.rgb = DARK_TEXT
-
-    return slide
-
-
 def add_tldr_slide(prs, section_title, original_slides, key_points):
     """TL;DR content slide with section reference."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Title with slide reference
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80)
+    )
     tf = tb.text_frame
     p = tf.paragraphs[0]
     p.text = section_title
@@ -122,7 +68,9 @@ def add_tldr_slide(prs, section_title, original_slides, key_points):
     p.font.color.rgb = PURPLE_PRIMARY
 
     # Slide reference (right-aligned, smaller)
-    tb = slide.shapes.add_textbox(Inches(10.5), Inches(0.35), Inches(2.33), Inches(0.50))
+    tb = slide.shapes.add_textbox(
+        Inches(10.5), Inches(0.35), Inches(2.33), Inches(0.50)
+    )
     tf = tb.text_frame
     p = tf.paragraphs[0]
     p.text = f"(Full: Slides {original_slides})"
@@ -131,7 +79,9 @@ def add_tldr_slide(prs, section_title, original_slides, key_points):
     p.alignment = PP_ALIGN.RIGHT
 
     # Content area
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50)
+    )
     tf = tb.text_frame
     tf.word_wrap = True
 
@@ -346,7 +296,7 @@ add_tldr_slide(
 )
 
 # Save
-output_path = "/home/daoneill/src/redhat-ai-workflow/docs/slides/AI Personas and Auto Remediation - TLDR.pptx"
+output_path = Path(__file__).parent / "AI Personas and Auto Remediation - TLDR.pptx"
 prs.save(output_path)
 print(f"✅ Created: {output_path}")
 print("   Title + 7 section dividers + 7 TL;DR slides = 15 slides total")

@@ -27,7 +27,14 @@ def _load_debounce_delay() -> float:
 
         cfg = load_config()
         return float(cfg.get("limits", {}).get("debounce_delay", 2.0))
-    except Exception:
+    except (
+        OSError,
+        json.JSONDecodeError,
+        KeyError,
+        ImportError,
+        TypeError,
+        ValueError,
+    ):
         return 2.0
 
 

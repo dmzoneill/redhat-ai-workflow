@@ -280,7 +280,13 @@ class GitLabCollectorMixin:
                     if len(batch) < PAGE_SIZE:
                         break
                     page += 1
-                except Exception as e:
+                except (
+                    OSError,
+                    json.JSONDecodeError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.info("GitLab global MR fetch for %s: %s", username, e)
                     break
 
@@ -297,7 +303,13 @@ class GitLabCollectorMixin:
                     f"projects/{encoded}/merge_requests/{iid}/notes"
                     f"?per_page=20&sort=desc",
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.warning(
                     "GitLab notes fetch failed for %s MR !%s: %s", gl_path, iid, e
                 )
@@ -335,7 +347,13 @@ class GitLabCollectorMixin:
                     f"?scope=all&reviewer_username={username}"
                     f"&updated_after={q_start}&per_page=20&state=all",
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.warning(
                     "GitLab reviewer MR list failed for %s: %s", repo_name, e
                 )
@@ -409,7 +427,13 @@ class GitLabCollectorMixin:
                         f"&created_after={ctx.q_start}&created_before={ctx.q_end}&per_page=100",
                     )
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.debug("GitLab MR fetch (created) for %s: %s", repo_name, e)
 
             try:
@@ -422,7 +446,13 @@ class GitLabCollectorMixin:
                         f"&state=opened&per_page=100",
                     )
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.debug("GitLab MR fetch (open) for %s: %s", repo_name, e)
 
             try:
@@ -436,7 +466,13 @@ class GitLabCollectorMixin:
                         f"&per_page={PAGE_SIZE}",
                     )
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.debug("GitLab MR fetch (merged) for %s: %s", repo_name, e)
 
             try:
@@ -456,7 +492,13 @@ class GitLabCollectorMixin:
                             f"projects/{encoded}/merge_requests/{iid}/notes"
                             f"?per_page=100&sort=desc",
                         )
-                    except Exception as e:
+                    except (
+                        OSError,
+                        json.JSONDecodeError,
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                    ) as e:
                         logger.warning(
                             "GitLab notes fetch failed for %s MR !%s: %s",
                             gl_path,
@@ -499,7 +541,13 @@ class GitLabCollectorMixin:
                                     "created_at": note_created,
                                 }
                             )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.debug("GitLab review fetch for %s: %s", repo_name, e)
 
         return {

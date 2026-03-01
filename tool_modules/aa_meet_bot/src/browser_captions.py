@@ -337,8 +337,8 @@ class CaptionMixin:
                     }
                 """
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Suppressed disconnect observer: %s", e, exc_info=True)
 
         logger.info("Caption capture stopped")
 

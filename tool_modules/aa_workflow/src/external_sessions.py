@@ -13,6 +13,7 @@ This module enables:
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,8 @@ CLAUDE_CONFIG_DIR = Path.home() / ".config" / "claude-code"
 
 # Gemini import directory (user-specified)
 GEMINI_IMPORT_DIR = Path.home() / ".config" / "aa-workflow" / "gemini_sessions"
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeSession:
@@ -172,7 +175,7 @@ def list_claude_sessions() -> list[ClaudeSession]:
                             if session:
                                 sessions.append(session)
                         except Exception as e:
-                            print(f"Error loading {session_file}: {e}")
+                            logger.warning("Error loading %s: %s", session_file, e)
 
     # Sort by updated_at descending
     sessions.sort(key=lambda s: s.updated_at, reverse=True)
@@ -234,7 +237,7 @@ def list_gemini_sessions() -> list[GeminiSession]:
             session_id = session_file.stem
             sessions.append(GeminiSession(session_id, data))
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Error loading {session_file}: {e}")
+            logger.warning("Error loading %s: %s", session_file, e)
 
     # Sort by created_at descending
     sessions.sort(key=lambda s: s.created_at, reverse=True)
@@ -271,7 +274,7 @@ def import_gemini_session(file_path: str) -> Optional[GeminiSession]:
 
         return GeminiSession(session_id, data)
     except (json.JSONDecodeError, IOError) as e:
-        print(f"Error importing Gemini session: {e}")
+        logger.error("Error importing Gemini session: %s", e)
         return None
 
 

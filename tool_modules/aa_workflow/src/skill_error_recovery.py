@@ -405,11 +405,12 @@ class ErrorRecoveryMixin:
         skill_name = self.skill.get("name", "unknown")
         skill_path = SKILLS_DIR / f"{skill_name}.yaml"
 
-        print(
-            f"\n🔧 Please edit the skill file: {skill_path}\n"
-            f"   Step: {step_name}\n"
-            f"   Error: {error_msg}\n"
-            f"   Suggestion: {error_info.get('suggestion')}\n"
+        logger.info(
+            "\n🔧 Please edit the skill file: %s\n   Step: %s\n   Error: %s\n   Suggestion: %s\n",
+            skill_path,
+            step_name,
+            error_msg,
+            error_info.get("suggestion"),
         )
         input("Press Enter after saving your changes...")
 
@@ -426,7 +427,7 @@ class ErrorRecoveryMixin:
 
     def _handle_skip_action(self, error_info: dict, step_name: str):
         """Handle skip action for interactive recovery."""
-        print("\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
+        logger.info("\n⏭️  Skipping skill execution.\n   Error in step: %s\n", step_name)
 
         self.error_recovery.log_fix_attempt(
             error_info, action="skip", success=False, details="User chose to skip"
@@ -447,7 +448,9 @@ class ErrorRecoveryMixin:
                     )
                 )
                 if issue_result.get("success"):
-                    print(f"\n🐛 GitHub issue created: {issue_result.get('issue_url')}")
+                    logger.info(
+                        "\n🐛 GitHub issue created: %s", issue_result.get("issue_url")
+                    )
             except Exception as e:
                 self._debug(f"Could not create issue: {e}")
 

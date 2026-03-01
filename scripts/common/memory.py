@@ -251,7 +251,7 @@ def append_to_list(
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     except Exception as e:
-        print(f"Error in append_to_list: {e}")
+        logger.error("Error in append_to_list: %s", e)
         return False
 
 
@@ -305,7 +305,7 @@ def remove_from_list(key: str, list_path: str, match_key: str, match_value: Any)
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     except Exception as e:
-        print(f"Error in remove_from_list: {e}")
+        logger.error("Error in remove_from_list: %s", e)
         return 0
 
 
@@ -355,7 +355,7 @@ def update_field(key: str, field_path: str, value: Any) -> bool:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
     except Exception as e:
-        print(f"Error in update_field: {e}")
+        logger.error("Error in update_field: %s", e)
         return False
 
 

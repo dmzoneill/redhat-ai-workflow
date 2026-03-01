@@ -446,8 +446,8 @@ class SprintCursorMixin:
                     "source": "sprint",
                 }
             )
-        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError):
-            pass
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
+            logger.debug("Suppressed append_session_entry: %s", e, exc_info=True)
 
         try:
             import shutil

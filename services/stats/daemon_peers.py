@@ -279,7 +279,7 @@ class PeerCollectorMixin:
                 "event_count": len(daily_data.get("events", [])),
                 "daily_total": daily_data.get("daily_total", 0),
             }
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Failed to collect peer data for %s: %s", username, e)
             return {"success": False, "error": str(e)}
 
@@ -395,7 +395,13 @@ class PeerCollectorMixin:
                             ),
                         )
                         peer_events += len(daily_data.get("events", []))
-                    except Exception as e:
+                    except (
+                        OSError,
+                        json.JSONDecodeError,
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                    ) as e:
                         logger.debug("Peer %s date %s failed: %s", username, d, e)
 
                 await loop.run_in_executor(
@@ -476,7 +482,7 @@ class PeerCollectorMixin:
                 None, resolve_github_usernames, peers_config
             )
             logger.info("GitHub username resolution completed before backfill")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.warning("GitHub username resolution failed (non-blocking): %s", e)
 
         self._peer_backfill_progress["phases_completed"].append("resolve_github")
@@ -577,7 +583,13 @@ class PeerCollectorMixin:
                                 ),
                             )
                     prefetch_count += 1
-                except Exception as e:
+                except (
+                    OSError,
+                    json.JSONDecodeError,
+                    KeyError,
+                    ValueError,
+                    TypeError,
+                ) as e:
                     logger.warning("Pre-fetch failed for %s: %s", pf_user, e)
                 self._peer_backfill_progress.update(
                     {
@@ -626,7 +638,13 @@ class PeerCollectorMixin:
                     "Shared drive index built in %ds",
                     int(time.monotonic() - start_time),
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.warning("Shared drive index failed (non-blocking): %s", e)
             self._peer_backfill_progress["phases_completed"].append("index_gdrive")
 
@@ -658,7 +676,13 @@ class PeerCollectorMixin:
                     "Meeting peer index built in %ds",
                     int(time.monotonic() - start_time),
                 )
-            except Exception as e:
+            except (
+                OSError,
+                json.JSONDecodeError,
+                KeyError,
+                ValueError,
+                TypeError,
+            ) as e:
                 logger.warning("Meeting peer index failed (non-blocking): %s", e)
             self._peer_backfill_progress["phases_completed"].append("index_meetings")
 
@@ -744,7 +768,13 @@ class PeerCollectorMixin:
 
                         daily_data = await loop.run_in_executor(None, _collect)
                         peer_events += len(daily_data.get("events", []))
-                    except Exception as e:
+                    except (
+                        OSError,
+                        json.JSONDecodeError,
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                    ) as e:
                         async with _progress_lock:
                             if (
                                 len(self._peer_backfill_progress["errors"])
@@ -812,7 +842,7 @@ class PeerCollectorMixin:
                 int(time.monotonic() - start_time),
                 filter_info,
             )
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("Peer backfill failed: %s", e)
             self._peer_backfill_progress["errors"].append(f"Fatal: {e}")
             self._peer_backfill_progress["phase"] = "error"
@@ -1052,7 +1082,7 @@ class PeerCollectorMixin:
                 "total_peers": total,
                 "resolved_different": changed,
             }
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
             logger.error("GitHub username resolution failed: %s", e)
             return {"success": False, "error": str(e)}
 

@@ -212,7 +212,7 @@ def get_tool_source(tool_name: str) -> tuple[str, str, int, int]:
         func_source = _extract_function(full_source, tool_name)
 
         return source_file, func_source, info["start_line"], info["end_line"]
-    except Exception as e:
+    except (OSError, UnicodeDecodeError) as e:
         return source_file, f"# Error reading source: {e}", 0, 0
 
 
@@ -253,7 +253,7 @@ def _search_for_tool(tool_name: str) -> dict | None:
                         "end_line": end_line,
                         "func_name": tool_name,
                     }
-            except Exception:
+            except (OSError, UnicodeDecodeError):
                 continue
 
     return None
@@ -415,7 +415,7 @@ def wrap_all_tools(server, tools_module) -> int:
     try:
         with open(source_file, encoding="utf-8") as f:
             full_source = f.read()
-    except Exception:
+    except (OSError, UnicodeDecodeError):
         return 0
 
     # Find all async def functions that look like tools

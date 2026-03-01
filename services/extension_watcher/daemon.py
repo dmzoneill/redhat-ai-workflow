@@ -63,7 +63,7 @@ def send_notification(title: str, message: str):
     except FileNotFoundError as exc:
         # notify-send not available
         logger.debug("File not found: %s", exc)
-    except Exception as e:
+    except (OSError, subprocess.TimeoutExpired) as e:
         log(f"Notification failed: {e}")
 
 
@@ -87,7 +87,7 @@ def compile_extension() -> bool:
     except subprocess.TimeoutExpired:
         log("✗ Compilation timed out")
         return False
-    except Exception as e:
+    except OSError as e:
         log(f"✗ Compilation error: {e}")
         return False
 

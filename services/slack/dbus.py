@@ -79,7 +79,9 @@ try:
     DBUS_AVAILABLE = True
 except ImportError:
     DBUS_AVAILABLE = False
-    print("Warning: dbus-next not installed. Install with: uv add dbus-next")
+    logging.getLogger(__name__).warning(
+        "dbus-next not installed. Install with: uv add dbus-next"
+    )
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -1102,7 +1104,7 @@ class SlackAgentClient:
     async def connect(self) -> bool:
         """Connect to the D-Bus service."""
         if not DBUS_AVAILABLE:
-            print("Error: dbus-next not installed")
+            logger.error("dbus-next not installed. Install with: uv add dbus-next")
             return False
 
         try:
@@ -1117,8 +1119,8 @@ class SlackAgentClient:
             )
             return True
         except Exception as e:
-            print(f"Failed to connect to Slack daemon: {e}")
-            print("Is the daemon running? Start with: make slack-daemon-bg")
+            logger.error("Failed to connect to Slack daemon: %s", e)
+            logger.error("Is the daemon running? Start with: make slack-daemon-bg")
             return False
 
     async def disconnect(self):

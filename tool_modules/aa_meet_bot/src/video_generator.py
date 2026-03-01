@@ -1075,7 +1075,7 @@ if __name__ == "__main__":  # noqa: C901
                             f"Cleanup complete: {total} items removed.", file=sys.stderr
                         )
                 except Exception as e:
-                    print(f"Cleanup error: {e}", file=sys.stderr)
+                    logger.error("Cleanup error: %s", e)
                 return
 
             elif sys.argv[1] == "--stream" and len(sys.argv) > 2:

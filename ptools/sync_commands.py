@@ -78,7 +78,7 @@ def extract_command_metadata(content: str, filename: str) -> dict:
                 else:
                     arguments.append({"name": arg, "required": False})
         except Exception as exc:
-            logger.debug("Suppressed error: %s", exc)
+            logger.warning("Suppressed error parsing skill_run args: %s", exc)
 
     return {
         "name": filename.replace(".md", ""),
@@ -169,7 +169,9 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
                 skill = yaml.safe_load(f)
         except Exception as e:
             if verbose:
-                print(f"  ⚠️  Error loading {skill_file.name}: {e}")
+                logger.warning("Error loading %s: %s", skill_file.name, e)
+            else:
+                logger.debug("Error loading %s: %s", skill_file.name, e)
             continue
 
         if not skill:

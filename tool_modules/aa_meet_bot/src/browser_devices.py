@@ -497,8 +497,8 @@ class DeviceMixin:
                             dialog_found = True
                             logger.info(f"Chrome sync dialog detected: {selector}")
                             break
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug("Suppressed dialog check: %s", e, exc_info=True)
 
             if not dialog_found:
                 logger.info("No Chrome sync dialog found")
@@ -682,8 +682,8 @@ class DeviceMixin:
                         )
                         await asyncio.sleep(0.3)
                         return  # Only dismiss one popup at a time
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Suppressed dialog dismiss: %s", e, exc_info=True)
 
             # Fallback: try button text without dialog constraint, but only for very safe texts
             for text in ["Got it", "Not now"]:
@@ -695,8 +695,8 @@ class DeviceMixin:
                         logger.info(f"Dismissed popup by clicking '{text}' button")
                         await asyncio.sleep(0.3)
                         return
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Suppressed popup dismiss: %s", e, exc_info=True)
 
         except Exception as e:
             logger.debug(f"Error dismissing info popups: {e}")
