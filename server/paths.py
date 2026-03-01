@@ -143,6 +143,23 @@ MEETBOT_RECORDINGS_DIR = MEETBOT_DATA_DIR / "recordings"
 MEETBOT_STATE_FILE = MEETBOT_DATA_DIR / "state.json"
 
 
+def get_performance_summary_path() -> Path:
+    """Get current quarter's performance summary file path."""
+    from datetime import datetime
+
+    now = datetime.now()
+    year = now.year
+    quarter = (now.month - 1) // 3 + 1
+    return (
+        AA_CONFIG_DIR
+        / "performance"
+        / str(year)
+        / f"q{quarter}"
+        / "performance"
+        / "summary.json"
+    )
+
+
 def get_performance_quarter_dir(year: int, quarter: int) -> Path:
     """Get the performance data directory for a specific quarter.
 
