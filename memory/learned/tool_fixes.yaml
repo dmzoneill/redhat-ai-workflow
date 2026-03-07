@@ -187,8 +187,9 @@ tool_fixes:
   times_prevented: 0
   tool_name: jira_delete_comment
 - date_learned: '2026-03-07'
-  error_pattern: 'ref'' is a required property / terraform-repo validation
-  fix_applied: Use full 40-character hex commit SHA for ref in app-interface
+  error_pattern: "'ref' is a required property / terraform-repo validation"
+  fix_applied: |
+    Use full 40-character hex commit SHA for ref in app-interface
     data/*/repos/*.yml (e.g. ref: 6bc292160c8184571900271a0185d621b5e5eab1). Not
     branch name or short SHA.
   root_cause: app-interface terraform-repo schema requires ref = 40-char commit SHA

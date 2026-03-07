@@ -1,6 +1,6 @@
 # ANSTRAT-1848 Refinement Actions
 
-**Jira epic:** [AAP-66639](https://issues.redhat.com/browse/AAP-66639)  
+**Jira epic:** [AAP-66639](https://issues.redhat.com/browse/AAP-66639)
 **Meeting notes:** [Google Doc](https://docs.google.com/document/d/1ILmwwMW2tiYcHGHgtLC6en_Iep_Fpev_Q54gzNwqg4Y/edit?tab=t.ukbxs0wui6lo)
 
 This document holds the refinement actions and story-level decisions from the Anstrat 1848 refinement meeting. Paste the meeting notes below (or the key decisions per story), then the content can be used to update AAP-66639 (epic description, comment, or acceptance criteria).

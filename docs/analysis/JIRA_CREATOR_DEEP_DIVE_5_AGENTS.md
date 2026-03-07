@@ -1,7 +1,7 @@
 # Jira Creator & Hygiene Deep Dive — 5-Agent Consolidated Report
 
-**Date:** 2026-03-06  
-**Method:** Five parallel analysis agents; findings synthesized into this single report.  
+**Date:** 2026-03-06
+**Method:** Five parallel analysis agents; findings synthesized into this single report.
 **Scope:** Jira-related memory learnings, aa_jira create flow, failure classification, and hygiene recommendations for the jira-creator and create_jira_issue skill.
 
 ---
@@ -37,8 +37,8 @@ Conclusion: Do **not** treat 401 or VPN issues as ongoing bugs to fix in jira-cr
 ## 3. Memory Learnings That Imply Jira-Creator Changes
 
 - **patterns.yaml / tool_fixes.yaml / tool_failures.yaml:** Jira-related learnings are either transient (auth/network) or about **required AAP fields and workflow** (e.g. AC, Epic link, description).
-- **Takeaways for jira-creator:**  
-  - Encode **required AAP fields** in creator defaults and validation (Acceptance Criteria, Epic link, description formatting).  
+- **Takeaways for jira-creator:**
+  - Encode **required AAP fields** in creator defaults and validation (Acceptance Criteria, Epic link, description formatting).
   - Rely on memory learnings for **field presence and formatting**, not for 401/VPN handling (those are environment/transient).
 
 *(No new findings; synthesized from Report 1.)*

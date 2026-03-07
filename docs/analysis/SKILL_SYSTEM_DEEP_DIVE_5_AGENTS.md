@@ -1,7 +1,7 @@
 # Skill System Deep Dive — 5-Agent Analysis
 
-**Date:** 2026-03-06  
-**Method:** Five parallel analysis agents, each focused on a different aspect of the skill system.  
+**Date:** 2026-03-06
+**Method:** Five parallel analysis agents, each focused on a different aspect of the skill system.
 **Scope:** Skill engine, YAML format, discovery/intent/persona, testing, and lifecycle/ecosystem.
 
 ---

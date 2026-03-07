@@ -1463,4 +1463,3 @@ These commands are explicitly allowed through `shell()` because they are basic u
 | Security scanning | `security` | nmap, openssl, ssh |
 | Databases | `database` | postgres, mysql, sqlite, ssh |
 | Infrastructure, cloud | `infra` | ansible, aws, gcloud, systemd, ssh, libvirt |
-

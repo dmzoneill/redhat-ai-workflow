@@ -1491,7 +1491,9 @@ class DataCollector(GitLabCollectorMixin, GitHubCollectorMixin):
             return []
 
         try:
-            from tool_modules.aa_workflow.src.memory_tools import get_session_log_entries
+            from tool_modules.aa_workflow.src.memory_tools import (
+                get_session_log_entries,
+            )
 
             entries = get_session_log_entries(session_data)
         except ImportError:

@@ -35,4 +35,3 @@ steps:
     args:
       relative_path: "docs/meetings/anstrat1848-notes-fetched.txt"
       content: "{{ doc_content }}"
-

@@ -674,7 +674,11 @@ class WorkspaceState:
         personas_from_content: dict[str, str] = {}
         projects_from_content: dict[str, str] = {}
 
-        skipped_count = len(skip_scan_ids & set(session_ids or [])) if skip_scan_ids and session_ids else 0
+        skipped_count = (
+            len(skip_scan_ids & set(session_ids or []))
+            if skip_scan_ids and session_ids
+            else 0
+        )
         if scan_ids:
             logger.debug(
                 f"Content scanning {len(scan_ids)} session(s), "

@@ -2,7 +2,7 @@
 
 **Purpose:** Copy-paste or merge this content into the System Design Proposal in [ansible/handbook PR #1223](https://github.com/ansible/handbook/pull/1223) so the SDP reflects the latest decisions and blockers from the saas-stage-routing work.
 
-**Source:** `~/src/saas-stage-routing/` (summary.md, entries 2026-03-03 and 2026-03-06).  
+**Source:** `~/src/saas-stage-routing/` (summary.md, entries 2026-03-03 and 2026-03-06).
 **Refinement alignment:** [ANSTRAT-1848-refinement-plan.md](ANSTRAT-1848-refinement-plan.md).
 
 ---

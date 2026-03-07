@@ -1,6 +1,6 @@
 # Session Log Structure: Separation by Chat
 
-**Date:** 2026-03-07  
+**Date:** 2026-03-07
 **Goal:** Preserve chronological order while giving clear separation between chats (sessions) in the daily session log.
 
 ## Current behavior (after change)

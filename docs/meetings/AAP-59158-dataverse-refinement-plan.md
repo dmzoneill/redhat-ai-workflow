@@ -1,8 +1,8 @@
 # AAP-59158 (ANSTRAT-1500) Refinement: Suggested Updates for Review
 
-**Epic:** [AAP-59158](https://issues.redhat.com/browse/AAP-59158) – ANSTRAT-1500 Refinement actions  
-**Notes source:** [dataverse-integration](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration) ( [summary](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/blob/main/summary.md), [docs](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/tree/main/docs), [entries](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/tree/main/entries) )  
-**Progress epic:** [AAP-53376](https://issues.redhat.com/browse/AAP-53376) – Dataverse ELT Migration - Snowpipe and dbt Implementation  
+**Epic:** [AAP-59158](https://issues.redhat.com/browse/AAP-59158) – ANSTRAT-1500 Refinement actions
+**Notes source:** [dataverse-integration](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration) ( [summary](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/blob/main/summary.md), [docs](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/tree/main/docs), [entries](https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration/-/tree/main/entries) )
+**Progress epic:** [AAP-53376](https://issues.redhat.com/browse/AAP-53376) – Dataverse ELT Migration - Snowpipe and dbt Implementation
 **SDP target:** [ansible/handbook](https://github.com/ansible/handbook) – new SDP at `The Ansible Engineering Handbook/System Design Plans/ANSTRAT-1500-Dataverse-Export.md`. **Handbook PR:** [ansible/handbook#1243](https://github.com/ansible/handbook/pull/1243).
 
 ---

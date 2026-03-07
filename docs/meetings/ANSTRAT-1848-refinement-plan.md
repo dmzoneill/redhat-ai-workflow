@@ -1,9 +1,9 @@
 # ANSTRAT-1848 Refinement: Suggested Updates for Review
 
-**Epic:** [AAP-66639](https://issues.redhat.com/browse/AAP-66639) – ANSTRAT-1848 Refinement actions  
-**Meeting:** 2026-03-05 – Shane McDonald, David O Neill, Zvika Sadeh  
-**Meeting notes:** [Google Doc](https://docs.google.com/document/d/1ILmwwMW2tiYcHGHgtLC6en_Iep_Fpev_Q54gzNwqg4Y/edit?tab=t.ukbxs0wui6lo)  
-**Fetched copy:** [docs/meetings/anstrat1848-notes-fetched.txt](anstrat1848-notes-fetched.txt)  
+**Epic:** [AAP-66639](https://issues.redhat.com/browse/AAP-66639) – ANSTRAT-1848 Refinement actions
+**Meeting:** 2026-03-05 – Shane McDonald, David O Neill, Zvika Sadeh
+**Meeting notes:** [Google Doc](https://docs.google.com/document/d/1ILmwwMW2tiYcHGHgtLC6en_Iep_Fpev_Q54gzNwqg4Y/edit?tab=t.ukbxs0wui6lo)
+**Fetched copy:** [docs/meetings/anstrat1848-notes-fetched.txt](anstrat1848-notes-fetched.txt)
 **SDP:** [ansible/handbook PR #1223](https://github.com/ansible/handbook/pull/1223) – review for alignment with this plan.
 
 ---
@@ -110,7 +110,7 @@ For each task we list **AC alignment**: each Jira acceptance criterion is marked
 
 ### AAP-66640 – Schedule Initial Kickoff and establish communication plan | **Close**
 
-**Jira description (summary):** PM schedules kickoff with Feature Team; establish communication plan (recurring sync, slack, weekly status comment, Jira view(s)); feature description and AC reviewed by functional SMEs; confirm scope and rank. 
+**Jira description (summary):** PM schedules kickoff with Feature Team; establish communication plan (recurring sync, slack, weekly status comment, Jira view(s)); feature description and AC reviewed by functional SMEs; confirm scope and rank.
 **AC alignment:**
 
 | Expectation | Alignment | Notes |
@@ -132,7 +132,7 @@ Refinement 2026-03-05: Closing as complete.
 
 ### AAP-66641 – Architecture Definition | **Keep open**
 
-**Jira description (summary):** Create SDP; present at Staff Engineering Proposal Review; shepherd through approval/merge. Proposals for every problem statement; blocking ones must be written/approved/merged before closing and exiting refinement. Create design epic with stories/spikes. 
+**Jira description (summary):** Create SDP; present at Staff Engineering Proposal Review; shepherd through approval/merge. Proposals for every problem statement; blocking ones must be written/approved/merged before closing and exiting refinement. Create design epic with stories/spikes.
 **AC alignment:**
 
 | Expectation | Alignment | Notes |
@@ -334,7 +334,7 @@ Refinement 2026-03-05: Closing.
 
 ### AAP-66650 – Engage with Performance and Scale | **Close**
 
-**Jira description (summary):** Define performance characteristics; document KPIs/SLOs, scale targets, scaling factors, architectural impact, minimum testing; schedule consultation with Perf/Scale. 
+**Jira description (summary):** Define performance characteristics; document KPIs/SLOs, scale targets, scaling factors, architectural impact, minimum testing; schedule consultation with Perf/Scale.
 **AC alignment:**
 
 | Expectation | Alignment | Notes |
@@ -355,7 +355,7 @@ Refinement 2026-03-05: Closing.
 
 ### AAP-66651 – Complete a Cloud Assessment | **Close**
 
-**Jira description (summary):** Assess whether feature impacts managed offerings (SaaS/Cloud); contact managed offerings team if feature adds services, impacts infra, etc. Reach out via #team-ansible-on-clouds-saas, @aoc-leads. 
+**Jira description (summary):** Assess whether feature impacts managed offerings (SaaS/Cloud); contact managed offerings team if feature adds services, impacts infra, etc. Reach out via #team-ansible-on-clouds-saas, @aoc-leads.
 **AC alignment:**
 
 | Expectation | Alignment | Notes |

@@ -7,8 +7,8 @@
 Mar 5, 2026
 Konflux pipelines onboard session
 Invited Qian Ding David O Neill Song Song Li
-Attachments Konflux pipelines onboard session 
-Meeting records Transcript Recording 
+Attachments Konflux pipelines onboard session
+Meeting records Transcript Recording
 
 
 Summary
@@ -61,7 +61,7 @@ Please provide feedback about using Gemini to take notes in a short survey.
 Mar 5, 2026
 Konflux pipelines onboard session - Transcript
 00:00:00
- 
+
 Qian Ding: Oh, good. Thank
 Song Song Li: Oh,
 Qian Ding: you.
@@ -75,10 +75,10 @@ Qian Ding: uh another thing is uh we have a weekly maintenance uh happens on eve
 David O Neill: Okay. Yeah. Um Okay.
 Qian Ding: Yeah.
 David O Neill: Um so like I said previously, today we are going to look at uh Conflux. Um, I don't really have a structured uh presentation for you today. I have some notes. Um, we'll see how it works out.
- 
- 
+
+
 00:01:29
- 
+
 David O Neill: Whether it'll be good or bad, we will see. Um, but we'll just I guess we'll we'll work through it as best as we can and uh work from there. Did somebody Yeah, go ahead.
 Song Song Li: So, thank you, David. Do you mind do you mind recording this meeting? I think maybe we can. Yeah, if we can record it, maybe we can check something
 David O Neill: Okay. Um,
@@ -88,15 +88,15 @@ Song Song Li: Thank
 David O Neill: Go back to
 Song Song Li: you. Thank you. Thanks.
 David O Neill: Okay. Um, since you work in CI/CD, I'm or DevOps, I'm I'm sure you have some familiarity uh with CI/CD tools, pipelines, all these type of things. So, I don't think anything will be shocking to you today. I've probably seen these things in some shape or form or another.
- 
- 
+
+
 00:02:43
- 
+
 David O Neill: Um I'll give some maybe a quick overview in terms of um I don't know some slides here and then I'll move maybe to some practical stuff. Um so in in in recent times we moved from uh Jenkins um to um Conflux and the reason behind that was it was an organizational decision that we should uh consume what we are producing. So I think Conflux is an IBM product and so they want us to use uh Conflux rather than um Jenkins. There was al also was a second problem uh in that the Jenkins server uh was overloaded the main Jenkins server and um it was taking a long time for uh some jobs to complete because there wasn't enough runners or whatever it's called in Jenkins to pick up all of the uh requests and so the decision was made to move to Conflux because it's more scalable and that it's a cloudnative solution for doing pipelines. Uh you may have looked at some of those videos already. So you know that each of the steps in the workflows are done by uh containers and those containers are linked together to create pipelines and because it's built on top of Kubernetes obviously that's very scalable.
- 
- 
+
+
 00:04:23
- 
+
 David O Neill: Um so um let's take a look here. So, Conflux builds conceptually uh consists of a namespace or a workspace which is very similar to Kubernetes namespaces. uh consists of applications which you could think as of as maybe deployments maybe in Kubernetes and then deployments can have a number of components or pods uh which then execute builds integration tests and releases. That's conceptually the the over the overview here of what what it's all about. Did you get access to this namespace that I that we were looking at for that I sent some links to? Do you have access to this?
 Qian Ding: Yeah.
 Song Song Li: Okay.
@@ -104,50 +104,50 @@ Qian Ding: Yeah.
 David O Neill: You have access.
 Qian Ding: I I have Yep.
 David O Neill: Okay. So, I make this bit bigger here. Okay. So, like I was talking about, we have a namespace. Um and we'll get you to create a namespace as part of your um your um whatever the word hands-on work with this.
- 
- 
+
+
 00:05:38
- 
+
 David O Neill: Um we're going to as previously said I asked you to fork uh a repository or create a repository in the analytics gitlab server uh where what you're going to do is you're going to subscribe your repository uh to a conflux namespace and from there you're going to define an application which is here on my screen I have an application inside this namespace and then within the application you're going to define components. So you can see a component is really just a link uh to a backend git repository. And you can see here that this component um automation analytics back end is um linked to uh the GitLab repo there in the back end. And you can add as many components as you like to an application and each one is typically linked by uh a git repository um link that could be to the same repository. It can be any different shape or form you want to imagine. It could be on different branches. It could be on different you know all sorts of different things.
- 
- 
+
+
 00:06:58
- 
+
 David O Neill: You might you might have different instructions for each component you hatch, but they could all be linked to the same repository. So, it's really up to you on how you want to build it. In analytics, we have um one application like that and we have one component. And when we build this component, we get uh an output um uh what I going to say container image. I was I was going to say docker image out of Hammet, but it's it's a container image. Um we will need to get you access to some of these. I just thought of it here. So, I'll just link these in the chat. So, this one and this one. Probably don't have access to this, so we'll have to get you access to it. Uh, will we do it now or later? Um, let's see if we can do it now. Um, okay. So, let me see here.
- 
- 
+
+
 00:08:13
- 
+
 David O Neill: It's no harm doing even though we might go off direction is small bit here. Uh it might be worth maybe just doing it now it so you can see some of it. So key let me see here. Uh a good source of information of course is to always uh look in Slack. And what I'm looking for here is um don't know if I actually forked the repository. So what I'm going to do is I'm going to look in our team chat and I'm going to look for uh this URL because I asked Ben and Aana to get access to this repository. So the information should be in here. Of course, if I was searching the team channel correctly, no, it's not in there. So, we'll have to do that later. Um, but basically, we will need to get you added to a git repository. Um, role binding, I believe it is. That will give you access to those key repositories.
- 
- 
+
+
 00:09:27
- 
+
 David O Neill: Similar to your onboarding process in SAS, where you just need to add yourself to some groups. We'll do that here after we go through the slides. We'll see if we can get you uh access to those key repositories. So, uh back to this um so we have an application uh we have a component and we have builds and releases. So when we make a change into the GitLab repository in the form of a a pull request, we'll look at a pull request here. Uh am I looking at the right thing? I am. So if we make a pull request uh the the container should start sorry the pipeline should start running and that will be signified by these indicators here in GitLab that you're probably very familiar with. Uh the first one here is on the left hand side is um validate MM or So the purpose of validate MR in this repository this comes from the gitlab CI file you can find it in here and in here there's a job called validate MR.
- 
- 
+
+
 00:10:56
- 
+
 David O Neill: The purpose of this validate MR is for organizational requirements that stipulate or say or impose um that all PRs must begin with the AAP issue number. They must begin with this. If it does not begin with this uh the commit must begin with this. I'll show you here as well. It's here in the commit. If it does not be begin with that, this job will fail. Okay. Uh there is also an additional check in here that also forces the use um that the source branch name also begins with this AAP number. So, if I show you in my I'll make this a little bigger for you in a moment. One second. I could type. So you can see here all my work all my issues that I am assigned in Jira all those branches begin with the issue number followed by whatever you want. So the branch name and the commit must have the issue number.
- 
- 
+
+
 00:12:38
- 
+
 David O Neill: If it does not have this your the first step here in the build process will fail. This will fail. Okay. and somebody will ask you to fix it. Okay, the next step here are these five tests here. So these five tests here are for quick feedback um on a poll request. These are just lint checks. So black commit lint which which also checks the commit here. Um and I'll talk about that in a moment a little bit more. Flakeate, Sonar Cube, I think in your group you use Snick U, but there are a number of these tools and YAML lint. The only one that I will give additional um information here is on commit lint um in that if you're not familiar with it, let's look at some commits here in the back end. You'll see that the there's some additional um structure here on the commit name. So let's take a look at this a little bit further in case there's a lack of familiarity with it.
- 
- 
+
+
 00:13:54
- 
+
 David O Neill: Just to remind ourselves, let's go back to the channel. Okay, so commit will take the the following format. the uh the issue key, the issue number um uh the action, the target colon followed by a description. That's how all of the issues will be done. You can find this information or more information about commitment if you're not familiar with it on the commit lint website and there's even uh I think some sort of playground there that you can play around with to test that. But that is basically structure of our commits. So if it doesn't follow that structure, you will get errors from the CI. uh this all of these small little things ensure that there is traceability from issues in Jira to the Pors and that it's organized and traceable. Okay, seems ridiculous. Maybe initially you're going this is a lot of bureaucracy, a lot of structure, but when you actually start using it, it makes a lot of sense. So there's a plugin in Jira.
- 
- 
+
+
 00:15:30
- 
+
 David O Neill: If we go to some issues in Jira, if we can open them here, let's find one of these PRs which are open. Let's say let's grab Let's grab this one here. So, if I search for this issue in here. Okay, here it is. And you can see here that the pull request was automatically added to the Jira issue. This is done by a tool. I think it's called JS CPD or something. I can't remember the name of it, but it's a tool or a plugin that's installed into GitLab and Jira that automatically creates this linkage between GitLab and Jira. So that when managers, when project managers, whoever come in here, they say, "Okay, there's an issue. Where can I find the code?" And it's linked to the code in GitLab. So it's very powerful and it keeps managers off your back or whatever when they're asking you know where's the PR why isn't it attached to the Jira issue all this good stuff so if you follow this naming convention that will be done for you so this is one of the advantages of that so um and all these jobs these these I'll say local jobs to gitlab lab are defined in the GitLab CI file.
- 
- 
+
+
 00:17:12
- 
+
 David O Neill: They're in here. There's gun. GitLab CI. So, we got validator more. We got flake, sonar, cube, yaml, lint, commit lint, and black. Um, okay. Question.
 Song Song Li: Yeah,
 David O Neill: Go ahead.
@@ -157,61 +157,61 @@ Song Song Li: many actually we transfer some repo from GitLab to GitHub. So we u
 David O Neill: Sure.
 Song Song Li: Maybe we need more experience for GitLab. Thank you.
 David O Neill: Yeah, that's no problem. So um you've we you've done training on um Red Hat confidential information Red Hat whatever there's different names for it confidential high I can't even remember the names for this stage but uh you know there's different levels of information and what we can share uh externally uh the problem with automation analytics back end is that um well there's a number of reasons.
- 
- 
+
+
 00:18:44
- 
+
 David O Neill: There's there's a number of reasons why this is on GitHub. Uh number one, at some point they may have decided that they wanted to keep some of this intellectual property private. Maybe that's one reason. Maybe that's where it started. I'm not too certain. But I can tell you uh in its current form this software it's like it's like Swiss cheese or we like like to call Swiss cheese, you know, like Swiss cheese. Uh it has lots of holes in it. Okay, lots and lots of holes in it. There's lots of security problems with it. There's lots of code problems with it.
 Song Song Li: Oh,
 David O Neill: uh there's a lot a lot of problems with it, right? So,
 Song Song Li: shut up.
 David O Neill: and it's not it's not something we want to release externally. This is part of our technical debt. We have a very long list of technical debt. And the problem with most software companies, you'll probably be aware that they want to keep moving forward with features and development and technical debt.
- 
- 
+
+
 00:19:56
- 
+
 David O Neill: From time to time, we get to work on some of it. Uh, but it's there's still lots of problems there. I'm not going to lie to you. There's lots of problems and maybe you might get some time to work on them. I don't know. We we'll see. Uh, the reason I gave you an onboarding task of fixing two bugs. Um, SA told me like to not put you on this work and I'm like I mean we uh I was hoping that you might be able to work on some of this stuff and it will build your your your your knowledge of the product but he wants you to work on on on the operation stuff works first. Okay. Um so what were we talking about? We were talking about CI. Let's go back to the CI here. So, so we looked at the first two, the first two um ticks or check marks, whatever you want to call them.
- 
- 
+
+
 00:20:54
- 
+
 David O Neill: Where are they? The first two. So, these are required. This the CI will not pass without the first two. The third one here is these are a lot of additional tools which I have also in the GitLab CI file. So you go into the GitLab CI file again. We'll go back again. I'm going around in circles here. And you look at the GitLab CI file if it will load. Uh there are a lot of additional ones. You scroll down here. There's lots lots lots more of these tools. Now why are they there? So they're not really used but they bring awareness to us of other issues that we might have and we have lots of issues. Um if you look through all these jobs there are a significant amount of failures in these jobs. Unfortunately the static analysis of the code is is quite poor. For instance, uh banded I believe is a security checker.
- 
- 
+
+
 00:22:07
- 
+
 David O Neill: There's lots of bandit issues. There's lots of problems with um quality of imports, ordering duplicates band or imports that are no longer used. That's what is JSCPD looks for duplicate code blocks. I think there's something like 30% of our code has duplicates in it like copy and pastes. Okay, there's markdown lint issues. There's my pi issues, py lint issues. There's lots of problems across all this code, right? If we turn all of these things on as required, we would never get anything merged. It's just there's too many problems. But they are there for awareness, but they don't they do not block the the merge requests from being merged. The only blockers are are these two and the conflux pipelines which which which we are going to look at now. So that that is the next step. So how do we set up a conflux pipeline? So the setup of a conflux pipeline begins with the conflux release repository.
- 
- 
+
+
 00:23:24
- 
+
 David O Neill: Let's see if we can find it here. Conflux release repository. Okay. So in here there is a folder called tenants config. Majority of these folders here you will never look at. They're outside of our scope. But there is a folder in here called tenants config. cluster. And depending on where you want the build to land, you will want to put your tenant config onto one of these clusters. The two stone prod ones here, these are on private Kubernetes uh conflux clusters. Some of these are external as in they're public and you can look that up somewhere in the documentation but our one lives in stone prod 02 and under tenants we have all the name spaces for all the projects which are using uh this cluster and we are AAP or anible automation platform AA which which stands for autom automation analytics tenant. And in here we have a configuration of our um application or our our namespace, our application, our components, our integration tests, the entire configuration of this Kubernetes config or sorry Conflux configuration.
- 
- 
+
+
 00:25:17
- 
+
 David O Neill: Where is the tab going? Here. Here. No, no, wrong one. Sorry. Where is it again? Too many tabs, guys. There it is. Um, in Kubernetes, uh, there is a templating mechanism. Um, so I think it's called customize if I recall correctly. Customize. If I could type this one here. I'm sure you've seen it working with Kubernetes. uh put it in the channel any customize they take uh a configuration here and they generate from it an output folder which is autogenerated cluster stone pro02 tenants AP tenant and they generate an output configuration And this is the configuration gets that gets loaded into Kubernetes. So we have a source configuration, a generated configuration and then this is the configuration that gets loaded into Kubernetes. But let's look at the source configuration first. Let's go back to the source configuration. Have you used customize before?
- 
- 
+
+
 00:26:47
- 
+
 Song Song Li: Yes.
 Qian Ding: Yep.
 David O Neill: Okay. So that should all be familiar with it. So I have made a very very very simple um customized configuration for our app. And the reason why I've made it very simple is is because we're we're a small team and we do not have time to invest in learning too many technologies. We constantly have to to battle um the usage of tools, services and technical debt against the time that we have available to us. So when you look in this configuration here, you'll probably think this could be a lot better. And you're right, it could be a lot better, but we have to keep it simple so that people can look at it quickly, fix things quickly, and they don't have to learn too much and understand too much. As you're probably familiar with, there are certain tools in the environment that you might look at once a week, once a month, once every couple of months. You don't have time to relearn it every time.
- 
- 
+
+
 00:28:05
- 
+
 David O Neill: You might have learned the technology last year, you haven't looked at it in a year and now you have to learn it again because you have forgotten how it works. And so when you look at this configuration in here, you will see it's extremely simple. So that even if you forget it tomorrow when you come back in, it should be pretty simple to uh pick it up and work at work with it again. So I put in a very simple very stupid naming convention here for these files and that is the first letter is the the type. So A is for application. C is for component. ECP is for um uh can't remember what ECP is something ad um enterprise contract policy. Uh IR is for image repository. Uh it is for integration test scenario. uh or back uh release plan and release uh plan admission. So the first thing of the file is the type of what it is then followed by AAPA and just the file extensions.
- 
- 
+
+
 00:29:32
- 
+
 David O Neill: So when you look in the customized file here it's very simple right extremely simple just references those files in the repository. If we jump to the actual repository here on my computer. Okay. Um, we can of course see those files that I talked about. Uh, see here. Uh, did I go to the very front? No, I don't think I did for stone config. Uh, I must must be confusing myself. Oh, sorry. tenants going. Okay. Okay. This is way too big. There is the structure that we were talking about. And here is the structure. Here's the the structure of the um the generated files. So, how did we go from the source files to the generated files? Well, maybe you're thinking of using the cubectl command, but that is not the case. inside in this folder here there is a file um I believe in the hack folder if I can recall and it is called um maybe I make it up one second here it should be in here uh this is this is what I mean about technical data and trying to find your way around these places right so I know the name of the file but I've forgotten where where it is in the in the folder.
- 
- 
+
+
 00:32:19
- 
+
 David O Neill: So just have to show I just have to find
 Qian Ding: Yeah,
 David O Neill: it
@@ -219,35 +219,35 @@ Qian Ding: I think it it is uh under the uh tenant configure config uh folder uh
 David O Neill: is it
 Qian Ding: right?
 David O Neill: is I should one second you've already looked at it. Yeah. So here here we go. Yeah. Perfect. So we got build single and build manifests. uh bill single you can target a specific um a specific tenant so you can go a-a-tenant and that will do that customize translation just out of pure habit I generally just use build manifests and I just run it like that and it iterates through all of the um customize configurations and outputs all of the destination generated Kubernetes configurations. All right. Now, obviously that's the long way of doing it. You're looking at it there and you're thinking, why is he doing it that way? It's just purely habit from for me.
- 
- 
+
+
 00:33:29
- 
+
 David O Neill: I'm just used to doing it like that. You can use the single as well. Let's see if we can. I presume it's I haven't used it in so long, but I presume it's AP- A- tenant, and it should just build that specific tenant. And it does. Yeah. So, it does. So, if there was any changes in that source repository, it would then um it would then um generate uh new content. So, let's let's change let's change something. And this is what you're going to do as part of your your um your onboarding. You what what you are going to do is you've created a repository. And what I want you to do is um I want you to add a new component into the existing application. Right? And the reason why I want you to do a new component is that we don't have to go through um a a review process with the Conflux engineers.
- 
- 
+
+
 00:34:36
- 
+
 David O Neill: If you want to create a new tenant uh in Conflux engineering, you're you're going to have to go through uh the review process with the Conflux engineers. But if I get you to create a component under our application and you register that component uh which with your git repository then your component will will live here and we can remove it later. So that's that makes it simp simpler for you and we don't have to go through a big onboarding process with the conflux engineers. So that's where you will do that. So in here in tenants config inside in cluster inside stone plot 02 okay and you go into to the tenants ap whatever in here you're going to create uh a new component and we look at our existing components you'll create a new component here's an here's here's an existing component and you can It points at a git a git repository and there's a docker file to build that component. You're going to do something very similar to that.
- 
- 
+
+
 00:35:52
- 
+
 David O Neill: Not going to tell you all the steps. It's going to take a bit of the journey of it out of you. But you can see here if you look at a component, it should start to make some type of sense to you. Once that's done, you will add that component to the to the uh customize file and you'll um reference it there and then you'll start you know adding additional things onto it. I expect you to maybe create an integration test scenario and make a you're going to make an image repository of where it's going to be stored. This image this image is going to be stored in key.io. O uh you might need a release plan and a re a release plan admission. I'll go through some of those concepts here in a moment. I don't I don't want to take all the fun out of it for you. So we'll just give you an overview. So let's let's make a change here to see if we can make a pull request into um let's delete something here.
- 
- 
+
+
 00:36:55
- 
+
 David O Neill: So there are some old files here actually that we can clean up. Um, there used to be a quick and a slow um, integration test scenario. I'm going to delete these. We've now moved to these four groups. Group one, group two, group three, and group four. Um, so we can get rid of these old groups here. Uh, I think we're going to have to make a change anyhow because these these aren't actually referenced in the customize file anymore. No, they're not. So, we're going to have to make a change somewhere if we want to make a change in customize. So, let's make a change somewhere. Um, let's just add a I don't know, something silly. Let's let's add an annotation here to to this uh test.x.x whatever is equal to whatever. Okay. Okay. Uh is that that's okay. Okay. And we will build that man the customized file.
- 
- 
+
+
 00:38:14
- 
+
 David O Neill: Let's see here. Uh did that actually build it? Maybe. Um so there there's two actually there's two commands you can run. Uh one is uh build manifests which is the one I usually do. And then there's a second command called verify man manifests. And that's does some additional checks to ensure the the consistency or the continuity of the um of the configuration. So I generally run that as well. Come on. It's usually faster than this in a way. So slow. Must be a lot more tenants in there now. Actually, that's probably what is going on. Uh when I onboarded this product, it was only a small few tenants. Now there's a lot of tenants because they're they've moved from Jenkins to Conflux. So maybe now is the time to adopt the build single. Um but I just let let this complete. Come on.
- 
- 
+
+
 00:39:44
- 
+
 David O Neill: Okay. And then there's ver verify manifest. This does I believe just some local checks for some local continuity or sanity tests as some people call them.
 Qian Ding: Hey David, quick question here like this uh verify
 David O Neill: Yeah.
@@ -255,35 +255,35 @@ Qian Ding: uh command actually because I I saw we have a folder in this repo nam
 David O Neill: Yeah.
 Qian Ding: Okay.
 David O Neill: Yeah. We'll look at more testing. I mean, we don't we don't have to familiarize yourself too much with tests. Um we like as I said, we have lots of things to worry about. you don't spend too much time uh digging through their their stuff. Um so I wouldn't worry about it too much.
- 
- 
+
+
 00:41:04
- 
+
 David O Neill: The only time you have to worry about it really is when there's a problem. So anyway, we can see here um here's my modifications, right? So I I modified uh two files. I added an annotation to the group one and the generated file has that annotation and I deleted those two old integration test scenarios. There's the deletions. So let's create a commit. Um so actually where am I is a good question. So I'm on some branch here which wasn't a good place to start out but this is merged so should be okay to continue here. So let's let's let's do this. So um I will not do get add minus a because I can see I have a cursor file there. So let's do this. Get add tenants config star. Okay. So okay. Um, now the the requirements for the conflux release pro process, they're not as uh strong as our requirements uh in terms of the pull request names, but I would still recommend following the pull request um commit lint that we've adopted in the organization once again for for traceability because that will get linked back to Git Git issues.
- 
- 
+
+
 00:42:38
- 
+
 David O Neill: So for today, I'm going to link this issue or this PR. I'm going to link it back to one of you lucky people. I'm going to link it back to the first one I grab here. Link it back to whoever's issue this is. So you're whoever this is is going to get the blame if it all goes wrong. Uh so dashen uh so I don't know um chore CI cleanup um none used uh integration test scenarios. Okay. Okay. So we commit that then I'll do a get pull rebase uh of origin main sometime today. Perfect. And then I'm just I'm going to push to origin main. So not not origin main. uh going to push to origin which like I said is the actual destination repo but I will push to a branch uh sorry what's my local branch here it's this this this nonsense branch name here you'll see I I was in a rush yesterday and I made this this branch without without a proper name uh I just pushed to that branch name I don't know we'll call it some cleanup whatever Okay.
- 
- 
+
+
 00:44:25
- 
+
 David O Neill: Okay. And we can go make a pull request for that. Oh, sorry. Uh, yeah. Pull request. Let's go to that. Okay. Uh, and if you use CI or sorry, if you use AI, uh, in fact, you could we could have did a better job here. Uh I can give you a script if if you find it of benefit. Um I call it fancy git commit. This makes um this makes a fancy git commit from me from the staged files. Let me let me show you that. Actually, this applies our organizational requirements um to the commit and it gives me a high quality commit as well. For you, this might be a more benefit as well if you're not comfortable with English so much and it's difficult to type up descriptions. So, this might be of value to you. So, let me do a get reset uh head till the one there.
- 
- 
+
+
 00:45:33
- 
+
 David O Neill: Okay. And now I will stage these changes. Okay. And now I'll do fancy fancy git commit. Right. What fancy git commit will do is it will um first of all it's asking for my signing key. So that's good. It wants me to sign the the git commit with my GPG key which is good. And now it's asking for an AAP number which is our organization requirements. So let's go with the AP number that I was using. And then it will using AI it will uh summarize the changes in the commit for me. So if we do uh get show I guess I don't know head tool. What is it? Uh let's sorry just head. Uh and you can see there it made a there wasn't much in it but you can see there it made um reasonably good um get commit uh description for me. It will if the more content you have obvious obviously the better.
- 
- 
+
+
 00:46:51
- 
+
 David O Neill: It will make a very long descriptive um you know description of what's in in the commit. that might be of of help for you depending on how good you are at writing uh pull request descriptions. So, let's see what went into this here. They may still require you to add their description in here. Let's see. Because they have their own template here as well. Yeah. So, they have their own template here as well, but we could just copy what was generated for us in there. like that. So obviously the more you have in there the better. Okay. Okay. So we have that um in the repository in the repository here there is a code owners file and if you search for automation analytics analytics or I don't know analytics automation analytics you can see there the group automation analytics has uh ownership over these files. Uh so you should be in the automation analytics group at this point.
- 
- 
+
+
 00:48:21
- 
+
 David O Neill: Um so uh Samsung or Chen, would you like to put uh an LGTM on my git commit? Would one of you like to do that just to approve it?
 Qian Ding: Yeah, I I can
 David O Neill: I can approve it myself.
@@ -293,77 +293,77 @@ Qian Ding: just uh add a comments like uh looks good to me, right?
 David O Neill: Yeah. Yeah. Looks looks good to me. Slash LGTM.
 Qian Ding: Okay.
 David O Neill: So you can see any uh our tests I believe have have already passed. Have they passed? Yeah, they've already passed I think. Yeah. Uh so as soon as this gets merged, um we just we'll set it to auto merge there. Approve it. So as soon as this gets merged, I believe that this uh well the first here is Jira pilot uh create this is the the the poll request pipeline when it gets merged the merge request pipeline will run and it will get pushed or it will update Argo CD as to the next steps.
- 
- 
+
+
 00:49:59
- 
+
 David O Neill: I don't know their entire processes and how it gets to Argo CD but it does end up uh Argo CD uh is then responsible for the next step which is actually applying it to the Kubernetes uh cluster. Do you have experience with Argo CD?
 Qian Ding: Yep.
 Song Song Li: Yes.
 David O Neill: Okay, perfect. So I don't have to explain anything here. So these are all our um kinds or Kubernetes kinds or conflux kinds in here. Um these these are these kinds obviously are provided by custom resource definitions in uh Kubernetes. You worked with operators and lots of things. So they were very familiar with custom resource definitions. So conf the the conflict solution itself provides these kinds or these custom resource definitions for application component enterprise contract policy all all of this good stuff and so in a while I don't know how long that's going to take depending on how busy it is uh that will get pushed to the con the the open shift cluster or the kubernetes cluster and it will get it will be updated here and if we go into integration test scenarios, we would expect uh that this group one should get an additional annotation here that that nonsense annotation that that I I I added.
- 
- 
+
+
 00:51:29
- 
+
 David O Neill: Um okay. So, so I believe you have your next steps and what you need to do in terms of creating a repository, adding a component and how to get it into uh Conflux via a pull request and Argo CD will apply to the cluster. So, at this point, you should have a build or you should have something happening. So, let's take a look at a build. Uh, by the way, are you do you need to drop at at 10 o'clock?
 Qian Ding: Uh, nope. Yeah,
 David O Neill: Do you need No.
 Qian Ding: that that's fine.
 David O Neill: Okay. So, so we keep going. Okay. So, what's what's actually in a build? So when your repository gets registered here, when you go back to the repository, you will see a Conflux has opened up a pull request against your repository. So let's go find uh automation analytic. You know, I need to close some of these things here and close some of these nonsense.
- 
- 
+
+
 00:52:43
- 
+
 David O Neill: Try not to close the meeting as we tend to do. We'll leave that open. Leave that open. Keep that. Kill some leaves. Keep that. And we already have open. Okay. So if we look in our repository here and look at the merge requests, we look at what was merged. Uh how far are we going to have to go back here? Uh probably a very long way. Uh can we show more on the page here, guys? Uh this is Is there a faster way to go back through this? Where is there a page number? There's a page number here. Let's go to I don't know page number. Oh, is this first page? Uh 18200. I don't know how far back we're going to have to go through. Tact. This could be very difficult to find this pure.
- 
- 
+
+
 00:54:01
- 
+
 David O Neill: Um, if I knew the name of it, it would be helpful. Uh, let me see if I can ask AI for this. This is might be a good use of AI here. It's it's beneficial for you to see this part. So, I'm going to spend a minute looking for it here. See if I can find it. We'll we'll ask AI to find it because I don't I don't know the name of it. Uh in this recall can you find the PR frame conflex that registers in the system. So anyway the the the logic here is when the code component in Conflux gets registered here it will open up a pull a pull request to the source repository. So in your case you've created uh some repositories there. I've seen I see you created some repositories. There's one here for uh Chan and another one. Is there a one for Samsung? I don't know.
- 
- 
+
+
 00:55:20
- 
+
 David O Neill: Just for Chan so far. Okay. So, when Chan, if I'm saying that correctly, apologies for that. You will see a merge request will appear here in your merge requests. Okay. And it will look like here we are. This one here. Uh is there a merge request ID? No, October 9th. Uh, I'll pull it up in the in the UI. It'll be easier for us to look at. Uh, can we give me the full G? Okay. Uh the merge commit. So let's go with the merge commit here a second or the Yeah, merge commit. So let's see if we can find this. Okay. So here's the merge commit and in the merge commit there are two files. Sorry. In the pull request, there are two files. There's one for uh a pull request pipeline.
- 
- 
+
+
 00:56:50
- 
+
 David O Neill: See, there's a kind definition here. Let me make this bigger for you. Uh the kind here is a pipeline run. This is a custom resource definition provided by uh Conflux. And this specific one here is for a pull request. So there's a pull request file and then down the end there is another one and it's this file here we are there's another one for a push request or a merge connect and this defines two pipeline runs these this type of pipeline run okay and you could when you merge that it will create a folder in here called tecton and there's two files in there, pull request and push request. And so if you go back in here to activity um under uh latest commits, when someone creates a commit or a pull request, a job will appear here for that uh pull request. And then when as soon as that job appears, pipeline run will kick off for it. Uh the first thing that will run is the pull request pipeline.
- 
- 
+
+
 00:58:11
- 
+
 David O Neill: The pull request pipeline as you can probably imagine will uh build the container image and push it to a a key repository or a a container image repository using that contain that docker file that's used. And when that gets pushed to the repository and the build is complete then uh the integration test scenarios will run these the these ones here these in integration test scenarios and these are like you know like like what what you would imagine they're not function they're not um uh unit tests they're functional tests so these typically spin up a Kubernetes deployment and they run tests against the deployment. Now, we're not going to look at these today because I have to explain additional technologies to you. Um, there's a couple of operators that I need to talk about. Um, but it's outside the scope of this today. We're just going to focus on build today. So, if you go back to activity here, we look at the pipeline runs. Um when the poll request runs you'll see that there is a pipeline.
- 
- 
+
+
 00:59:38
- 
+
 David O Neill: So init clone the repository prefetch dependencies build the image and this is the the docker file um some additional post build information building indexes apply tags which you're probably familiar with from you know uh docker apply tag or podman apply tag whatever some snick checks and then that generally results in a image being pushed to a repository. And we can look through the logs of these steps here. Uh let's look at the build images one. It's probably the main one. Uh so actually let's look at the clone repository. So you can see here it clones the repository. Where is it? Uh there's the repository and it check it checks out the commit ID of the pull request I believe because this is a pull request. Uh it has some information about the destination key repository already. uh and in fact it pushes some immediate information it seems to the uh the key repository as part of the setup of the pipeline.
- 
- 
+
+
 01:01:09
- 
+
 David O Neill: Then it like I said it goes to building the image and it'll it'll go into that directory somewhere here. Where is it? This is some some setup scripts which are outside of the scope of today's um conversation today, but you can learn more about them by looking at the pull request steps. We might take a look at that here in a moment. Um where is it? Hang on. But down in here, you will find we'll start see start to see things about Docker files and building the image. this doesn't fail. So this is defined for us upstream. So we don't manage this. This is largely defined for us. We have some some ability to change it and I'll explain that here in a moment. Let's go down. This is a very long file guys. Sorry. Um so here are the build steps. Where is it?
- 
- 
+
+
 01:02:20
- 
+
 David O Neill: I got the length of this thing. Um I think it starts here. Okay. So here is the was it builder? Is that the tool that's being used? Yeah. Builder build followed by some switches or arguments to the build tool. And then it starts reading the docker file. Docker file is what's expected I believe. I think that's configurable. You can call it something else, but our one is called Docker file. And basically, it's going to start building that Docker image or container image like you're familiar with. And then at the very end of the process, we can see that it applies tags to the image as well as pushing it up to the key repository. So that's the build process in a nutshell. Let's take a look at the build's steps maybe if you want some additional knowledge. Um is this the correct file? Yeah.
- 
- 
+
+
 01:03:26
- 
+
 David O Neill: So there are some annotations around um pull the pull request thing. Some of it is predefined like our repository there and some of it is dynamic referencing annotations which tells the conflict operators information about you know the builds and what it needs to do. There's some labels around our existing application and component. Uh and by the way when when we receive this poll request day one most of this is is already there right you you won't need to change anything in here really what you can change is you can remove some of the jobs in here so like in it clone repository prefetch dependencies um ply tags Uh and these things these are these are the most simplest jobs in this pipeline. There was some additional ones in there but they were not valid for our project and our build steps. So I removed those steps and what we have is the steps which were required for our building process the ma the basic building processes. Okay. Uh the merge request pipeline is a little bit different.
- 
- 
+
+
 01:04:57
- 
+
 David O Neill: We have additional requirements for the merge request pipeline. So you can see here's a pull request pipeline and the here's the merge request pipeline or the push request pipeline and you can see it's a there's more in it, right? There's there's a lot more in it. And the merge request pipeline is largely dictated to us or stipulated or enforced upon us by the organization by the Conflux team or these other teams because you'll see here that we have the basic things again. We have clone repository building the image and all this stuff. But now the merge request pipeline has all of these things. We've got clam AV scanners. We got clear scans. Looks like we have some work there to do. So that might be a task for you and for for for the two of you to pick up. And we have some additional tasks. If these tasks are not here, uh we will not be allowed to do a release.
- 
- 
+
+
 01:06:05
- 
+
 David O Neill: The release will be blocked. And so if the release is blocked, managers are going to start getting unhappy. So, and how this is validated is if we look at a a release, let's see if we can find a release here. If we click into a release, we can see there's a release pipeline. And it's quite technical. It's not that bad, but it has. So to be clear, this release pipeline, we do not manage this. This is enforced upon us by upstream. And upstream, they have all of these these jobs. But this verify conformer one here, this verify conformer, this is the one that enforces the or checks for the constraints in our push
 
 ... (truncated, 96991 total chars)

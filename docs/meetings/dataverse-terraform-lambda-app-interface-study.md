@@ -151,12 +151,12 @@ So: **no secrets to the Lambdas** — they use IAM only; destination bucket name
 ## 4. References
 
 - **dataverse-terraform-lambda**: `README.md`, `lambda_function.py`, `modules/lambda-s3-sync/main.tf`, `stage/main.tf`, `prod/main.tf`, `stage/providers.tf`, `prod/providers.tf`
-- **app-interface**:  
-  - `data/aws/insights-stage/repos/tower-analytics-dataverse-lambda.yml`  
-  - `data/aws/insights-prod/repos/tower-analytics-dataverse-lambda.yml`  
-  - `data/aws/insights-stage/account.yml`, `state.yml`  
-  - `data/aws/insights-prod/account.yml`, `state.yml`  
-  - `data/services/insights/tower-analytics/app.yml`  
+- **app-interface**:
+  - `data/aws/insights-stage/repos/tower-analytics-dataverse-lambda.yml`
+  - `data/aws/insights-prod/repos/tower-analytics-dataverse-lambda.yml`
+  - `data/aws/insights-stage/account.yml`, `state.yml`
+  - `data/aws/insights-prod/account.yml`, `state.yml`
+  - `data/services/insights/tower-analytics/app.yml`
   - `data/services/app-interface/terraform-repo/` (terraform-repo integration)
 - **Tower Analytics snowpipe buckets**: e.g. `stage-tower-analytics-stage.yml` / `tower-analytics-prod.yml` externalResources for `tower-analytics-snowpipe` (source buckets).
 - **Jira**: AAP-66507 / Epic AAP-53376 (from dataverse-terraform-lambda README).

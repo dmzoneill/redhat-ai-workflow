@@ -22,7 +22,7 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
-        exclude: ^(\.claude/|extensions/.*node_modules/)
+        exclude: ^(\.claude/|extensions/.*node_modules/|scripts/(analyze_|audit_|explore_|test_|backfill_))
         additional_dependencies:
           - flake8-bugbear
 

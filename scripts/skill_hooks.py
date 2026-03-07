@@ -325,9 +325,7 @@ def emit_event_sync(event_type: str, context: dict):
         loop = None
 
     if loop and loop.is_running():
-        future = asyncio.run_coroutine_threadsafe(
-            emit_event(event_type, context), loop
-        )
+        future = asyncio.run_coroutine_threadsafe(emit_event(event_type, context), loop)
         try:
             future.result(timeout=10)
         except Exception:

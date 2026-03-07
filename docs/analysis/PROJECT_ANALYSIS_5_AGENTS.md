@@ -1,7 +1,7 @@
 # Red Hat AI Workflow — 5-Agent Project Analysis
 
-**Date:** 2026-03-06  
-**Method:** Five parallel analysis agents, each with a distinct perspective (Architecture, Code Quality, Security & Operations, Skills & Workflows, Developer Experience).  
+**Date:** 2026-03-06
+**Method:** Five parallel analysis agents, each with a distinct perspective (Architecture, Code Quality, Security & Operations, Skills & Workflows, Developer Experience).
 **Scope:** Full project at `/home/daoneill/src/redhat-ai-workflow`.
 
 ---
@@ -30,8 +30,8 @@ Single MCP server exposing tools and skills; clients (Cursor, Claude Code) conne
 | **Daemons** (`services/*`) | Slack, session, cron, meet, etc.; D-Bus IPC |
 
 ### Data Flow
-1. **Startup:** `main()` → load config → load initial persona → run server (stdio, optional WebSocket).  
-2. **Persona switch:** `persona_load("devops")` → unload/load modules → emit `tools/list_changed`.  
+1. **Startup:** `main()` → load config → load initial persona → run server (stdio, optional WebSocket).
+2. **Persona switch:** `persona_load("devops")` → unload/load modules → emit `tools/list_changed`.
 3. **Skill run:** `skill_run(name, inputs)` → load YAML → run steps (tool/compute/then) → template args → handle errors → optional session logging.
 
 ### Strengths

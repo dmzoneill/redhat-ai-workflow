@@ -711,11 +711,17 @@ class TestSessionLogHelpers:
         assert out["session_order"] == ["sid-1"]
 
 
-class TestSessionLogHelpers:
-    """Tests for get_session_log_entries and by-session structure."""
+class TestSessionLogHelpersAppend:
+    """Tests for session log append and get_session_log_entries (legacy + new format)."""
 
     def test_get_session_log_entries_legacy(self):
-        data = {"date": "2026-03-06", "entries": [{"time": "10:00", "action": "A"}, {"time": "11:00", "action": "B"}]}
+        data = {
+            "date": "2026-03-06",
+            "entries": [
+                {"time": "10:00", "action": "A"},
+                {"time": "11:00", "action": "B"},
+            ],
+        }
         assert memory_tools.get_session_log_entries(data) == [
             {"time": "10:00", "action": "A"},
             {"time": "11:00", "action": "B"},
@@ -736,7 +742,11 @@ class TestSessionLogHelpers:
 
     def test_append_creates_session_block_with_session_id(self, temp_memory_dir):
         memory_tools.append_session_entry(
-            {"action": "Session started", "session_id": "test-uuid-123", "details": "Persona: developer, Project: foo"}
+            {
+                "action": "Session started",
+                "session_id": "test-uuid-123",
+                "details": "Persona: developer, Project: foo",
+            }
         )
         today = datetime.now().strftime("%Y-%m-%d")
         session_file = temp_memory_dir / "sessions" / f"{today}.yaml"

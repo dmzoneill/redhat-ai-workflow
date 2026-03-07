@@ -782,7 +782,7 @@ def get_session_log_entries(data: dict) -> list[dict]:
         # New format: collect from _global and every session, sort by time
         sessions = data["sessions"]
         combined: list[tuple[str, dict]] = []
-        for sid, block in sessions.items():
+        for _sid, block in sessions.items():
             if not isinstance(block, dict):
                 continue
             ent_list = block.get("entries", [])
@@ -807,7 +807,9 @@ def get_session_log_by_chat(data: dict) -> dict[str, Any]:
     if "sessions" not in data:
         # Legacy: treat all as _global, chronological is entries
         entries = data.get("entries", [])
-        by_session: dict[str, Any] = {SESSION_LOG_GLOBAL_KEY: {"meta": {}, "entries": entries}}
+        by_session: dict[str, Any] = {
+            SESSION_LOG_GLOBAL_KEY: {"meta": {}, "entries": entries}
+        }
         return {
             "chronological": entries,
             "by_session": by_session,
@@ -860,13 +862,19 @@ def _migrate_legacy_to_sessions(data: dict, today: str) -> None:
         if sid == SESSION_LOG_GLOBAL_KEY:
             continue
         for e in block["entries"]:
-            if e.get("type") == "session" and "Session started" in str(e.get("action", "")):
+            if e.get("type") == "session" and "Session started" in str(
+                e.get("action", "")
+            ):
                 block["started_at"] = e.get("time", "")
-                details = (e.get("details") or "")
+                details = e.get("details") or ""
                 if "Persona:" in details:
-                    block["persona"] = details.split("Persona:")[1].split(",")[0].strip()
+                    block["persona"] = (
+                        details.split("Persona:")[1].split(",")[0].strip()
+                    )
                 if "Project:" in details:
-                    block["project"] = details.split("Project:")[1].split(",")[0].strip()
+                    block["project"] = (
+                        details.split("Project:")[1].split(",")[0].strip()
+                    )
                 if "Name:" in details:
                     block["name"] = details.split("Name:")[1].split(",")[0].strip()
                 break
@@ -936,14 +944,22 @@ def append_session_entry(entry: dict) -> None:
                         session_order.append(sid)
                     if sid != SESSION_LOG_GLOBAL_KEY:
                         sessions[sid]["started_at"] = entry.get("time", "")
-                        if entry.get("type") == "session" and "Session started" in str(entry.get("action", "")):
-                            details = (entry.get("details") or "")
+                        if entry.get("type") == "session" and "Session started" in str(
+                            entry.get("action", "")
+                        ):
+                            details = entry.get("details") or ""
                             if "Persona:" in details:
-                                sessions[sid]["persona"] = details.split("Persona:")[1].split(",")[0].strip()
+                                sessions[sid]["persona"] = (
+                                    details.split("Persona:")[1].split(",")[0].strip()
+                                )
                             if "Project:" in details:
-                                sessions[sid]["project"] = details.split("Project:")[1].split(",")[0].strip()
+                                sessions[sid]["project"] = (
+                                    details.split("Project:")[1].split(",")[0].strip()
+                                )
                             if "Name:" in details:
-                                sessions[sid]["name"] = details.split("Name:")[1].split(",")[0].strip()
+                                sessions[sid]["name"] = (
+                                    details.split("Name:")[1].split(",")[0].strip()
+                                )
 
                 sessions[sid]["entries"].append(entry)
 
@@ -1452,11 +1468,25 @@ def register_memory_tools(server: "FastMCP") -> int:
         try:
             rel = path.relative_to(root)
         except ValueError:
-            return [TextContent(type="text", text=f"❌ Path must be under project root: {relative_path}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Path must be under project root: {relative_path}",
+                )
+            ]
         if not (str(rel).startswith("docs") or str(rel).startswith("memory")):
-            return [TextContent(type="text", text=f"❌ Path must be under docs/ or memory/: {relative_path}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Path must be under docs/ or memory/: {relative_path}",
+                )
+            ]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
-        return [TextContent(type="text", text=f"✅ Wrote {relative_path} ({len(content)} chars)")]
+        return [
+            TextContent(
+                type="text", text=f"✅ Wrote {relative_path} ({len(content)} chars)"
+            )
+        ]
 
     return registry.count
