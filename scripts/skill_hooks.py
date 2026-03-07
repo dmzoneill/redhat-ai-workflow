@@ -316,9 +316,24 @@ def emit_event_sync(event_type: str, context: dict):
     """
     Synchronous wrapper for emit_event.
 
-    For use in YAML skill compute blocks.
+    For use in YAML skill compute blocks (which run inside
+    the async skill engine's event loop).
     """
-    asyncio.run(emit_event(event_type, context))
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        future = asyncio.run_coroutine_threadsafe(
+            emit_event(event_type, context), loop
+        )
+        try:
+            future.result(timeout=10)
+        except Exception:
+            logger.warning("emit_event_sync timed out or failed", exc_info=True)
+    else:
+        asyncio.run(emit_event(event_type, context))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,27 @@
+h2. Overview
+
+This story tracks the System Design Plan (SDP) work for *ANSTRAT-1848: SaaS on AWS Non-Production Network Connectivity to Red Hat VPN* (Stage Connectivity Initiative). It is the single Jira story for the ANSTRAT-1848 SDP. The SDP document lives in the ansible/handbook repo and is maintained via [Handbook PR #1223|https://github.com/ansible/handbook/pull/1223].
+
+h2. Scope
+
+* *Repo and path:* [ansible/handbook|https://github.com/ansible/handbook], file {{The Ansible Engineering Handbook/System Design Plans/ANSTRAT-1848-SaaS-Non-Production-Network-Connectivity.md}}
+* *Handbook PR:* [PR #1223|https://github.com/ansible/handbook/pull/1223]
+* *Refinement epic:* [AAP-66639|https://issues.redhat.com/browse/AAP-66639] (ANSTRAT-1848 Refinement actions)
+* *Feature:* [ANSTRAT-1848|https://issues.redhat.com/browse/ANSTRAT-1848]
+
+h2. What the SDP Covers
+
+* *Purpose:* Enable secure network connectivity between SaaS non-production AWS environments (25–28 accounts, dev/integration/pre-prod) and Red Hat's console.redhat.com staging infrastructure so SaaS testing can reach {{cloud.stage.redhat.com/api/ingress/v1/upload}}. Today Akamai pre-production lockdown blocks non-whitelisted traffic; SaaS AWS CIDRs (10.0.0.0/16) overlap with Red Hat internal (10.0.0.0/8), so direct VPN is not viable.
+* *Chosen architecture (Option C):* PrivateLink + NAT Gateway + Akamai whitelisting. Spoke accounts connect to hub via PrivateLink with private DNS (no Route 53 split DNS). Hub VPC: NLB → reverse proxy → NAT Gateway with *static EIPs* → Akamai. No Transit Gateway, no VPN, no squid. 3scale is public-facing via Akamai; only egress IP whitelisting required.
+* *Traffic flow:* Spoke app → PrivateLink (private DNS) → NLB → Reverse Proxy → NAT GW (EIP) → Akamai → 3scale → insights-ingress-go. Target endpoint: {{https://cloud.stage.redhat.com/api/ingress/v1/upload}}.
+* *Static egress IPs (2026-03-03):* 54.146.227.199, 52.0.219.139, 35.174.84.177. These must be whitelisted in Akamai preprod lockdown for cloud.stage.redhat.com.
+* *Blockers:* Akamai preprod whitelist — InfoSec exception (INC4595478) and/or MP+ public egress IP spreadsheet; CDN request [DAT-10614|https://issues.redhat.com/browse/DAT-10614]. Hub implementation (Option C) in progress; static IPs provided by Razique (2026-03-03).
+* *Phase 1 verification:* Establish connectivity and confirm staging *receives* data (e.g. billing/analytics payloads). Validation via Prometheus/Grafana and non-firing alerts in scope. Phase 2 (end-to-end data validation/accuracy) is out of scope for this initiative.
+* *Security:* Three public egress IPs from hub NAT Gateway; consult Thomas Eagle (ProdSec) re: external IPs and network changes. Same restrictions as normal inbound interface; pre-prod to pre-prod acceptable per ESS.
+* *Docs:* Internal hub–spoke/PrivateLink docs owned by SAS team; handbook SDP should reflect SAS ownership where relevant.
+
+h2. References
+
+* [Refinement plan (AAP-66639)|https://gitlab.cee.redhat.com/automation-analytics/redhat-ai-workflow/-/blob/main/docs/meetings/ANSTRAT-1848-refinement-plan.md]
+* [Refinement meeting notes (2026-03-05)|https://docs.google.com/document/d/1ILmwwMW2tiYcHGHgtLC6en_Iep_Fpev_Q54gzNwqg4Y/edit]
+* [SDP updates / alignment notes|https://gitlab.cee.redhat.com/automation-analytics/redhat-ai-workflow/-/blob/main/docs/meetings/ANSTRAT-1848-SDP-updates.md]

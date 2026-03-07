@@ -1,7 +1,7 @@
 metadata:
   project: redhat-ai-workflow
   persona: developer
-  last_updated: '2026-02-09T23:30:16.345893'
+  last_updated: '2026-03-02T06:05:13.757155'
   last_scanned: '2026-02-07T20:58:17.876220'
   confidence: 1.0
   auto_generated: true
@@ -248,3 +248,25 @@ learned_from_tasks:
   task: AAP-999
   learning: Started work on AAP-999
   skill: start_work
+- date: '2026-03-02'
+  task: cron-reindex_all_vectors-20260302-000000
+  learning: 'Cron job vector_reindex_3h ran successfully on 2026-03-02 00:00. All
+    11 projects reindexed (incremental). Only redhat-ai-workflow had changes: 83 files
+    indexed, 2156 chunks created, IVF_PQ index rebuilt. Other 10 projects had no changes.
+    All 11 file watchers restarted with 5s debounce.'
+- date: '2026-03-02'
+  task: cron-reindex_all_vectors-20260302-030000
+  learning: "Cron vector reindex (2026-03-02 03:00): All 11 projects indexed successfully.\
+    \ Only redhat-ai-workflow had changes (2 files, 6 chunks). 106,365 files scanned\
+    \ total. Health status went from UNHEALTHY (all stale) to HEALTHY. 11 file watchers\
+    \ restarted. 4 projects (automation-analytics-backend, app-interface, konflux-release-data,\
+    \ dataproduct-config) still using FLAT index instead of IVF_PQ \u2014 these need\
+    \ a force reindex to build ANN indexes for faster search."
+- date: '2026-03-02'
+  task: cron-bootstrap_all_knowledge-20260302-060000
+  learning: "Knowledge bootstrap cron job (2026-03-02 06:00): Successfully generated\
+    \ 80 new knowledge files for 4 missing projects (automation-analytics-jupyter-notebooks,\
+    \ aws-ingestion, dataproduct-config, saas-stage-routing) across all 20 personas.\
+    \ Cleaned up stray researcher/proj.yaml artifact. Total knowledge inventory: 220\
+    \ files (11 projects \xD7 20 personas). The 'core' persona does not generate project-specific\
+    \ knowledge. All scans completed at 30% baseline confidence."

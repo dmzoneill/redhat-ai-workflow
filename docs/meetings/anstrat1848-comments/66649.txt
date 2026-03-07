@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Closing.
+
+* AC (1) Tracking epic/issues if engagement needed — N/A: No Release Engineering engagement is needed for this initiative.
+* AC (2) Closing comment explaining WHY — Satisfied: No engagement needed because this initiative does not publish content on access.redhat.com/downloads and does not create entitlement for customers other than "all current & future AAP customers." No RHDH/Portal or other non-AAP release content; not relevant to this initiative.

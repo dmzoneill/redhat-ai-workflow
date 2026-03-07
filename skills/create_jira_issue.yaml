@@ -149,6 +149,17 @@ inputs:
     default: ""
     description: "Definition of done (for Story type)"
 
+  - name: supporting_documentation
+    type: string
+    required: false
+    default: ""
+    description: "Supporting documentation (for AAP Story type; e.g. links or N/A)"
+
+  - name: epic_key
+    type: string
+    required: false
+    description: "Epic issue key to link this Story to (e.g. AAP-10000); for issue_type Story"
+
   - name: components
     type: string
     required: false
@@ -351,6 +362,7 @@ steps:
       user_story: "{{ inputs.user_story or '' }}"
       acceptance_criteria: "{{ inputs.acceptance_criteria or '' }}"
       definition_of_done: "{{ inputs.definition_of_done or '' }}"
+      supporting_documentation: "{{ inputs.supporting_documentation or '' }}"
       components: "{{ inputs.components or '' }}"
     output: create_result
     on_error: continue
@@ -404,16 +416,37 @@ steps:
     output: link_status
     on_error: continue
 
+  - name: add_link_fallback_comment
+    description: "When add-link fails, add a comment with related issue URL so relationship is visible on the issue"
+    condition: "create_status.issue_key and inputs.link_to and link_status and not link_status.success"
+    tool: jira_add_comment
+    args:
+      issue_key: "{{ create_status.issue_key }}"
+      comment: "Related: [{{ inputs.link_to }}](https://issues.redhat.com/browse/{{ inputs.link_to }}) ({{ inputs.link_type or 'relates to' }}). Link step did not create in-Jira link; see this comment for reference."
+    output: link_fallback_comment_result
+    on_error: continue
+
+  # ==================== LINK STORY TO EPIC ====================
+
+  - name: set_epic
+    description: "Link Story to Epic when epic_key provided"
+    condition: "create_status.issue_key and inputs.epic_key and (inputs.issue_type or '').lower() == 'story'"
+    tool: jira_set_epic
+    args:
+      issue_key: "{{ create_status.issue_key }}"
+      epic_key: "{{ inputs.epic_key }}"
+    output: set_epic_result
+    on_error: continue
+
   # ==================== UPDATE ISSUE (add more fields) ====================
 
   - name: update_issue
-    description: "Update issue with additional fields"
+    description: "Update issue labels (when jira_update_issue available; create already sets labels)"
     condition: "create_status.issue_key and inputs.labels"
     tool: jira_update_issue
     args:
       issue_key: "{{ create_status.issue_key }}"
-      fields: "labels"
-      values: "{{ inputs.labels }}"
+      labels: "{{ inputs.labels }}"
     output: update_result
     on_error: continue
 
@@ -425,7 +458,7 @@ steps:
     tool: jira_transition
     args:
       issue_key: "{{ create_status.issue_key }}"
-      transition: "Start Progress"
+      status: "In Progress"
     output: transition_result
     on_error: auto_heal  # Jira API - may need auth refresh
 
@@ -646,7 +679,11 @@ outputs:
       **Linked to:** [{{ inputs.link_to }}](https://issues.redhat.com/browse/{{ inputs.link_to }}) ({{ inputs.link_type }})
       {% endif %}
       {% elif inputs.link_to and not link_status.success %}
-      ⚠️ Link to {{ inputs.link_to }} failed: {{ link_status.message }}
+      ⚠️ Link to {{ inputs.link_to }} failed: {{ link_status.message }}. A comment was added to the issue with the related link for reference.
+      {% endif %}
+
+      {% if inputs.epic_key %}
+      **Epic:** [{{ inputs.epic_key }}](https://issues.redhat.com/browse/{{ inputs.epic_key }})
       {% endif %}
 
       {% if inputs.start_progress %}

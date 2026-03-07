@@ -111,6 +111,20 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._background_sync_offset: int = 0
         self._last_background_sync: float = 0
 
+        # Per-session lastUpdatedAt cache for change detection.
+        # Maps session_id -> lastUpdatedAt (ms timestamp from Cursor DB).
+        # Used to skip content scanning for sessions that haven't changed.
+        self._session_last_updated: dict[str, int] = {}
+
+        # Global Cursor DB mtime for content scan gating.
+        # If the global DB hasn't changed, no chat content has changed.
+        self._global_db_mtime: float = 0
+
+        # Records the lastUpdatedAt value at the time each session was last
+        # content-scanned.  Compared against _session_last_updated to detect
+        # whether a re-scan is actually necessary.
+        self._last_scanned_timestamps: dict[str, int] = {}
+
         # Lock to serialize sync operations across loops (prevents
         # concurrent WorkspaceRegistry access from fast/recent/background loops)
         self._sync_lock = asyncio.Lock()
@@ -521,6 +535,7 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         This only reads the composer metadata, not chat content.
         Uses cached workspace-to-storage mapping to avoid iterating all directories.
+        Also extracts per-session lastUpdatedAt timestamps for change detection.
 
         Returns:
             Tuple of (Dict mapping workspace_uri to active session ID, total session count)
@@ -574,13 +589,18 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     else:
                         active_sessions[folder_uri] = None
 
-                    # Count non-archived, non-draft sessions
+                    # Count non-archived, non-draft sessions and cache lastUpdatedAt
                     all_composers = composer_data.get("allComposers", [])
-                    active_count = sum(
-                        1
-                        for c in all_composers
-                        if not c.get("isArchived") and not c.get("isDraft")
-                    )
+                    active_count = 0
+                    for c in all_composers:
+                        if c.get("isArchived") or c.get("isDraft"):
+                            continue
+                        active_count += 1
+                        cid = c.get("composerId")
+                        last_updated = c.get("lastUpdatedAt", 0)
+                        if cid and last_updated:
+                            self._session_last_updated[cid] = last_updated
+
                     total_session_count += active_count
 
                     # Cache the session count for this workspace
@@ -614,6 +634,64 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         # Track last active
         self._last_active_session_id = active_session_id
+
+    def _check_global_db_changed(self) -> bool:
+        """Check if Cursor's global storage DB has changed since last scan.
+
+        The global DB (~/.config/Cursor/User/globalStorage/state.vscdb) holds
+        all chat content. If its mtime hasn't changed, no content scanning
+        is needed for any session.
+
+        Returns:
+            True if the global DB has been modified since last check.
+        """
+        global_db = (
+            Path.home()
+            / ".config"
+            / "Cursor"
+            / "User"
+            / "globalStorage"
+            / "state.vscdb"
+        )
+        try:
+            current_mtime = global_db.stat().st_mtime
+        except OSError:
+            return True  # Can't stat -> assume changed to be safe
+
+        if current_mtime == self._global_db_mtime:
+            return False
+
+        self._global_db_mtime = current_mtime
+        return True
+
+    def _get_changed_session_ids(
+        self, candidate_ids: list[str], last_scanned: dict[str, int]
+    ) -> tuple[list[str], list[str]]:
+        """Split candidate session IDs into changed and unchanged sets.
+
+        Compares each session's current lastUpdatedAt (from _session_last_updated,
+        populated during fast sync) against the timestamp recorded at last scan.
+
+        Args:
+            candidate_ids: Session IDs to evaluate.
+            last_scanned: Dict of session_id -> lastUpdatedAt at time of last scan.
+
+        Returns:
+            Tuple of (changed_ids, unchanged_ids).
+        """
+        changed: list[str] = []
+        unchanged: list[str] = []
+
+        for sid in candidate_ids:
+            current_ts = self._session_last_updated.get(sid, 0)
+            previous_ts = last_scanned.get(sid, 0)
+
+            if current_ts == 0 or current_ts != previous_ts:
+                changed.append(sid)
+            else:
+                unchanged.append(sid)
+
+        return changed, unchanged
 
     async def _do_fast_sync(self) -> bool:
         """Fast sync: Only detect active session changes (1 second interval).
@@ -662,15 +740,43 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return False
 
     def _recent_sync_work(self) -> dict:
-        """Blocking work for recent sync (runs in thread executor)."""
+        """Blocking work for recent sync (runs in thread executor).
+
+        Uses two-layer change detection to skip expensive content scanning:
+        1. Global DB mtime gate -- if the global DB hasn't changed, skip all scans.
+        2. Per-session lastUpdatedAt -- only scan sessions whose timestamp changed.
+        """
         from server.workspace_state import WorkspaceRegistry
 
         if WorkspaceRegistry.count() == 0:
             WorkspaceRegistry.load_from_disk()
 
-        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
-            session_ids=self._recent_active_sessions
+        all_ids = list(self._recent_active_sessions)
+        global_db_changed = self._check_global_db_changed()
+
+        if global_db_changed:
+            changed_ids, unchanged_ids = self._get_changed_session_ids(
+                all_ids, self._last_scanned_timestamps
+            )
+        else:
+            changed_ids, unchanged_ids = [], list(all_ids)
+
+        skip_scan_ids = set(unchanged_ids) if unchanged_ids else set()
+
+        logger.debug(
+            f"Recent sync: scanning {len(changed_ids)}, "
+            f"skipping {len(skip_scan_ids)} unchanged sessions"
         )
+
+        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
+            session_ids=all_ids, skip_scan_ids=skip_scan_ids
+        )
+
+        # Record scanned timestamps so next cycle can detect changes
+        for sid in changed_ids:
+            ts = self._session_last_updated.get(sid, 0)
+            if ts:
+                self._last_scanned_timestamps[sid] = ts
 
         all_states = WorkspaceRegistry.get_all_as_dict()
         all_sessions = WorkspaceRegistry.get_all_sessions()
@@ -730,7 +836,11 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             return {"error": str(e)}
 
     def _background_sync_work(self) -> dict:
-        """Blocking work for background sync (runs in thread executor)."""
+        """Blocking work for background sync (runs in thread executor).
+
+        Uses the same two-layer change detection as recent sync to avoid
+        re-scanning sessions whose content hasn't changed.
+        """
         from server.workspace_state import WorkspaceRegistry
 
         if WorkspaceRegistry.count() == 0:
@@ -761,11 +871,30 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if not batch_ids:
             return {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
+        # Change detection: skip content scanning for unchanged sessions
+        global_db_changed = self._check_global_db_changed()
+        if global_db_changed:
+            changed_ids, unchanged_ids = self._get_changed_session_ids(
+                batch_ids, self._last_scanned_timestamps
+            )
+        else:
+            changed_ids, unchanged_ids = [], list(batch_ids)
+
+        skip_scan_ids = set(unchanged_ids) if unchanged_ids else set()
+
         logger.debug(
-            f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start})"
+            f"Background sync batch: {len(batch_ids)} sessions (offset {batch_start}), "
+            f"scanning {len(changed_ids)}, skipping {len(skip_scan_ids)}"
         )
 
-        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=batch_ids)
+        sync_result = WorkspaceRegistry.sync_sessions_with_cursor(
+            session_ids=batch_ids, skip_scan_ids=skip_scan_ids
+        )
+
+        for sid in changed_ids:
+            ts = self._session_last_updated.get(sid, 0)
+            if ts:
+                self._last_scanned_timestamps[sid] = ts
 
         all_states = WorkspaceRegistry.get_all_as_dict()
         all_sessions = WorkspaceRegistry.get_all_sessions()
@@ -827,6 +956,11 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 workspace_uri = f"file://{workspace_path}"
             WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
 
+        # Clean up stale sessions before syncing (removes sessions older than MAX_SESSION_AGE_DAYS)
+        cleaned = WorkspaceRegistry.cleanup_stale()
+        if cleaned > 0:
+            logger.info(f"Initial cleanup removed {cleaned} stale workspace(s)")
+
         sync_result = WorkspaceRegistry.sync_all_with_cursor(skip_content_scan=True)
 
         all_states = WorkspaceRegistry.get_all_as_dict()
@@ -879,6 +1013,9 @@ class SessionDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if not workspace_uri.startswith("file://"):
                 workspace_uri = f"file://{workspace_path}"
             WorkspaceRegistry.get_or_create(workspace_uri, ensure_session=False)
+
+        # Clean up stale sessions before syncing
+        WorkspaceRegistry.cleanup_stale()
 
         sync_result = WorkspaceRegistry.sync_all_with_cursor()
 

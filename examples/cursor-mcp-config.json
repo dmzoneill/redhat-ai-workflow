@@ -17,7 +17,7 @@
         "/home/USER/src/redhat-ai-workflow/scripts/mcp_proxy.py",
         "--cwd", "/home/USER/src/redhat-ai-workflow",
         "--",
-        "uv", "run", "python", "-m", "server"
+        ".venv/bin/python", "-m", "server"
       ]
     },
 
@@ -29,7 +29,7 @@
         "--cwd", "/home/USER/src/redhat-ai-workflow",
         "--debug",
         "--",
-        "uv", "run", "python", "-m", "server"
+        ".venv/bin/python", "-m", "server"
       ],
       "env": {
         "MCP_PROXY_DEBUG": "1"

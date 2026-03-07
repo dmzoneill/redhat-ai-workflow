@@ -17,6 +17,26 @@ active_issues:
   status: blocked - skill executor unavailable
   thread_ts: 1771848571.224559
   timestamp: 2026-02-23
+- created: 2026-03-07
+  key: AAP-67712
+  status: New
+  summary: Create Lambda functions for S3-to-Dataverse Snowpipe copy
+  type: Story
+- created: 2026-03-07
+  key: AAP-67713
+  status: New
+  summary: Create dataverse-terraform-lambda repository and Lambda code
+  type: Story
+- created: 2026-03-07
+  key: AAP-67716
+  status: New
+  summary: Document Konflux pipelines onboarding session for Song Song
+  type: Story
+- created: 2026-03-07
+  key: AAP-67719
+  status: New
+  summary: Obtain read access to Lambda function in S3
+  type: Story
 daily_summaries:
 - commits: 0
   date: '2026-02-09'
@@ -243,22 +263,13 @@ follow_ups:
   task: 'Fix hygiene issues on AAP-66507: epic_link'
 - alert: AutomationAnalyticsAAPBillingSubsWatchProcessingErrors (RESOLVED)
   namespace: tower-analytics-stage-billing
+  priority: low - already resolved
   slack_channel: C01CPSKFG0P
   slack_thread: '1772039703.731829'
   status: blocked - skill executor down, cannot reply to slack
   task: send slack reply when skills return - alert resolved, likely transient issue,
     related to AAP-65191
-  priority: low - already resolved
 - alert: AutomationAnalyticsProcessorAAPEdaStoppedProcessing (NEW)
-  namespace: tower-analytics-stage
-  slack_channel: C01CPSKFG0P
-  slack_thread: '1772122659.477449'
-  status: blocked - all skills down including slack, cannot investigate or reply
-  task: eda processor <1 payload/24hrs - part of pattern with other stage processor
-    alerts
-  priority: medium - stage env, but recurring pattern suggests systemic issue
-  next: when skills return - check pod status/logs, message queue connectivity, verify
-    if related to other stage processor issues (billing processor errors feb 24)
   investigation_draft: '*investigation status* :tools:
 
 
@@ -292,16 +303,22 @@ follow_ups:
 
 
     tagging this fo follow-up when tooling comes back online'
+  namespace: tower-analytics-stage
+  next: when skills return - check pod status/logs, message queue connectivity, verify
+    if related to other stage processor issues (billing processor errors feb 24)
+  priority: medium - stage env, but recurring pattern suggests systemic issue
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1772122659.477449'
+  status: blocked - all skills down including slack, cannot investigate or reply
+  task: eda processor <1 payload/24hrs - part of pattern with other stage processor
+    alerts
 - alert: MessagesRecoveryTarballProcessingFailedError (6th occurrence - NEW)
   namespace: tower-analytics-stage
-  slack_channel: C01CPSKFG0P
-  slack_thread: '1772381512.977259'
-  status: blocked - skill executor completely down, cannot reply to slack
-  priority: high - 6th occurrence in 5 days, needs urgent investigation
-  pattern: recurring tarball processing failures - s3 access/malformed data/storage
-    quota likely
   next: when skills return - send slack reply with investigation status, check kibana
     logs, verify s3 access, check cronjob pod status, look for corrupted tarballs
+  pattern: recurring tarball processing failures - s3 access/malformed data/storage
+    quota likely
+  priority: high - 6th occurrence in 5 days, needs urgent investigation
   reply_text: "*investigation status* \U0001F50D\n\nmessages recovery tarball processing\
     \ alert - this is the 6th time ive seen this alert recently. cant fully investigate\
     \ right now cos skill executor is down\n\n*whats happening*\n- alert: `MessagesRecoveryTarballProcessingFailedError`\n\
@@ -315,9 +332,20 @@ follow_ups:
     \ for corrupted tarballs in s3\n\n*impact*\nhistorical message recovery is blocked\
     \ but real-time processing should be unaffected\n\ntagging for follow-up when\
     \ k8s access comes back"
+  slack_channel: C01CPSKFG0P
+  slack_thread: '1772381512.977259'
+  status: blocked - skill executor completely down, cannot reply to slack
+- due: Monday EOD
+  reason: weekly reporting and stakeholder review
+  requester: zsadeh
+  task: Update status in JIRA for all active initiatives
+- created: '2026-03-03T16:57:45.821796'
+  issue_key: AAP-65425
+  priority: low
+  task: 'Fix hygiene issues on AAP-65425: acceptance_criteria'
 last_beer: '2026-02-09T23:28:48.052195'
 last_coffee: '2026-02-25T14:54:14.861514'
-last_updated: '2026-03-01T16:14:16.748535'
+last_updated: '2026-03-03T16:57:45.834688'
 open_mrs:
 - id: 1516
   status: open

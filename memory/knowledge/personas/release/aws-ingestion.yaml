@@ -1,0 +1,21 @@
+metadata:
+  project: aws-ingestion
+  persona: release
+  last_updated: '2026-03-02T06:03:42.653027'
+  last_scanned: '2026-03-02T06:03:42.652967'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: 'This repo is intended for deployments of AWS resources used as part of
+    dataverse ingestion. Specifically:'
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+gotchas: []
+learned_from_tasks: []

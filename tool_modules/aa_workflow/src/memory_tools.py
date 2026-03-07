@@ -763,8 +763,125 @@ def _extract_issue_keys(*texts: str) -> list[str]:
     return sorted(keys) if keys else []
 
 
+# Key for entries that are not tied to a chat (cron, etc.)
+SESSION_LOG_GLOBAL_KEY = "_global"
+
+
+def get_session_log_entries(data: dict) -> list[dict]:
+    """Return session log entries in chronological order.
+
+    Supports both formats:
+    - Legacy: data["entries"] is a flat list.
+    - New: data["sessions"] has "_global" and per-session_id blocks; merge by time.
+
+    Use this when reading session YAML so all callers get a single chronological list.
+    """
+    if not data:
+        return []
+    if "sessions" in data:
+        # New format: collect from _global and every session, sort by time
+        sessions = data["sessions"]
+        combined: list[tuple[str, dict]] = []
+        for sid, block in sessions.items():
+            if not isinstance(block, dict):
+                continue
+            ent_list = block.get("entries", [])
+            for e in ent_list:
+                t = e.get("time") or ""
+                combined.append((t, e))
+        combined.sort(key=lambda x: x[0])
+        return [e for _, e in combined]
+    return data.get("entries", [])
+
+
+def get_session_log_by_chat(data: dict) -> dict[str, Any]:
+    """Return session log grouped by chat (session_id) plus chronological stream.
+
+    Use when you need separation between chats. Keys:
+    - "chronological": list of entries in time order (same as get_session_log_entries).
+    - "by_session": dict mapping session_id -> { "meta": {...}, "entries": [...] }.
+    - "session_order": list of session_id in order of first appearance.
+    """
+    if not data:
+        return {"chronological": [], "by_session": {}, "session_order": []}
+    if "sessions" not in data:
+        # Legacy: treat all as _global, chronological is entries
+        entries = data.get("entries", [])
+        by_session: dict[str, Any] = {SESSION_LOG_GLOBAL_KEY: {"meta": {}, "entries": entries}}
+        return {
+            "chronological": entries,
+            "by_session": by_session,
+            "session_order": [SESSION_LOG_GLOBAL_KEY],
+        }
+    sessions = data["sessions"]
+    session_order = data.get("session_order", [])
+    by_session = {}
+    combined: list[tuple[str, dict]] = []
+    for sid, block in sessions.items():
+        if not isinstance(block, dict):
+            continue
+        ent_list = block.get("entries", [])
+        by_session[sid] = {
+            "meta": {
+                k: block[k]
+                for k in ("started_at", "persona", "project", "name")
+                if k in block
+            },
+            "entries": ent_list,
+        }
+        for e in ent_list:
+            combined.append((e.get("time") or "", e))
+    combined.sort(key=lambda x: x[0])
+    return {
+        "chronological": [e for _, e in combined],
+        "by_session": by_session,
+        "session_order": session_order or list(by_session),
+    }
+
+
+def _migrate_legacy_to_sessions(data: dict, today: str) -> None:
+    """Convert legacy { entries: [...] } to { sessions: { _global, <session_id>: ... } }."""
+    entries = data.get("entries", [])
+    if not entries or "sessions" in data:
+        return
+    sessions: dict[str, Any] = {}
+    session_order: list[str] = []
+    for e in entries:
+        sid = e.get("session_id") or SESSION_LOG_GLOBAL_KEY
+        if sid not in sessions:
+            if sid != SESSION_LOG_GLOBAL_KEY:
+                session_order.append(sid)
+            sessions[sid] = {"entries": []}
+        sessions[sid]["entries"].append(e)
+    if SESSION_LOG_GLOBAL_KEY not in sessions:
+        sessions[SESSION_LOG_GLOBAL_KEY] = {"entries": []}
+    # Set meta from "Session started" entry in each session block
+    for sid, block in sessions.items():
+        if sid == SESSION_LOG_GLOBAL_KEY:
+            continue
+        for e in block["entries"]:
+            if e.get("type") == "session" and "Session started" in str(e.get("action", "")):
+                block["started_at"] = e.get("time", "")
+                details = (e.get("details") or "")
+                if "Persona:" in details:
+                    block["persona"] = details.split("Persona:")[1].split(",")[0].strip()
+                if "Project:" in details:
+                    block["project"] = details.split("Project:")[1].split(",")[0].strip()
+                if "Name:" in details:
+                    block["name"] = details.split("Name:")[1].split(",")[0].strip()
+                break
+    data["sessions"] = sessions
+    data["session_order"] = session_order
+    if "entries" in data:
+        del data["entries"]
+
+
 def append_session_entry(entry: dict) -> None:
     """Thread/process-safe append to today's session log file.
+
+    Uses a by-session structure: sessions["_global"] for cron/non-chat,
+    sessions["<session_id>"] for each chat. Chronological order is preserved
+    when reading via get_session_log_entries() (merge by time).
 
     Uses fcntl.flock to prevent concurrent corruption when multiple
     sessions (chat windows, cron jobs, skills) write simultaneously.
@@ -782,6 +899,8 @@ def append_session_entry(entry: dict) -> None:
 
     if "time" not in entry:
         entry["time"] = datetime.now().strftime("%H:%M:%S")
+    if "type" not in entry:
+        entry["type"] = "event"
 
     # Auto-extract issue keys from action/details if not provided
     if "issues" not in entry:
@@ -797,12 +916,36 @@ def append_session_entry(entry: dict) -> None:
                     with open(session_file, encoding="utf-8") as f:
                         data = yaml.safe_load(f) or {}
                 else:
-                    data = {"date": today, "entries": []}
+                    data = {"date": today}
 
-                if "entries" not in data:
-                    data["entries"] = []
+                # Migrate legacy flat entries to sessions structure on first write
+                if "entries" in data and "sessions" not in data:
+                    _migrate_legacy_to_sessions(data, today)
 
-                data["entries"].append(entry)
+                if "sessions" not in data:
+                    data["sessions"] = {SESSION_LOG_GLOBAL_KEY: {"entries": []}}
+                    data["session_order"] = []
+
+                sessions = data["sessions"]
+                session_order = data.get("session_order", [])
+                sid = entry.get("session_id") or SESSION_LOG_GLOBAL_KEY
+
+                if sid not in sessions:
+                    sessions[sid] = {"entries": []}
+                    if sid != SESSION_LOG_GLOBAL_KEY:
+                        session_order.append(sid)
+                    if sid != SESSION_LOG_GLOBAL_KEY:
+                        sessions[sid]["started_at"] = entry.get("time", "")
+                        if entry.get("type") == "session" and "Session started" in str(entry.get("action", "")):
+                            details = (entry.get("details") or "")
+                            if "Persona:" in details:
+                                sessions[sid]["persona"] = details.split("Persona:")[1].split(",")[0].strip()
+                            if "Project:" in details:
+                                sessions[sid]["project"] = details.split("Project:")[1].split(",")[0].strip()
+                            if "Name:" in details:
+                                sessions[sid]["name"] = details.split("Name:")[1].split(",")[0].strip()
+
+                sessions[sid]["entries"].append(entry)
 
                 with open(session_file, "w", encoding="utf-8") as f:
                     yaml.dump(data, f, default_flow_style=False)
@@ -1066,7 +1209,7 @@ async def _memory_stats_impl() -> list[TextContent]:
             if today_file.exists():
                 with open(today_file, encoding="utf-8") as f:
                     today_data = yaml.safe_load(f) or {}
-                    today_actions = len(today_data.get("entries", []))
+                    today_actions = len(get_session_log_entries(today_data))
 
             stats["sessions"] = {
                 "total_session_files": len(session_files),
@@ -1283,5 +1426,37 @@ def register_memory_tools(server: "FastMCP") -> int:
             Comprehensive memory health dashboard.
         """
         return await _memory_stats_impl()
+
+    @registry.tool()
+    async def write_workspace_file(
+        ctx: Context, relative_path: str, content: str
+    ) -> list[TextContent]:
+        """
+        Write text content to a file under the workspace (docs/ or memory/ only).
+
+        Use to save fetched content (e.g. meeting notes) for later use.
+
+        Args:
+            relative_path: Path relative to project root (e.g. docs/meetings/notes.txt)
+            content: Full text content to write
+
+        Returns:
+            Confirmation or error.
+        """
+        try:
+            from tool_modules.common import PROJECT_ROOT
+        except ImportError:
+            PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+        path = (PROJECT_ROOT / relative_path).resolve()
+        root = PROJECT_ROOT.resolve()
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            return [TextContent(type="text", text=f"❌ Path must be under project root: {relative_path}")]
+        if not (str(rel).startswith("docs") or str(rel).startswith("memory")):
+            return [TextContent(type="text", text=f"❌ Path must be under docs/ or memory/: {relative_path}")]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return [TextContent(type="text", text=f"✅ Wrote {relative_path} ({len(content)} chars)")]
 
     return registry.count

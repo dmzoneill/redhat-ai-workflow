@@ -176,9 +176,12 @@ Load a persona when the task matches their expertise:
 
 > **Note:** All personas include `jira_basic`. Use `tool_exec()` for `_extra` module tools when needed.
 
+**Persona knowledge:** Project-specific context per persona lives in `memory/knowledge/personas/<persona>/<project>.yaml` (e.g. metadata, architecture, patterns, gotchas, learned_from_tasks). These files are read-only for the LLM; they are populated by scans and skills.
+
 ## Memory Usage
 
 - **Log important actions**: `memory_session_log("action", "details")`
+- **Current work path:** Work state is stored at `state/projects/<project>/current_work.yaml`; you always use the key `state/current_work` (the system resolves it by project). See 25-memory-operations.md for project resolution and state keys.
 - **Track active work**: `memory_append("state/current_work", "active_issues", '{...}')`
 - **Save learned patterns**: `memory_write("learned/patterns", content)` for reusable knowledge
 

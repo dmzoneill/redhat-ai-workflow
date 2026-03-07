@@ -262,7 +262,12 @@ def load_session_log(limit: int = 5) -> list[dict]:
         logger.warning(f"Failed to load session log: {e}")
         return []
 
-    entries = data.get("entries", data.get("actions", []))
+    try:
+        from tool_modules.aa_workflow.src.memory_tools import get_session_log_entries
+
+        entries = get_session_log_entries(data)
+    except ImportError:
+        entries = data.get("entries", data.get("actions", []))
     if not entries:
         return []
 

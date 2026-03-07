@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Closing.
+
+* Performance KPIs/SLOs, observability, scale targets — N/A: Not required for the initial pass. Current focus is testing connectivity in the stage environment. No Perf/Scale consultation needed for this refinement exit.
+* Perf/Scale engagement — N/A: Performance/scale testing may be considered in a later initiative.

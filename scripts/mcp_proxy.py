@@ -22,6 +22,7 @@ Features:
 - Transparent to both Cursor and the real server
 
 Usage in mcp.json (with proxy):
+    Use .venv/bin/python so the server starts immediately (no uv sync at startup):
     {
         "mcpServers": {
             "aa_workflow": {
@@ -30,11 +31,12 @@ Usage in mcp.json (with proxy):
                     "/path/to/scripts/mcp_proxy.py",
                     "--cwd", "/path/to/redhat-ai-workflow",
                     "--",
-                    "uv", "run", "python", "-m", "server"
+                    ".venv/bin/python", "-m", "server"
                 ]
             }
         }
     }
+    Run "uv sync" once to create/populate .venv before first use.
 
 To remove proxy (direct connection):
     {
@@ -838,7 +840,7 @@ def main():
         print("", file=sys.stderr)
         print("Example:", file=sys.stderr)
         print(
-            "  mcp_proxy.py --cwd /path/to/project -- uv run python -m server",
+            "  mcp_proxy.py --cwd /path/to/project -- .venv/bin/python -m server",
             file=sys.stderr,
         )
         print("", file=sys.stderr)

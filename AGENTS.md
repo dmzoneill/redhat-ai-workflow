@@ -1,11 +1,9 @@
 <!--
   AGENTS.md - Cross-tool AI assistant configuration
-
-  This file follows the agents.md standard for AI coding assistants.
   Compatible with: Claude Code, Cursor, Codex, Gemini, Copilot, OpenCode, Amp, and others.
 
   Source: docs/ai-rules/
-  Generated: 2026-02-20 10:40:23
+  Generated: 2026-03-07 21:36:43
 -->
 
 
@@ -140,6 +138,7 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "sprint planning" / "plan sprint" | `sprint_planning` | `{}` |
 | "discovered work" / "sync discovered work" | `sync_discovered_work` | `{}` |
 | "attach session to Jira" / "document on Jira" | `attach_session_to_jira` | `{"issue_key": "AAP-12345"}` |
+| "update stale issues" / "stakeholder updates" / "jira updates" | `jira_update_stale` | `{}` |
 
 ### DevOps / Infrastructure
 
@@ -185,6 +184,14 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "compare options" / "which approach?" | `compare_options` | `{"question": "..."}` |
 | "summarize findings" / "wrap up research" | `summarize_findings` | `{"topic": "..."}` |
 | "work analysis" / "activity report" | `work_analysis` | `{}` |
+
+### Google Drive / Docs
+
+| User Says | Skill | inputs JSON |
+|-----------|-------|-------------|
+| "fetch Google Doc" / "get doc by ID" / "load GDrive doc" | `gdrive_fetch_doc` | `{"file_id": "..."}` |
+
+**Note:** No persona includes `aa_gdrive`; Google Drive is used **only via skills**. The skill engine runs GDrive tools inside skill steps. Use `gdrive_fetch_doc` (or similar) for fetching a doc by `file_id`.
 
 ### Knowledge / Code Understanding
 
@@ -322,10 +329,12 @@ The system automatically logs these to the daily session file:
 | Event | Logged By | Entry Type |
 |-------|-----------|------------|
 | Session start | `session_tools.py` | `session` |
-| Skill completions | `skill_engine.py` | `skill` |
-| Significant tool calls (git_commit, jira_transition, slack_send_message, etc.) | `debuggable.py` | `tool` |
+| Skill started + skill completions | `skill_engine.py` | `skill` |
+| Significant tool calls (git_commit, jira_transition, persona_load, skill_run, etc.) | `debuggable.py` | `tool` |
 
 You do NOT need to manually log these. They are captured automatically.
+
+**Session logs stay sparse if:** the LLM never calls `session_start()` (no session row), only does read-only tools (no tool rows), and skips `session_close()` and `memory_session_log()`. Always call `session_close()` before ending real work so the day's log has a summary.
 
 ## What YOU Must Log (Mid-Session)
 
@@ -629,9 +638,12 @@ Load a persona when the task matches their expertise:
 
 > **Note:** All personas include `jira_basic`. Use `tool_exec()` for `_extra` module tools when needed.
 
+**Persona knowledge:** Project-specific context per persona lives in `memory/knowledge/personas/<persona>/<project>.yaml` (e.g. metadata, architecture, patterns, gotchas, learned_from_tasks). These files are read-only for the LLM; they are populated by scans and skills.
+
 ## Memory Usage
 
 - **Log important actions**: `memory_session_log("action", "details")`
+- **Current work path:** Work state is stored at `state/projects/<project>/current_work.yaml`; you always use the key `state/current_work` (the system resolves it by project). See 25-memory-operations.md for project resolution and state keys.
 - **Track active work**: `memory_append("state/current_work", "active_issues", '{...}')`
 - **Save learned patterns**: `memory_write("learned/patterns", content)` for reusable knowledge
 
@@ -771,19 +783,43 @@ session_close(
 )
 ```
 
+## State and shared_context
+
+`state/shared_context.yaml` holds cross-session context written by skills and tools (not by the LLM directly). Read it when you need recent system state.
+
+| Key | Purpose |
+|-----|---------|
+| `current_investigation` | Active alert/investigation context (e.g. from investigate_alert); has `expires_at` |
+| `last_branch_sync` | Last sync_branch result (branch, ahead/behind, success) |
+| `last_ci_health_check` | Last CI health check result (project, pipeline_count, ci_valid) |
+| `last_coffee` | Last morning briefing snapshot (alerts, pr_count, feedback_waiting, etc.) |
+| `last_updated` | Timestamp of last update |
+
+**When to read:** Before retrying an operation that might depend on recent state (e.g. "when did we last sync?"), or when resuming an investigation (current_investigation). Use `memory_read("state/shared_context")`.
+
 ## Session Log Format
 
-Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) use an enriched entry format.
+Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) are stored **by chat** for separation, with chronological order available when needed.
+
+**Structure:** The file has `date`, `session_order`, and `sessions`. Under `sessions`:
+- `_global`: entries with no `session_id` (cron, daemons).
+- `<session_id>`: one block per chat, with `started_at`, `persona`, `project`, `name` (optional) and `entries` (that chat’s events in order).
+
+**Reading:** Use `get_session_log_entries(data)` for a single chronological list (merge of all sessions by time). Use `get_session_log_by_chat(data)` when you need per-chat separation. Legacy files (flat `entries` only) are migrated to this structure on first write.
+
 Each entry has a `type` field indicating its source:
 
 | Type | Source | Description |
 |------|--------|-------------|
 | `session` | Auto (session_tools.py) | Session start/end events |
-| `skill` | Auto (skill_engine.py) | Skill execution completions |
-| `tool` | Auto (debuggable.py) | Significant tool calls (commits, MR creation, Jira transitions) |
+| `skill` | Auto (skill_engine.py) | Skill started + skill execution completions |
+| `tool` | Auto (debuggable.py) | Significant tool calls (commits, persona_load, skill_run, Jira, etc.) |
 | `manual` | LLM (memory_session_log) | Context, decisions, findings logged by the LLM |
 | `summary` | LLM (session_close) | Structured session summary with issues, accomplished, next_steps |
 | `cron` | Auto (cron jobs) | Scheduled task results |
+| `slack_alert` | Auto (Slack daemon) | Incoming Slack alert that triggered investigate_slack_alert |
+| `event` | Any (default) | Entry written without a type; backward compatibility |
+| `activity` | Auto (debuggable.py) | Session activity heartbeat every 10 tool calls (ensures a trace even without session_close) |
 
 ### Entry Fields
 
@@ -813,6 +849,8 @@ Multiple sessions can write to the same daily file safely -- all writes use `fcn
 |------|----------|
 | `check_known_issues(tool, error)` | Check if we've seen this error before |
 | `learn_tool_fix(tool, pattern, cause, fix)` | Save a fix for future reference |
+
+**Learned files:** `tool_fixes.yaml` stores fixes you save via `learn_tool_fix()`; `check_known_issues()` searches both `patterns.yaml` and `tool_fixes.yaml`. `tool_failures.yaml` is a log of tool failures used for stats and auto-heal; the LLM should not read or write it directly.
 
 ### Examples
 
@@ -868,18 +906,25 @@ memory_ask("AAP-12345 details", sources="jira")
 ```
 memory/
 ├── state/
-│   ├── current_work.yaml      # Active issues, branches, MRs
-│   ├── environments.yaml      # Stage/prod health status
+│   ├── current_work.yaml      # Active issues, branches, MRs (see project resolution below)
+│   ├── shared_context.yaml   # Cross-session context (last_coffee, last_branch_sync, etc.)
+│   ├── environments.yaml     # Stage/prod health status
 │   └── projects/
 │       └── <project>/
 │           └── current_work.yaml  # Per-project work state
 ├── learned/
-│   ├── patterns.yaml          # Error patterns and solutions
-│   ├── tool_fixes.yaml        # Tool-specific fixes
-│   └── runbooks.yaml          # Procedures that worked
+│   ├── patterns.yaml         # Error/auth/bonfire/pipeline patterns (check_known_issues)
+│   ├── tool_fixes.yaml       # Learned fixes (learn_tool_fix); used by check_known_issues
+│   └── tool_failures.yaml    # Failure log for stats/auto-heal; not for direct reads
+├── knowledge/
+│   └── personas/
+│       └── <persona>/
+│           └── <project>.yaml # Metadata, architecture, patterns, gotchas (read-only)
 └── sessions/
-    └── YYYY-MM-DD.yaml        # Daily session logs (enriched format)
+    └── YYYY-MM-DD.yaml       # Daily session logs (enriched format)
 ```
+
+**Current work path:** The key `state/current_work` is project-specific. The system resolves it to `memory/state/projects/<project>/current_work.yaml` using the session's project. Use the key `state/current_work` in `memory_read`, `memory_update`, etc.; do not hardcode the path.
 
 ## Common Patterns
 
@@ -994,6 +1039,7 @@ KUBECONFIG=~/.kube/config.e bonfire namespace list --mine
 2. **Image tags must be FULL 40-char git SHA** - short SHAs (8 chars) don't exist in Quay
 3. **Only release YOUR namespaces**: `bonfire namespace list --mine`
 4. **ITS deploy pattern requires sha256 digest**, not git SHA for IMAGE_TAG
+5. **app-interface** terraform-repo YAML requires `ref` = full 40-char commit SHA (see `docs/app-interface.md`).
 
 ## ClowdApp Deployment
 
@@ -1035,6 +1081,8 @@ Key namespaces for Automation Analytics:
 
 When an MCP tool fails (returns ❌), you can fix the tool itself.
 
+**Before retrying:** Call `check_known_issues(tool_name, error_text)` to see if a fix is already recorded (see 25-memory-operations.md). If a known fix is returned, apply it and retry instead of debugging from scratch.
+
 ## Workflow
 
 1. **Tool fails** → Look for the hint: `💡 To auto-fix: debug_tool('tool_name')`
@@ -1074,6 +1122,16 @@ Claude: [applies fix, commits, retries operation]
 | "Unknown flag: --state" | CLI syntax changed |
 | "Unauthorized" | Auth not passed correctly |
 | "manifest unknown" | Wrong image tag format |
+
+## Recurring Failure Modes
+
+When the same kind of error keeps appearing, try the usual remedy before deep debugging:
+
+| Failure mode | Example patterns | Typical remedy |
+|--------------|------------------|----------------|
+| Auth / 401   | unauthorized, 401, 403, token expired | Re-auth (e.g. `oc login`, kube_login, refresh token) |
+| Network      | connection refused, timeout, no route to host | Check VPN / connectivity, retry later |
+| Image/tag    | manifest unknown | Use full 40-char image SHA (see 40-ephemeral.md) |
 
 ## Check Known Issues First
 
@@ -1153,6 +1211,8 @@ Common status transitions:
 - **MR created**: "In Progress" → "In Review"
 - **MR merged**: "In Review" → "Done"
 - **Work blocked**: Any → "Blocked"
+
+**Transition to Closed (Red Hat Jira):** Some workflows require the **Workstream** field (customfield_12319275). Send it as an array in the transition payload, e.g. `[{ "id": "..." }]`. The jira-creator plugin or tool may need to load issue fields and include Workstream when transitioning to Closed.
 
 ### 3. Add a Comment
 
@@ -1403,3 +1463,4 @@ These commands are explicitly allowed through `shell()` because they are basic u
 | Security scanning | `security` | nmap, openssl, ssh |
 | Databases | `database` | postgres, mysql, sqlite, ssh |
 | Infrastructure, cloud | `infra` | ansible, aws, gcloud, systemd, ssh, libvirt |
+

@@ -6,10 +6,14 @@ import asyncio
 import fcntl
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 
-from .constants import SKILLS_DIR
+try:
+    from .constants import SKILLS_DIR
+except ImportError:
+    SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "skills"
 
 logger = logging.getLogger(__name__)
 

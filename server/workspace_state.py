@@ -68,6 +68,12 @@ def get_default_persona() -> str:
 # Session stale timeout (hours) - sessions inactive for longer are cleaned up
 SESSION_STALE_HOURS = 24
 
+# Maximum session age (days) - sessions older than this are force-removed
+# regardless of whether they still exist in Cursor's database.
+# This prevents unbounded accumulation of old sessions from workspaces
+# that haven't been opened in weeks/months.
+MAX_SESSION_AGE_DAYS = 45
+
 # Maximum entries in tool_filter_cache per session to prevent memory leaks
 MAX_FILTER_CACHE_SIZE = 50
 
@@ -546,11 +552,12 @@ class WorkspaceState:
         return False
 
     def cleanup_stale_sessions(self, max_age_hours: int = SESSION_STALE_HOURS) -> int:
-        """Remove stale sessions that no longer exist in Cursor.
+        """Remove stale sessions that no longer exist in Cursor or are too old.
 
-        Sessions are only removed if they are stale AND no longer exist in
-        Cursor's database. This ensures we don't lose session data for chats
-        that are still open in Cursor.
+        Two-tier cleanup:
+        1. Sessions inactive > max_age_hours AND not in Cursor DB -> remove
+        2. Sessions inactive > MAX_SESSION_AGE_DAYS -> force-remove even if
+           still in Cursor DB (prevents unbounded accumulation from old workspaces)
 
         Args:
             max_age_hours: Maximum hours of inactivity before considering removal
@@ -558,32 +565,43 @@ class WorkspaceState:
         Returns:
             Number of sessions removed
         """
-        # Get all chat IDs that still exist in Cursor
         cursor_chat_ids = get_cursor_chat_ids(self.workspace_uri)
+        max_age_seconds = MAX_SESSION_AGE_DAYS * 86400
 
-        # Only remove sessions that are stale AND not in Cursor's database
-        stale_ids = [
-            sid
-            for sid, session in self.sessions.items()
-            if session.is_stale(max_age_hours) and sid not in cursor_chat_ids
-        ]
+        remove_ids = []
+        for sid, session in self.sessions.items():
+            age_seconds = (datetime.now() - session.last_activity).total_seconds()
 
-        for sid in stale_ids:
+            # Tier 2: Force-remove sessions older than MAX_SESSION_AGE_DAYS
+            if age_seconds > max_age_seconds:
+                logger.info(
+                    f"Force-removing session {sid[:12]}... "
+                    f"(inactive {age_seconds / 86400:.0f} days, max {MAX_SESSION_AGE_DAYS})"
+                )
+                remove_ids.append(sid)
+            # Tier 1: Remove stale sessions not in Cursor DB
+            elif session.is_stale(max_age_hours) and sid not in cursor_chat_ids:
+                remove_ids.append(sid)
+
+        for sid in remove_ids:
             self.remove_session(sid)
 
-        if stale_ids:
+        if remove_ids:
             logger.info(
-                f"Cleaned up {len(stale_ids)} stale session(s) not in Cursor DB from {self.workspace_uri}"
+                f"Cleaned up {len(remove_ids)} stale session(s) from {self.workspace_uri}"
             )
 
-        return len(stale_ids)
+        return len(remove_ids)
 
     def session_count(self) -> int:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
 
     def sync_with_cursor_db(  # noqa: C901
-        self, session_ids: list[str] | None = None, skip_content_scan: bool = False
+        self,
+        session_ids: list[str] | None = None,
+        skip_content_scan: bool = False,
+        skip_scan_ids: set[str] | None = None,
     ) -> dict:
         """Sync with Cursor's database.
 
@@ -601,6 +619,10 @@ class WorkspaceState:
                         Session adds/removes still happen for all sessions.
             skip_content_scan: If True, skip all expensive content scanning.
                               Useful for initial sync to get basic state quickly.
+            skip_scan_ids: Session IDs whose expensive content scan should be
+                          skipped because their lastUpdatedAt hasn't changed.
+                          Cheap metadata sync (name, lastUpdatedAt, tool count)
+                          still runs for these sessions.
 
         Returns:
             Dict with counts: {"added": N, "removed": N, "renamed": N, "updated": N}
@@ -621,12 +643,15 @@ class WorkspaceState:
         # Get currently loaded tools count (for active session)
         current_tool_count = len(self._get_loaded_tools())
 
-        # Determine which sessions to scan for content (expensive operations)
-        # If session_ids provided, only scan those; if skip_content_scan, scan none
+        # Determine which sessions to scan for content (expensive operations).
+        # Remove any IDs in skip_scan_ids -- those haven't changed since last scan.
         if skip_content_scan:
             scan_ids = []
         elif session_ids:
-            scan_ids = list(session_ids)
+            if skip_scan_ids:
+                scan_ids = [sid for sid in session_ids if sid not in skip_scan_ids]
+            else:
+                scan_ids = list(session_ids)
         else:
             scan_ids = []  # Default to no content scanning - too expensive
 
@@ -644,21 +669,24 @@ class WorkspaceState:
             if matches:
                 issue_keys_from_names[sid] = {m.upper() for m in matches}
 
-        # Expensive content scanning - only for target sessions
-        # These query the 7GB global Cursor database
+        # Expensive content scanning - only for sessions that actually changed
         issue_keys_from_content: dict[str, str] = {}
         personas_from_content: dict[str, str] = {}
         projects_from_content: dict[str, str] = {}
 
+        skipped_count = len(skip_scan_ids & set(session_ids or [])) if skip_scan_ids and session_ids else 0
         if scan_ids:
-            # Second pass: scan chat content for issue keys (expensive)
+            logger.debug(
+                f"Content scanning {len(scan_ids)} session(s), "
+                f"skipped {skipped_count} unchanged"
+            )
             issue_keys_from_content = get_cursor_chat_issue_keys(scan_ids)
-
-            # Third pass: scan chat content for persona loads (expensive)
             personas_from_content = get_cursor_chat_personas(scan_ids)
-
-            # Fourth pass: scan chat content for project mentions (expensive)
             projects_from_content = get_cursor_chat_projects(scan_ids)
+        elif session_ids and skipped_count > 0:
+            logger.debug(
+                f"All {skipped_count} session(s) unchanged, skipping content scan"
+            )
 
         # Merge: combine keys from name and content, deduplicate and sort
         issue_keys: dict[str, str] = {}
@@ -691,10 +719,23 @@ class WorkspaceState:
 
         # 2. Add sessions that exist in Cursor but not in our system
         # (These are chats the user created but never called session_start())
-        # We create minimal session entries for them
+        # Skip sessions older than MAX_SESSION_AGE_DAYS to avoid accumulating
+        # stale sessions from workspaces that haven't been opened in weeks.
+        max_age_ms = MAX_SESSION_AGE_DAYS * 86400 * 1000
+        now_ms = datetime.now().timestamp() * 1000
         added_ids = cursor_ids - our_ids
         for sid in added_ids:
             cursor_chat = cursor_chat_map[sid]
+
+            # Skip old sessions
+            last_updated = cursor_chat.get("lastUpdatedAt", 0)
+            if last_updated and (now_ms - last_updated) > max_age_ms:
+                logger.debug(
+                    f"Skipping old session {sid[:12]}... from Cursor DB "
+                    f"(age {(now_ms - last_updated) / 86400000:.0f} days)"
+                )
+                continue
+
             logger.info(
                 f"Adding session {sid} from Cursor DB: {cursor_chat.get('name')}"
             )
@@ -1449,7 +1490,11 @@ class WorkspaceRegistry:
         return result["renamed"]
 
     @classmethod
-    def sync_sessions_with_cursor(cls, session_ids: list[str] | None = None) -> dict:
+    def sync_sessions_with_cursor(
+        cls,
+        session_ids: list[str] | None = None,
+        skip_scan_ids: set[str] | None = None,
+    ) -> dict:
         """Sync specific sessions with Cursor's database.
 
         This is more efficient than sync_all_with_cursor when you only need
@@ -1457,6 +1502,9 @@ class WorkspaceRegistry:
 
         Args:
             session_ids: List of session IDs to sync. If None, syncs all sessions.
+            skip_scan_ids: Session IDs whose content scan should be skipped
+                          (their lastUpdatedAt hasn't changed since last scan).
+                          Metadata sync (name, lastUpdatedAt, tool count) still runs.
 
         Returns:
             Dict with total counts: {"added": N, "removed": N, "renamed": N, "updated": N}
@@ -1478,7 +1526,10 @@ class WorkspaceRegistry:
         for workspace_uri, target_ids in target_workspaces.items():
             workspace = cls._workspaces.get(workspace_uri)
             if workspace:
-                result = workspace.sync_with_cursor_db(session_ids=list(target_ids))
+                result = workspace.sync_with_cursor_db(
+                    session_ids=list(target_ids),
+                    skip_scan_ids=skip_scan_ids,
+                )
                 totals["added"] += result["added"]
                 totals["removed"] += result["removed"]
                 totals["renamed"] += result["renamed"]

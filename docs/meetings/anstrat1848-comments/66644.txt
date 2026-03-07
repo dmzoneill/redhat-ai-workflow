@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Keeping open – security review pending.
+
+* AC (1) Security work needed — Gap (in progress): Security assessment is necessary; opening external IPs could present risk. Same restrictions as normal inbound interface apply. Plan to consult Thomas Eagle (product security architect, Ansible) once the plan is in place. After review we will reflect in Feature AC and create child issue(s) if needed, or confirm no actions needed.
+* AC (2) Comment linking to issue(s) or confirm no actions — Gap: Will add that comment when we close this task after Thomas Eagle review.

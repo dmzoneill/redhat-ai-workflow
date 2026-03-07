@@ -309,6 +309,7 @@
   height: calc(100vh - 200px);
   min-height: 500px;
   background: var(--bg-secondary);
+  overflow: visible;
 }
 
 .mindmap-header-compact {
@@ -318,6 +319,17 @@
   padding: 8px 12px;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
+  overflow: visible;
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+}
+.mindmap-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  overflow: visible;
 }
 .mindmap-title-block {
   display: flex;
@@ -346,7 +358,18 @@
   background: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
-  min-width: 120px;
+  min-width: 140px;
+  max-width: 200px;
+  position: relative;
+  z-index: 20;
+  overflow: visible;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mindmap-select:focus {
+  z-index: 30;
+  outline: 2px solid var(--accent, #0066cc);
+  outline-offset: 1px;
 }
 .mindmap-toggles input[type="checkbox"] {
   width: 14px;
@@ -650,5 +673,5 @@
 .perf-sunburst-ring-item b { color: var(--text-primary); }
 .perf-mindmap-toggle input { cursor: pointer; }
 .mindmap-graph .node.highlighted { opacity: 1; }
-.perf-mindmap-d3-filters, .mindmap-header-controls { flex-wrap: wrap; }
+.perf-mindmap-d3-filters { flex-wrap: wrap; }
 .perf-mm-link--comp-anstrat, .perf-mm-link--anstrat-strategy { stroke-dasharray: none; }

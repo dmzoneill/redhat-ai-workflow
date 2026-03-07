@@ -55,6 +55,8 @@ Common status transitions:
 - **MR merged**: "In Review" → "Done"
 - **Work blocked**: Any → "Blocked"
 
+**Transition to Closed (Red Hat Jira):** Some workflows require the **Workstream** field (customfield_12319275). Send it as an array in the transition payload, e.g. `[{ "id": "..." }]`. The jira-creator plugin or tool may need to load issue fields and include Workstream when transitioning to Closed.
+
 ### 3. Add a Comment
 
 Use `jira_add_comment` to document what was done:

@@ -12,7 +12,10 @@ import yaml
 
 from tool_modules.common import PROJECT_ROOT
 
-from .constants import SKILLS_DIR
+try:
+    from .constants import SKILLS_DIR
+except ImportError:
+    SKILLS_DIR = Path(__file__).parent.parent.parent.parent / "skills"
 
 if TYPE_CHECKING:
     pass
@@ -20,7 +23,10 @@ if TYPE_CHECKING:
 
 def _get_attr_dict():
     """Import AttrDict lazily to avoid circular import with skill_engine."""
-    from .skill_engine import AttrDict
+    try:
+        from .skill_engine import AttrDict
+    except ImportError:
+        from skill_engine import AttrDict
 
     return AttrDict
 
@@ -233,7 +239,10 @@ class TemplateEngineMixin:
         import asyncio
 
         # Late import to avoid circular import - SkillExecutor is in skill_engine
-        from .skill_engine import SkillExecutor
+        try:
+            from .skill_engine import SkillExecutor
+        except ImportError:
+            from skill_engine import SkillExecutor
 
         def run_skill_sync(skill_name: str, inputs: Optional[dict] = None) -> dict:
             """Run a nested skill synchronously from within a compute block.

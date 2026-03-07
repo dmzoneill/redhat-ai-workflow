@@ -1,47 +1,4 @@
 failures:
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:29:44.500711'
-  tool: target_tool
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:44.555882'
-  tool: t
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: true
-  timestamp: '2026-02-08T00:29:44.611176'
-  tool: t
-- error_snippet: unauthorized 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:48.004350'
-  tool: kubectl_get_pods
-- error_snippet: 'DNS resolution failed - VPN may be disconnected: ...Error: no such
-    host api.example.com...'
-  error_type: network
-  fix_applied: vpn_connect
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:29:48.081176'
-  tool: t
-- error_snippet: unauthorized - 401
-  error_type: auth
-  fix_applied: kube_login
-  source: skill_engine
-  success: false
-  timestamp: '2026-02-08T00:31:44.197013'
-  tool: kubectl_get_pods
 - error_snippet: 'Authentication failed - token may be expired: ...Error: unauthorized
     - 401 must authenticate...'
   error_type: auth
@@ -724,8 +681,56 @@ failures:
   success: true
   timestamp: '2026-02-28T21:01:23.923076'
   tool: jira_my_issues
+- error_snippet: "\u274C Failed to get tag: time=\"2026-03-04T11:17:12Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-03-04T11:17:27.564576'
+  tool: quay_get_tag
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-03-04T21:04:13.454467'
+  tool: jira_my_issues
+- error_snippet: "\u274C Failed to get tag: time=\"2026-03-05T18:55:33Z\" level=fatal\
+    \ msg=\"Error parsing image name \\\"docker:"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: false
+  timestamp: '2026-03-05T18:56:11.314845'
+  tool: quay_get_tag
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-03-05T21:01:10.527855'
+  tool: jira_my_issues
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-03-06T21:01:44.995946'
+  tool: jira_my_issues
+- error_snippet: "HTTP 401 - authentication required: ...| \u2014            | False\
+    \  \nCVP-2401      | Task          | Clos"
+  error_type: auth
+  fix_applied: kube_login
+  source: skill_engine
+  success: true
+  timestamp: '2026-03-07T21:04:45.111698'
+  tool: jira_my_issues
 stats:
-  auto_fixed: 183
+  auto_fixed: 187
   daily:
     '2026-02-17':
       auto_fixed: 1
@@ -739,8 +744,8 @@ stats:
     '2026-02-25':
       auto_fixed: 3
       total: 3
-  manual_required: 203
-  total_failures: 386
+  manual_required: 205
+  total_failures: 392
   weekly:
     2026-W07:
       auto_fixed: 2

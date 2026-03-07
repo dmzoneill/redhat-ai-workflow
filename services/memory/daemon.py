@@ -335,10 +335,17 @@ class MemoryDaemon(DaemonDBusBase, BaseDaemon):
                     try:
                         content = yaml.safe_load(session_file.read_text())
                         if content:
-                            # Extract log entries from session - handle both 'logs' and 'entries' keys
-                            session_logs = content.get(
-                                "logs", content.get("entries", [])
-                            )
+                            # Support both legacy (entries) and new (sessions) format
+                            try:
+                                from tool_modules.aa_workflow.src.memory_tools import (
+                                    get_session_log_entries,
+                                )
+
+                                session_logs = get_session_log_entries(content)
+                            except ImportError:
+                                session_logs = content.get(
+                                    "logs", content.get("entries", [])
+                                )
                             session_date = content.get("date", session_file.stem)
 
                             for log in session_logs[-5:]:  # Last 5 from each session

@@ -1,0 +1,553 @@
+# Skill: Jira Stale Issue Updater
+# Scans for issues without recent updates and generates draft stakeholder comments
+
+name: jira_update_stale
+description: |
+  Find Jira issues assigned to you that haven't been updated in 48+ hours
+  and generate draft stakeholder updates based on git, MR, session, and
+  memory context. Returns drafts for interactive approval before posting.
+
+  Phase 1 (this skill): scan, gather context, generate drafts.
+  Phase 2 (LLM orchestration): present drafts, collect edits, post comments.
+
+version: "1.0"
+
+links:
+  depends_on: []
+  validates: []
+  chains_to:
+    - jira_hygiene
+  provides_context_for:
+    - beer
+    - coffee
+    - standup_summary
+  validated_by:
+    - jira_hygiene_all
+
+inputs:
+  - name: hours_threshold
+    type: integer
+    required: false
+    default: 48
+    description: "Hours since last update to consider an issue stale"
+
+  - name: project
+    type: string
+    required: false
+    default: "AAP"
+    description: "Jira project key to scan"
+
+  - name: status_filter
+    type: string
+    required: false
+    default: "In Progress,Refinement,New"
+    description: "Comma-separated statuses to check"
+
+  - name: limit
+    type: integer
+    required: false
+    default: 20
+    description: "Maximum number of stale issues to process"
+
+  - name: include_epics
+    type: boolean
+    required: false
+    default: true
+    description: "Include Epic and Initiative issue types in scan"
+
+steps:
+  # ==================== LOAD DEVELOPER PERSONA ====================
+
+  - name: load_developer_persona
+    description: "Load developer persona for Jira, Git, and GitLab tools"
+    tool: persona_load
+    args:
+      persona_name: "developer"
+
+  # ==================== SEARCH FOR STALE ISSUES ====================
+
+  - name: build_jql
+    description: "Build JQL query from inputs"
+    compute: |
+      hours = inputs.get('hours_threshold', 48) if isinstance(inputs, dict) else 48
+      project = inputs.get('project', 'AAP') if isinstance(inputs, dict) else 'AAP'
+      status_filter = inputs.get('status_filter', 'In Progress,Refinement,New') if isinstance(inputs, dict) else 'In Progress,Refinement,New'
+      include_epics = inputs.get('include_epics', True) if isinstance(inputs, dict) else True
+
+      statuses = [s.strip() for s in status_filter.split(',') if s.strip()]
+      status_jql = ', '.join(f'"{s}"' for s in statuses)
+
+      hours_val = int(hours)
+      if hours_val >= 24:
+          days = hours_val // 24
+          time_filter = f"-{days}d"
+      else:
+          time_filter = f"-{hours_val}h"
+
+      type_exclusion = ""
+      if not include_epics:
+          type_exclusion = ' AND issuetype not in ("Epic", "Initiative")'
+
+      jql = (
+          f'project = {project} AND assignee = currentUser() '
+          f'AND status in ({status_jql}){type_exclusion} '
+          f'AND updated <= {time_filter} '
+          f'ORDER BY updated ASC'
+      )
+
+      result = {
+          "jql": jql,
+          "hours": hours_val,
+          "project": project,
+          "statuses": statuses,
+      }
+    output: query_config
+
+  - name: search_stale_issues
+    description: "Find issues not updated within the threshold"
+    tool: jira_search
+    args:
+      jql: "{{ query_config.jql }}"
+      max_results: "{{ inputs.limit | default(20) }}"
+    output: stale_issues_raw
+    on_error: auto_heal
+
+  - name: parse_stale_issues
+    description: "Extract issue keys, summaries, and types from search results"
+    compute: |
+      import re
+
+      text = str(stale_issues_raw) if stale_issues_raw else ""
+      project = query_config.get('project', 'AAP')
+
+      issue_pattern = re.compile(rf'({re.escape(project)}-\d+)')
+      issue_keys = issue_pattern.findall(text)
+
+      seen = set()
+      unique_keys = []
+      for key in issue_keys:
+          if key not in seen:
+              seen.add(key)
+              unique_keys.append(key)
+
+      # Try to extract summaries from the tabular output
+      issue_summaries = {}
+      for line in text.split("\n"):
+          for key in unique_keys:
+              if key in line:
+                  parts = [p.strip() for p in line.split("|")]
+                  if len(parts) >= 5:
+                      issue_summaries[key] = {
+                          "type": parts[1] if len(parts) > 1 else "",
+                          "status": parts[2] if len(parts) > 2 else "",
+                          "summary": parts[4] if len(parts) > 4 else "",
+                      }
+
+      limit = inputs.get('limit', 20) if isinstance(inputs, dict) else 20
+      limited_keys = unique_keys[:limit]
+
+      result = {
+          "issue_keys": limited_keys,
+          "issue_summaries": issue_summaries,
+          "total_found": len(unique_keys),
+          "processing": len(limited_keys),
+      }
+    output: stale_issues
+
+  - name: early_exit_if_none
+    description: "Exit early if no stale issues found"
+    condition: "stale_issues and stale_issues.get('total_found', 0) == 0"
+    compute: |
+      result = "No stale issues found - all your issues have been updated recently."
+    output: early_exit_msg
+    then: return
+
+  # ==================== GATHER CONTEXT FROM ALL SOURCES ====================
+
+  - name: load_session_logs
+    description: "Read session logs from the last 3 days for issue mentions"
+    compute: |
+      from datetime import datetime, timedelta
+      from pathlib import Path
+      import yaml
+      import re
+
+      issue_re = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
+      session_dir = Path.home() / "src/redhat-ai-workflow/memory/sessions"
+
+      issue_session_activity = {}
+
+      for day_offset in range(3):
+          date = (datetime.now() - timedelta(days=day_offset)).strftime("%Y-%m-%d")
+          session_file = session_dir / f"{date}.yaml"
+
+          if not session_file.exists():
+              continue
+
+          try:
+              with open(session_file) as f:
+                  data = yaml.safe_load(f) or {}
+              entries = data.get("entries", [])
+          except Exception:
+              continue
+
+          for e in entries:
+              action = e.get("action", "")
+              details = e.get("details", "")
+              time_str = e.get("time", "")
+              etype = e.get("type", "manual")
+
+              # Skip this skill's own log entries to avoid false positives
+              if "stale issue scan" in action.lower():
+                  continue
+
+              combined_text = f"{action} {details}"
+              found_keys = issue_re.findall(combined_text)
+
+              if e.get("issues"):
+                  found_keys.extend(e["issues"])
+
+              for key in set(found_keys):
+                  if key not in issue_session_activity:
+                      issue_session_activity[key] = []
+
+                  entry_line = f"[{date} {time_str}] ({etype}) {action}"
+                  if details:
+                      entry_line += f" - {details[:120]}"
+                  issue_session_activity[key].append(entry_line)
+
+                  if etype == "summary":
+                      for item in e.get("accomplished", []):
+                          issue_session_activity[key].append(f"  Accomplished: {item}")
+
+      result = issue_session_activity
+    output: session_context
+
+  - name: load_memory_context
+    description: "Read current work state for follow-ups and active issues"
+    tool: memory_read
+    args:
+      key: "state/current_work"
+    output: memory_state_raw
+    on_error: continue
+
+  - name: parse_memory_context
+    description: "Parse memory state into usable context"
+    compute: |
+      import json
+      import yaml as _yaml
+
+      memory_data = {}
+      if memory_state_raw:
+          if isinstance(memory_state_raw, dict):
+              memory_data = memory_state_raw
+          elif isinstance(memory_state_raw, str):
+              raw = str(memory_state_raw)
+              # memory_read returns markdown with YAML in ```yaml blocks
+              if "```yaml" in raw:
+                  yaml_block = raw.split("```yaml", 1)[1].split("```", 1)[0]
+                  try:
+                      memory_data = _yaml.safe_load(yaml_block) or {}
+                  except Exception:
+                      pass
+              else:
+                  try:
+                      memory_data = json.loads(raw)
+                  except Exception:
+                      try:
+                          memory_data = _yaml.safe_load(raw) or {}
+                      except Exception:
+                          pass
+
+      active_issues = memory_data.get("active_issues", [])
+      follow_ups = memory_data.get("follow_ups", [])
+      open_mrs = memory_data.get("open_mrs", [])
+
+      issue_memory = {}
+      for ai in active_issues:
+          key = ai.get("key", "")
+          if key:
+              issue_memory[key] = {
+                  "status": ai.get("status", ""),
+                  "summary": ai.get("summary", ""),
+                  "branch": ai.get("branch", ""),
+                  "type": ai.get("type", ""),
+              }
+
+      for fu in follow_ups:
+          key = fu.get("issue_key", "")
+          if key:
+              if key not in issue_memory:
+                  issue_memory[key] = {}
+              issue_memory[key]["follow_up"] = fu.get("task", "")
+              issue_memory[key]["follow_up_priority"] = fu.get("priority", "")
+
+      result = {
+          "issue_memory": issue_memory,
+          "open_mrs": open_mrs,
+          "active_issue_keys": [ai.get("key", "") for ai in active_issues if ai.get("key")],
+      }
+    output: memory_context
+
+  - name: get_recent_commits
+    description: "Get recent commits across repos to match against issue keys"
+    tool: git_log
+    args:
+      repo: "automation-analytics-backend"
+      limit: 50
+      oneline: true
+      since: "3 days ago"
+    output: recent_commits_raw
+    on_error: continue
+
+  - name: get_recent_mrs
+    description: "Get recent MR activity from GitLab"
+    tool: gitlab_mr_list
+    args:
+      project: "automation-analytics/automation-analytics-backend"
+      state: all
+    output: recent_mrs_raw
+    on_error: continue
+
+  # ==================== FETCH DETAILS AND GENERATE DRAFTS ====================
+
+  - name: gather_and_draft
+    description: "For each stale issue, gather context and generate a draft update"
+    compute: |
+      import re
+
+      issue_re = re.compile(r"\b([A-Z]{2,10}-\d+)\b")
+      commit_text = str(recent_commits_raw) if 'recent_commits_raw' in dir() and recent_commits_raw else ""
+      mr_text = str(recent_mrs_raw) if 'recent_mrs_raw' in dir() and recent_mrs_raw else ""
+
+      drafts = []
+      needs_manual = []
+      up_to_date = []
+
+      for issue_key in stale_issues.get('issue_keys', []):
+          context_pieces = []
+
+          # --- Check git commits ---
+          issue_commits = []
+          for line in commit_text.split("\n"):
+              if issue_key.lower() in line.lower():
+                  cleaned = line.strip()
+                  if cleaned:
+                      issue_commits.append(cleaned[:100])
+
+          if issue_commits:
+              context_pieces.append({
+                  "source": "git",
+                  "summary": f"{len(issue_commits)} commit(s) found",
+                  "details": issue_commits[:5],
+              })
+
+          # --- Check MR activity ---
+          issue_mrs = []
+          for line in mr_text.split("\n"):
+              if issue_key.lower() in line.lower():
+                  cleaned = line.strip()
+                  if cleaned:
+                      issue_mrs.append(cleaned[:120])
+
+          if issue_mrs:
+              context_pieces.append({
+                  "source": "gitlab",
+                  "summary": f"{len(issue_mrs)} MR(s) referencing this issue",
+                  "details": issue_mrs[:3],
+              })
+
+          # --- Check session logs ---
+          session_entries = session_context.get(issue_key, []) if session_context else []
+          if session_entries:
+              context_pieces.append({
+                  "source": "session",
+                  "summary": f"{len(session_entries)} session log entry/entries",
+                  "details": session_entries[:5],
+              })
+
+          # --- Check memory state ---
+          mem_info = memory_context.get("issue_memory", {}).get(issue_key, {}) if memory_context else {}
+          if mem_info:
+              mem_details = []
+              if mem_info.get("branch"):
+                  mem_details.append(f"Branch: {mem_info['branch']}")
+              if mem_info.get("status"):
+                  mem_details.append(f"Tracked status: {mem_info['status']}")
+              if mem_info.get("follow_up"):
+                  mem_details.append(f"Follow-up: {mem_info['follow_up']}")
+              if mem_details:
+                  context_pieces.append({
+                      "source": "memory",
+                      "summary": "Tracked in active work state",
+                      "details": mem_details,
+                  })
+
+          # --- Check if any open MRs reference this issue ---
+          open_mr_refs = []
+          for mr in memory_context.get("open_mrs", []):
+              mr_title = str(mr.get("title", ""))
+              if issue_key.lower() in mr_title.lower():
+                  open_mr_refs.append(f"MR !{mr.get('id', '?')}: {mr_title[:80]} ({mr.get('status', 'open')})")
+          if open_mr_refs:
+              context_pieces.append({
+                  "source": "open_mrs",
+                  "summary": f"{len(open_mr_refs)} open MR(s)",
+                  "details": open_mr_refs,
+              })
+
+          # --- Generate draft or flag for manual ---
+          if context_pieces:
+              parts = []
+              parts.append("Progress update:")
+
+              for ctx in context_pieces:
+                  src = ctx["source"]
+                  if src == "git":
+                      commit_msgs = [d.split(" ", 1)[-1] if " " in d else d for d in ctx["details"][:3]]
+                      parts.append(f"- Recent commits ({ctx['summary']}): {'; '.join(commit_msgs)}")
+                  elif src == "gitlab":
+                      parts.append(f"- {ctx['summary']}: {'; '.join(ctx['details'][:2])}")
+                  elif src == "open_mrs":
+                      parts.append(f"- {ctx['summary']}: {'; '.join(ctx['details'][:2])}")
+                  elif src == "session":
+                      recent = ctx["details"][-1] if ctx["details"] else ""
+                      parts.append(f"- Recent session activity ({len(ctx['details'])} entries): {recent[:100]}")
+                  elif src == "memory":
+                      parts.append(f"- {'; '.join(ctx['details'][:3])}")
+
+              draft_text = "\n".join(parts)
+
+              drafts.append({
+                  "issue_key": issue_key,
+                  "category": "A" if issue_commits or issue_mrs else "B",
+                  "draft": draft_text,
+                  "context_sources": [c["source"] for c in context_pieces],
+                  "context_details": context_pieces,
+              })
+          else:
+              other_active = [k for k in memory_context.get("active_issue_keys", []) if k != issue_key][:3]
+              issue_info = stale_issues.get("issue_summaries", {}).get(issue_key, {})
+              summary_text = issue_info.get("summary", "")
+              type_text = issue_info.get("type", "")
+
+              suggestion = "No recent activity found. Please provide a brief status note."
+              if other_active:
+                  suggestion = f"No recent activity found. Consider: focused on other priorities ({', '.join(other_active)})"
+
+              needs_manual.append({
+                  "issue_key": issue_key,
+                  "category": "C",
+                  "summary": summary_text,
+                  "issue_type": type_text,
+                  "other_active_issues": other_active,
+                  "suggestion": suggestion,
+              })
+
+      result = {
+          "drafts": drafts,
+          "needs_manual": needs_manual,
+          "total_stale": stale_issues.get('total_found', 0),
+          "with_drafts": len(drafts),
+          "needs_input": len(needs_manual),
+      }
+    output: draft_results
+
+  # ==================== BUILD REPORT ====================
+
+  - name: build_report
+    description: "Format structured output for LLM orchestration"
+    compute: |
+      lines = ["## Stale Issue Update Report", ""]
+
+      hours = query_config.get('hours', 48)
+      lines.append(f"**Threshold:** No updates in {hours}+ hours")
+      lines.append(f"**Project:** {query_config.get('project', 'AAP')}")
+      lines.append(f"**Stale Issues Found:** {draft_results.get('total_stale', 0)}")
+      lines.append(f"**Drafts Generated:** {draft_results.get('with_drafts', 0)}")
+      lines.append(f"**Needs Manual Input:** {draft_results.get('needs_input', 0)}")
+      lines.append("")
+
+      # Category A & B: Issues with auto-generated drafts
+      if draft_results.get('drafts'):
+          lines.append("---")
+          lines.append("")
+          lines.append("### Draft Updates (Review & Approve)")
+          lines.append("")
+
+          for i, d in enumerate(draft_results['drafts'], 1):
+              cat_label = "Active (commits/MRs)" if d['category'] == 'A' else "Active (session/memory)"
+              lines.append(f"#### {i}. [{d['issue_key']}](https://issues.redhat.com/browse/{d['issue_key']}) - {cat_label}")
+              lines.append(f"**Sources:** {', '.join(d['context_sources'])}")
+              lines.append("")
+              lines.append("**Draft comment:**")
+              lines.append("```")
+              lines.append(d['draft'])
+              lines.append("```")
+              lines.append("")
+
+      # Category C: Issues needing manual input
+      if draft_results.get('needs_manual'):
+          lines.append("---")
+          lines.append("")
+          lines.append("### Needs Your Input")
+          lines.append("")
+          lines.append("These issues have no recent activity. Please provide a brief note")
+          lines.append("and I'll enhance it into a professional stakeholder update.")
+          lines.append("")
+
+          for m in draft_results['needs_manual']:
+              summary_suffix = f" ({m['summary'][:60]})" if m.get('summary') else ""
+              lines.append(f"- **[{m['issue_key']}](https://issues.redhat.com/browse/{m['issue_key']})**{summary_suffix}: {m['suggestion']}")
+
+          lines.append("")
+
+      result = '\n'.join(lines)
+    output: report_text
+
+  # ==================== LOG TO SESSION ====================
+
+  - name: log_stale_scan
+    description: "Log the stale issue scan to session memory"
+    tool: memory_session_log
+    args:
+      action: "Stale issue scan: {{ stale_issues.total_found }} stale, {{ draft_results.with_drafts }} drafted, {{ draft_results.needs_input }} need input"
+      details: "Scanned {{ query_config.project }} issues not updated in {{ query_config.hours }}h. Issue keys: {{ stale_issues.issue_keys | join(', ') }}"
+    on_error: continue
+
+outputs:
+  - name: summary
+    value: |
+      {{ report_text }}
+
+      ---
+
+      ### Next Steps
+
+      {% if draft_results.drafts %}
+      **To approve and post a draft update:**
+      Tell me which drafts to post (e.g., "post all drafts" or "post draft 1 and 3")
+      and I'll add them as comments to the Jira issues.
+
+      **To edit a draft before posting:**
+      Tell me which draft to edit and what to change (e.g., "edit draft 2: add that we're blocked on API team review").
+      {% endif %}
+
+      {% if draft_results.needs_manual %}
+      **For issues needing your input:**
+      Give me a brief note for each issue (e.g., "AAP-12345: waiting on design review, AAP-12346: deprioritized for this sprint")
+      and I'll craft professional stakeholder updates from your notes.
+      {% endif %}
+
+      **To re-scan:**
+      ```
+      skill_run("jira_update_stale", '{"hours_threshold": 48}')
+      ```
+
+  - name: data
+    value:
+      total_stale: "{{ draft_results.total_stale }}"
+      with_drafts: "{{ draft_results.with_drafts }}"
+      needs_input: "{{ draft_results.needs_input }}"
+      drafts: "{{ draft_results.drafts }}"
+      needs_manual: "{{ draft_results.needs_manual }}"

@@ -103,6 +103,7 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "sprint planning" / "plan sprint" | `sprint_planning` | `{}` |
 | "discovered work" / "sync discovered work" | `sync_discovered_work` | `{}` |
 | "attach session to Jira" / "document on Jira" | `attach_session_to_jira` | `{"issue_key": "AAP-12345"}` |
+| "update stale issues" / "stakeholder updates" / "jira updates" | `jira_update_stale` | `{}` |
 
 ### DevOps / Infrastructure
 
@@ -148,6 +149,14 @@ run the corresponding skill immediately via `skill_run`. Do NOT attempt manual s
 | "compare options" / "which approach?" | `compare_options` | `{"question": "..."}` |
 | "summarize findings" / "wrap up research" | `summarize_findings` | `{"topic": "..."}` |
 | "work analysis" / "activity report" | `work_analysis` | `{}` |
+
+### Google Drive / Docs
+
+| User Says | Skill | inputs JSON |
+|-----------|-------|-------------|
+| "fetch Google Doc" / "get doc by ID" / "load GDrive doc" | `gdrive_fetch_doc` | `{"file_id": "..."}` |
+
+**Note:** No persona includes `aa_gdrive`; Google Drive is used **only via skills**. The skill engine runs GDrive tools inside skill steps. Use `gdrive_fetch_doc` (or similar) for fetching a doc by `file_id`.
 
 ### Knowledge / Code Understanding
 

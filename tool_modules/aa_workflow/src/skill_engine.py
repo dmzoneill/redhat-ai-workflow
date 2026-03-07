@@ -24,21 +24,38 @@ from mcp.types import TextContent
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
-from .known_issues import check_known_issues_sync as _check_known_issues_sync
-from .known_issues import format_known_issues as _format_known_issues
-from .skill_error_recovery import ErrorRecoveryMixin
-from .skill_safety import SprintSafetyGuard  # noqa: F401
-from .skill_template import TemplateEngineMixin
-
-# Support both package import and direct loading
 try:
+    from .known_issues import check_known_issues_sync as _check_known_issues_sync
+    from .known_issues import format_known_issues as _format_known_issues
+    from .skill_error_recovery import ErrorRecoveryMixin
+    from .skill_safety import SprintSafetyGuard  # noqa: F401
+    from .skill_template import TemplateEngineMixin
     from .constants import SKILLS_DIR, TOOL_MODULES_DIR
 except ImportError:
+    from known_issues import check_known_issues_sync as _check_known_issues_sync
+    from known_issues import format_known_issues as _format_known_issues
+    from skill_error_recovery import ErrorRecoveryMixin
+    from skill_safety import SprintSafetyGuard  # noqa: F401
+    from skill_template import TemplateEngineMixin
     TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
     PROJECT_DIR = TOOL_MODULES_DIR.parent
     SKILLS_DIR = PROJECT_DIR / "skills"
 
 logger = logging.getLogger(__name__)
+
+# Skills after which we remind the LLM to call session_close (improves session logs)
+SKILLS_TRIGGER_SESSION_CLOSE_REMINDER: frozenset[str] = frozenset({
+    "create_mr",
+    "close_issue",
+    "close_mr",
+    "beer",
+    "coffee",
+    "start_work",
+    "release_to_prod",
+    "release_aa_backend_prod",
+    "attach_session_to_jira",
+    "create_jira_issue",
+})
 
 
 class AttrDict(dict):
@@ -748,6 +765,23 @@ class SkillExecutor(ErrorRecoveryMixin, TemplateEngineMixin):
                 )
             )
 
+        # Log skill start to daily session file (so sessions show in-progress work)
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import append_session_entry
+
+            entry_start: dict[str, Any] = {
+                "type": "skill",
+                "action": f"skill: {skill_name} started",
+                "details": f"Running (0/{total_steps} steps)",
+                "skill_name": skill_name,
+                "source": self.source,
+            }
+            if self.session_id:
+                entry_start["session_id"] = self.session_id
+            append_session_entry(entry_start)
+        except Exception as e:
+            self._debug(f"Failed to log skill start to session: {e}")
+
         for inp in self.skill.get("inputs", []):
             name = inp["name"]
             if name not in self.inputs and "default" in inp:
@@ -1013,6 +1047,18 @@ class SkillExecutor(ErrorRecoveryMixin, TemplateEngineMixin):
             append_session_entry(entry)
         except Exception as e:
             self._debug(f"Failed to log skill to session: {e}")
+
+        # Remind to call session_close after high-signal skills (improves session logs)
+        if (
+            fail_count == 0
+            and skill_name in SKILLS_TRIGGER_SESSION_CLOSE_REMINDER
+            and self.source == "chat"
+        ):
+            output_lines.append("")
+            output_lines.append(
+                "💡 **Session log:** When you finish, call `session_close(issues, accomplished, next_steps)` "
+                "so the day's log has a summary."
+            )
 
         # Extract and save learnings from successful skill execution
         if fail_count == 0:

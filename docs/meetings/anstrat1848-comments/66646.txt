@@ -1,0 +1,5 @@
+Refinement 2026-03-05: Keeping open – pending SAS side.
+
+* AC (1) Pipeline automation to validate feature — N/A for AAP: We do not have AAP downstream pipeline automation for this feature. Open question: Do SAS nightly pipelines need to be updated to include assertions that data is successfully showing up in the staging service? Task stays open until SAS side changes are understood; may be handed to SAS team (they are part of the initiative).
+* AC (2) New pipeline job configurations — N/A for AAP: No new AAP pipeline job configs for this initiative.
+* AC (3) Notify PDE — N/A: No new AAP issues to create; notifying PDE is not applicable. We use CI/CD for build/deploy, not monitoring. Will add comment when SAS pipeline needs are clear; then close or reassign.

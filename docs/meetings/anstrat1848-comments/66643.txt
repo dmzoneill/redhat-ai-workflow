@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Closing.
+
+* UX involvement / additional UX effort — N/A: This initiative is purely network connectivity with no UI changes. No UX engagement required.
+* UX or UI contact — N/A: No contact needed; no UI impact.

@@ -1,0 +1,19 @@
+metadata:
+  project: saas-stage-routing
+  persona: meetings
+  last_updated: '2026-03-02T06:02:58.307093'
+  last_scanned: '2026-03-02T06:02:58.307046'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: Knowledge base for routing SaaS non-production billing data to staging
+    analytics and staging subscription watch (swatch).
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment: []
+gotchas: []
+learned_from_tasks: []

@@ -1,0 +1,8 @@
+recent_deployments:
+- version: '2026-03-05'
+  sha: d33376c33a0e
+  environment: production
+  deployed_at: '2026-03-05T18:58:04.314174'
+  mr_url: https://gitlab.cee.redhat.com/service/app-interface/-/merge_requests/177624
+  jira_key: AAP-67447
+last_updated: '2026-03-05T18:58:04.314349'

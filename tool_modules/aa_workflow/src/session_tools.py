@@ -531,9 +531,11 @@ def _load_session_history(lines: list[str]) -> None:
         return
 
     try:
+        from tool_modules.aa_workflow.src.memory_tools import get_session_log_entries
+
         with open(session_file, encoding="utf-8") as f:
             session = yaml.safe_load(f) or {}
-        entries = session.get("entries", [])
+        entries = get_session_log_entries(session)
         if entries:
             lines.append("## 📝 Today's Session History\n")
             for entry in entries[-5:]:
@@ -1326,15 +1328,24 @@ async def _session_start_impl(  # noqa: C901
 
         lines.append("")
 
+    # In-context reminder so LLM sees it every session (improves session log quality)
+    lines.append("---")
+    lines.append(
+        "**When you finish real work:** call `session_close(issues, accomplished, next_steps)` "
+        "so the day's log has a summary (used by coffee/beer and reporting)."
+    )
+    lines.append("")
+
     # Log session start to daily session file (always, with locking)
     try:
         from tool_modules.aa_workflow.src.memory_tools import append_session_entry
 
         project_info = f", Project: {detected_project}" if detected_project else ""
+        name_info = f", Name: {name}" if name else ""
         entry = {
             "type": "session",
             "action": "Session started",
-            "details": f"Persona: {agent or 'none'}{project_info}",
+            "details": f"Persona: {agent or 'none'}{project_info}{name_info}",
         }
         if workspace and workspace.get_active_session(refresh_tools=False):
             entry["session_id"] = workspace.get_active_session(

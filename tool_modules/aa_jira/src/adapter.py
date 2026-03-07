@@ -95,8 +95,8 @@ class JiraAdapter:
                     error="No issue key found in query. Include an issue key like AAP-12345.",
                 )
 
-            # Get issue details
-            success, output = await run_rh_issue(["view", issue_key, "--json"])
+            # Get issue details (rh-issue subcommand is view-issue, not view)
+            success, output = await run_rh_issue(["view-issue", issue_key])
 
             if not success:
                 return AdapterResult(

@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Keeping open – test plan to be captured in SDP/proposals.
+
+* QA contact — Satisfied: Identified (engineers; per refinement discussion).
+* Test plan / verification — Gap (in progress): Phase 1 = establish connectivity and confirm we receive data; Prometheus/Grafana for telemetry; non-firing alerts as validation for now. Phase 2 (end-to-end / data accuracy) out of scope. "Receive" to be qualified in proposal (e.g. billing code vs subwatch). Test plan is part of the SDP (handbook PR #1223). Task stays open until proposal outlines mechanics of Phase 1 verification.

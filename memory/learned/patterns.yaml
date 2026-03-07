@@ -1,3 +1,13 @@
+branch_syncs:
+- base_branch: main
+  branch: unknown
+  commits_ahead: 0
+  commits_behind: 3
+  had_conflicts: false
+  pushed: false
+  repo: /home/daoneill/src/automation-analytics-backend
+  success: true
+  timestamp: '2026-03-04T11:20:55.579046'
 ci_failure_patterns: []
 code_searches:
 - patterns_found: 0
@@ -507,13 +517,20 @@ common_hygiene_issues:
     - AAP-66507
     first_seen: '2026-02-25T08:11:09.339025'
     last_seen: '2026-02-25T08:11:09.339039'
+  Missing acceptance criteria:
+    count: 1
+    example_issues:
+    - AAP-65425
+    first_seen: '2026-03-03T16:57:45.750878'
+    last_seen: '2026-03-03T16:57:45.750894'
   No fix version set:
-    count: 2
+    count: 3
     example_issues:
     - AAP-62977
     - AAP-66507
+    - AAP-65425
     first_seen: '2026-02-23T10:25:31.968800'
-    last_seen: '2026-02-25T08:11:09.339054'
+    last_seen: '2026-03-03T16:57:45.750904'
   Story not linked to an Epic:
     count: 2
     example_issues:
@@ -1257,6 +1274,13 @@ hygiene_checks:
   needs_input_count: 1
   timestamp: '2026-02-25T08:11:09.238599'
   transition_ready: true
+- health_score: 85
+  is_healthy: false
+  issue_key: AAP-65425
+  issues_count: 2
+  needs_input_count: 1
+  timestamp: '2026-03-03T16:57:45.628810'
+  transition_ready: false
 issue_creations:
 - code_context_added: true
   files_referenced: 5
@@ -1266,6 +1290,70 @@ issue_creations:
   priority: normal
   project: AAP
   timestamp: '2026-02-25T08:09:22.544471'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67712
+  issue_type: Story
+  linked_to: null
+  priority: normal
+  project: AAP
+  timestamp: '2026-03-07T17:31:58.650167'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67713
+  issue_type: Story
+  linked_to: null
+  priority: normal
+  project: AAP
+  timestamp: '2026-03-07T17:33:00.804118'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67714
+  issue_type: Story
+  linked_to: null
+  priority: major
+  project: AAP
+  timestamp: '2026-03-07T17:54:48.093391'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67715
+  issue_type: Story
+  linked_to: null
+  priority: major
+  project: AAP
+  timestamp: '2026-03-07T17:55:45.331024'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67716
+  issue_type: Story
+  linked_to: null
+  priority: normal
+  project: AAP
+  timestamp: '2026-03-07T17:57:46.778885'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67717
+  issue_type: Story
+  linked_to: null
+  priority: major
+  project: AAP
+  timestamp: '2026-03-07T18:11:38.726990'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67718
+  issue_type: Story
+  linked_to: null
+  priority: normal
+  project: AAP
+  timestamp: '2026-03-07T19:03:50.915892'
+- code_context_added: false
+  files_referenced: 0
+  issue_key: AAP-67719
+  issue_type: Story
+  linked_to: APPSRE-13651
+  priority: normal
+  project: AAP
+  timestamp: '2026-03-07T19:06:22.544951'
 knowledge_bootstraps_all:
 - errors: 0
   force: false
@@ -1667,7 +1755,7 @@ knowledge_bootstraps_all:
   skipped: 0
   timestamp: '2026-02-09T23:28:48.244139'
   total_combinations: 140
-last_updated: '2026-03-01T12:01:01.186081'
+last_updated: '2026-03-07T21:04:45.063215'
 pipeline_failures: []
 popular_queries:
 - avg_results: 0.0
@@ -1732,73 +1820,61 @@ slack_notifications:
   threaded: false
   timestamp: '2026-02-26T10:02:23.021544'
   type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-03T16:44:46.660575'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-03T16:52:07.546919'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-03T17:24:57.659417'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-04T11:27:29.892106'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-05T18:58:04.171736'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-07T17:34:14.847436'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-07T17:59:22.066434'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-07T19:04:17.770911'
+  type: info
+- channel: aa-api-team-test
+  has_context: false
+  has_mention: false
+  threaded: false
+  timestamp: '2026-03-07T19:06:32.179710'
+  type: info
 vector_reindexes:
-- errors: 2
-  force: false
-  projects_indexed: 5
-  timestamp: '2026-02-15T00:02:11.742106'
-  total_chunks: 0
-  total_files: 0
-- errors: 2
-  force: false
-  projects_indexed: 5
-  timestamp: '2026-02-15T21:02:26.855719'
-  total_chunks: 0
-  total_files: 0
-- errors: 2
-  force: false
-  projects_indexed: 5
-  timestamp: '2026-02-16T00:02:05.845146'
-  total_chunks: 0
-  total_files: 0
-- errors: 3
-  force: false
-  projects_indexed: 4
-  timestamp: '2026-02-16T15:03:15.989824'
-  total_chunks: 0
-  total_files: 0
-- errors: 3
-  force: false
-  projects_indexed: 4
-  timestamp: '2026-02-16T18:00:58.507212'
-  total_chunks: 0
-  total_files: 0
-- errors: 4
-  force: false
-  projects_indexed: 3
-  timestamp: '2026-02-16T21:02:11.391177'
-  total_chunks: 0
-  total_files: 0
-- errors: 4
-  force: false
-  projects_indexed: 3
-  timestamp: '2026-02-17T00:01:05.106603'
-  total_chunks: 0
-  total_files: 0
-- errors: 4
-  force: false
-  projects_indexed: 3
-  timestamp: '2026-02-17T12:01:11.720050'
-  total_chunks: 0
-  total_files: 0
-- errors: 4
-  force: false
-  projects_indexed: 3
-  timestamp: '2026-02-17T18:01:14.010092'
-  total_chunks: 0
-  total_files: 0
-- errors: 0
-  force: false
-  projects_indexed: 11
-  timestamp: '2026-02-18T18:03:42.594793'
-  total_chunks: 9097
-  total_files: 5427
-- errors: 0
-  force: false
-  projects_indexed: 11
-  timestamp: '2026-02-18T21:02:41.579951'
-  total_chunks: 591
-  total_files: 34
 - errors: 0
   force: false
   projects_indexed: 11
@@ -2033,3 +2109,69 @@ vector_reindexes:
   timestamp: '2026-03-01T12:01:01.173252'
   total_chunks: 34
   total_files: 2
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-04T12:01:42.900298'
+  total_chunks: 4333
+  total_files: 682
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-04T15:01:20.169513'
+  total_chunks: 162
+  total_files: 10
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-04T18:04:17.208440'
+  total_chunks: 41798
+  total_files: 29527
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-04T21:04:10.644611'
+  total_chunks: 45
+  total_files: 2
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-05T18:02:41.940949'
+  total_chunks: 819
+  total_files: 325
+- errors: 0
+  force: false
+  projects_indexed: 11
+  timestamp: '2026-03-05T21:01:39.931206'
+  total_chunks: 2231
+  total_files: 330
+- errors: 1
+  force: false
+  projects_indexed: 10
+  timestamp: '2026-03-06T18:01:05.907253'
+  total_chunks: 0
+  total_files: 0
+- errors: 2
+  force: false
+  projects_indexed: 9
+  timestamp: '2026-03-06T21:01:38.523986'
+  total_chunks: 0
+  total_files: 0
+- errors: 3
+  force: false
+  projects_indexed: 8
+  timestamp: '2026-03-07T15:01:41.684972'
+  total_chunks: 0
+  total_files: 0
+- errors: 4
+  force: false
+  projects_indexed: 8
+  timestamp: '2026-03-07T18:04:14.248475'
+  total_chunks: 10
+  total_files: 2
+- errors: 4
+  force: false
+  projects_indexed: 8
+  timestamp: '2026-03-07T21:04:45.030238'
+  total_chunks: 0
+  total_files: 0

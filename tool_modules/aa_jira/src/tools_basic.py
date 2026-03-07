@@ -372,6 +372,47 @@ async def _jira_add_comment_impl(issue_key: str, comment: str) -> str:
 
 
 @auto_heal()
+async def _jira_delete_comment_impl(
+    issue_key: str,
+    comment_id: str | None = None,
+    containing: str | None = None,
+    latest: bool = False,
+    all_comments: bool = False,
+) -> str:
+    """
+    Delete a comment from a Jira issue via rh-issue delete-comment.
+
+    Args:
+        issue_key: The Jira issue key (e.g., AAP-12345)
+        comment_id: Comment ID from Jira (omit if using containing, latest, or all_comments)
+        containing: Delete first comment whose body contains this text
+        latest: Delete the most recent comment on the issue
+        all_comments: Delete all comments on the issue
+
+    Returns:
+        Confirmation message.
+    """
+    args = ["delete-comment", issue_key]
+    if all_comments:
+        args.append("--all")
+    elif latest:
+        args.append("--latest")
+    elif containing is not None:
+        args.extend(["--containing", containing])
+    elif comment_id:
+        args.append(comment_id)
+    else:
+        return "❌ Provide one of: comment_id, containing, latest=True, or all_comments=True"
+
+    success, output = await run_rh_issue(args, timeout=30)
+
+    if not success:
+        return f"❌ Failed to delete comment: {output}"
+
+    return f"✅ Comment deleted from {issue_key}\n\n{output}"
+
+
+@auto_heal()
 async def _jira_add_link_impl(
     from_issue: str,
     to_issue: str,
@@ -903,6 +944,36 @@ def _register_write_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
+    async def jira_delete_comment(
+        issue_key: str,
+        comment_id: str | None = None,
+        containing: str | None = None,
+        latest: bool = False,
+        all_comments: bool = False,
+    ) -> str:
+        """
+        Delete a comment from a Jira issue.
+
+        Args:
+            issue_key: The Jira issue key (e.g., AAP-12345)
+            comment_id: Comment ID from Jira (omit if using containing, latest, or all_comments)
+            containing: Delete first comment whose body contains this text
+            latest: Delete the most recent comment on the issue
+            all_comments: Delete all comments on the issue
+
+        Returns:
+            Confirmation message.
+        """
+        return await _jira_delete_comment_impl(
+            issue_key,
+            comment_id=comment_id,
+            containing=containing,
+            latest=latest,
+            all_comments=all_comments,
+        )
+
+    @auto_heal()
+    @registry.tool()
     async def jira_add_link(
         from_issue: str,
         to_issue: str,
@@ -975,9 +1046,14 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Accepts Markdown in all text fields and auto-converts to Jira wiki markup.
         Issue type is case-insensitive (Story, story, STORY all work).
 
-        AAP project requires Problem Description and Definition of Done for all issue types.
-        If not provided, description is used as fallback for Problem Description,
-        and a sensible default is used for Definition of Done.
+        Required AAP fields (fallbacks when omitted):
+        - All types: Summary (required), Problem Description (fallback: description),
+          Definition of Done (fallback: default bullet list).
+        - Story only: User Story (fallback: "As a user, I want {summary}."),
+          Acceptance Criteria (fallback: "* Functionality works as described"),
+          Supporting Documentation (fallback: "N/A"), Definition of Done (same as above).
+        The create_jira_issue skill and other callers may pass these explicitly or rely
+        on these tool-level fallbacks to satisfy AAP project requirements.
 
         Args:
             issue_type: Type of issue - "bug", "story", "task", "epic" (case insensitive)
@@ -1003,7 +1079,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
                 issue_type="task",
                 summary="Fix Slack bot issue creation",
                 description="The @me jira command fails to create issues.",
-                problem_description="create_jira_issue skill missing required AAP fields",
+                problem_description="Users cannot create issues via Slack; API returns 500.",
                 priority="major"
             )
         """

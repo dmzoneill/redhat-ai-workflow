@@ -115,6 +115,12 @@ You can also load a persona when starting a session:
 session_start(agent="devops")
 ```
 
+## Tools Not in Personas (use skills instead)
+
+Some capabilities are available **only via skills**, not by loading a persona:
+
+- **Google Drive:** No persona includes `aa_gdrive`. Use the **`gdrive_fetch_doc`** skill to fetch a Google Doc by `file_id`. The skill engine runs GDrive tools inside skill steps.
+
 ## See Also
 
 - `/tools` - See what tools are available

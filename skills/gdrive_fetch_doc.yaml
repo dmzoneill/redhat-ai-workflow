@@ -1,0 +1,38 @@
+# Skill: Fetch a Google Doc (or Sheet/Slides) by file ID
+# Use when you have the document ID from a URL (e.g. docs.google.com/document/d/FILE_ID/edit)
+
+name: gdrive_fetch_doc
+description: |
+  Fetch the text content of a Google Drive file by its file ID.
+  Use for: meeting notes, design docs, any Doc/Sheet/Slides when you have the share link.
+  File ID is in the URL: https://docs.google.com/document/d/FILE_ID/edit
+version: "1.0"
+
+inputs:
+  - name: file_id
+    type: string
+    required: true
+    description: "Google Drive file ID (from the document URL)"
+  - name: max_chars
+    type: integer
+    required: false
+    default: 60000
+    description: "Maximum characters to return (default 60000)"
+
+steps:
+  - name: fetch_content
+    description: "Get file content from Google Drive"
+    tool: gdrive_get_file_content
+    args:
+      file_id: "{{ inputs.file_id }}"
+      max_chars: "{{ inputs.max_chars | default(60000) }}"
+    output: doc_content
+
+  - name: save_to_workspace
+    description: "Save full content to docs/ for use in plans"
+    condition: "doc_content and not doc_content.startswith('❌')"
+    tool: write_workspace_file
+    args:
+      relative_path: "docs/meetings/anstrat1848-notes-fetched.txt"
+      content: "{{ doc_content }}"
+

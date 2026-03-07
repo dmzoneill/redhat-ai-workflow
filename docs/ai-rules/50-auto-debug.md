@@ -2,6 +2,8 @@
 
 When an MCP tool fails (returns ❌), you can fix the tool itself.
 
+**Before retrying:** Call `check_known_issues(tool_name, error_text)` to see if a fix is already recorded (see 25-memory-operations.md). If a known fix is returned, apply it and retry instead of debugging from scratch.
+
 ## Workflow
 
 1. **Tool fails** → Look for the hint: `💡 To auto-fix: debug_tool('tool_name')`
@@ -41,6 +43,16 @@ Claude: [applies fix, commits, retries operation]
 | "Unknown flag: --state" | CLI syntax changed |
 | "Unauthorized" | Auth not passed correctly |
 | "manifest unknown" | Wrong image tag format |
+
+## Recurring Failure Modes
+
+When the same kind of error keeps appearing, try the usual remedy before deep debugging:
+
+| Failure mode | Example patterns | Typical remedy |
+|--------------|------------------|----------------|
+| Auth / 401   | unauthorized, 401, 403, token expired | Re-auth (e.g. `oc login`, kube_login, refresh token) |
+| Network      | connection refused, timeout, no route to host | Check VPN / connectivity, retry later |
+| Image/tag    | manifest unknown | Use full 40-char image SHA (see 40-ephemeral.md) |
 
 ## Check Known Issues First
 

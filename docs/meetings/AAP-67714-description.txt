@@ -1,0 +1,25 @@
+h2. Overview
+
+This story tracks the System Design Plan (SDP) work for *ANSTRAT-1500: Support Data Export to Dataverse for Ansible Cloud Analytics*. It is the single Jira story for the ANSTRAT-1500 SDP. The SDP document lives in the ansible/handbook repo and is maintained via [Handbook PR #1243|https://github.com/ansible/handbook/pull/1243].
+
+h2. Scope
+
+* *Repo and path:* [ansible/handbook|https://github.com/ansible/handbook], file {{The Ansible Engineering Handbook/System Design Plans/ANSTRAT-1500-Dataverse-Export.md}}
+* *Handbook PR:* [PR #1243|https://github.com/ansible/handbook/pull/1243]
+* *Implementation epic:* [AAP-53376|https://issues.redhat.com/browse/AAP-53376] (Dataverse ELT Migration - Snowpipe and dbt)
+* *Feature:* [ANSTRAT-1500|https://issues.redhat.com/browse/ANSTRAT-1500]
+
+h2. What the SDP Covers
+
+* *Purpose:* Export Ansible Analytics data to Red Hat's enterprise Dataverse platform (Snowflake), restore paused Tableau reports, align with Red Hat-wide Dataverse adoption by end of CY25.
+* *Current state:* RedShift-based data warehouse; Airflow-managed ETL; Tableau reports paused since Q4 2025 (RedShift end-of-life, schema incompatibility).
+* *Target architecture:* AAP Metrics → S3 Export → Dedicated S3 Buckets → SQS → Lambda → DDS S3 → Snowpipe → Snowflake/Dataverse → dbt → Tableau.
+* *Key decisions:* ELT (not ETL in AAP); raw JSON only, five sources (Tower, Billing, Lightspeed, Hub, EDA); Lambda replication from AA S3 to DDS S3 (platform requirement); two-phase POC (Phase 1 one table via Snowpipe, Phase 2 dbt to Nabo's schema, ~2 months); support model APPSRE (ingress, S3/SQS; Lambda limited) and Dataverse (Snowflake, Snowpipe).
+* *Blocking problem statements:* P1 pipeline and support boundaries (APPSRE/Dataverse sign-off, ATLAN, Lambda MR !176223); P2 end-to-end validation (Phase 1/2, &lt;0.1% variance from RedShift, TeleSense/Tableau); P3 security (cross-account S3, Lambda, Vault, ProdSec/Thomas Eagle).
+* *Implementation progress:* Snowpipe pipeline (MR !1511); 94 dbt staging + 6 mart models (MR !5); Vault credentials; Lambda via terraform-repo (MR !176223). Pending: Lambda MR merge, cross-account bucket policies, Dataverse SDP and support alignment.
+
+h2. References
+
+* [Refinement plan (AAP-59158)|https://gitlab.cee.redhat.com/automation-analytics/redhat-ai-workflow/-/blob/main/docs/meetings/AAP-59158-dataverse-refinement-plan.md]
+* [Dataverse integration notes repo|https://gitlab.cee.redhat.com/automation-analytics/dataverse-integration]
+* [app-interface Lambda MR !176223|https://gitlab.cee.redhat.com/service/app-interface/-/merge_requests/176223]

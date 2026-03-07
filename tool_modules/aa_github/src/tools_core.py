@@ -1,11 +1,11 @@
 """GitHub core tools - essential repository and PR operations.
 
 This module provides the minimal set of GitHub tools needed for most workflows:
-- gh_repo_list, gh_repo_view: Repository info
+- gh_repo_list, gh_repo_view, gh_repo_clone: Repository info and clone
 - gh_pr_list, gh_pr_view, gh_pr_create: PR operations
 - gh_pr_checkout, gh_pr_merge: PR workflow
 
-Total: ~8 core tools (down from 35 in basic)
+Total: ~9 core tools (down from 35 in basic)
 """
 
 import logging
@@ -31,6 +31,7 @@ try:
         _gh_pr_list_impl,
         _gh_pr_merge_impl,
         _gh_pr_view_impl,
+        _gh_repo_clone_impl,
         _gh_repo_list_impl,
         _gh_repo_view_impl,
     )
@@ -45,6 +46,7 @@ except ImportError:
     _gh_pr_list_impl = _basic_module._gh_pr_list_impl
     _gh_pr_merge_impl = _basic_module._gh_pr_merge_impl
     _gh_pr_view_impl = _basic_module._gh_pr_view_impl
+    _gh_repo_clone_impl = _basic_module._gh_repo_clone_impl
     _gh_repo_list_impl = _basic_module._gh_repo_list_impl
     _gh_repo_view_impl = _basic_module._gh_repo_view_impl
 
@@ -68,6 +70,12 @@ def register_tools(server: FastMCP) -> int:
     async def gh_repo_view(repo: str = "", web: bool = False) -> str:
         """View repository details."""
         return await _gh_repo_view_impl(repo, web)
+
+    @auto_heal()
+    @registry.tool()
+    async def gh_repo_clone(repo: str, directory: str = "", cwd: str = "") -> str:
+        """Clone a repository."""
+        return await _gh_repo_clone_impl(repo, directory, cwd)
 
     @auto_heal()
     @registry.tool()
@@ -104,7 +112,7 @@ def register_tools(server: FastMCP) -> int:
     @registry.tool()
     async def gh_pr_checkout(pr_number: int, repo: str = "", cwd: str = "") -> str:
         """Checkout a pull request locally."""
-        return await _gh_pr_checkout_impl(pr_number, repo, cwd)
+        return await _gh_pr_checkout_impl(str(pr_number), "", repo, cwd)
 
     @auto_heal()
     @registry.tool()

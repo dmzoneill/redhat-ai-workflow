@@ -1,0 +1,8 @@
+Refinement meeting 2026-03-05 (Shane McDonald, David O Neill, Zvika Sadeh).
+
+Reviewed all refinement action tasks for Stage Connectivity Initiative (1848). Decisions:
+- Keep open: Architecture Definition (SDP in progress), Test Plan (to be addressed in SDP/proposals), Downstream CI/CD (pending SAS side changes).
+- Close with detailed comments: Kickoff, Engage with Docs, Engage with UX, Security (see Security task), Build and Release, Installer, Release Eng, Perf and Scale, Cloud Assessment.
+
+Meeting notes: https://docs.google.com/document/d/1ILmwwMW2tiYcHGHgtLC6en_Iep_Fpev_Q54gzNwqg4Y/edit
+SDP: https://github.com/ansible/handbook/pull/1223

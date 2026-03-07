@@ -1490,7 +1490,12 @@ class DataCollector(GitLabCollectorMixin, GitHubCollectorMixin):
             logger.debug("Session file read failed for %s: %s", target, e)
             return []
 
-        entries = session_data.get("entries", [])
+        try:
+            from tool_modules.aa_workflow.src.memory_tools import get_session_log_entries
+
+            entries = get_session_log_entries(session_data)
+        except ImportError:
+            entries = session_data.get("entries", [])
         if not entries:
             return []
 

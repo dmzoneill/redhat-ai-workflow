@@ -633,14 +633,15 @@ class TestMemorySessionLogImpl:
             )
         assert "Logged" in result[0].text
 
-        # Verify file was created
+        # Verify file was created (new format: sessions._global.entries)
         today = datetime.now().strftime("%Y-%m-%d")
         session_file = temp_memory_dir / "sessions" / f"{today}.yaml"
         assert session_file.exists()
         data = yaml.safe_load(session_file.read_text())
-        assert len(data["entries"]) == 1
-        assert data["entries"][0]["action"] == "Started work"
-        assert data["entries"][0]["details"] == "details here"
+        entries = memory_tools.get_session_log_entries(data)
+        assert len(entries) == 1
+        assert entries[0]["action"] == "Started work"
+        assert entries[0]["details"] == "details here"
 
     @pytest.mark.asyncio
     async def test_logs_without_details(self, temp_memory_dir):
@@ -649,7 +650,8 @@ class TestMemorySessionLogImpl:
         today = datetime.now().strftime("%Y-%m-%d")
         session_file = temp_memory_dir / "sessions" / f"{today}.yaml"
         data = yaml.safe_load(session_file.read_text())
-        assert "details" not in data["entries"][0]
+        entries = memory_tools.get_session_log_entries(data)
+        assert "details" not in entries[0]
 
     @pytest.mark.asyncio
     async def test_appends_to_existing_session(self, temp_memory_dir):
@@ -663,7 +665,89 @@ class TestMemorySessionLogImpl:
         with patch("tool_modules.aa_workflow.src.agent_stats.record_memory_write"):
             await memory_tools._memory_session_log_impl("new action")
         data = yaml.safe_load(session_file.read_text())
-        assert len(data["entries"]) == 2
+        entries = memory_tools.get_session_log_entries(data)
+        assert len(entries) == 2
+
+
+class TestSessionLogHelpers:
+    """Tests for get_session_log_entries and by-session structure."""
+
+    def test_get_session_log_entries_legacy(self):
+        data = {"date": "2026-03-06", "entries": [{"time": "10:00", "action": "A"}]}
+        assert memory_tools.get_session_log_entries(data) == [
+            {"time": "10:00", "action": "A"}
+        ]
+
+    def test_get_session_log_entries_new_format(self):
+        data = {
+            "date": "2026-03-06",
+            "sessions": {
+                "_global": {"entries": [{"time": "10:00", "action": "cron"}]},
+                "sid-1": {"entries": [{"time": "11:00", "action": "Session started"}]},
+            },
+        }
+        entries = memory_tools.get_session_log_entries(data)
+        assert len(entries) == 2
+        assert entries[0]["action"] == "cron"
+        assert entries[1]["action"] == "Session started"
+
+    def test_get_session_log_by_chat(self):
+        data = {
+            "date": "2026-03-06",
+            "session_order": ["sid-1"],
+            "sessions": {
+                "_global": {"entries": [{"time": "10:00", "action": "cron"}]},
+                "sid-1": {
+                    "started_at": "11:00",
+                    "persona": "developer",
+                    "entries": [{"time": "11:00", "action": "Session started"}],
+                },
+            },
+        }
+        out = memory_tools.get_session_log_by_chat(data)
+        assert len(out["chronological"]) == 2
+        assert "sid-1" in out["by_session"]
+        assert out["by_session"]["sid-1"]["meta"]["persona"] == "developer"
+        assert out["session_order"] == ["sid-1"]
+
+
+class TestSessionLogHelpers:
+    """Tests for get_session_log_entries and by-session structure."""
+
+    def test_get_session_log_entries_legacy(self):
+        data = {"date": "2026-03-06", "entries": [{"time": "10:00", "action": "A"}, {"time": "11:00", "action": "B"}]}
+        assert memory_tools.get_session_log_entries(data) == [
+            {"time": "10:00", "action": "A"},
+            {"time": "11:00", "action": "B"},
+        ]
+
+    def test_get_session_log_entries_new_format(self):
+        data = {
+            "date": "2026-03-06",
+            "sessions": {
+                "_global": {"entries": [{"time": "10:00", "action": "cron"}]},
+                "sid-1": {"entries": [{"time": "10:30", "action": "Session started"}]},
+            },
+        }
+        entries = memory_tools.get_session_log_entries(data)
+        assert len(entries) == 2
+        assert entries[0]["action"] == "cron"
+        assert entries[1]["action"] == "Session started"
+
+    def test_append_creates_session_block_with_session_id(self, temp_memory_dir):
+        memory_tools.append_session_entry(
+            {"action": "Session started", "session_id": "test-uuid-123", "details": "Persona: developer, Project: foo"}
+        )
+        today = datetime.now().strftime("%Y-%m-%d")
+        session_file = temp_memory_dir / "sessions" / f"{today}.yaml"
+        data = yaml.safe_load(session_file.read_text())
+        assert "sessions" in data
+        assert "test-uuid-123" in data["sessions"]
+        assert data["sessions"]["test-uuid-123"]["persona"] == "developer"
+        assert data["sessions"]["test-uuid-123"]["project"] == "foo"
+        entries = memory_tools.get_session_log_entries(data)
+        assert len(entries) == 1
+        assert entries[0]["action"] == "Session started"
 
 
 class TestCheckKnownIssuesImpl:

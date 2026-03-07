@@ -1,0 +1,5 @@
+Refinement 2026-03-05: Keeping open – in progress.
+
+* SDP — Satisfied (in progress): Open (handbook PR #1223). May need slight tweaks based on ongoing discussions.
+* Blocking proposals — Gap: Not all approved/merged yet. Outstanding questions; we are engaging; proposals will follow once we have more clarity. This task stays open until blocking proposals are done.
+* Design epic / stories — Satisfied (in progress): SDP work will be story-pointed and assigned to current sprint. Close this task when SDP is approved/merged and blocking proposals are done.

@@ -45,10 +45,12 @@ The system automatically logs these to the daily session file:
 | Event | Logged By | Entry Type |
 |-------|-----------|------------|
 | Session start | `session_tools.py` | `session` |
-| Skill completions | `skill_engine.py` | `skill` |
-| Significant tool calls (git_commit, jira_transition, slack_send_message, etc.) | `debuggable.py` | `tool` |
+| Skill started + skill completions | `skill_engine.py` | `skill` |
+| Significant tool calls (git_commit, jira_transition, persona_load, skill_run, etc.) | `debuggable.py` | `tool` |
 
 You do NOT need to manually log these. They are captured automatically.
+
+**Session logs stay sparse if:** the LLM never calls `session_start()` (no session row), only does read-only tools (no tool rows), and skips `session_close()` and `memory_session_log()`. Always call `session_close()` before ending real work so the day's log has a summary.
 
 ## What YOU Must Log (Mid-Session)
 

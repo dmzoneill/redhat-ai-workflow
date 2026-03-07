@@ -1,0 +1,18 @@
+metadata:
+  project: automation-analytics-jupyter-notebooks
+  persona: infra
+  last_updated: '2026-03-02T06:02:48.834936'
+  last_scanned: '2026-03-02T06:02:48.834882'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: 2.1 Click on **Start my server**
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment: []
+gotchas: []
+learned_from_tasks: []

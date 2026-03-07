@@ -67,6 +67,8 @@ uv sync --extra dev
 
 ### 2️⃣ Configure Your IDE
 
+> **Cursor / MCP:** Use **`.venv/bin/python`** (not `uv run`) as the server command so the IDE doesn't run `uv sync` at startup and time out. Run `uv sync` once to create `.venv` before first use.
+
 <details>
 <summary><strong>🔷 Claude Code (claude.ai/code)</strong></summary>
 

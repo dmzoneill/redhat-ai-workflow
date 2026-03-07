@@ -33,6 +33,7 @@ from server.tool_registry import ToolRegistry
 try:
     from .tools_basic import (
         _jira_add_comment_impl,
+        _jira_delete_comment_impl,
         _jira_get_issue_impl,
         _jira_my_issues_impl,
         _jira_search_impl,
@@ -46,6 +47,7 @@ except ImportError:
     _basic_module = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_basic_module)
     _jira_add_comment_impl = _basic_module._jira_add_comment_impl
+    _jira_delete_comment_impl = _basic_module._jira_delete_comment_impl
     _jira_get_issue_impl = _basic_module._jira_get_issue_impl
     _jira_my_issues_impl = _basic_module._jira_my_issues_impl
     _jira_search_impl = _basic_module._jira_search_impl
@@ -142,6 +144,36 @@ def register_tools(server: FastMCP) -> int:
             Confirmation of comment added.
         """
         return await _jira_add_comment_impl(issue_key, comment)
+
+    @auto_heal()
+    @registry.tool()
+    async def jira_delete_comment(
+        issue_key: str,
+        comment_id: str | None = None,
+        containing: str | None = None,
+        latest: bool = False,
+        all_comments: bool = False,
+    ) -> str:
+        """
+        Delete a comment from a Jira issue.
+
+        Args:
+            issue_key: Issue key (e.g., "AAP-12345")
+            comment_id: Comment ID from Jira (omit if using containing, latest, or all_comments)
+            containing: Delete first comment whose body contains this text
+            latest: Delete the most recent comment on the issue
+            all_comments: Delete all comments on the issue
+
+        Returns:
+            Confirmation message.
+        """
+        return await _jira_delete_comment_impl(
+            issue_key,
+            comment_id=comment_id,
+            containing=containing,
+            latest=latest,
+            all_comments=all_comments,
+        )
 
     @auto_heal()
     @registry.tool()

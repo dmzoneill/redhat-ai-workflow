@@ -67,6 +67,7 @@ SIGNIFICANT_TOOLS: set[str] = {
     # Jira
     "jira_transition",
     "jira_add_comment",
+    "jira_delete_comment",
     "jira_create_issue",
     "jira_update_issue",
     "jira_attach_session",
@@ -99,6 +100,12 @@ SIGNIFICANT_TOOLS: set[str] = {
     "google_calendar_schedule_meeting",
     # Alertmanager
     "alertmanager_create_silence",
+    # Workflow / context (so session logs show what the user did)
+    "persona_load",
+    "session_rename",
+    "session_switch",
+    "session_set_project",
+    "skill_run",
 }
 
 logger = logging.getLogger(__name__)
@@ -656,6 +663,22 @@ def _create_debug_wrapper(tool_name: str, original_fn: Callable) -> Callable:
                         session_id = session.session_id
                         if session.tool_call_count % 10 == 0:
                             WorkspaceRegistry.save_to_disk()
+                            # Activity heartbeat: ensure session log has a trace even if
+                            # the LLM never calls session_close
+                            try:
+                                from tool_modules.aa_workflow.src.memory_tools import (
+                                    append_session_entry,
+                                )
+
+                                heartbeat = {
+                                    "type": "activity",
+                                    "action": "Session activity",
+                                    "details": f"{session.tool_call_count} tools used (last: {_name})",
+                                    "session_id": session_id,
+                                }
+                                append_session_entry(heartbeat)
+                            except Exception as hb_exc:
+                                logger.debug("Suppressed heartbeat log: %s", hb_exc)
             except Exception as exc:
                 logger.debug("Suppressed error: %s", exc)
 

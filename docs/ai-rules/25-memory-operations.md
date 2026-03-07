@@ -60,19 +60,43 @@ session_close(
 )
 ```
 
+## State and shared_context
+
+`state/shared_context.yaml` holds cross-session context written by skills and tools (not by the LLM directly). Read it when you need recent system state.
+
+| Key | Purpose |
+|-----|---------|
+| `current_investigation` | Active alert/investigation context (e.g. from investigate_alert); has `expires_at` |
+| `last_branch_sync` | Last sync_branch result (branch, ahead/behind, success) |
+| `last_ci_health_check` | Last CI health check result (project, pipeline_count, ci_valid) |
+| `last_coffee` | Last morning briefing snapshot (alerts, pr_count, feedback_waiting, etc.) |
+| `last_updated` | Timestamp of last update |
+
+**When to read:** Before retrying an operation that might depend on recent state (e.g. "when did we last sync?"), or when resuming an investigation (current_investigation). Use `memory_read("state/shared_context")`.
+
 ## Session Log Format
 
-Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) use an enriched entry format.
+Daily session logs (`memory/sessions/YYYY-MM-DD.yaml`) are stored **by chat** for separation, with chronological order available when needed.
+
+**Structure:** The file has `date`, `session_order`, and `sessions`. Under `sessions`:
+- `_global`: entries with no `session_id` (cron, daemons).
+- `<session_id>`: one block per chat, with `started_at`, `persona`, `project`, `name` (optional) and `entries` (that chat’s events in order).
+
+**Reading:** Use `get_session_log_entries(data)` for a single chronological list (merge of all sessions by time). Use `get_session_log_by_chat(data)` when you need per-chat separation. Legacy files (flat `entries` only) are migrated to this structure on first write.
+
 Each entry has a `type` field indicating its source:
 
 | Type | Source | Description |
 |------|--------|-------------|
 | `session` | Auto (session_tools.py) | Session start/end events |
-| `skill` | Auto (skill_engine.py) | Skill execution completions |
-| `tool` | Auto (debuggable.py) | Significant tool calls (commits, MR creation, Jira transitions) |
+| `skill` | Auto (skill_engine.py) | Skill started + skill execution completions |
+| `tool` | Auto (debuggable.py) | Significant tool calls (commits, persona_load, skill_run, Jira, etc.) |
 | `manual` | LLM (memory_session_log) | Context, decisions, findings logged by the LLM |
 | `summary` | LLM (session_close) | Structured session summary with issues, accomplished, next_steps |
 | `cron` | Auto (cron jobs) | Scheduled task results |
+| `slack_alert` | Auto (Slack daemon) | Incoming Slack alert that triggered investigate_slack_alert |
+| `event` | Any (default) | Entry written without a type; backward compatibility |
+| `activity` | Auto (debuggable.py) | Session activity heartbeat every 10 tool calls (ensures a trace even without session_close) |
 
 ### Entry Fields
 
@@ -102,6 +126,8 @@ Multiple sessions can write to the same daily file safely -- all writes use `fcn
 |------|----------|
 | `check_known_issues(tool, error)` | Check if we've seen this error before |
 | `learn_tool_fix(tool, pattern, cause, fix)` | Save a fix for future reference |
+
+**Learned files:** `tool_fixes.yaml` stores fixes you save via `learn_tool_fix()`; `check_known_issues()` searches both `patterns.yaml` and `tool_fixes.yaml`. `tool_failures.yaml` is a log of tool failures used for stats and auto-heal; the LLM should not read or write it directly.
 
 ### Examples
 
@@ -157,18 +183,25 @@ memory_ask("AAP-12345 details", sources="jira")
 ```
 memory/
 ├── state/
-│   ├── current_work.yaml      # Active issues, branches, MRs
-│   ├── environments.yaml      # Stage/prod health status
+│   ├── current_work.yaml      # Active issues, branches, MRs (see project resolution below)
+│   ├── shared_context.yaml   # Cross-session context (last_coffee, last_branch_sync, etc.)
+│   ├── environments.yaml     # Stage/prod health status
 │   └── projects/
 │       └── <project>/
 │           └── current_work.yaml  # Per-project work state
 ├── learned/
-│   ├── patterns.yaml          # Error patterns and solutions
-│   ├── tool_fixes.yaml        # Tool-specific fixes
-│   └── runbooks.yaml          # Procedures that worked
+│   ├── patterns.yaml         # Error/auth/bonfire/pipeline patterns (check_known_issues)
+│   ├── tool_fixes.yaml       # Learned fixes (learn_tool_fix); used by check_known_issues
+│   └── tool_failures.yaml    # Failure log for stats/auto-heal; not for direct reads
+├── knowledge/
+│   └── personas/
+│       └── <persona>/
+│           └── <project>.yaml # Metadata, architecture, patterns, gotchas (read-only)
 └── sessions/
-    └── YYYY-MM-DD.yaml        # Daily session logs (enriched format)
+    └── YYYY-MM-DD.yaml       # Daily session logs (enriched format)
 ```
+
+**Current work path:** The key `state/current_work` is project-specific. The system resolves it to `memory/state/projects/<project>/current_work.yaml` using the session's project. Use the key `state/current_work` in `memory_read`, `memory_update`, etc.; do not hardcode the path.
 
 ## Common Patterns
 

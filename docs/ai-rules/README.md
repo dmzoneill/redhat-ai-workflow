@@ -13,11 +13,15 @@ Files are numbered for ordering:
 |------|---------|
 | `00-identity.md` | Who the AI is, what it does |
 | `10-skill-first.md` | **CRITICAL**: Use skills before manual steps |
-| `20-session-management.md` | Session tracking, personas |
+| `15-session-lifecycle.md` | Opening/closing session, what to log, session_close |
+| `16-tool-discovery.md` | Discovering tools, skill_list, persona_load |
+| `20-session-management.md` | Session ID, bootstrap, project detection, personas |
+| `25-memory-operations.md` | Reading/writing memory, session log, learned, state |
 | `30-git-safety.md` | Git safety rules |
 | `40-ephemeral.md` | Ephemeral deployment rules |
-| `50-auto-debug.md` | Self-healing tools |
-| `60-project-context.md` | Project-specific context |
+| `50-auto-debug.md` | Self-healing tools, check_known_issues, learn_tool_fix |
+| `55-work-completion.md` | Update Jira after work (transitions, comments) |
+| `60-use-mcp-tools.md` | Use MCP tools instead of blocked CLI commands |
 
 ## Syncing
 

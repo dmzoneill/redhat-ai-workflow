@@ -1,0 +1,20 @@
+metadata:
+  project: dataproduct-config
+  persona: workspace
+  last_updated: '2026-03-02T06:04:35.422143'
+  last_scanned: '2026-03-02T06:04:35.422099'
+  confidence: 0.3
+  auto_generated: true
+architecture:
+  overview: <!-- TOC -->
+  key_modules: []
+  data_flow: ''
+  dependencies: []
+patterns:
+  coding: []
+  testing: []
+  deployment:
+  - pattern: GitLab CI/CD
+    notes: Pipeline defined in .gitlab-ci.yml
+gotchas: []
+learned_from_tasks: []

@@ -28,6 +28,7 @@ KUBECONFIG=~/.kube/config.e bonfire namespace list --mine
 2. **Image tags must be FULL 40-char git SHA** - short SHAs (8 chars) don't exist in Quay
 3. **Only release YOUR namespaces**: `bonfire namespace list --mine`
 4. **ITS deploy pattern requires sha256 digest**, not git SHA for IMAGE_TAG
+5. **app-interface** terraform-repo YAML requires `ref` = full 40-char commit SHA (see `docs/app-interface.md`).
 
 ## ClowdApp Deployment
 

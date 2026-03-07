@@ -82,7 +82,7 @@ graph LR
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
-| `mcp_proxy.py` | MCP proxy server | Used for testing |
+| `mcp_proxy.py` | MCP hot-reload proxy (Cursor) | Run `uv sync` once before first use so the server starts before the IDE times out |
 | `extension_watcher.py` | Watch VSCode extension | `python extension_watcher.py` |
 | `generate_slides.py` | Generate presentation slides | `python generate_slides.py` |
 | `generate_layer5_dashboard.py` | Generate Layer 5 dashboard | `python generate_layer5_dashboard.py` |

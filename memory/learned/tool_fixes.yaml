@@ -178,3 +178,28 @@ tool_fixes:
     resolve this for file watchers.
   times_prevented: 0
   tool_name: code_watch
+- date_learned: '2026-03-07'
+  error_pattern: jira_delete_comment timeout / 30s / all_comments
+  fix_applied: Run deletes in a loop (one comment at a time) or increase MCP timeout
+    for jira_delete_comment. Jira API can be slow when deleting many comments.
+  root_cause: jira_delete_comment(..., all_comments=True) can hit 30s timeout on
+    issues with many comments.
+  times_prevented: 0
+  tool_name: jira_delete_comment
+- date_learned: '2026-03-07'
+  error_pattern: 'ref'' is a required property / terraform-repo validation
+  fix_applied: Use full 40-character hex commit SHA for ref in app-interface
+    data/*/repos/*.yml (e.g. ref: 6bc292160c8184571900271a0185d621b5e5eab1). Not
+    branch name or short SHA.
+  root_cause: app-interface terraform-repo schema requires ref = 40-char commit SHA
+    (^[0-9a-f]{40}$).
+  times_prevented: 0
+  tool_name: app-interface / appinterface_check
+- date_learned: '2026-03-07'
+  error_pattern: jira_add_link failed / add-link step failed / link not created
+  fix_applied: Add a comment on the issue with the related issue key and Slack URLs
+    so the relationship is visible on the issue.
+  root_cause: add-link step may expect different flags or fail for cross-project
+    links; comment is a reliable fallback.
+  times_prevented: 0
+  tool_name: jira_add_link

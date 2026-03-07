@@ -1,0 +1,4 @@
+Refinement 2026-03-05: Closing.
+
+* AC (1) Child issue(s) for installer changes — N/A: No installer changes required for this initiative (no new component, new settings, component interaction changes, or additional infra for this connectivity work).
+* AC (2) Comment — Satisfied: This comment states why no installer changes are needed: no installer impact for this initiative.
