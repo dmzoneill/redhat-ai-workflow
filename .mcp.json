@@ -1,12 +1,59 @@
 {
   "mcpServers": {
     "aa_workflow": {
-      "command": "python",
+      "command": "bash",
       "args": [
-        "/home/daoneill/src/redhat-ai-workflow/scripts/mcp_proxy.py",
-        "--cwd", "/home/daoneill/src/redhat-ai-workflow",
-        "--",
-        ".venv/bin/python", "-m", "server"
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/20-redhat-jira.sh && load-secrets 2>/dev/null; exec /home/daoneill/src/redhat-ai-workflow/.venv/bin/python /home/daoneill/src/redhat-ai-workflow/scripts/mcp_proxy.py --cwd /home/daoneill/src/redhat-ai-workflow -- /home/daoneill/src/redhat-ai-workflow/.venv/bin/python -m server"
+      ]
+    },
+    "github": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/21-github.sh && load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/github/server.py"
+      ]
+    },
+    "gitlab": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/22-gitlab.sh && load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/gitlab/server.py"
+      ]
+    },
+    "gmail": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh 2>/dev/null; source ~/.bashrc.d/scripts.d/35-google-mcp.sh 2>/dev/null; load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/gmail/server.py"
+      ]
+    },
+    "gworkspace": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh 2>/dev/null; source ~/.bashrc.d/scripts.d/35-google-mcp.sh 2>/dev/null; load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/gworkspace/server.py"
+      ]
+    },
+    "jira": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/20-redhat-jira.sh && load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/jira/server.py"
+      ]
+    },
+    "slack": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/24-redhat-slack.sh && load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/slack/server.py"
+      ]
+    },
+    "wordpress": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source ~/.bashrc.d/scripts.d/00-lazy-secrets.sh && source ~/.bashrc.d/scripts.d/40-wordpress.sh && load-secrets 2>/dev/null; exec /usr/bin/python3 /home/daoneill/src/agent-mcp-skills/wordpress/server.py"
       ]
     }
   }
