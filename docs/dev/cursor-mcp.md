@@ -4,7 +4,7 @@ Lessons from chat transcripts (see [lessons-learned-from-chat-transcripts](../le
 
 ## MCP config location
 
-**Cursor uses `.cursor/mcp.json` for project MCP config**, not the repo-root `.mcp.json`. When you change the MCP server command or args, update `.cursor/mcp.json` so Cursor picks it up.
+**Cursor uses `.cursor/mcp.json` for project MCP config**, not the repo-root `.mcp.json`. When you change the MCP server command or args, update **`.cursor/mcp.json`** so Cursor picks it up. Editing only repo-root `.mcp.json` will do nothing no matter how many times you restart — keep them in sync if you maintain both (e.g. copy `aa_workflow` from `.cursor/mcp.json` into `.mcp.json` for documentation).
 
 ## Server startup
 
