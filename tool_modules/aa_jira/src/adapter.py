@@ -204,19 +204,18 @@ class JiraAdapter:
             f"Assignee: {assignee_name}",
         ]
 
-        # Add description if present
+        # Add description if present (keep generous slice; ResultFormatter applies Jira cap)
         description = fields.get("description", "")
         if description:
-            # Truncate long descriptions
-            if len(description) > 500:
-                description = description[:500] + "..."
+            if len(description) > 20_000:
+                description = description[:20_000] + "..."
             content_parts.append(f"\n**Description:**\n{description}")
 
         # Add acceptance criteria if present
         ac = fields.get("customfield_12313440", "")  # Common AC field
         if ac:
-            if len(ac) > 300:
-                ac = ac[:300] + "..."
+            if len(ac) > 12_000:
+                ac = ac[:12_000] + "..."
             content_parts.append(f"\n**Acceptance Criteria:**\n{ac}")
 
         return MemoryItem(

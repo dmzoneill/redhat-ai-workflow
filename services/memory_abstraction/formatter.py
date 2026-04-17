@@ -23,6 +23,10 @@ from .models import MemoryItem, QueryResult
 
 logger = logging.getLogger(__name__)
 
+# Jira issues often exceed the default max_content_length (500); truncating there hid
+# summary, assignee, description, and AC from the model. See memory_ask + sources=jira.
+_JIRA_ITEM_CONTENT_LIMIT = 24_000
+
 
 class ResultFormatter:
     """
@@ -165,9 +169,12 @@ class ResultFormatter:
         if not content:
             return ""
 
-        # Truncate if needed
-        if len(content) > self.max_content_length:
-            content = content[: self.max_content_length] + "..."
+        # Truncate if needed (Jira/issue payloads need a much higher cap than default 500)
+        limit = self.max_content_length
+        if item.source == "jira":
+            limit = max(self.max_content_length, _JIRA_ITEM_CONTENT_LIMIT)
+        if len(content) > limit:
+            content = content[:limit] + "..."
 
         # Format based on type
         if item.type == "code_snippet":

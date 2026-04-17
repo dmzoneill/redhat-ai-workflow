@@ -391,6 +391,41 @@ class TestFormatter:
         assert "Code Search" in output
         assert "Test function" in output
 
+    def test_jira_content_not_truncated_at_default_500(self):
+        """Jira MemoryItems must not be cut to max_content_length (500) — see formatter."""
+        from services.memory_abstraction.formatter import ResultFormatter
+        from services.memory_abstraction.models import (
+            IntentClassification,
+            MemoryItem,
+            QueryResult,
+        )
+
+        formatter = ResultFormatter()
+        long_body = "D" * 3000
+        item = MemoryItem(
+            source="jira",
+            type="issue",
+            relevance=0.9,
+            summary="AAP-1: Example",
+            content=f"**AAP-1: Example**\nStatus: Open\nAssignee: Someone\n\n{long_body}",
+            metadata={"issue_key": "AAP-1", "status": "Open"},
+        )
+        intent = IntentClassification(
+            intent="issue_context",
+            confidence=0.9,
+            sources_suggested=["jira"],
+        )
+        result = QueryResult(
+            query="AAP-1",
+            intent=intent,
+            sources_queried=["jira"],
+            items=[item],
+            total_count=1,
+        )
+        output = formatter.format(result)
+        assert long_body in output
+        assert output.count("D") >= 3000
+
     def test_format_compact(self):
         """Test compact formatting."""
         from services.memory_abstraction.formatter import ResultFormatter
