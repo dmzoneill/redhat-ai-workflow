@@ -334,6 +334,33 @@ class TestMerger:
         assert "yaml" in result.errors
 
 
+class TestRouter:
+    """QueryRouter explicit vs health behavior."""
+
+    def test_explicit_jira_not_skipped_when_unhealthy(self):
+        """memory_ask(..., sources='jira') must route even if health check failed."""
+        import asyncio
+
+        from services.memory_abstraction.discovery import discover_and_load_all_adapters
+        from services.memory_abstraction.models import SourceFilter
+        from services.memory_abstraction.router import QueryRouter
+
+        discover_and_load_all_adapters()
+        router = QueryRouter()
+        router._health_cache["jira"] = False
+
+        async def run():
+            _intent, adapters = await router.route(
+                query="AAP-71577",
+                sources=[SourceFilter(name="jira")],
+                capability="query",
+            )
+            return adapters
+
+        adapters = asyncio.run(run())
+        assert [a[0].name for a in adapters] == ["jira"]
+
+
 class TestFormatter:
     """Test result formatter."""
 

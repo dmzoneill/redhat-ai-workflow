@@ -11,6 +11,7 @@ It wraps the existing Jira tool functionality.
 import json
 import logging
 import re
+import shutil
 from typing import Any
 
 from services.memory_abstraction.models import (
@@ -168,15 +169,41 @@ class JiraAdapter:
         try:
             from tool_modules.aa_jira.src.tools_basic import run_rh_issue
 
-            # Quick test - list config profiles (fast, doesn't hit API)
+            # Prefer: list config profiles (fast, doesn't hit Jira API)
             success, output = await run_rh_issue(
                 ["config", "list-profiles"], timeout=10
             )
+            if success:
+                return HealthStatus(
+                    healthy=True,
+                    error=None,
+                    details={"config": "ok"},
+                )
+
+            # Some rh-issue builds or environments fail `config list-profiles` while
+            # `view-issue` / API calls still work — try generic help, then PATH.
+            help_ok, _ = await run_rh_issue(["--help"], timeout=8)
+            if help_ok:
+                return HealthStatus(
+                    healthy=True,
+                    error=None,
+                    details={"fallback": "rh-issue --help"},
+                )
+
+            if shutil.which("rh-issue"):
+                return HealthStatus(
+                    healthy=True,
+                    error=None,
+                    details={
+                        "fallback": "which(rh-issue)",
+                        "note": "config list-profiles failed; probe query may still work",
+                    },
+                )
 
             return HealthStatus(
-                healthy=success,
-                error=None if success else output[:100],
-                details={"config": "ok"} if success else {},
+                healthy=False,
+                error=(output or "")[:200],
+                details={},
             )
         except ImportError:
             return HealthStatus(

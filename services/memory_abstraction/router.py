@@ -104,10 +104,9 @@ class QueryRouter:
                 )
                 continue
 
-            # Check health (cached)
-            if not await self._is_healthy(source_filter.name):
-                logger.warning(f"Adapter {source_filter.name} is unhealthy, skipping")
-                continue
+            # Do not gate explicit sources on health. Health checks are best-effort (e.g. Jira
+            # uses `rh-issue config list-profiles`, which can fail while `view-issue` still works).
+            # The adapter query will surface a real error if the backend is unusable.
 
             result.append((info, source_filter))
 
