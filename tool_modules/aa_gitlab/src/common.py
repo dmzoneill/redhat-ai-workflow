@@ -6,7 +6,13 @@ Extracted from tools_basic.py and tools_extra.py to eliminate duplication (DUP-0
 import re
 from pathlib import Path
 
-from server.utils import get_gitlab_host, get_section_config, run_cmd
+from server.utils import (
+    build_glab_bash_argv,
+    get_gitlab_host,
+    get_section_config,
+    gitlab_cli_token_ready,
+    run_cmd,
+)
 
 # Use shared implementation from utils
 GITLAB_HOST = get_gitlab_host()
@@ -99,11 +105,28 @@ async def run_glab(
         else:
             cmd.extend(["--repo", repo])
 
-    # Disable pager to prevent glab (especially `mr diff`) from hanging
-    # in non-interactive subprocess contexts
+    # Pager off; host from config/env. GITLAB_TOKEN comes from pass via 22-gitlab.sh + load-secrets
+    # (same as .mcp.json gitlab server). Sourcing ~/.bashrc without load-secrets does not export
+    # _lazy_pass tokens — use bash wrapper when the process has no token yet.
+    extra_env = {
+        "GITLAB_HOST": GITLAB_HOST,
+        "GLAB_PAGER": "",
+        "GIT_PAGER": "",
+    }
+    if not gitlab_cli_token_ready():
+        bash_argv = build_glab_bash_argv(args, extra_env, run_cwd)
+        if bash_argv is not None:
+            return await run_cmd(
+                bash_argv,
+                cwd=None,
+                env=None,
+                timeout=max(timeout, 120),
+                use_shell=False,
+            )
     return await run_cmd(
         cmd,
         cwd=run_cwd,
-        env={"GITLAB_HOST": GITLAB_HOST, "GLAB_PAGER": "", "GIT_PAGER": ""},
+        env=extra_env,
         timeout=timeout,
+        use_shell=False,
     )

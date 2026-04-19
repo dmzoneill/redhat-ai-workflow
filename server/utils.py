@@ -7,6 +7,7 @@ eliminating code duplication and ensuring consistent behavior.
 import asyncio
 import logging
 import os
+import shlex
 import subprocess
 from pathlib import Path
 from typing import cast
@@ -15,6 +16,10 @@ from server.error_patterns import AUTH_PATTERNS
 
 logger = logging.getLogger(__name__)
 
+# Serialize OpenShift auth refresh triggered by get_bearer_token / tools. Without this,
+# parallel Prometheus/Alertmanager/k8s calls from the Slack bot each invoke
+# ensure_cluster_auth → refresh_cluster_auth → user's `kube` wrapper (often `rhtoken`).
+_ensure_cluster_auth_lock = asyncio.Lock()
 
 # ==================== Output Formatting ====================
 
@@ -186,6 +191,146 @@ def get_section_config(section: str, default: dict | None = None) -> dict:
     return cast(dict, result)
 
 
+def ensure_jira_cli_env(extra: dict[str, str] | None = None) -> dict[str, str] | None:
+    """Merge env overrides for ``rh-issue`` (jira_creator ``EnvFetcher`` requires ``JIRA_URL``).
+
+    Why this exists:
+
+    - **Cursor MCP** is often started via ``.mcp.json`` with ``bash -c`` that sources
+      ``~/.bashrc.d/scripts.d/20-redhat-jira.sh`` and ``load-secrets``, so the server
+      process may already have ``JIRA_URL`` in ``os.environ``.
+    - **``run_rh_issue``** calls ``run_cmd(..., use_shell=False)`` so stdout from
+      sourcing ``~/.bashrc`` does not corrupt parsed CLI output. That path uses
+      ``os.environ.copy()`` only — no interactive shell — so if the parent process
+      was started without the Jira scripts, ``JIRA_URL`` is missing.
+    - **Agent / CI terminals** often run with a minimal environment (no ``.bashrc``),
+      so bare ``rh-issue`` fails with ``MissingConfigVariable: JIRA_URL`` even when
+      the workflow ``config.json`` defines ``jira.url``.
+
+    When ``JIRA_URL`` is unset or blank in the current process environment, set it
+    from ``config.json`` (same default as ``aa_jira`` helpers). Returns ``None`` if
+    no overrides are needed (caller passes ``env=None`` to ``run_cmd``).
+
+    Args:
+        extra: Additional keys to merge (e.g. ``JIRA_AFFECTS_VERSION`` cleared for create).
+
+    Returns:
+        Dict to pass as ``run_cmd(..., env=...)``, or ``None`` if no merge needed.
+    """
+    merged = dict(extra or {})
+    if (os.environ.get("JIRA_URL") or "").strip():
+        return merged if merged else None
+    config = load_config()
+    url = cast(dict, config.get("jira", {})).get("url", "https://issues.redhat.com")
+    merged["JIRA_URL"] = url
+    return merged
+
+
+def jira_cli_credential_ready() -> bool:
+    """True if this process already has URL + token for ``rh-issue`` / jira_creator."""
+    has_token = (
+        os.environ.get("JIRA_JPAT") or os.environ.get("JIRA_TOKEN") or ""
+    ).strip()
+    has_url = (os.environ.get("JIRA_URL") or "").strip()
+    return bool(has_token and has_url)
+
+
+def jira_lazy_secret_script_paths(home: Path | None = None) -> tuple[Path, Path] | None:
+    """Paths to the user's lazy-secrets + Jira scripts (read-only; never modified here)."""
+    home = home or Path.home()
+    lazy = home / ".bashrc.d" / "scripts.d" / "00-lazy-secrets.sh"
+    jira = home / ".bashrc.d" / "scripts.d" / "20-redhat-jira.sh"
+    if lazy.is_file() and jira.is_file():
+        return (lazy, jira)
+    return None
+
+
+def build_rh_issue_bash_argv(
+    args: list[str],
+    extra_env: dict[str, str] | None,
+    strip_affects_version_for_create: bool,
+    home: Path | None = None,
+) -> list[str] | None:
+    """Run ``rh-issue`` in bash after ``source`` + ``load-secrets`` (stdout from load-secrets suppressed).
+
+    Does not edit any bashrc files — only executes existing scripts under ``~/.bashrc.d/scripts.d/``.
+
+    Returns:
+        ``["bash", "-c", "..."]`` or ``None`` if those scripts are not present.
+    """
+    pair = jira_lazy_secret_script_paths(home)
+    if not pair:
+        return None
+    lazy, jira_sh = pair
+    parts: list[str] = [
+        f"source {shlex.quote(str(lazy))}",
+        f"source {shlex.quote(str(jira_sh))}",
+        # Suppress "Secrets loaded …" on stdout so CLI output stays parseable
+        "load-secrets 2>/dev/null 1>/dev/null",
+    ]
+    if extra_env:
+        for key in sorted(extra_env.keys()):
+            val = extra_env[key]
+            parts.append(f"export {key}={shlex.quote(str(val))}")
+    if strip_affects_version_for_create:
+        parts.append('export JIRA_AFFECTS_VERSION=""')
+    parts.append("exec " + " ".join(shlex.quote(x) for x in (["rh-issue"] + args)))
+    return ["bash", "-c", "; ".join(parts)]
+
+
+def gitlab_cli_token_ready() -> bool:
+    """True if ``GITLAB_TOKEN`` (or legacy alias) is already in the process environment."""
+    return bool(
+        (
+            os.environ.get("GITLAB_TOKEN") or os.environ.get("GITLAB_API_TOKEN") or ""
+        ).strip()
+    )
+
+
+def gitlab_lazy_secret_script_paths(
+    home: Path | None = None,
+) -> tuple[Path, Path] | None:
+    """Paths to lazy-secrets + GitLab scripts (``22-gitlab.sh`` registers ``GITLAB_TOKEN``). Read-only."""
+    home = home or Path.home()
+    lazy = home / ".bashrc.d" / "scripts.d" / "00-lazy-secrets.sh"
+    gitlab_sh = home / ".bashrc.d" / "scripts.d" / "22-gitlab.sh"
+    if lazy.is_file() and gitlab_sh.is_file():
+        return (lazy, gitlab_sh)
+    return None
+
+
+def build_glab_bash_argv(
+    glab_args: list[str],
+    extra_env: dict[str, str] | None,
+    cwd: str | None,
+    home: Path | None = None,
+) -> list[str] | None:
+    """Run ``glab`` after ``source`` + ``load-secrets`` (same pattern as ``.mcp.json`` gitlab server).
+
+    ``_lazy_pass GITLAB_TOKEN`` only resolves after ``load-secrets``; sourcing bashrc alone does not
+    export tokens. Does not edit bashrc files.
+
+    Returns:
+        ``["bash", "-c", "..."]`` or ``None`` if lazy/gitlab scripts are missing.
+    """
+    pair = gitlab_lazy_secret_script_paths(home)
+    if not pair:
+        return None
+    lazy, gitlab_sh = pair
+    parts: list[str] = [
+        f"source {shlex.quote(str(lazy))}",
+        f"source {shlex.quote(str(gitlab_sh))}",
+        "load-secrets 2>/dev/null 1>/dev/null",
+    ]
+    if extra_env:
+        for key in sorted(extra_env.keys()):
+            parts.append(f"export {key}={shlex.quote(str(extra_env[key]))}")
+    if cwd:
+        parts.append(f"cd {shlex.quote(cwd)}")
+    parts.append("exec " + " ".join(shlex.quote(x) for x in (["glab"] + glab_args)))
+    return ["bash", "-c", "; ".join(parts)]
+
+
 # ==================== Kubeconfig Handling ====================
 
 
@@ -292,15 +437,15 @@ async def check_cluster_auth(environment: str) -> bool:
         logger.info(f"Kubeconfig not found: {kubeconfig}")
         return False
 
-    # Quick auth check using oc whoami
+    # Quick auth check using oc whoami (explicit --kubeconfig; avoids KUBECONFIG edge cases)
     try:
         result = await asyncio.to_thread(
             subprocess.run,
-            ["oc", "whoami"],
+            ["oc", "--kubeconfig", kubeconfig, "whoami"],
             capture_output=True,
             text=True,
-            timeout=10,
-            env={**os.environ, "KUBECONFIG": kubeconfig},
+            timeout=15,
+            env=os.environ,
         )
         if result.returncode == 0:
             logger.info(f"Auth valid for {environment}: {result.stdout.strip()}")
@@ -352,6 +497,9 @@ async def ensure_cluster_auth(
 ) -> tuple[bool, str]:
     """Ensure cluster authentication is valid, optionally refreshing if needed.
 
+    Concurrent callers (e.g. several MCP tools from one Slack turn) share one
+    serialized refresh so `kube`/SSO is not spawned repeatedly.
+
     Args:
         environment: Environment name (stage, production, ephemeral, etc.)
         auto_refresh: If True, automatically refresh auth if expired (default: True)
@@ -365,9 +513,13 @@ async def ensure_cluster_auth(
     if not auto_refresh:
         return False, f"Authentication expired for {environment} cluster."
 
-    logger.info(f"Auth expired for {environment}, attempting refresh...")
-    if await refresh_cluster_auth(environment):
-        return True, ""
+    async with _ensure_cluster_auth_lock:
+        if await check_cluster_auth(environment):
+            return True, ""
+
+        logger.info(f"Auth expired for {environment}, attempting refresh...")
+        if await refresh_cluster_auth(environment):
+            return True, ""
 
     short_name = get_cluster_short_name(environment)
     return False, (
@@ -1023,6 +1175,26 @@ def get_service_url(service: str, environment: str) -> str:
     return url
 
 
+def _extract_cli_token(stdout: str) -> str:
+    """Parse kubectl/oc stdout into a single token string.
+
+    When ``run_cmd`` used ``use_shell=True``, lines from sourced ~/.bashrc could be
+    prepended to stdout (e.g. vault: "Secrets loaded (29 secrets, 13 aliases)"),
+    producing illegal HTTP Authorization headers. We run token commands with
+    ``use_shell=False`` and still take the last non-junk line here as a safeguard.
+    """
+    for line in reversed(stdout.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        if line.upper() == "REDACTED":
+            continue
+        if "Secrets loaded" in line:
+            continue
+        return line
+    return ""
+
+
 async def get_bearer_token(
     kubeconfig: str,
     environment: str | None = None,
@@ -1054,7 +1226,7 @@ async def get_bearer_token(
         elif kc_path.endswith(".k"):
             environment = "konflux"
 
-    # Check/refresh auth if enabled
+    # Check/refresh auth if enabled (ensure_cluster_auth serializes refresh across tools)
     if auto_auth and environment:
         auth_ok, _ = await ensure_cluster_auth(environment, auto_refresh=True)
         if not auth_ok:
@@ -1074,8 +1246,9 @@ async def get_bearer_token(
             "-o",
             "jsonpath={.users[0].user.token}",
         ]
-        success, output = await run_cmd(cmd, timeout=10)
-        token = output.strip()
+        # use_shell=False: avoid sourcing bashrc; its stdout would prefix the token
+        success, output = await run_cmd(cmd, timeout=10, use_shell=False)
+        token = _extract_cli_token(output)
         # "REDACTED" is returned by kubectl for security - not a real token
         if success and token and token.upper() != "REDACTED":
             return token
@@ -1085,9 +1258,10 @@ async def get_bearer_token(
     # Method 2: Use oc whoami --show-token (works with SSO sessions)
     try:
         cmd = ["oc", "--kubeconfig", kubeconfig, "whoami", "--show-token"]
-        success, output = await run_cmd(cmd, timeout=10)
-        if success and output.strip():
-            return output.strip()
+        success, output = await run_cmd(cmd, timeout=10, use_shell=False)
+        token = _extract_cli_token(output)
+        if success and token:
+            return token
     except Exception as e:
         logger.warning(f"Failed to get token via oc whoami: {e}")
 
