@@ -1,6 +1,5 @@
 import json
 import logging
-from pathlib import Path
 
 from server.paths import PERFORMANCE_DIR
 

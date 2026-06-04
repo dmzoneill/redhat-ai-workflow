@@ -1142,8 +1142,7 @@ class GoogleMeetController:
 
     async def _inject_stealth_scripts(self) -> None:
         """Inject scripts to avoid bot detection."""
-        await self.page.add_init_script(
-            """
+        await self.page.add_init_script("""
             // Override webdriver property
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
@@ -1166,8 +1165,7 @@ class GoogleMeetController:
                     Promise.resolve({ state: Notification.permission }) :
                     originalQuery(parameters)
             );
-        """
-        )
+        """)
 
     async def sign_in_google(self) -> bool:  # noqa: C901
         """
@@ -2735,8 +2733,7 @@ class GoogleMeetController:
         # 1. Wait for text to "settle" (800ms no changes)
         # 2. Use UPDATE mode for refinements of the same utterance (not new entries)
         # 3. Only create NEW entries when speaker changes or it's clearly a new sentence
-        await self.page.evaluate(
-            """
+        await self.page.evaluate("""
             () => {
                 window._meetBotCaptions = [];
                 window._meetBotCurrentSpeaker = 'Unknown';
@@ -2923,8 +2920,7 @@ class GoogleMeetController:
                 window._meetBotObserver = observer;
                 console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
             }
-        """
-        )
+        """)
 
         # Start polling for new captions (track task for cleanup)
         self._caption_poll_task = asyncio.create_task(self._poll_captions())
@@ -2938,15 +2934,13 @@ class GoogleMeetController:
         while self._caption_observer_running and self.page:
             try:
                 # Fetch and clear the caption buffer - these are already debounced/corrected
-                captions = await self.page.evaluate(
-                    """
+                captions = await self.page.evaluate("""
                     () => {
                         const c = window._meetBotCaptions || [];
                         window._meetBotCaptions = [];
                         return c;
                     }
-                """
-                )
+                """)
 
                 for cap in captions:
                     speaker = cap.get("speaker", "Unknown")
@@ -3025,15 +3019,13 @@ class GoogleMeetController:
 
         if self.page:
             try:
-                await self.page.evaluate(
-                    """
+                await self.page.evaluate("""
                     () => {
                         if (window._meetBotObserver) {
                             window._meetBotObserver.disconnect();
                         }
                     }
-                """
-                )
+                """)
             except Exception:
                 pass
 
@@ -3174,8 +3166,7 @@ class GoogleMeetController:
 
             # Primary method: Use JavaScript to extract from accessibility tree
             # This is the most reliable as it uses stable ARIA attributes
-            js_participants = await self.page.evaluate(
-                """
+            js_participants = await self.page.evaluate("""
                 () => {
                     const participants = [];
                     const seen = new Set();
@@ -3283,8 +3274,7 @@ class GoogleMeetController:
 
                     return participants;
                 }
-            """
-            )
+            """)
 
             if js_participants:
                 participants = js_participants

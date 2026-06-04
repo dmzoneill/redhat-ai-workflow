@@ -1141,7 +1141,9 @@ async def _meet_notes_cleanup_impl() -> str:
     if hung_instances:
         lines.append("---")
         lines.append("")
-        lines.append(f"⚠️ **{len(hung_instances)} potentially hung instance(s) found.**")
+        lines.append(
+            f"⚠️ **{len(hung_instances)} potentially hung instance(s) found.**"
+        )
         lines.append("")
         lines.append("To force-kill hung instances, run:")
         lines.append("```")

@@ -25,11 +25,29 @@ def parse_args():
     parser.add_argument("--query", default="", help="The question to test")
     parser.add_argument("--project-root", default="", help="Project root directory")
     parser.add_argument("--limit", type=int, default=5, help="Max results per source")
-    parser.add_argument("--include-jira", action="store_true", default=True, help="Include Jira context")
-    parser.add_argument("--include-code", action="store_true", default=True, help="Include code search")
-    parser.add_argument("--include-memory", action="store_true", default=True, help="Include memory context")
-    parser.add_argument("--include-inscope", action="store_true", default=True, help="Include InScope AI context")
-    parser.add_argument("--status-only", action="store_true", help="Only return status, don't run context gathering")
+    parser.add_argument(
+        "--include-jira", action="store_true", default=True, help="Include Jira context"
+    )
+    parser.add_argument(
+        "--include-code", action="store_true", default=True, help="Include code search"
+    )
+    parser.add_argument(
+        "--include-memory",
+        action="store_true",
+        default=True,
+        help="Include memory context",
+    )
+    parser.add_argument(
+        "--include-inscope",
+        action="store_true",
+        default=True,
+        help="Include InScope AI context",
+    )
+    parser.add_argument(
+        "--status-only",
+        action="store_true",
+        help="Only return status, don't run context gathering",
+    )
     return parser.parse_args()
 
 
@@ -85,7 +103,10 @@ def get_inscope_status() -> dict:
     try:
         import asyncio
 
-        from tool_modules.aa_inscope.src.tools_basic import KNOWN_ASSISTANTS, _get_auth_token
+        from tool_modules.aa_inscope.src.tools_basic import (
+            KNOWN_ASSISTANTS,
+            _get_auth_token,
+        )
 
         # Check authentication
         loop = asyncio.new_event_loop()

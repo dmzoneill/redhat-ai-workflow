@@ -66,7 +66,9 @@ async def main():
                 print(f"      Username: @{user.get('name', 'unknown')}")
                 print(f"      Email: {user.get('profile', {}).get('email', 'N/A')}")
             else:
-                print(f"   ⚠️  API returned: {user_info.get('error', 'no error field')}")
+                print(
+                    f"   ⚠️  API returned: {user_info.get('error', 'no error field')}"
+                )
                 print("      (This is OK - we can still send messages)")
         except Exception as e:
             print(f"   ⚠️  Exception: {e}")

@@ -356,8 +356,7 @@ class SlackStateDB:
 
     async def _create_tables(self):
         """Create database tables if they don't exist."""
-        await self._db.executescript(
-            """
+        await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS channel_state (
                 channel_id TEXT PRIMARY KEY,
                 last_processed_ts TEXT NOT NULL,
@@ -434,8 +433,7 @@ class SlackStateDB:
 
             CREATE INDEX IF NOT EXISTS idx_notified_messages_time
             ON notified_messages(notified_at);
-        """
-        )
+        """)
         await self._db.commit()
 
         # Clean up old notified messages (older than 1 hour)
@@ -1421,12 +1419,10 @@ class SlackStateDB:
 
         async with self._lock:
             await self._connect_unlocked()
-            cursor = await self._db.execute(
-                """
+            cursor = await self._db.execute("""
                 SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
                 FROM user_cache
-                """
-            )
+                """)
             rows = await cursor.fetchall()
 
         # Score each user

@@ -120,14 +120,12 @@ async def cmd_status(client: SlackAgentClient, args):
     hours, remainder = divmod(int(uptime), 3600)
     minutes, seconds = divmod(remainder, 60)
 
-    print(
-        f"""
+    print(f"""
 {COLORS['bold']}Uptime:{COLORS['reset']} {hours:02d}:{minutes:02d}:{seconds:02d}
 {COLORS['bold']}Messages Processed:{COLORS['reset']} {status.get('messages_processed', 0)}
 {COLORS['bold']}Messages Responded:{COLORS['reset']} {status.get('messages_responded', 0)}
 {COLORS['bold']}Pending Approvals:{COLORS['reset']} {status.get('pending_approvals', 0)}
-"""
-    )
+""")
 
 
 async def cmd_pending(client: SlackAgentClient, args):
@@ -144,13 +142,11 @@ async def cmd_pending(client: SlackAgentClient, args):
         print(format_message(msg, verbose=args.verbose))
         print(f"{COLORS['dim']}{'─' * 40}{COLORS['reset']}")
 
-    print(
-        f"""
+    print(f"""
 {COLORS['bold']}To approve:{COLORS['reset']} slack_control.py approve <id>
 {COLORS['bold']}To approve all:{COLORS['reset']} slack_control.py approve-all
 {COLORS['bold']}To reject:{COLORS['reset']} slack_control.py reject <id>
-"""
-    )
+""")
 
 
 async def cmd_approve(client: SlackAgentClient, args):
@@ -172,13 +168,11 @@ async def cmd_approve_all(client: SlackAgentClient, args):
     failed = result.get("failed", 0)
 
     print_header("Approve All Results")
-    print(
-        f"""
+    print(f"""
 {COLORS['bold']}Total:{COLORS['reset']} {total}
 {COLORS['green']}Approved:{COLORS['reset']} {approved}
 {COLORS['red']}Failed:{COLORS['reset']} {failed}
-"""
-    )
+""")
 
 
 async def cmd_reject(client: SlackAgentClient, args):

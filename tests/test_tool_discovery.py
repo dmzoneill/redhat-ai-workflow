@@ -51,8 +51,7 @@ def manifest():
 @pytest.fixture
 def sample_tool_file(tmp_path):
     """Create a sample Python file with tool registrations."""
-    content = textwrap.dedent(
-        '''\
+    content = textwrap.dedent('''\
         from server.tool_registry import ToolRegistry
 
         def register_tools(server):
@@ -69,8 +68,7 @@ def sample_tool_file(tmp_path):
                 return "repos"
 
             return registry.count
-    '''
-    )
+    ''')
     filepath = tmp_path / "tools_basic.py"
     filepath.write_text(content)
     return filepath
@@ -79,8 +77,7 @@ def sample_tool_file(tmp_path):
 @pytest.fixture
 def sample_core_file(tmp_path):
     """Create a sample core tools Python file."""
-    content = textwrap.dedent(
-        '''\
+    content = textwrap.dedent('''\
         from server.tool_registry import ToolRegistry
 
         def register_tools(server):
@@ -92,8 +89,7 @@ def sample_core_file(tmp_path):
                 return "status"
 
             return registry.count
-    '''
-    )
+    ''')
     filepath = tmp_path / "tools_core.py"
     filepath.write_text(content)
     return filepath
@@ -102,8 +98,7 @@ def sample_core_file(tmp_path):
 @pytest.fixture
 def sample_extra_file(tmp_path):
     """Create a sample extra tools Python file."""
-    content = textwrap.dedent(
-        '''\
+    content = textwrap.dedent('''\
         from server.tool_registry import ToolRegistry
 
         def register_tools(server):
@@ -115,8 +110,7 @@ def sample_extra_file(tmp_path):
                 return "bisect"
 
             return registry.count
-    '''
-    )
+    ''')
     filepath = tmp_path / "tools_extra.py"
     filepath.write_text(content)
     return filepath
@@ -534,17 +528,13 @@ class TestDiscoverToolsFromFile:
     def test_discover_no_tools(self, tmp_path):
         """Should return empty list for file with no tool decorators."""
         no_tools_file = tmp_path / "tools_basic.py"
-        no_tools_file.write_text(
-            textwrap.dedent(
-                """\
+        no_tools_file.write_text(textwrap.dedent("""\
             def regular_function():
                 pass
 
             async def async_but_no_decorator():
                 pass
-        """
-            )
-        )
+        """))
 
         result = discover_tools_from_file(no_tools_file, "mod")
         assert result == []
@@ -576,49 +566,33 @@ class TestDiscoverModuleTools:
         src_dir = tmp_path / "aa_test" / "src"
         src_dir.mkdir(parents=True)
 
-        (src_dir / "tools_core.py").write_text(
-            textwrap.dedent(
-                '''\
+        (src_dir / "tools_core.py").write_text(textwrap.dedent('''\
             async def core_tool():
                 @registry.tool()
                 async def core_func():
                     """Core."""
                     pass
-        '''
-            )
-        )
+        '''))
         # The discover function looks for @registry.tool() on AsyncFunctionDef
         # Let's write valid tool patterns
-        (src_dir / "tools_core.py").write_text(
-            textwrap.dedent(
-                '''\
+        (src_dir / "tools_core.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def core_func():
                 """Core tool."""
                 pass
-        '''
-            )
-        )
-        (src_dir / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        '''))
+        (src_dir / "tools_basic.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def basic_func():
                 """Basic tool."""
                 pass
-        '''
-            )
-        )
-        (src_dir / "tools_extra.py").write_text(
-            textwrap.dedent(
-                '''\
+        '''))
+        (src_dir / "tools_extra.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def extra_func():
                 """Extra tool."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         with patch("server.tool_discovery.TOOL_MODULES_DIR", tmp_path):
             result = discover_module_tools("test")
@@ -632,16 +606,12 @@ class TestDiscoverModuleTools:
         src_dir = tmp_path / "aa_legacy" / "src"
         src_dir.mkdir(parents=True)
 
-        (src_dir / "tools.py").write_text(
-            textwrap.dedent(
-                '''\
+        (src_dir / "tools.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def legacy_func():
                 """Legacy tool."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         with patch("server.tool_discovery.TOOL_MODULES_DIR", tmp_path):
             result = discover_module_tools("legacy")
@@ -679,16 +649,12 @@ class TestBuildFullManifest:
         # Create a module directory structure
         mod_dir = tmp_path / "aa_testmod" / "src"
         mod_dir.mkdir(parents=True)
-        (mod_dir / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod_dir / "tools_basic.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def testmod_func():
                 """A test tool."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         with patch("server.tool_discovery.TOOL_MODULES_DIR", tmp_path):
             result = build_full_manifest()
@@ -748,9 +714,7 @@ class TestGetModuleToolCounts:
         src_dir = tmp_path / "aa_counted" / "src"
         src_dir.mkdir(parents=True)
 
-        (src_dir / "tools_core.py").write_text(
-            textwrap.dedent(
-                '''\
+        (src_dir / "tools_core.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def c1():
                 """Core 1."""
@@ -760,19 +724,13 @@ class TestGetModuleToolCounts:
             async def c2():
                 """Core 2."""
                 pass
-        '''
-            )
-        )
-        (src_dir / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        '''))
+        (src_dir / "tools_basic.py").write_text(textwrap.dedent('''\
             @registry.tool()
             async def b1():
                 """Basic 1."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         with patch("server.tool_discovery.TOOL_MODULES_DIR", tmp_path):
             result = get_module_tool_counts("counted")

@@ -42,31 +42,27 @@ def clean_registry():
 
 class TestExtractFunction:
     def test_extracts_simple_function(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             def foo():
                 return 1
 
             def bar():
                 return 2
-        """
-        )
+        """)
         result = _extract_function(source, "foo")
         assert "def foo():" in result
         assert "return 1" in result
         assert "def bar():" not in result
 
     def test_extracts_async_function(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             async def my_tool(ctx):
                 result = await something()
                 return result
 
             async def other():
                 pass
-        """
-        )
+        """)
         result = _extract_function(source, "my_tool")
         assert "async def my_tool" in result
         assert "await something" in result
@@ -78,51 +74,44 @@ class TestExtractFunction:
         assert "not found" in result
 
     def test_function_at_end_of_file(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             def first():
                 pass
 
             def last():
                 return 42
-        """
-        )
+        """)
         result = _extract_function(source, "last")
         assert "def last():" in result
         assert "return 42" in result
 
     def test_stops_at_decorator(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             def func_a():
                 return 1
 
             @some_decorator
             def func_b():
                 return 2
-        """
-        )
+        """)
         result = _extract_function(source, "func_a")
         assert "return 1" in result
         assert "@some_decorator" not in result
 
     def test_stops_at_class(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             def func_a():
                 return 1
 
             class MyClass:
                 pass
-        """
-        )
+        """)
         result = _extract_function(source, "func_a")
         assert "return 1" in result
         assert "MyClass" not in result
 
     def test_handles_blank_lines_inside_function(self):
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             def func():
                 a = 1
 
@@ -131,8 +120,7 @@ class TestExtractFunction:
 
             def next_func():
                 pass
-        """
-        )
+        """)
         result = _extract_function(source, "func")
         assert "a = 1" in result
         assert "b = 2" in result
@@ -469,8 +457,7 @@ class TestRegisterDebugTool:
 class TestWrapAllTools:
     def test_wraps_public_async_functions(self, tmp_path):
         # Create a temporary module source
-        source = textwrap.dedent(
-            """\
+        source = textwrap.dedent("""\
             async def public_tool(ctx):
                 return "ok"
 
@@ -479,8 +466,7 @@ class TestWrapAllTools:
 
             def sync_func():
                 pass
-        """
-        )
+        """)
         mod_file = tmp_path / "tools.py"
         mod_file.write_text(source)
 

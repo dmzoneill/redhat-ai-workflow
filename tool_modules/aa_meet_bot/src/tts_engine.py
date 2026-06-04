@@ -416,9 +416,7 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''.replace(
-            "GPT_SOVITS_PATH_PLACEHOLDER", repr(gpt_sovits_path)
-        )
+'''.replace("GPT_SOVITS_PATH_PLACEHOLDER", repr(gpt_sovits_path))
 
         script_path.write_text(script_content)
         script_path.chmod(0o755)

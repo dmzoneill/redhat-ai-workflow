@@ -84,8 +84,7 @@ class MeetCaptions:
         # 1. Wait for text to "settle" (800ms no changes)
         # 2. Use UPDATE mode for refinements of the same utterance (not new entries)
         # 3. Only create NEW entries when speaker changes or it's clearly a new sentence
-        await self.page.evaluate(
-            """
+        await self.page.evaluate("""
             () => {
                 window._meetBotCaptions = [];
                 window._meetBotCurrentSpeaker = 'Unknown';
@@ -272,8 +271,7 @@ class MeetCaptions:
                 window._meetBotObserver = observer;
                 console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
             }
-        """
-        )
+        """)
 
         # Start polling for new captions (track task for cleanup)
         self._caption_poll_task = asyncio.create_task(self._poll_captions())
@@ -287,15 +285,13 @@ class MeetCaptions:
         while self._caption_observer_running and self.page:
             try:
                 # Fetch and clear the caption buffer - these are already debounced/corrected
-                captions = await self.page.evaluate(
-                    """
+                captions = await self.page.evaluate("""
                     () => {
                         const c = window._meetBotCaptions || [];
                         window._meetBotCaptions = [];
                         return c;
                     }
-                """
-                )
+                """)
 
                 for cap in captions:
                     speaker = cap.get("speaker", "Unknown")
@@ -387,15 +383,13 @@ class MeetCaptions:
 
         if self.page:
             try:
-                await self.page.evaluate(
-                    """
+                await self.page.evaluate("""
                     () => {
                         if (window._meetBotObserver) {
                             window._meetBotObserver.disconnect();
                         }
                     }
-                """
-                )
+                """)
             except Exception as e:
                 logger.debug(
                     f"Suppressed error in stop_caption_capture (observer disconnect): {e}"

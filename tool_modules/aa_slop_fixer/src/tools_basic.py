@@ -417,16 +417,14 @@ def register_tools(server: "FastMCP") -> int:
             category_counts = await cursor.fetchall()
 
             # Recent fixes
-            cursor = await db.execute(
-                """
+            cursor = await db.execute("""
                 SELECT category, COUNT(*) as count, MAX(fixed_at) as last_fixed
                 FROM findings
                 WHERE status = 'fixed'
                 GROUP BY category
                 ORDER BY last_fixed DESC
                 LIMIT 10
-                """
-            )
+                """)
             recent_fixes = await cursor.fetchall()
 
         lines = ["## Slop Findings Statistics\n"]

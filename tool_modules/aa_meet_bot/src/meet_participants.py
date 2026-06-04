@@ -146,8 +146,7 @@ class MeetParticipants:
 
             # Primary method: Use JavaScript to extract from accessibility tree
             # This is the most reliable as it uses stable ARIA attributes
-            js_participants = await self.page.evaluate(
-                """
+            js_participants = await self.page.evaluate("""
                 () => {
                     const participants = [];
                     const seen = new Set();
@@ -255,8 +254,7 @@ class MeetParticipants:
 
                     return participants;
                 }
-            """
-            )
+            """)
 
             if js_participants:
                 participants = js_participants

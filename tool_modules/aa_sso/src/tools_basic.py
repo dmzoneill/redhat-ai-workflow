@@ -942,8 +942,7 @@ class SSOAuthenticator:
         for storage_type in ["localStorage", "sessionStorage"]:
             for key in strategy.jwt_storage_keys:
                 try:
-                    value = await self._page.evaluate(
-                        f"""
+                    value = await self._page.evaluate(f"""
                         () => {{
                             const val = {storage_type}.getItem('{key}');
                             if (!val) return null;
@@ -955,8 +954,7 @@ class SSOAuthenticator:
                                 return val;
                             }}
                         }}
-                    """
-                    )
+                    """)
                     if value:
                         token = value
                         logger.info(f"Found token in {storage_type}['{key}']")

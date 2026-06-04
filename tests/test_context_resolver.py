@@ -1,7 +1,6 @@
 """Tests for scripts/common/context_resolver.py - Context extraction from messages/URLs."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from scripts.common.context_resolver import (

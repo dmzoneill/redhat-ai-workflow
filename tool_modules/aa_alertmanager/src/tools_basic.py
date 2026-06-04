@@ -54,7 +54,9 @@ async def _alertmanager_alerts_impl(
 
     if not isinstance(result, list):
         return [
-            TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")
+            TextContent(
+                type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}"
+            )
         ]
 
     alerts = result

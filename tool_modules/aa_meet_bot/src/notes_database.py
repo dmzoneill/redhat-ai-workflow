@@ -199,8 +199,7 @@ class MeetingNotesDB:
             return
 
         # Monitored calendars table
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE TABLE IF NOT EXISTS calendars (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 calendar_id TEXT UNIQUE NOT NULL,
@@ -213,12 +212,10 @@ class MeetingNotesDB:
                 enabled INTEGER DEFAULT 1,
                 added_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
 
         # Meetings table
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE TABLE IF NOT EXISTS meetings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -242,12 +239,10 @@ class MeetingNotesDB:
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(event_id, calendar_id)
             )
-        """
-        )
+        """)
 
         # Transcripts table
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE TABLE IF NOT EXISTS transcripts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 meeting_id INTEGER NOT NULL,
@@ -256,65 +251,48 @@ class MeetingNotesDB:
                 timestamp TEXT NOT NULL,
                 FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
             )
-        """
-        )
+        """)
 
         # Create indexes
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_meetings_calendar ON meetings(calendar_id)
-        """
-        )
-        await self._db.execute(
-            """
+        """)
+        await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_meetings_status ON meetings(status)
-        """
-        )
-        await self._db.execute(
-            """
+        """)
+        await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_meetings_scheduled ON meetings(scheduled_start)
-        """
-        )
-        await self._db.execute(
-            """
+        """)
+        await self._db.execute("""
             CREATE INDEX IF NOT EXISTS idx_transcripts_meeting ON transcripts(meeting_id)
-        """
-        )
+        """)
 
         # Full-text search for transcripts
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
                 speaker, text, content=transcripts, content_rowid=id
             )
-        """
-        )
+        """)
 
         # Triggers to keep FTS in sync
-        await self._db.execute(
-            """
+        await self._db.execute("""
             CREATE TRIGGER IF NOT EXISTS transcripts_ai AFTER INSERT ON transcripts BEGIN
                 INSERT INTO transcripts_fts(rowid, speaker, text) VALUES (new.id, new.speaker, new.text);
             END
-        """
-        )
-        await self._db.execute(
-            """
+        """)
+        await self._db.execute("""
             CREATE TRIGGER IF NOT EXISTS transcripts_ad AFTER DELETE ON transcripts BEGIN
                 INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text)
                     VALUES('delete', old.id, old.speaker, old.text);
             END
-        """
-        )
-        await self._db.execute(
-            """
+        """)
+        await self._db.execute("""
             CREATE TRIGGER IF NOT EXISTS transcripts_au AFTER UPDATE ON transcripts BEGIN
                 INSERT INTO transcripts_fts(transcripts_fts, rowid, speaker, text)
                     VALUES('delete', old.id, old.speaker, old.text);
                 INSERT INTO transcripts_fts(rowid, speaker, text) VALUES (new.id, new.speaker, new.text);
             END
-        """
-        )
+        """)
 
         await self._db.commit()
 
@@ -940,11 +918,9 @@ class MeetingNotesDB:
             stats["calendars"] = row[0] if row else 0
 
             # Meeting counts by status
-            cursor = await self._db.execute(
-                """
+            cursor = await self._db.execute("""
                 SELECT status, COUNT(*) FROM meetings GROUP BY status
-            """
-            )
+            """)
             rows = await cursor.fetchall()
             stats["meetings"] = {row[0]: row[1] for row in rows}
             stats["meetings"]["total"] = sum(stats["meetings"].values())

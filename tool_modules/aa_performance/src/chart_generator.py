@@ -68,13 +68,11 @@ def generate_sunburst_svg(
     center_value = center.get("value", 0)
     center_color = get_color_for_percentage(center_value)
 
-    paths.append(
-        f"""
+    paths.append(f"""
         <circle cx="{cx}" cy="{cy}" r="{inner_radius - 5}" fill="{center_color}" opacity="0.2"/>
         <text x="{cx}" y="{cy}" text-anchor="middle" dominant-baseline="middle"
               font-size="24" font-weight="bold" fill="{center_color}">{center.get("label", "")}</text>
-    """
-    )
+    """)
 
     # Inner ring - meta categories
     inner_categories = data.get("inner", [])
@@ -93,13 +91,11 @@ def generate_sunburst_svg(
             path = _arc_path(
                 cx, cy, inner_radius, middle_radius, start_angle, sweep_angle
             )
-            paths.append(
-                f"""
+            paths.append(f"""
                 <path d="{path}" fill="{color}" opacity="0.6" stroke="var(--bg-primary, #1a1a2e)" stroke-width="2">
                     <title>{cat.get("name", "")}: {cat_value}%</title>
                 </path>
-            """
-            )
+            """)
 
             # Outer ring - individual competencies
             children = cat.get("children", [])
@@ -119,14 +115,12 @@ def generate_sunburst_svg(
                         child_start,
                         child_sweep - 1,
                     )
-                    paths.append(
-                        f"""
+                    paths.append(f"""
                         <path d="{child_path}" fill="{child_color}" opacity="0.8"
                               stroke="var(--bg-primary, #1a1a2e)" stroke-width="1">
                             <title>{child.get("name", "")}: {child_value}%</title>
                         </path>
-                    """
-                    )
+                    """)
                     child_start += child_sweep
 
             start_angle += sweep_angle
@@ -204,8 +198,7 @@ def generate_progress_bars_html(
         color = get_color_for_percentage(pct)
         icon = get_status_icon(pct) if show_icons else ""
 
-        html_parts.append(
-            f"""
+        html_parts.append(f"""
             <div class="progress-row" data-competency="{comp_id}">
                 <div class="progress-label">
                     <span class="progress-name">{name}</span>
@@ -215,8 +208,7 @@ def generate_progress_bars_html(
                     <div class="progress-bar-fill" style="width: {min(pct, 100)}%; background: {color};"></div>
                 </div>
             </div>
-        """
-        )
+        """)
 
     html_parts.append("</div>")
     return "\n".join(html_parts)

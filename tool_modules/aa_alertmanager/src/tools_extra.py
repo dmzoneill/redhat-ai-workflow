@@ -144,7 +144,9 @@ async def _alertmanager_silences_impl(
 
     if not isinstance(result, list):
         return [
-            TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")
+            TextContent(
+                type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}"
+            )
         ]
 
     silences = result

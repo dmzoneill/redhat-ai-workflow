@@ -30,7 +30,9 @@ def add_section_divider(prs, title):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Purple background
-    bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height)
+    bg = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, 0, 0, prs.slide_width, prs.slide_height
+    )
     bg.fill.solid()
     bg.fill.fore_color.rgb = PURPLE_PRIMARY
     bg.line.fill.background()
@@ -53,7 +55,9 @@ def add_content_slide(prs, title, content_items):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Title
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80)
+    )
     tf = tb.text_frame
     p = tf.paragraphs[0]
     p.text = title
@@ -62,7 +66,9 @@ def add_content_slide(prs, title, content_items):
     p.font.color.rgb = PURPLE_PRIMARY
 
     # Content area
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50)
+    )
     tf = tb.text_frame
     tf.word_wrap = True
 
@@ -113,7 +119,9 @@ def add_tldr_slide(prs, section_title, original_slides, key_points):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
 
     # Title with slide reference
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(0.30), Inches(12.33), Inches(0.80)
+    )
     tf = tb.text_frame
     p = tf.paragraphs[0]
     p.text = section_title
@@ -122,7 +130,9 @@ def add_tldr_slide(prs, section_title, original_slides, key_points):
     p.font.color.rgb = PURPLE_PRIMARY
 
     # Slide reference (right-aligned, smaller)
-    tb = slide.shapes.add_textbox(Inches(10.5), Inches(0.35), Inches(2.33), Inches(0.50))
+    tb = slide.shapes.add_textbox(
+        Inches(10.5), Inches(0.35), Inches(2.33), Inches(0.50)
+    )
     tf = tb.text_frame
     p = tf.paragraphs[0]
     p.text = f"(Full: Slides {original_slides})"
@@ -131,7 +141,9 @@ def add_tldr_slide(prs, section_title, original_slides, key_points):
     p.alignment = PP_ALIGN.RIGHT
 
     # Content area
-    tb = slide.shapes.add_textbox(Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50))
+    tb = slide.shapes.add_textbox(
+        Inches(0.5), Inches(1.20), Inches(12.33), Inches(5.50)
+    )
     tf = tb.text_frame
     tf.word_wrap = True
 

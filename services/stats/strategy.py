@@ -3,10 +3,8 @@ import logging
 import os
 import re
 import subprocess
-from datetime import date
 from pathlib import Path
 
-from server.paths import AA_CONFIG_DIR
 from services.stats.scorer import COMPETENCY_DEFS
 
 logger = logging.getLogger(__name__)

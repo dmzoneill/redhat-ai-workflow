@@ -37,7 +37,6 @@ from server.paths import (
     AA_CONFIG_DIR,
     AGENT_STATS_FILE,
     INFERENCE_STATS_FILE,
-    PERFORMANCE_DIR,
     SKILL_EXECUTION_FILE,
 )
 from services.base.daemon import BaseDaemon
@@ -965,13 +964,13 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
         else:
             lines = [
                 f"# Q{quarter} {year} Quarterly Connection Report",
-                f"",
+                "",
                 f"**Generated:** {now.strftime('%Y-%m-%d %H:%M')}",
                 f"**Overall Score:** {summary.get('overall_percentage', 0)}%",
                 f"**Total Events:** {len(all_events)}",
-                f"",
-                f"## Competency Progress",
-                f"",
+                "",
+                "## Competency Progress",
+                "",
             ]
             for comp, pct in sorted(
                 summary.get("cumulative_percentage", {}).items(),
@@ -982,12 +981,12 @@ class StatsDaemon(DaemonDBusBase, BaseDaemon):
                 lines.append(f"- **{name}**: {pct}% ({pts} pts)")
 
             if summary.get("gaps"):
-                lines.append(f"\n## Areas Needing Attention\n")
+                lines.append("\n## Areas Needing Attention\n")
                 for gap in summary["gaps"]:
                     lines.append(f"- {gap.replace('_', ' ').title()}")
 
             if summary.get("highlights"):
-                lines.append(f"\n## Highlights\n")
+                lines.append("\n## Highlights\n")
                 for h in summary["highlights"]:
                     lines.append(f"- {h}")
 

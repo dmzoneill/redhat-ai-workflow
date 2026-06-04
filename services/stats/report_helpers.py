@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import calendar
 import math
-from datetime import datetime
 from html import escape
 from pathlib import Path
 

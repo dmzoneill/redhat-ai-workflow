@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Get Google Slides presentation info."""
+
 import sys
 from pathlib import Path
 

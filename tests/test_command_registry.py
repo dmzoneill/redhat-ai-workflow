@@ -262,9 +262,7 @@ class TestRegistrySkills:
 
     def test_load_skill_from_yaml(self, skills_dir, registry):
         skill_yaml = skills_dir / "deploy_service.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: deploy_service
             description: Deploy a service to stage or prod
             inputs:
@@ -272,9 +270,7 @@ class TestRegistrySkills:
                 required: true
                 type: string
                 description: Target environment
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert len(cmds) == 1
@@ -285,30 +281,22 @@ class TestRegistrySkills:
 
     def test_skill_description_first_line(self, skills_dir, registry):
         skill_yaml = skills_dir / "multi.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: multi
             description: |
               First line of description
               Second line should be ignored
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert cmds[0].description == "First line of description"
 
     def test_skill_description_bold_stripped(self, skills_dir, registry):
         skill_yaml = skills_dir / "bold.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: bold
             description: "**Bold description**"
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert "**" not in cmds[0].description
@@ -316,23 +304,17 @@ class TestRegistrySkills:
 
     def test_skill_examples_generated(self, skills_dir, registry):
         skill_yaml = skills_dir / "simple.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: simple
             description: A simple skill
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert "@me simple" in cmds[0].examples
 
     def test_skill_examples_with_required_inputs(self, skills_dir, registry):
         skill_yaml = skills_dir / "with_inputs.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: with_inputs
             description: Skill with inputs
             inputs:
@@ -342,9 +324,7 @@ class TestRegistrySkills:
                 required: true
               - name: optional_flag
                 required: false
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert any("--project" in ex for ex in cmds[0].examples)
@@ -361,14 +341,10 @@ class TestRegistrySkills:
 
     def test_skills_cached(self, skills_dir, registry):
         skill_yaml = skills_dir / "cached.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: cached
             description: A cached skill
-        """
-            )
-        )
+        """))
 
         # First call
         first = registry._get_skills()
@@ -381,14 +357,10 @@ class TestRegistrySkills:
     def test_contextual_skill(self, skills_dir, registry):
         """Skills in CONTEXTUAL_SKILLS set should be marked contextual."""
         skill_yaml = skills_dir / "create_jira_issue.yaml"
-        skill_yaml.write_text(
-            textwrap.dedent(
-                """\
+        skill_yaml.write_text(textwrap.dedent("""\
             name: create_jira_issue
             description: Create a Jira issue
-        """
-            )
-        )
+        """))
 
         cmds = registry.list_commands(command_type=CommandType.SKILL)
         assert cmds[0].contextual is True
@@ -429,9 +401,7 @@ class TestRegistryTools:
     def test_discover_tool_from_file(self, tools_dir, registry):
         mod = tools_dir / "aa_jira" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_basic.py").write_text(textwrap.dedent('''\
             async def jira_create_issue(project: str, summary: str) -> dict:
                 """Create a new Jira issue."""
                 pass
@@ -439,9 +409,7 @@ class TestRegistryTools:
             async def jira_search(query: str) -> list:
                 """Search Jira issues by JQL."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         cmds = registry.list_commands(command_type=CommandType.TOOL)
         names = [c.name for c in cmds]
@@ -451,15 +419,11 @@ class TestRegistryTools:
     def test_tool_category_from_module_name(self, tools_dir, registry):
         mod = tools_dir / "aa_deploy" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_basic.py").write_text(textwrap.dedent('''\
             async def deploy_service(env: str) -> str:
                 """Deploy a service to target environment."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         cmds = registry.list_commands(command_type=CommandType.TOOL)
         assert cmds[0].category == "deploy"
@@ -467,9 +431,7 @@ class TestRegistryTools:
     def test_private_functions_skipped(self, tools_dir, registry):
         mod = tools_dir / "aa_utils" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_basic.py").write_text(textwrap.dedent('''\
             async def _internal_helper(x: int) -> int:
                 """Internal helper function."""
                 return x
@@ -477,9 +439,7 @@ class TestRegistryTools:
             async def public_tool(x: int) -> int:
                 """Public tool."""
                 return x
-        '''
-            )
-        )
+        '''))
 
         cmds = registry.list_commands(command_type=CommandType.TOOL)
         names = [c.name for c in cmds]
@@ -489,15 +449,11 @@ class TestRegistryTools:
     def test_non_aa_dirs_skipped(self, tools_dir, registry):
         mod = tools_dir / "not_aa" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_basic.py").write_text(textwrap.dedent('''\
             async def some_func() -> str:
                 """Some function."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         cmds = registry.list_commands(command_type=CommandType.TOOL)
         assert cmds == []
@@ -505,15 +461,11 @@ class TestRegistryTools:
     def test_tools_cached(self, tools_dir, registry):
         mod = tools_dir / "aa_test" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_basic.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_basic.py").write_text(textwrap.dedent('''\
             async def cached_tool() -> str:
                 """Cached tool."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         first = registry._get_tools()
         second = registry._get_tools()
@@ -530,15 +482,11 @@ class TestRegistryTools:
     def test_tools_extra_file(self, tools_dir, registry):
         mod = tools_dir / "aa_extra" / "src"
         mod.mkdir(parents=True)
-        (mod / "tools_extra.py").write_text(
-            textwrap.dedent(
-                '''\
+        (mod / "tools_extra.py").write_text(textwrap.dedent('''\
             async def extra_tool() -> str:
                 """An extra tool."""
                 pass
-        '''
-            )
-        )
+        '''))
 
         cmds = registry.list_commands(command_type=CommandType.TOOL)
         assert len(cmds) == 1
@@ -615,14 +563,10 @@ class TestListCommands:
     def registry(self, tmp_path):
         sd = tmp_path / "skills"
         sd.mkdir()
-        (sd / "deploy.yaml").write_text(
-            textwrap.dedent(
-                """\
+        (sd / "deploy.yaml").write_text(textwrap.dedent("""\
             name: deploy
             description: Deploy a service
-        """
-            )
-        )
+        """))
         return CommandRegistry(
             skills_dir=sd,
             tool_modules_dir=Path("/nonexistent/tools"),
@@ -671,18 +615,14 @@ class TestGetCommandHelp:
     def registry(self, tmp_path):
         sd = tmp_path / "skills"
         sd.mkdir()
-        (sd / "deploy.yaml").write_text(
-            textwrap.dedent(
-                """\
+        (sd / "deploy.yaml").write_text(textwrap.dedent("""\
             name: deploy
             description: Deploy a service
             inputs:
               - name: env
                 required: true
                 type: string
-        """
-            )
-        )
+        """))
         return CommandRegistry(
             skills_dir=sd,
             tool_modules_dir=Path("/nonexistent/tools"),

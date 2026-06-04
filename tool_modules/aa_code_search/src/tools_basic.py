@@ -1981,9 +1981,7 @@ Then use `knowledge_update()` to save findings to memory:
 knowledge_update("PROJECT", "developer", "architecture.overview", "Your summary...")
 knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n  solution: Z")
 ```
-""".replace(
-            "PROJECT", project
-        )
+""".replace("PROJECT", project)
 
         return [TextContent(type="text", text=output)]
 

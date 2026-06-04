@@ -1835,7 +1835,9 @@ def register_session_tools(  # noqa: C901
                     )
 
                     role_emoji = (
-                        "👤" if role == "user" else "🤖" if role == "assistant" else "⚙️"
+                        "👤"
+                        if role == "user"
+                        else "🤖" if role == "assistant" else "⚙️"
                     )
                     lines.append(
                         f"### {role_emoji} {role.title()} {f'({timestamp})' if timestamp else ''}\n"

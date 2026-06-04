@@ -302,7 +302,9 @@ def sync_commands(dry_run: bool = False) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Sync AI rules from docs/ai-rules/ to all targets")
+    parser = argparse.ArgumentParser(
+        description="Sync AI rules from docs/ai-rules/ to all targets"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

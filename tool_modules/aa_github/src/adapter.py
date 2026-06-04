@@ -212,7 +212,10 @@ class GitHubAdapter:
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.7,
-                                metadata={"raw": line, "id": f"github-workflow-{hash(line)}"},
+                                metadata={
+                                    "raw": line,
+                                    "id": f"github-workflow-{hash(line)}",
+                                },
                             )
                         )
 
@@ -249,7 +252,10 @@ class GitHubAdapter:
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.7,
-                                metadata={"raw": line, "id": f"github-issue-{hash(line)}"},
+                                metadata={
+                                    "raw": line,
+                                    "id": f"github-issue-{hash(line)}",
+                                },
                             )
                         )
 
@@ -292,7 +298,11 @@ class GitHubAdapter:
                                 content=line,
                                 summary=line[:100],
                                 relevance=0.75,
-                                metadata={"query": query, "raw": line, "id": f"github-search-{hash(line)}"},
+                                metadata={
+                                    "query": query,
+                                    "raw": line,
+                                    "id": f"github-search-{hash(line)}",
+                                },
                             )
                         )
 

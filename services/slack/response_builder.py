@@ -274,16 +274,14 @@ class TerminalUI:
 
         mode_indicator = f"{yellow}🐛 DEBUG MODE{reset}" if debug_mode else ""
 
-        print(
-            f"""
+        print(f"""
 {cyan}╔══════════════════════════════════════════════════════════════════╗
 ║  {bold}🤖 AI Workflow - Autonomous Slack Persona{reset}{cyan}                          ║
 ║                                                                    ║
 ║  Monitoring Slack channels for messages...                         ║
 ║  Press Ctrl+C to stop                                              ║
 ╚══════════════════════════════════════════════════════════════════╝{reset}
-{mode_indicator}"""
-        )
+{mode_indicator}""")
 
     def print_status(self, listener_stats: dict):
         """Print current status."""

@@ -132,7 +132,9 @@ def generate_placeholder(key: str, actual_value: Any) -> Any:
         return None
 
 
-def compare_configs(config: dict, example: dict, verbose: bool = False) -> tuple[set[str], set[str]]:
+def compare_configs(
+    config: dict, example: dict, verbose: bool = False
+) -> tuple[set[str], set[str]]:
     """Compare config keys and return (missing_in_example, extra_in_example)."""
     config_keys = get_all_keys(config)
     example_keys = get_all_keys(example)
@@ -170,13 +172,17 @@ def fix_example(config: dict, example: dict, missing_keys: set[str]) -> dict:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ensure config.json.example has all keys from config.json")
+    parser = argparse.ArgumentParser(
+        description="Ensure config.json.example has all keys from config.json"
+    )
     parser.add_argument(
         "--fix",
         action="store_true",
         help="Add missing keys to config.json.example with placeholders",
     )
-    parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed comparison")
+    parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed comparison"
+    )
     parser.add_argument(
         "--strict",
         action="store_true",
@@ -205,7 +211,9 @@ def main():
     print("\n🔍 Comparing config.json with config.json.example...")
 
     # Compare
-    missing_in_example, extra_in_example = compare_configs(config, example, verbose=args.verbose)
+    missing_in_example, extra_in_example = compare_configs(
+        config, example, verbose=args.verbose
+    )
 
     # Report missing keys
     if missing_in_example:
@@ -220,7 +228,9 @@ def main():
             fixed_example = fix_example(config, example, missing_in_example)
 
             # Write back with pretty formatting
-            EXAMPLE_FILE.write_text(json.dumps(fixed_example, indent=2, ensure_ascii=False) + "\n")
+            EXAMPLE_FILE.write_text(
+                json.dumps(fixed_example, indent=2, ensure_ascii=False) + "\n"
+            )
             print(f"✅ Updated {EXAMPLE_FILE.name}")
         else:
             print("\n💡 Run with --fix to add missing keys automatically")

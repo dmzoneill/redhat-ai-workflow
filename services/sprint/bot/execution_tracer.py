@@ -773,8 +773,7 @@ class ExecutionTracer:
             except (ValueError, AttributeError):
                 time_str = step.timestamp[:19]
 
-            html_parts.append(
-                f"""
+            html_parts.append(f"""
             <div class="timeline-step {status_class}">
                 <div class="timeline-marker">{icon}</div>
                 <div class="timeline-content">
@@ -783,19 +782,16 @@ class ExecutionTracer:
                         <span class="timeline-name">{step.name}</span>
                         {f'<span class="timeline-duration">{step.duration_ms}ms</span>' if step.duration_ms else ''}
                     </div>
-            """
-            )
+            """)
 
             # Add details
             if step.decision:
-                html_parts.append(
-                    f"""
+                html_parts.append(f"""
                     <div class="timeline-decision">
                         <strong>Decision:</strong> {step.decision}
                         {f'<br><em>{step.reason}</em>' if step.reason else ''}
                     </div>
-                """
-                )
+                """)
 
             if step.inputs:
                 inputs_str = ", ".join(
@@ -819,13 +815,11 @@ class ExecutionTracer:
                 )
 
             if step.chat_id:
-                html_parts.append(
-                    f"""
+                html_parts.append(f"""
                     <div class="timeline-chat">
                         <a href="#" onclick="openChat('{step.chat_id}')">Open Chat</a>
                     </div>
-                """
-                )
+                """)
 
             html_parts.append("</div></div>")
 

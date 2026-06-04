@@ -37,7 +37,9 @@ def get_memory_state(project_root: Path) -> dict:
     try:
         import yaml
 
-        memory_path = Path.home() / ".aa-workflow" / "memory" / "state" / "current_work.yaml"
+        memory_path = (
+            Path.home() / ".aa-workflow" / "memory" / "state" / "current_work.yaml"
+        )
         if memory_path.exists():
             with open(memory_path) as f:
                 memory_state = yaml.safe_load(f) or {}
@@ -66,7 +68,9 @@ def get_memory_state(project_root: Path) -> dict:
             try:
                 branch = (
                     subprocess.check_output(
-                        ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(project_root), stderr=subprocess.DEVNULL
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=str(project_root),
+                        stderr=subprocess.DEVNULL,
                     )
                     .decode()
                     .strip()
@@ -83,7 +87,9 @@ def get_memory_state(project_root: Path) -> dict:
 def get_environment_status(project_root: Path) -> dict:
     """Get environment status (VPN, kubeconfigs, Ollama instances)."""
     env_status = {
-        "vpn_connected": os.path.exists(os.path.expanduser("~/.aa-workflow/.vpn_connected")),
+        "vpn_connected": os.path.exists(
+            os.path.expanduser("~/.aa-workflow/.vpn_connected")
+        ),
         "kubeconfigs": {
             "stage": os.path.exists(os.path.expanduser("~/.kube/config.s")),
             "prod": os.path.exists(os.path.expanduser("~/.kube/config.p")),
@@ -154,7 +160,13 @@ def get_session_log() -> list:
 
     session_log = []
     try:
-        log_path = Path.home() / ".aa-workflow" / "memory" / "sessions" / f"{date.today().isoformat()}.yaml"
+        log_path = (
+            Path.home()
+            / ".aa-workflow"
+            / "memory"
+            / "sessions"
+            / f"{date.today().isoformat()}.yaml"
+        )
         if log_path.exists():
             with open(log_path) as f:
                 log_data = yaml.safe_load(f) or {}
@@ -171,7 +183,9 @@ def get_learned_patterns() -> list:
 
     learned_patterns = []
     try:
-        patterns_path = Path.home() / ".aa-workflow" / "memory" / "learned" / "patterns.yaml"
+        patterns_path = (
+            Path.home() / ".aa-workflow" / "memory" / "learned" / "patterns.yaml"
+        )
         if patterns_path.exists():
             with open(patterns_path) as f:
                 patterns_data = yaml.safe_load(f) or {}
@@ -195,7 +209,9 @@ def run_inference(message: str, persona: str, skill: str, project_root: Path) ->
     filter_instance = HybridToolFilter()
 
     start = time.time()
-    result = filter_instance.filter(message=message, persona=persona, detected_skill=skill if skill else None)
+    result = filter_instance.filter(
+        message=message, persona=persona, detected_skill=skill if skill else None
+    )
     latency_ms = (time.time() - start) * 1000
 
     # Get the actual persona (may have been auto-detected)
@@ -206,7 +222,9 @@ def run_inference(message: str, persona: str, skill: str, project_root: Path) ->
     # Gather context
     memory_state = get_memory_state(project_root)
     env_status = get_environment_status(project_root)
-    persona_prompt, persona_categories, persona_tool_modules = get_persona_info(project_root, actual_persona)
+    persona_prompt, persona_categories, persona_tool_modules = get_persona_info(
+        project_root, actual_persona
+    )
     session_log = get_session_log()
     learned_patterns = get_learned_patterns()
 
@@ -236,7 +254,11 @@ def run_inference(message: str, persona: str, skill: str, project_root: Path) ->
             "active_issues": memory_state.get("active_issues", [])[:3],
             "current_branch": memory_state.get("current_branch"),
             "current_repo": memory_state.get("repo"),
-            "notes": memory_state.get("notes", "")[:200] if memory_state.get("notes") else None,
+            "notes": (
+                memory_state.get("notes", "")[:200]
+                if memory_state.get("notes")
+                else None
+            ),
         },
         "environment": env_status,
         "persona_prompt": persona_prompt,

@@ -383,7 +383,9 @@ def _format_memory_stats(stats: dict) -> list[str]:
 
     # Check total storage
     if stats["storage"]["total_kb"] > 1024:
-        warnings.append(f"⚠️ Total storage over 1 MB: {stats['storage']['total_kb']} KB")
+        warnings.append(
+            f"⚠️ Total storage over 1 MB: {stats['storage']['total_kb']} KB"
+        )
 
     if warnings:
         for w in warnings:
