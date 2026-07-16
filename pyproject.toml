@@ -24,7 +24,7 @@ classifiers = [
 
 dependencies = [
     # MCP Server
-    "mcp>=1.0.0",
+    "mcp>=1.27.2",
     "fastmcp>=3.0.0b1",
     # Configuration & Templating
     "pyyaml>=6.0",
