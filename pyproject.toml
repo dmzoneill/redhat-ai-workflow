@@ -58,7 +58,7 @@ dependencies = [
     "watchfiles>=0.21.0",
     # Meet bot browser automation and video
     "playwright>=1.40.0",
-    "pillow>=12.2.0",
+    "pillow>=12.3.0",
     # Meet bot GPU acceleration
     "pyopencl>=2023.1",
     "PyOpenGL>=3.1.0",
