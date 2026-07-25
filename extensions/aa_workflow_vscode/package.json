@@ -298,7 +298,7 @@
   },
   "dependencies": {
     "dbus-next": "^0.10.2",
-    "js-yaml": "^5.2.1",
+    "js-yaml": "^5.2.2",
     "ws": "^8.20.1"
   }
 }
