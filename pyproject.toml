@@ -72,7 +72,7 @@ dependencies = [
     "onnxruntime>=1.16.0; python_version < '3.14'",
     # Document processing
     "python-pptx>=0.6.21",
-    "pypdf>=6.14.2",
+    "pypdf>=6.15.0",
     "jsonpath-ng>=1.6.0",
     "ai-slop-detector>=2.6.3",
 ]
