@@ -17,24 +17,30 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 # Add current directory to sys.path to support both relative and absolute imports
 _DIR = Path(__file__).parent.absolute()
 if str(_DIR) not in sys.path:
     sys.path.insert(0, str(_DIR))
 
-try:
+if TYPE_CHECKING:
+    # One import path for type checking; runtime keeps the package and script fallbacks.
     from .persistence import PendingMessage, SlackStateDB
     from .slack_client import SlackSession
-except (ImportError, SystemError, TypeError):
-    from persistence import PendingMessage, SlackStateDB
-    from slack_client import SlackSession
+else:
+    try:
+        from .persistence import PendingMessage, SlackStateDB
+        from .slack_client import SlackSession
+    except (ImportError, SystemError, TypeError):
+        from persistence import PendingMessage, SlackStateDB
+        from slack_client import SlackSession
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class ListenerConfig:
     """Configuration for the Slack listener."""
 
@@ -94,6 +100,7 @@ class ListenerConfig:
 NotificationCallback = Callable[[PendingMessage], None]
 
 
+# pylint: disable-next=too-many-instance-attributes
 class SlackListener:
     """
     Background Slack message listener.
@@ -131,7 +138,7 @@ class SlackListener:
         self._channel_names: dict[str, str] = {}
 
         # Stats
-        self._stats = {
+        self._stats: dict[str, Any] = {
             "polls": 0,
             "messages_seen": 0,
             "messages_queued": 0,
@@ -161,9 +168,9 @@ class SlackListener:
             auth_info = await self.session.validate_session()
             if not self.config.self_user_id:
                 self.config.self_user_id = auth_info.get("user_id", "")
-            logger.info(f"Authenticated as user: {auth_info.get('user', 'unknown')}")
+            logger.info("Authenticated as user: %s", auth_info.get("user", "unknown"))
         except Exception as e:
-            logger.error(f"Session validation failed: {e}")
+            logger.error("Session validation failed: %s", e)
             raise
 
         # Load channel names
@@ -173,8 +180,10 @@ class SlackListener:
         self._stats["started_at"] = time.time()
         self._task = asyncio.create_task(self._poll_loop())
         logger.info(
-            f"Started listener polling {len(self.config.watched_channels)} channels "
-            f"every {self.config.poll_interval_min}-{self.config.poll_interval_max}s"
+            "Started listener polling %s channels every %s-%ss",
+            len(self.config.watched_channels),
+            self.config.poll_interval_min,
+            self.config.poll_interval_max,
         )
 
     async def stop(self):
@@ -217,10 +226,12 @@ class SlackListener:
                     self._channel_names[channel_id] = cached.name
             if self._channel_names:
                 logger.info(
-                    f"Loaded {len(self._channel_names)} channel names from cache"
+                    "Loaded %s channel names from cache", len(self._channel_names)
                 )
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Could not load channel names from cache: {e}")
+            logger.debug("Could not load channel names from cache: %s", e)
 
         # Fall back to API for any missing channels (may fail on enterprise)
         missing = [
@@ -234,8 +245,10 @@ class SlackListener:
                         self._channel_names[channel["id"]] = channel.get(
                             "name", channel["id"]
                         )
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(f"Could not load channel names from API: {e}")
+                logger.warning("Could not load channel names from API: %s", e)
 
     async def _resolve_channel_name(self, channel_id: str) -> str:
         """
@@ -258,8 +271,10 @@ class SlackListener:
                 # Update in-memory cache for future lookups
                 self._channel_names[channel_id] = cached.name
                 return cached.name
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Could not resolve channel name from cache: {e}")
+            logger.debug("Could not resolve channel name from cache: %s", e)
 
         # For DMs (D...), the "name" is typically the other user
         # We can't easily resolve this without knowing who the DM is with
@@ -277,7 +292,9 @@ class SlackListener:
         logger.info("Poll loop starting...")
         while self._running:
             try:
-                logger.debug(f"Polling {len(self.config.watched_channels)} channels...")
+                logger.debug(
+                    "Polling %s channels...", len(self.config.watched_channels)
+                )
                 poll_had_errors = await self._poll_all_channels()
                 self._stats["polls"] += 1
 
@@ -285,17 +302,19 @@ class SlackListener:
                 if not poll_had_errors:
                     self._stats["consecutive_errors"] = 0
 
-                logger.debug(f"Poll complete. Total polls: {self._stats['polls']}")
+                logger.debug("Poll complete. Total polls: %s", self._stats["polls"])
             except asyncio.CancelledError:
                 logger.info("Poll loop cancelled")
                 break
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 # Don't log full traceback for transient errors
                 error_type = type(e).__name__
                 self._stats["errors"] += 1
                 self._stats["consecutive_errors"] += 1
                 self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
-                logger.debug(f"Poll loop error: {error_type}: {e}")
+                logger.debug("Poll loop error: %s: %s", error_type, e)
 
             # Wait for next poll interval (randomized for natural feel)
             interval = random.uniform(
@@ -316,31 +335,37 @@ class SlackListener:
             await asyncio.sleep(0)
             try:
                 logger.debug(
-                    f"Polling channel {i + 1}/{len(self.config.watched_channels)}: {channel_id}"
+                    "Polling channel %s/%s: %s",
+                    i + 1,
+                    len(self.config.watched_channels),
+                    channel_id,
                 )
                 await self._poll_channel(channel_id)
-                logger.debug(f"Done polling {channel_id}")
+                logger.debug("Done polling %s", channel_id)
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 # Don't log full traceback - just record the error type
                 error_type = type(e).__name__
                 self._stats["errors"] += 1
                 self._stats["consecutive_errors"] += 1
                 self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
-                logger.debug(f"Error polling channel {channel_id}: {error_type}")
+                logger.debug("Error polling channel %s: %s", channel_id, error_type)
                 had_errors = True
         return had_errors
 
     async def _poll_channel(self, channel_id: str):
         """Poll a single channel for new messages."""
         # Get last processed timestamp
-        logger.debug(f"  Getting last_ts for {channel_id}")
+        logger.debug("  Getting last_ts for %s", channel_id)
         last_ts = await self.state_db.get_last_processed_ts(channel_id)
-        logger.debug(f"  last_ts={last_ts}, fetching history...")
+        logger.debug("  last_ts=%s, fetching history...", last_ts)
 
         # First run: just get the latest message to set our baseline
         if last_ts is None:
             logger.info(
-                f"First poll of {channel_id} - setting baseline (not processing historical)"
+                "First poll of %s - setting baseline (not processing historical)",
+                channel_id,
             )
             messages = await self.session.get_channel_history(
                 channel_id=channel_id,
@@ -361,7 +386,7 @@ class SlackListener:
             oldest=last_ts,
             inclusive=False,
         )
-        logger.debug(f"  Got {len(messages) if messages else 0} messages")
+        logger.debug("  Got %s messages", len(messages) if messages else 0)
 
         if not messages:
             return
@@ -390,7 +415,7 @@ class SlackListener:
                 channel_id, newest_ts, channel_name
             )
             if self.config.debug:
-                logger.debug(f"Updated {channel_id} last_ts to {newest_ts}")
+                logger.debug("Updated %s last_ts to %s", channel_id, newest_ts)
 
     def _extract_content(self, message: dict[str, Any]) -> tuple[str, str, str]:
         """Extract effective user_id, user_name, and text from a message.
@@ -432,6 +457,7 @@ class SlackListener:
 
         return user_id, effective_user_name, text
 
+    # pylint: disable-next=too-many-return-statements,too-many-branches
     def _should_process(self, message: dict[str, Any], channel_id: str) -> bool:
         """
         Determine if a message should trigger the agent.
@@ -455,17 +481,18 @@ class SlackListener:
         # Ignore our own messages (UNLESS in self-DM testing channel)
         if user_id == self.config.self_user_id:
             # Allow self messages in the designated self-DM channel for testing
+            # pylint: disable-next=no-else-return
             if (
                 self.config.self_dm_channel
                 and channel_id == self.config.self_dm_channel
             ):
                 logger.debug(
-                    f"Self-DM testing: processing message from self in {channel_id}"
+                    "Self-DM testing: processing message from self in %s", channel_id
                 )
                 return True  # Process ALL messages from self in self-DM channel
             else:
                 logger.debug(
-                    f"Ignoring self message in {channel_id} (not self-DM channel)"
+                    "Ignoring self message in %s (not self-DM channel)", channel_id
                 )
                 return False
 
@@ -476,7 +503,7 @@ class SlackListener:
         # ALWAYS process messages in alert channels (for auto-investigate)
         # Alert channels are configured in config.json under slack.listener.alert_channels
         if channel_id in self.config.alert_channels:
-            logger.debug(f"Alert channel message: processing from {channel_id}")
+            logger.debug("Alert channel message: processing from %s", channel_id)
             return True
 
         # Always process from watched users
@@ -492,7 +519,7 @@ class SlackListener:
         # Check for @me command pattern (literal "@me " at start of message)
         text_lower = text.lower()
         if text_lower.startswith("@me ") or text_lower == "@me":
-            logger.debug(f"@me command detected: {text[:50]}")
+            logger.debug("@me command detected: %s", text[:50])
             return True
 
         # Check for ! or / commands in self-DM channel only
@@ -500,7 +527,7 @@ class SlackListener:
             if text.startswith("!") or (
                 text.startswith("/") and not text.startswith("//")
             ):
-                logger.debug(f"Self-DM command detected: {text[:50]}")
+                logger.debug("Self-DM command detected: %s", text[:50])
                 return True
 
         # Check for watched keywords
@@ -536,8 +563,10 @@ class SlackListener:
             await self.state_db.cache_user(user_id, user_name, display_name, real_name)
 
             return display_name or user_name
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Could not resolve user {user_id}: {e}")
+            logger.warning("Could not resolve user %s: %s", user_id, e)
             return user_id
 
     async def _process_message(self, channel_id: str, message: dict[str, Any]):
@@ -587,16 +616,21 @@ class SlackListener:
         self._stats["messages_queued"] += 1
 
         logger.info(
-            f"Queued message from {user_name} in #{channel_name}: "
-            f"{text[:50]}{'...' if len(text) > 50 else ''}"
+            "Queued message from %s in #%s: %s%s",
+            user_name,
+            channel_name,
+            text[:50],
+            "..." if len(text) > 50 else "",
         )
 
         # Trigger callbacks
         for callback in self._callbacks:
             try:
                 callback(pending)
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.error(f"Callback error: {e}")
+                logger.error("Callback error: %s", e)
 
 
 class SlackListenerManager:
@@ -657,28 +691,39 @@ class SlackListenerManager:
     ) -> list[PendingMessage]:
         """Get pending messages from the queue."""
         await self.initialize()
-        return await self.state_db.get_pending_messages(limit, channel_id)
+        state_db = self.state_db
+        if state_db is None:
+            raise RuntimeError("Slack listener is not initialized")
+        return await state_db.get_pending_messages(limit, channel_id)
 
     async def mark_processed(self, message_id: str):
         """Mark a message as processed."""
         await self.initialize()
-        await self.state_db.mark_message_processed(message_id)
+        state_db = self.state_db
+        if state_db is None:
+            raise RuntimeError("Slack listener is not initialized")
+        await state_db.mark_message_processed(message_id)
 
     async def get_status(self) -> dict[str, Any]:
         """Get listener status."""
-        if not self._initialized or not self.listener:
+        listener = self.listener
+        state_db = self.state_db
+        if not self._initialized or listener is None or state_db is None:
             return {"status": "not_initialized", "running": False}
 
-        pending_count = await self.state_db.get_pending_count()
+        pending_count = await state_db.get_pending_count()
 
         return {
-            "status": "running" if self.listener.is_running else "stopped",
-            "running": self.listener.is_running,
+            "status": "running" if listener.is_running else "stopped",
+            "running": listener.is_running,
             "pending_messages": pending_count,
-            "stats": self.listener.stats,
+            "stats": listener.stats,
             "config": {
-                "poll_interval": f"{self.listener.config.poll_interval_min}-{self.listener.config.poll_interval_max}s",
-                "watched_channels": len(self.listener.config.watched_channels),
-                "watched_keywords": self.listener.config.watched_keywords,
+                "poll_interval": (
+                    f"{listener.config.poll_interval_min}-"
+                    f"{listener.config.poll_interval_max}s"
+                ),
+                "watched_channels": len(listener.config.watched_channels),
+                "watched_keywords": listener.config.watched_keywords,
             },
         }

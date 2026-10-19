@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,cyclic-import,too-many-lines
 """Knowledge Tools - Project-specific expertise loading and learning.
 
 Provides tools for:
@@ -12,11 +13,10 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from mcp.types import TextContent
-
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
@@ -89,8 +89,9 @@ def _load_knowledge(persona: str, project: str) -> dict | None:
     try:
         with open(knowledge_path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Failed to load knowledge {knowledge_path}: {e}")
+    # Unreadable knowledge files are treated as missing.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load knowledge %s: %s", knowledge_path, e)
         return None
 
 
@@ -117,11 +118,12 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
 
         # Log notifications
         for notification in notifications:
-            logger.info(f"📚 Knowledge milestone: {notification}")
+            logger.info("📚 Knowledge milestone: %s", notification)
 
         return True
-    except Exception as e:
-        logger.error(f"Failed to save knowledge {knowledge_path}: {e}")
+    # Saving is best-effort; callers still have the in-memory knowledge.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to save knowledge %s: %s", knowledge_path, e)
         return False
 
 
@@ -191,7 +193,8 @@ def _detect_project_from_path(path: str | Path | None = None) -> str | None:
     else:
         try:
             check_path = Path.cwd().resolve()
-        except Exception:
+        # cwd can fail in restricted environments; detection then returns None.
+        except Exception:  # pylint: disable=broad-exception-caught
             return None
 
     repositories = config.get("repositories", {})
@@ -222,10 +225,12 @@ async def _detect_project_from_ctx(ctx: Any) -> str | None:
         return _detect_project_from_path()
 
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.workspace_utils import get_workspace_project
 
         return await get_workspace_project(ctx)
-    except Exception:
+    # Workspace lookup is optional; path detection is the fallback.
+    except Exception:  # pylint: disable=broad-exception-caught
         # Fall back to path-based detection
         return _detect_project_from_path()
 
@@ -237,9 +242,14 @@ def _get_current_persona() -> str | None:
     For workspace-aware persona detection, use _get_persona_from_ctx() instead.
     """
     try:
+        # pylint: disable-next=import-outside-toplevel
         from .session_tools import _get_current_persona as _get_persona
     except ImportError:
-        from session_tools import _get_current_persona as _get_persona
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        _session_tools = importlib.import_module("session_tools")
+        # pylint: disable-next=protected-access
+        _get_persona = _session_tools._get_current_persona
     return _get_persona()
 
 
@@ -258,17 +268,19 @@ async def _get_persona_from_ctx(ctx: Any) -> str:
         return _get_current_persona() or "developer"
 
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.workspace_utils import get_workspace_persona
 
         return await get_workspace_persona(ctx)
-    except Exception:
+    # Workspace persona lookup is optional.
+    except Exception:  # pylint: disable=broad-exception-caught
         # Fall back to global persona
         return _get_current_persona() or "developer"
 
 
 def _scan_project_structure(project_path: Path) -> dict:
     """Scan a project's structure and return key information."""
-    result = {
+    result: dict[str, Any] = {
         "files": [],
         "directories": [],
         "config_files": [],
@@ -317,28 +329,32 @@ def _scan_project_structure(project_path: Path) -> dict:
     # Parse dependencies from config files
     if "pyproject.toml" in result["config_files"]:
         try:
-            import tomllib
+            import tomllib  # pylint: disable=import-outside-toplevel
 
-            with open(project_path / "pyproject.toml", "rb") as f:
-                pyproject = tomllib.load(f)
+            with open(project_path / "pyproject.toml", "rb") as toml_file:
+                pyproject = tomllib.load(toml_file)
             deps = pyproject.get("project", {}).get("dependencies", [])
             result["dependencies"] = [
                 d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]
             ]
-        except Exception as e:
+        # Optional config files may be missing, binary, or invalid.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.debug(
-                f"Suppressed error in _scan_project_structure (pyproject.toml): {e}"
+                "Suppressed error in _scan_project_structure (pyproject.toml): %s",
+                e,
             )
 
     if "package.json" in result["config_files"]:
         try:
-            with open(project_path / "package.json", encoding="utf-8") as f:
-                pkg = json.load(f)
+            with open(project_path / "package.json", encoding="utf-8") as package_file:
+                pkg = json.load(package_file)
             deps = list(pkg.get("dependencies", {}).keys())[:20]
             result["dependencies"] = deps
-        except Exception as e:
+        # Optional config files may be missing or invalid JSON.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.debug(
-                f"Suppressed error in _scan_project_structure (package.json): {e}"
+                "Suppressed error in _scan_project_structure (package.json): %s",
+                e,
             )
 
     return result
@@ -360,9 +376,11 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
                 if p.strip() and not p.startswith("#"):
                     overview = p.strip()[:500]
                     break
-        except Exception as e:
+        # README may be unreadable or use an unexpected encoding.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.debug(
-                f"Suppressed error in _generate_initial_knowledge (readme): {e}"
+                "Suppressed error in _generate_initial_knowledge (readme): %s",
+                e,
             )
 
     # Build key modules from directory structure
@@ -379,7 +397,11 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
             )
 
     # Determine project type and patterns based on config files
-    patterns = {"coding": [], "testing": [], "deployment": []}
+    patterns: dict[str, list[dict[str, str]]] = {
+        "coding": [],
+        "testing": [],
+        "deployment": [],
+    }
 
     if (
         "pyproject.toml" in structure["config_files"]
@@ -432,7 +454,9 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
     return knowledge
 
 
-def _format_knowledge_summary(knowledge: dict) -> str:
+def _format_knowledge_summary(  # pylint: disable=too-many-locals
+    knowledge: dict,
+) -> str:
     """Format knowledge into a readable summary."""
     lines = []
 
@@ -493,7 +517,8 @@ def _format_knowledge_summary(knowledge: dict) -> str:
         lines.append(f"### 📝 Learned from Tasks ({len(learned)})")
         for item in learned[-3:]:  # Show most recent
             lines.append(
-                f"- [{item.get('date', '?')}] {item.get('task', '?')}: {item.get('learning', '')[:100]}"
+                f"- [{item.get('date', '?')}] {item.get('task', '?')}: "
+                f"{item.get('learning', '')[:100]}"
             )
         lines.append("")
 
@@ -524,15 +549,17 @@ async def _knowledge_load_impl(
     """
     # Auto-detect project if not provided
     if not project:
-        project = _detect_project_from_path()
-        if not project:
+        detected_project = _detect_project_from_path()
+        if not detected_project:
             return [
                 TextContent(
                     type="text",
                     text="❌ Could not detect project from current directory.\n\n"
-                    "Provide project name explicitly: `knowledge_load(project='automation-analytics-backend')`",
+                    "Provide project name explicitly: "
+                    "`knowledge_load(project='automation-analytics-backend')`",
                 )
             ]
+        project = detected_project
 
     # Auto-detect persona if not provided
     if not persona:
@@ -591,7 +618,7 @@ async def _knowledge_load_impl(
     ]
 
 
-async def _knowledge_scan_impl(
+async def _knowledge_scan_impl(  # pylint: disable=too-many-locals
     project: str = "",
     persona: str = "",
     force: bool = False,
@@ -609,15 +636,17 @@ async def _knowledge_scan_impl(
     """
     # Auto-detect project if not provided
     if not project:
-        project = _detect_project_from_path()
-        if not project:
+        detected_project = _detect_project_from_path()
+        if not detected_project:
             return [
                 TextContent(
                     type="text",
                     text="❌ Could not detect project from current directory.\n\n"
-                    "Provide project name explicitly: `knowledge_scan(project='automation-analytics-backend')`",
+                    "Provide project name explicitly: "
+                    "`knowledge_scan(project='automation-analytics-backend')`",
                 )
             ]
+        project = detected_project
 
     # Auto-detect persona if not provided
     if not persona:
@@ -754,7 +783,8 @@ async def _knowledge_update_impl(
             )
         ]
 
-    except Exception as e:
+    # Update failures are reported to the caller as text.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error updating knowledge: {e}")]
 
 
@@ -777,14 +807,15 @@ async def _knowledge_query_impl(
     """
     # Auto-detect
     if not project:
-        project = _detect_project_from_path()
-        if not project:
+        detected_project = _detect_project_from_path()
+        if not detected_project:
             return [
                 TextContent(
                     type="text",
                     text="❌ Could not detect project. Provide project name explicitly.",
                 )
             ]
+        project = detected_project
 
     if not persona:
         persona = _get_current_persona() or "developer"
@@ -816,16 +847,18 @@ async def _knowledge_query_impl(
             return [
                 TextContent(
                     type="text",
-                    text=f"## Knowledge: {project}/{persona} → {section}\n\n```yaml\n{formatted}```",
+                    text=(
+                        f"## Knowledge: {project}/{persona} → {section}\n\n"
+                        f"```yaml\n{formatted}```"
+                    ),
                 )
             ]
-        else:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"## Knowledge: {project}/{persona} → {section}\n\n{result}",
-                )
-            ]
+        return [
+            TextContent(
+                type="text",
+                text=f"## Knowledge: {project}/{persona} → {section}\n\n{result}",
+            )
+        ]
 
     except KeyError:
         return [
@@ -837,7 +870,7 @@ async def _knowledge_query_impl(
         ]
 
 
-async def _knowledge_learn_impl(
+async def _knowledge_learn_impl(  # pylint: disable=too-many-branches
     learning: str,
     task: str = "",
     section: str = "learned_from_tasks",
@@ -853,7 +886,8 @@ async def _knowledge_learn_impl(
     Args:
         learning: What was learned (the insight)
         task: Task/issue that led to this learning (e.g., "AAP-12345")
-        section: Where to store (default: learned_from_tasks, can be "gotchas", "patterns.coding", etc.)
+        section: Where to store (default: learned_from_tasks, or
+            "gotchas", "patterns.coding", etc.)
         project: Project name. Auto-detected if empty.
         persona: Persona name. Uses current if empty.
 
@@ -862,27 +896,29 @@ async def _knowledge_learn_impl(
     """
     # Auto-detect
     if not project:
-        project = _detect_project_from_path()
-        if not project:
+        detected_project = _detect_project_from_path()
+        if not detected_project:
             return [
                 TextContent(
                     type="text",
                     text="❌ Could not detect project. Provide project name explicitly.",
                 )
             ]
+        project = detected_project
 
     if not persona:
         persona = _get_current_persona() or "developer"
 
-    # Load or create knowledge
-    knowledge = _load_knowledge(persona, project)
-    if not knowledge:
-        # Create minimal knowledge structure
-        knowledge = copy.deepcopy(DEFAULT_KNOWLEDGE_SCHEMA)
-        knowledge["metadata"]["project"] = project
-        knowledge["metadata"]["persona"] = persona
+    # Load or create knowledge. Cast so later writes are not a schema union.
+    loaded = _load_knowledge(persona, project)
+    if not loaded:
+        loaded = copy.deepcopy(DEFAULT_KNOWLEDGE_SCHEMA)
+    knowledge = cast(dict[str, Any], loaded)
+    knowledge["metadata"]["project"] = project
+    knowledge["metadata"]["persona"] = persona
 
     # Build the learning entry
+    entry: Any
     if section == "learned_from_tasks":
         entry = {
             "date": datetime.now().strftime("%Y-%m-%d"),
@@ -984,9 +1020,11 @@ async def _knowledge_list_impl() -> list[TextContent]:
                         :10
                     ]
                     lines.append(
-                        f"- **{project}** {confidence_emoji} {confidence:.0%} (updated: {last_updated})"
+                        f"- **{project}** {confidence_emoji} {confidence:.0%} "
+                        f"(updated: {last_updated})"
                     )
-                except Exception:
+                # A single unreadable file should not hide the rest of the list.
+                except Exception:  # pylint: disable=broad-exception-caught
                     lines.append(f"- **{project}** ❓")
             lines.append("")
 
@@ -1001,7 +1039,7 @@ async def _knowledge_list_impl() -> list[TextContent]:
 
 def register_knowledge_tools(server: "FastMCP") -> int:
     """Register knowledge tools with the MCP server."""
-    from fastmcp import Context
+    from fastmcp import Context  # pylint: disable=import-outside-toplevel
 
     registry = ToolRegistry(server)
 
@@ -1064,8 +1102,9 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         return await _knowledge_scan_impl(project, persona, force)
 
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def knowledge_update(
-        ctx: Context,
+        ctx: Context,  # pylint: disable=unused-argument
         project: str,
         persona: str,
         section: str,
@@ -1120,6 +1159,7 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         return await _knowledge_query_impl(project, persona, section)
 
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def knowledge_learn(
         ctx: Context,
         learning: str,
@@ -1137,7 +1177,8 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         Args:
             learning: What was learned (the insight)
             task: Task/issue that led to this learning (e.g., "AAP-12345")
-            section: Where to store (default: learned_from_tasks, can be "gotchas", "patterns.coding", etc.)
+            section: Where to store (default: learned_from_tasks, or
+            "gotchas", "patterns.coding", etc.)
             project: Project name. Auto-detected from workspace if empty.
             persona: Persona name. Uses workspace persona if empty.
 
@@ -1152,7 +1193,9 @@ def register_knowledge_tools(server: "FastMCP") -> int:
         return await _knowledge_learn_impl(learning, task, section, project, persona)
 
     @registry.tool()
-    async def knowledge_list(ctx: Context) -> list[TextContent]:
+    async def knowledge_list(  # pylint: disable=unused-argument
+        ctx: Context,
+    ) -> list[TextContent]:
         """
         List all available knowledge files.
 

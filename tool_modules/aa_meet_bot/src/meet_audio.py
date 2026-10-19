@@ -11,57 +11,49 @@ Handles PulseAudio/PipeWire audio routing for the Meet bot:
 Extracted from GoogleMeetController to separate audio concerns.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
+from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
+from tool_modules.aa_meet_bot.src.virtual_devices import (
+    InstanceDeviceManager,
+    InstanceDevices,
+)
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
-    from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDevices
 
 logger = logging.getLogger(__name__)
 
+# pactl parsing and process failures. These handlers keep audio routing alive.
+_PACTL_ERRORS = (
+    OSError,
+    subprocess.SubprocessError,
+    ValueError,
+    IndexError,
+    TypeError,
+    AttributeError,
+)
 
-class MeetAudio:
-    """Handles PulseAudio/PipeWire audio routing for Google Meet.
 
-    Uses composition: receives a reference to the GoogleMeetController
-    to access browser PID, state, device manager, and instance ID.
-    """
+class AudioMixin:
+    """PulseAudio routing methods shared by the controller and MeetAudio."""
 
-    def __init__(self, controller: "GoogleMeetController"):
-        self._controller = controller
+    # Declared for mixins that read sibling state.
+    _audio_sink_name: Optional[str]
+    _browser_pid: Any
+    _device_manager: Optional[InstanceDeviceManager]
+    _devices: Optional[InstanceDevices]
+    _instance_id: Any
+    state: Any
 
-    @property
-    def _instance_id(self):
-        return self._controller._instance_id
-
-    @property
-    def _audio_sink_name(self) -> Optional[str]:
-        return self._controller._audio_sink_name
-
-    @_audio_sink_name.setter
-    def _audio_sink_name(self, value: Optional[str]):
-        self._controller._audio_sink_name = value
-
-    @property
-    def _browser_pid(self) -> Optional[int]:
-        return self._controller._browser_pid
-
-    @property
-    def _device_manager(self):
-        return self._controller._device_manager
-
-    @property
-    def _devices(self) -> Optional["InstanceDevices"]:
-        return self._controller._devices
-
-    @property
-    def state(self):
-        return self._controller.state
-
-    async def create_virtual_audio_sink(self) -> bool:
+    async def _create_virtual_audio_sink(self) -> bool:
         """Create a virtual PulseAudio sink for meeting audio output.
 
         This creates a null sink that:
@@ -72,7 +64,6 @@ class MeetAudio:
         Returns:
             True if sink was created successfully.
         """
-        import subprocess
 
         # Create a unique sink name for this instance
         sink_name = f"meet_bot_{self._instance_id.replace('-', '_')}"
@@ -81,11 +72,16 @@ class MeetAudio:
         try:
             # Check if sink already exists
             result = subprocess.run(
-                ["pactl", "list", "short", "sinks"], capture_output=True, text=True
+                ["pactl", "list", "short", "sinks"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             if sink_name in result.stdout:
                 logger.info(
-                    f"[{self._instance_id}] Virtual audio sink already exists: {sink_name}"
+                    "[%s] Virtual audio sink already exists: %s",
+                    self._instance_id,
+                    sink_name,
                 )
                 self._audio_sink_name = sink_name
                 return True
@@ -101,32 +97,33 @@ class MeetAudio:
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
 
             if result.returncode == 0:
                 self._audio_sink_name = sink_name
                 logger.info(
-                    f"[{self._instance_id}] Created virtual audio sink: {sink_name}"
+                    "[%s] Created virtual audio sink: %s", self._instance_id, sink_name
                 )
                 logger.info(
-                    f"[{self._instance_id}] To listen: pactl set-default-source {sink_name}.monitor"
+                    "[%s] To listen: pactl set-default-source %s.monitor",
+                    self._instance_id,
+                    sink_name,
                 )
                 return True
-            else:
-                logger.warning(
-                    f"[{self._instance_id}] Failed to create audio sink: {result.stderr}"
-                )
-                return False
-
-        except Exception as e:
             logger.warning(
-                f"[{self._instance_id}] Could not create virtual audio sink: {e}"
+                "[%s] Failed to create audio sink: %s", self._instance_id, result.stderr
             )
             return False
 
-    async def remove_virtual_audio_sink(self) -> None:
+        except _PACTL_ERRORS as e:
+            logger.warning(
+                "[%s] Could not create virtual audio sink: %s", self._instance_id, e
+            )
+            return False
+
+    async def _remove_virtual_audio_sink(self) -> None:
         """Remove the virtual audio sink when done."""
-        import subprocess
 
         if not self._audio_sink_name:
             return
@@ -134,41 +131,30 @@ class MeetAudio:
         try:
             # Find the module index for our sink
             result = subprocess.run(
-                ["pactl", "list", "short", "modules"], capture_output=True, text=True
+                ["pactl", "list", "short", "modules"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
             for line in result.stdout.strip().split("\n"):
                 if self._audio_sink_name in line:
                     module_index = line.split()[0]
-                    subprocess.run(["pactl", "unload-module", module_index])
+                    subprocess.run(
+                        ["pactl", "unload-module", module_index], check=False
+                    )
                     logger.info(
-                        f"[{self._instance_id}] Removed virtual audio sink: {self._audio_sink_name}"
+                        "[%s] Removed virtual audio sink: %s",
+                        self._instance_id,
+                        self._audio_sink_name,
                     )
                     break
 
             self._audio_sink_name = None
-        except Exception as e:
+        except _PACTL_ERRORS as e:
             logger.warning(
-                f"[{self._instance_id}] Could not remove virtual audio sink: {e}"
+                "[%s] Could not remove virtual audio sink: %s", self._instance_id, e
             )
-
-    def get_audio_sink_name(self) -> Optional[str]:
-        """Get the name of the virtual audio sink for this instance.
-
-        To listen to meeting audio:
-            pactl set-default-source <sink_name>.monitor
-            # Or use pavucontrol to route the monitor to your headphones
-        """
-        return self._audio_sink_name
-
-    def get_audio_devices(self) -> Optional["InstanceDevices"]:
-        """Get the per-instance audio devices for this controller.
-
-        Returns:
-            InstanceDevices with sink_name, source_name, pipe_path, etc.
-            None if devices weren't created (legacy mode).
-        """
-        return self._devices
 
     def get_monitor_source(self) -> Optional[str]:
         """Get the monitor source name for capturing meeting audio.
@@ -181,7 +167,7 @@ class MeetAudio:
         """
         if self._device_manager:
             return self._device_manager.get_monitor_source()
-        elif self._audio_sink_name:
+        if self._audio_sink_name:
             return f"{self._audio_sink_name}.monitor"
         return None
 
@@ -198,18 +184,97 @@ class MeetAudio:
             return self._devices.pipe_path
         return None
 
-    async def route_browser_audio_to_sink(self) -> None:
+    def _route_parsed_stream(
+        self,
+        input_id: str | None,
+        is_chrome: bool,
+        current_sink: str | None,
+        current_pid: str | None,
+    ) -> bool:
+        """Route one Chrome sink input onto our sink."""
+        if not input_id or not is_chrome or not current_sink:
+            return False
+        if not isinstance(current_sink, str):
+            return False
+        audio_sink = self._audio_sink_name
+        if not isinstance(audio_sink, str) or audio_sink in current_sink:
+            return False
+        if self._browser_pid and current_pid != str(self._browser_pid):
+            logger.debug(
+                "[%s] Skipping audio stream %s (PID %s != our PID %s)",
+                self._instance_id,
+                input_id,
+                current_pid,
+                self._browser_pid,
+            )
+            return False
+        self._move_sink_input(input_id)
+        return True
+
+    def _consume_sink_line(self, line: str, pending: dict) -> bool:
+        """Update one pactl line. Return True when a previous stream was routed."""
+        routed = False
+        if line.startswith("Sink Input #"):
+            routed = self._route_parsed_stream(
+                pending["input_id"],
+                pending["is_chrome"],
+                pending["sink"],
+                pending["pid"],
+            )
+            pending["input_id"] = line.split("#")[1]
+            pending["sink"] = None
+            pending["is_chrome"] = False
+            pending["pid"] = None
+            return routed
+        if "Sink:" in line and pending["input_id"]:
+            pending["sink"] = line.split(":")[-1].strip()
+            return False
+        if "application.name" in line.lower():
+            app_name = line.split("=")[-1].strip().strip('"').lower()
+            if app_name in ["google chrome", "chromium", "chrome"]:
+                pending["is_chrome"] = True
+                logger.debug(
+                    "[%s] Found Chrome audio stream: %s",
+                    self._instance_id,
+                    pending["input_id"],
+                )
+            return False
+        if "application.process.id" in line.lower():
+            pending["pid"] = line.split("=")[-1].strip().strip('"')
+        return False
+
+    def _route_sink_input_listing(self, listing: str) -> int:
+        """Parse pactl sink-input text and route matching Chrome streams."""
+        pending: dict[str, Any] = {
+            "input_id": None,
+            "sink": None,
+            "is_chrome": False,
+            "pid": None,
+        }
+        routed = 0
+        for raw_line in listing.split("\n"):
+            if self._consume_sink_line(raw_line.strip(), pending):
+                routed += 1
+        if self._route_parsed_stream(
+            pending["input_id"],
+            pending["is_chrome"],
+            pending["sink"],
+            pending["pid"],
+        ):
+            routed += 1
+        return routed
+
+    async def _route_browser_audio_to_sink(self) -> None:
         """Route Chrome's audio output to our virtual sink.
 
         This runs in the background and periodically checks for Chrome audio streams,
         moving them to our virtual sink so meeting audio doesn't play on speakers.
         """
-        import subprocess
 
         if not self._audio_sink_name:
             return
 
-        logger.info(f"[{self._instance_id}] Starting audio routing monitor...")
+        logger.info("[%s] Starting audio routing monitor...", self._instance_id)
 
         streams_routed = 0
 
@@ -221,98 +286,39 @@ class MeetAudio:
 
         if not self.state or not self.state.joined:
             logger.warning(
-                f"[{self._instance_id}] Audio routing: meeting not joined, giving up"
+                "[%s] Audio routing: meeting not joined, giving up", self._instance_id
             )
             return
 
-        logger.info(f"[{self._instance_id}] Meeting joined, starting audio routing...")
+        logger.info("[%s] Meeting joined, starting audio routing...", self._instance_id)
 
         # Keep checking for new audio streams while in the meeting
         while self.state and self.state.joined:
             await asyncio.sleep(3)  # Check every 3 seconds
-
             try:
-                # Get detailed info about all sink inputs
                 result = subprocess.run(
-                    ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+                    ["pactl", "list", "sink-inputs"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
-
-                # Parse sink inputs and find Chrome/Chromium ones not on our sink
-                # IMPORTANT: Only route OUR browser instance, not user's regular Chrome
-                current_input_id = None
-                current_sink = None
-                is_chrome = False
-                current_pid = None
-
-                for line in result.stdout.split("\n"):
-                    line = line.strip()
-
-                    if line.startswith("Sink Input #"):
-                        # Save previous input if it was CONFIRMED our browser and not on our sink
-                        if (
-                            current_input_id
-                            and is_chrome
-                            and current_sink
-                            and self._audio_sink_name not in current_sink
-                        ):
-                            # Only route if it's our browser PID (or we don't have PID yet)
-                            if not self._browser_pid or current_pid == str(
-                                self._browser_pid
-                            ):
-                                self._move_sink_input(current_input_id)
-                                streams_routed += 1
-                            else:
-                                logger.debug(
-                                    f"[{self._instance_id}] Skipping audio stream {current_input_id} "
-                                    f"(PID {current_pid} != our PID {self._browser_pid})"
-                                )
-
-                        # Start new input
-                        current_input_id = line.split("#")[1]
-                        current_sink = None
-                        is_chrome = False
-                        current_pid = None
-
-                    elif "Sink:" in line and current_input_id:
-                        # Check which sink this stream is on
-                        current_sink = line.split(":")[-1].strip()
-
-                    elif "application.name" in line.lower():
-                        # Only match if application.name explicitly contains chrome/chromium
-                        app_name = line.split("=")[-1].strip().strip('"').lower()
-                        if app_name in ["google chrome", "chromium", "chrome"]:
-                            is_chrome = True
-                            logger.debug(
-                                f"[{self._instance_id}] Found Chrome audio stream: {current_input_id}"
-                            )
-
-                    elif "application.process.id" in line.lower():
-                        current_pid = line.split("=")[-1].strip().strip('"')
-
-                # Don't forget the last one
-                if (
-                    current_input_id
-                    and is_chrome
-                    and current_sink
-                    and self._audio_sink_name not in current_sink
-                ):
-                    if not self._browser_pid or current_pid == str(self._browser_pid):
-                        self._move_sink_input(current_input_id)
-                        streams_routed += 1
-
-            except Exception as e:
-                logger.debug(f"[{self._instance_id}] Audio routing check failed: {e}")
+                streams_routed += self._route_sink_input_listing(result.stdout)
+            except _PACTL_ERRORS as e:
+                logger.debug(
+                    "[%s] Audio routing check failed: %s", self._instance_id, e
+                )
 
         if streams_routed > 0:
             logger.info(
-                f"[{self._instance_id}] Audio routing monitor stopped (routed {streams_routed} streams)"
+                "[%s] Audio routing monitor stopped (routed %s streams)",
+                self._instance_id,
+                streams_routed,
             )
         else:
-            logger.info(f"[{self._instance_id}] Audio routing monitor stopped")
+            logger.info("[%s] Audio routing monitor stopped", self._instance_id)
 
     def _move_sink_input(self, sink_input_id: str) -> bool:
         """Move a sink input to our virtual audio sink."""
-        import subprocess
 
         if not self._audio_sink_name:
             return False
@@ -322,19 +328,21 @@ class MeetAudio:
                 ["pactl", "move-sink-input", sink_input_id, self._audio_sink_name],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             if result.returncode == 0:
                 logger.info(
-                    f"[{self._instance_id}] Routed audio stream {sink_input_id} to virtual sink"
+                    "[%s] Routed audio stream %s to virtual sink",
+                    self._instance_id,
+                    sink_input_id,
                 )
                 return True
-            else:
-                logger.debug(
-                    f"Failed to move sink-input {sink_input_id}: {result.stderr}"
-                )
-                return False
-        except Exception as e:
-            logger.debug(f"Failed to move sink-input {sink_input_id}: {e}")
+            logger.debug(
+                "Failed to move sink-input %s: %s", sink_input_id, result.stderr
+            )
+            return False
+        except _PACTL_ERRORS as e:
+            logger.debug("Failed to move sink-input %s: %s", sink_input_id, e)
             return False
 
     def _get_chrome_sink_inputs(self, only_our_browser: bool = True) -> list[str]:
@@ -344,12 +352,14 @@ class MeetAudio:
             only_our_browser: If True, only return sink inputs from our browser PID.
                             If False, return all Chrome/Chromium sink inputs.
         """
-        import subprocess
 
         sink_inputs = []
         try:
             result = subprocess.run(
-                ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+                ["pactl", "list", "sink-inputs"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
             current_input_id = None
@@ -388,8 +398,8 @@ class MeetAudio:
                 elif only_our_browser and not self._browser_pid:
                     sink_inputs.append(current_input_id)
 
-        except Exception as e:
-            logger.debug(f"Failed to get Chrome sink inputs: {e}")
+        except _PACTL_ERRORS as e:
+            logger.debug("Failed to get Chrome sink inputs: %s", e)
 
         return sink_inputs
 
@@ -399,12 +409,14 @@ class MeetAudio:
         Returns:
             True if audio was successfully unmuted.
         """
-        import subprocess
 
         try:
             # Get the default sink
             result = subprocess.run(
-                ["pactl", "get-default-sink"], capture_output=True, text=True
+                ["pactl", "get-default-sink"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             default_sink = result.stdout.strip()
 
@@ -424,17 +436,21 @@ class MeetAudio:
                     ["pactl", "move-sink-input", sink_input_id, default_sink],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
                 if result.returncode == 0:
                     logger.info(
-                        f"[{self._instance_id}] Unmuted: moved stream {sink_input_id} to {default_sink}"
+                        "[%s] Unmuted: moved stream %s to %s",
+                        self._instance_id,
+                        sink_input_id,
+                        default_sink,
                     )
                     success = True
 
             return success
 
-        except Exception as e:
-            logger.error(f"Failed to unmute audio: {e}")
+        except _PACTL_ERRORS as e:
+            logger.error("Failed to unmute audio: %s", e)
             return False
 
     def mute_audio(self) -> bool:
@@ -443,7 +459,6 @@ class MeetAudio:
         Returns:
             True if audio was successfully muted.
         """
-        import subprocess
 
         if not self._audio_sink_name:
             logger.warning("No virtual audio sink available for muting")
@@ -462,17 +477,21 @@ class MeetAudio:
                     ["pactl", "move-sink-input", sink_input_id, self._audio_sink_name],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
                 if result.returncode == 0:
                     logger.info(
-                        f"[{self._instance_id}] Muted: moved stream {sink_input_id} to {self._audio_sink_name}"
+                        "[%s] Muted: moved stream %s to %s",
+                        self._instance_id,
+                        sink_input_id,
+                        self._audio_sink_name,
                     )
                     success = True
 
             return success
 
-        except Exception as e:
-            logger.error(f"Failed to mute audio: {e}")
+        except _PACTL_ERRORS as e:
+            logger.error("Failed to mute audio: %s", e)
             return False
 
     def is_audio_muted(self) -> bool:
@@ -481,14 +500,16 @@ class MeetAudio:
         Returns:
             True if audio is muted (on null sink), False if audible.
         """
-        import subprocess
 
         if not self._audio_sink_name:
             return False
 
         try:
             result = subprocess.run(
-                ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+                ["pactl", "list", "sink-inputs"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
             current_input_id = None
@@ -520,11 +541,11 @@ class MeetAudio:
 
             return False
 
-        except Exception as e:
-            logger.debug(f"Failed to check audio mute state: {e}")
+        except _PACTL_ERRORS as e:
+            logger.debug("Failed to check audio mute state: %s", e)
             return False
 
-    async def restore_user_default_source(self) -> None:
+    async def _restore_user_default_source(self) -> None:
         """
         Restore the user's original microphone as the default audio source.
 
@@ -539,7 +560,6 @@ class MeetAudio:
 
         This works with ANY audio device - built-in mic, USB headset, Bluetooth, etc.
         """
-        import subprocess
 
         # Wait for Chrome to fully initialize and potentially mess with defaults
         await asyncio.sleep(2)
@@ -547,21 +567,29 @@ class MeetAudio:
         try:
             # First, check what the current default is
             result = subprocess.run(
-                ["pactl", "get-default-source"], capture_output=True, text=True
+                ["pactl", "get-default-source"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             current_default = result.stdout.strip()
 
             # If current default is already NOT a meetbot source, we're good
             if current_default and "meet_bot" not in current_default.lower():
                 logger.info(
-                    f"[{self._instance_id}] Default source is already user's device: {current_default}"
+                    "[%s] Default source is already user's device: %s",
+                    self._instance_id,
+                    current_default,
                 )
                 return
 
             # Current default is meetbot - need to find and restore user's source
             # Get all available sources
             result = subprocess.run(
-                ["pactl", "list", "sources", "short"], capture_output=True, text=True
+                ["pactl", "list", "sources", "short"],
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
             # Find a non-meetbot, non-monitor source (user's actual mic/headset)
@@ -589,30 +617,29 @@ class MeetAudio:
             if user_source:
                 # Use pw-metadata for persistent default (pactl gets overridden by PipeWire)
                 subprocess.run(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{user_source}"}}',
-                    ],
+                    default_source_metadata_args(user_source),
                     capture_output=True,
+                    check=False,
                 )
                 logger.info(
-                    f"[{self._instance_id}] Restored default source via pw-metadata: {user_source}"
+                    "[%s] Restored default source via pw-metadata: %s",
+                    self._instance_id,
+                    user_source,
                 )
             else:
                 logger.warning(
-                    f"[{self._instance_id}] No user audio source found to restore"
+                    "[%s] No user audio source found to restore", self._instance_id
                 )
 
-        except Exception as e:
+        except _PACTL_ERRORS as e:
             logger.warning(
-                f"[{self._instance_id}] Failed to restore default source: {e}"
+                "[%s] Failed to restore default source: %s", self._instance_id, e
             )
 
-    async def move_user_browser_to_original_source(self, target_source: str) -> None:
+    async def _move_user_browser_to_original_source(
+        self,
+        target_source: str,  # pylint: disable=unused-argument
+    ) -> None:
         """
         DEPRECATED: This function is no longer used.
 
@@ -624,5 +651,51 @@ class MeetAudio:
         Keeping this function stub for backwards compatibility.
         """
         logger.debug(
-            f"[{self._instance_id}] _move_user_browser_to_original_source called but disabled"
+            "[%s] _move_user_browser_to_original_source called but disabled",
+            self._instance_id,
         )
+
+    def get_audio_sink_name(self) -> Optional[str]:
+        """Get the name of the virtual audio sink for this instance.
+
+        To listen to meeting audio:
+            pactl set-default-source <sink_name>.monitor
+            # Or use pavucontrol to route the monitor to your headphones
+        """
+        return self._audio_sink_name
+
+    def get_audio_devices(self) -> Optional[InstanceDevices]:
+        """Get the per-instance audio devices for this controller.
+
+        Returns:
+            InstanceDevices with sink_name, source_name, pipe_path, etc.
+            None if devices weren't created (legacy mode).
+        """
+        return self._devices
+
+    async def create_virtual_audio_sink(self) -> bool:
+        """Public alias for _create_virtual_audio_sink."""
+        return await self._create_virtual_audio_sink()
+
+    async def remove_virtual_audio_sink(self) -> None:
+        """Public alias for _remove_virtual_audio_sink."""
+        return await self._remove_virtual_audio_sink()
+
+    async def route_browser_audio_to_sink(self) -> None:
+        """Public alias for _route_browser_audio_to_sink."""
+        return await self._route_browser_audio_to_sink()
+
+    async def restore_user_default_source(self) -> None:
+        """Public alias for _restore_user_default_source."""
+        return await self._restore_user_default_source()
+
+    async def move_user_browser_to_original_source(self, target_source: str) -> None:
+        """Public alias for _move_user_browser_to_original_source."""
+        return await self._move_user_browser_to_original_source(target_source)
+
+
+class MeetAudio(AudioMixin, MeetControllerView):
+    """Handles PulseAudio/PipeWire audio routing for Google Meet."""
+
+    def __init__(self, controller: GoogleMeetController) -> None:
+        MeetControllerView.__init__(self, controller)

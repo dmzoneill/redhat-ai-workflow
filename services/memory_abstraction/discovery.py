@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """
 Adapter Discovery - Scan and load memory adapters from tool_modules.
 
@@ -35,6 +36,7 @@ TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 ADAPTER_FILE = "adapter.py"
 
 # Cache for discovered modules
+# pylint: disable-next=invalid-name
 _discovered_modules: set[str] | None = None
 
 
@@ -49,15 +51,16 @@ def discover_adapter_modules() -> set[str]:
     Returns:
         Set of module names that have adapters (e.g., {'code_search', 'slack_persona'})
     """
+    # pylint: disable-next=global-statement
     global _discovered_modules
 
     if _discovered_modules is not None:
         return _discovered_modules
 
-    modules = set()
+    modules: set[str] = set()
 
     if not TOOL_MODULES_DIR.exists():
-        logger.warning(f"Tool modules directory not found: {TOOL_MODULES_DIR}")
+        logger.warning("Tool modules directory not found: %s", TOOL_MODULES_DIR)
         return modules
 
     for module_dir in TOOL_MODULES_DIR.iterdir():
@@ -68,10 +71,10 @@ def discover_adapter_modules() -> set[str]:
         if adapter_file.exists():
             base_name = module_dir.name[3:]  # Remove "aa_" prefix
             modules.add(base_name)
-            logger.debug(f"Found adapter module: {base_name} at {adapter_file}")
+            logger.debug("Found adapter module: %s at %s", base_name, adapter_file)
 
     _discovered_modules = modules
-    logger.info(f"Discovered {len(modules)} adapter modules: {sorted(modules)}")
+    logger.info("Discovered %s adapter modules: %s", len(modules), sorted(modules))
     return modules
 
 
@@ -90,7 +93,7 @@ def load_adapter_module(module_name: str) -> AdapterInfo | None:
     adapter_file = TOOL_MODULES_DIR / f"aa_{module_name}" / "src" / ADAPTER_FILE
 
     if not adapter_file.exists():
-        logger.warning(f"Adapter file not found: {adapter_file}")
+        logger.warning("Adapter file not found: %s", adapter_file)
         return None
 
     try:
@@ -99,7 +102,7 @@ def load_adapter_module(module_name: str) -> AdapterInfo | None:
             f"aa_{module_name}_adapter_dynamic", adapter_file
         )
         if spec is None or spec.loader is None:
-            logger.error(f"Could not create module spec for {adapter_file}")
+            logger.error("Could not create module spec for %s", adapter_file)
             return None
 
         module = importlib.util.module_from_spec(spec)
@@ -110,14 +113,16 @@ def load_adapter_module(module_name: str) -> AdapterInfo | None:
         # Return the registered adapter info
         info = ADAPTER_MANIFEST.get_by_module(module_name)
         if info:
-            logger.info(f"Loaded adapter: {info.name} from {module_name}")
+            logger.info("Loaded adapter: %s from %s", info.name, module_name)
         else:
-            logger.warning(f"Module {module_name} loaded but no adapter registered")
+            logger.warning("Module %s loaded but no adapter registered", module_name)
 
         return info
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.error(f"Error loading adapter {module_name}: {e}", exc_info=True)
+        logger.error("Error loading adapter %s: %s", module_name, e, exc_info=True)
         return None
 
 
@@ -133,7 +138,7 @@ def discover_and_load_all_adapters() -> dict[str, AdapterInfo]:
     # If already populated, return existing
     if ADAPTER_MANIFEST.adapters:
         logger.debug(
-            f"Using existing manifest with {len(ADAPTER_MANIFEST.adapters)} adapters"
+            "Using existing manifest with %s adapters", len(ADAPTER_MANIFEST.adapters)
         )
         return dict(ADAPTER_MANIFEST.adapters)
 
@@ -148,8 +153,10 @@ def discover_and_load_all_adapters() -> dict[str, AdapterInfo]:
             loaded += 1
 
     logger.info(
-        f"Loaded {loaded}/{len(adapter_modules)} memory adapters: "
-        f"{list(ADAPTER_MANIFEST.adapters.keys())}"
+        "Loaded %s/%s memory adapters: %s",
+        loaded,
+        len(adapter_modules),
+        list(ADAPTER_MANIFEST.adapters.keys()),
     )
 
     return dict(ADAPTER_MANIFEST.adapters)
@@ -169,7 +176,9 @@ def reload_adapter(module_name: str) -> AdapterInfo | None:
     """
     # Clear cached instance
     adapter_name = ADAPTER_MANIFEST.modules.get(module_name)
+    # pylint: disable-next=protected-access
     if adapter_name and adapter_name in ADAPTER_MANIFEST._instances:
+        # pylint: disable-next=protected-access
         del ADAPTER_MANIFEST._instances[adapter_name]
 
     # Reload the module
@@ -216,6 +225,7 @@ def get_adapters_for_intent(intent_keywords: list[str]) -> list[AdapterInfo]:
 
 def clear_discovery_cache() -> None:
     """Clear the discovery cache (for testing)."""
+    # pylint: disable-next=global-statement
     global _discovered_modules
     _discovered_modules = None
     ADAPTER_MANIFEST.clear()
