@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Slack MCP Tools and Resources.
 
 Provides MCP tools for Slack interaction:
@@ -12,7 +13,6 @@ Provides MCP tools for Slack interaction:
 Also provides MCP resources for proactive updates.
 """
 
-import asyncio
 import json
 import logging
 import sys
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import cast
 
 from fastmcp import FastMCP
+
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
@@ -60,11 +61,6 @@ async def _send_via_dbus(
 _send_via_dbus.__doc__ = _shared__send_via_dbus.__doc__
 
 
-# Global manager instance (initialized on first use)
-_manager = None
-_manager_lock = asyncio.Lock()
-
-
 async def get_manager():
     "Get manager."
     return await _shared_get_manager(logger=logger)
@@ -88,8 +84,9 @@ async def _slack_add_reaction_impl(channel_id: str, timestamp: str, emoji: str) 
             }
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e), "success": False})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return Slack failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc), "success": False})
 
 
 async def _slack_get_channels_impl() -> str:
@@ -136,8 +133,9 @@ async def _slack_get_channels_impl() -> str:
             indent=2,
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return config failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc)})
 
 
 async def _slack_list_messages_impl(
@@ -190,8 +188,9 @@ async def _slack_list_messages_impl(
                                 "is_reply": True,
                             }
                         )
-                except Exception as e:
-                    logger.warning("Could not fetch thread: %s", e)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    # Keep listing messages when one thread fetch fails.
+                    logger.warning("Could not fetch thread: %s", exc)
 
         return json.dumps(
             {
@@ -202,8 +201,9 @@ async def _slack_list_messages_impl(
             indent=2,
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return history failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc)})
 
 
 def register_tools(server: FastMCP) -> int:
@@ -258,8 +258,9 @@ def register_tools(server: FastMCP) -> int:
                 },
                 indent=2,
             )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Resource boundary: return listener failures as JSON.
+            return json.dumps({"error": str(exc)})
 
     @server.resource("slack://listener_status")
     async def listener_status_resource() -> str:
@@ -268,8 +269,9 @@ def register_tools(server: FastMCP) -> int:
             manager = await get_manager()
             status = await manager.get_status()
             return json.dumps(status, indent=2)
-        except Exception as e:
-            return json.dumps({"error": str(e), "status": "error"})
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Resource boundary: return listener status failures as JSON.
+            return json.dumps({"error": str(exc), "status": "error"})
 
     # ==================== Message Tools ====================
     # ==================== TOOLS NOT USED IN SKILLS ====================

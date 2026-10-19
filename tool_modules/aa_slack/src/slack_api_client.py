@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Slack API Client — low-level HTTP, rate limiting, and session management.
 
 Extracted from SlackSession to isolate network transport concerns.  All HTTP
@@ -29,29 +30,9 @@ class RateLimitState:
     backoff_until: float = 0
 
 
-async def _shared_SlackApiClient_get_client(self) -> httpx.AsyncClient:
-    """Get or create the HTTP client."""
-    if self._client is None or self._client.is_closed:
-        self._client = httpx.AsyncClient(
-            headers={
-                "User-Agent": self.USER_AGENT,
-                "Referer": self.REFERER,
-                "Accept": "application/json",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Origin": f"https://{self.SLACK_HOST}",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-            },
-            cookies={"d": self.d_cookie},
-            timeout=30.0,
-        )
-    return self._client
-
-
+# Session fields are the public constructor of the Slack web client.
 @dataclass
-class SlackApiClient:
+class SlackApiClient:  # pylint: disable=too-many-instance-attributes
     """Low-level HTTP transport for the Slack web API.
 
     Manages:
@@ -75,7 +56,10 @@ class SlackApiClient:
     _rate_limit: RateLimitState = field(default_factory=RateLimitState)
 
     # High-fidelity spoofing headers
-    USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+    USER_AGENT = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+    )
 
     # Enterprise Slack URLs
     SLACK_HOST = os.getenv("SLACK_HOST", "redhat.enterprise.slack.com")
@@ -92,10 +76,24 @@ class SlackApiClient:
     # ------------------------------------------------------------------
 
     async def get_client(self) -> httpx.AsyncClient:
-        "Get client."
-        return await _shared_SlackApiClient_get_client(self)
-
-    get_client.__doc__ = _shared_SlackApiClient_get_client.__doc__
+        """Get or create the HTTP client."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                headers={
+                    "User-Agent": self.USER_AGENT,
+                    "Referer": self.REFERER,
+                    "Accept": "application/json",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Origin": f"https://{self.SLACK_HOST}",
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-site",
+                },
+                cookies={"d": self.d_cookie},
+                timeout=30.0,
+            )
+        return self._client
 
     async def close(self):
         """Close the HTTP client."""
@@ -188,8 +186,7 @@ class SlackApiClient:
                     if error == "ratelimited":
                         await asyncio.sleep(self.base_backoff * (2**attempt))
                         continue
-                    else:
-                        raise ValueError(f"Slack API error: {error}")
+                    raise ValueError(f"Slack API error: {error}")
 
                 return result
 
