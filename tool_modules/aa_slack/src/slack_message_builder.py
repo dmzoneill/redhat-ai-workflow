@@ -456,6 +456,7 @@ def _shared_get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
+    "Get app commands summary."
     return _shared_get_app_commands_summary(data)
 
 

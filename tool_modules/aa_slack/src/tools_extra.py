@@ -66,6 +66,7 @@ _manager_lock = asyncio.Lock()
 
 
 async def get_manager():
+    "Get manager."
     return await _shared_get_manager(logger=logger)
 
 
@@ -190,7 +191,7 @@ async def _slack_list_messages_impl(
                             }
                         )
                 except Exception as e:
-                    logger.warning(f"Could not fetch thread: {e}")
+                    logger.warning("Could not fetch thread: %s", e)
 
         return json.dumps(
             {

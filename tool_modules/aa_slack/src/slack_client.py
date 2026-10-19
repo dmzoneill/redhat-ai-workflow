@@ -123,7 +123,7 @@ class SlackSession:
             if xoxc_token and d_cookie:
                 logger.info("Loaded Slack credentials from ConfigManager")
         except Exception as e:
-            logger.debug(f"Failed to load config from ConfigManager: {e}")
+            logger.debug("Failed to load config from ConfigManager: %s", e)
 
         # Fall back to environment variables if config.json doesn't have tokens
         if not xoxc_token:
@@ -160,6 +160,7 @@ class SlackSession:
         )
 
     async def get_client(self) -> httpx.AsyncClient:
+        "Get client."
         return await _shared_SlackApiClient_get_client(self)
 
     get_client.__doc__ = _shared_SlackApiClient_get_client.__doc__
@@ -192,7 +193,9 @@ class SlackSession:
         # Check if we're in backoff
         if time.time() < self._rate_limit.backoff_until:
             wait_time = self._rate_limit.backoff_until - time.time()
-            logger.warning(f"Rate limited, waiting {wait_time:.1f}s before retry")
+            logger.warning(
+                "Rate limited, waiting %ss before retry", format(wait_time, ".1f")
+            )
             await asyncio.sleep(wait_time)
 
         url = f"{self.BASE_URL}/{method}"
@@ -218,7 +221,10 @@ class SlackSession:
                     self._rate_limit.backoff_until = time.time() + backoff
 
                     logger.warning(
-                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. Backing off {backoff:.1f}s"
+                        "Rate limited (429). Attempt %s/%s. Backing off %ss",
+                        attempt + 1,
+                        self.max_retries,
+                        format(backoff, ".1f"),
                     )
 
                     await asyncio.sleep(backoff)
@@ -240,11 +246,11 @@ class SlackSession:
                             "Invalid authentication. XOXC_TOKEN or D_COOKIE may be expired. "
                             "Re-obtain from browser dev tools."
                         )
-                    elif error == "token_revoked":
+                    if error == "token_revoked":
                         raise ValueError(
                             "Token has been revoked. Re-authenticate via browser."
                         )
-                    elif error == "ratelimited":
+                    if error == "ratelimited":
                         # Slack-level rate limiting
                         await asyncio.sleep(self.base_backoff * (2**attempt))
                         continue
@@ -414,13 +420,13 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"User conversations error: {error}")
+                logger.error("User conversations error: %s", error)
                 return []
 
             return data.get("channels", [])
 
         except Exception as e:
-            logger.error(f"User conversations request failed: {e}")
+            logger.error("User conversations request failed: %s", e)
             return []
 
     async def get_client_counts(self) -> dict[str, Any]:
@@ -456,7 +462,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"Client counts error: {error}")
+                logger.error("Client counts error: %s", error)
                 return {"ok": False, "error": error}
 
             return {
@@ -467,7 +473,7 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"Client counts request failed: {e}")
+            logger.error("Client counts request failed: %s", e)
             return {"ok": False, "error": str(e)}
 
     async def get_channel_history(
@@ -555,7 +561,7 @@ class SlackSession:
             result = await self._request("conversations.info", {"channel": channel_id})
             return result.get("channel")
         except Exception as e:
-            logger.debug(f"Could not get channel info for {channel_id}: {e}")
+            logger.debug("Could not get channel info for %s: %s", channel_id, e)
             return None
 
     async def get_thread_replies(
@@ -631,7 +637,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"Thread replies error: {error}")
+                logger.error("Thread replies error: %s", error)
                 return {"ok": False, "error": error, "messages": []}
 
             return {
@@ -642,7 +648,7 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"Thread replies request failed: {e}")
+            logger.error("Thread replies request failed: %s", e)
             return {"ok": False, "error": str(e), "messages": []}
 
     async def get_thread_context(
@@ -798,7 +804,7 @@ class SlackSession:
         if typing_delay:
             # Natural typing delay to avoid bot-like behavior
             delay = random.uniform(0.5, 2.5)
-            logger.debug(f"Adding natural typing delay: {delay:.2f}s")
+            logger.debug("Adding natural typing delay: %ss", format(delay, ".2f"))
             await asyncio.sleep(delay)
 
         data = {"channel": channel_id, "text": text}
@@ -838,7 +844,7 @@ class SlackSession:
         """
         if typing_delay:
             delay = random.uniform(0.5, 2.5)
-            logger.debug(f"Adding natural typing delay: {delay:.2f}s")
+            logger.debug("Adding natural typing delay: %ss", format(delay, ".2f"))
             await asyncio.sleep(delay)
 
         # Get enterprise ID for routing
@@ -919,7 +925,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"Send message error: {error}")
+                logger.error("Send message error: %s", error)
                 return {"ok": False, "error": error}
 
             return {
@@ -930,7 +936,7 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"Send message request failed: {e}")
+            logger.error("Send message request failed: %s", e)
             return {"ok": False, "error": str(e)}
 
     def _text_to_rich_blocks(self, text: str) -> list[dict[str, Any]]:
@@ -1310,11 +1316,11 @@ class SlackSession:
 
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
+                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
             )
             raise ValueError(f"Channel search failed: {e.response.status_code}") from e
         except Exception as e:
-            logger.error(f"Channel search error: {e}")
+            logger.error("Channel search error: %s", e)
             raise
 
     def _extract_enterprise_id(self) -> str:
@@ -1528,11 +1534,13 @@ class SlackSession:
 
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"Edge API user search error: {e.response.status_code} - {e.response.text[:200]}"
+                "Edge API user search error: %s - %s",
+                e.response.status_code,
+                e.response.text[:200],
             )
             raise ValueError(f"User search failed: {e.response.status_code}") from e
         except Exception as e:
-            logger.error(f"User search error: {e}")
+            logger.error("User search error: %s", e)
             raise
 
     async def list_channel_members(
@@ -1608,20 +1616,20 @@ class SlackSession:
 
             if not result.get("ok"):
                 error = result.get("error", "Unknown error")
-                logger.error(f"Channel members list error: {error}")
+                logger.error("Channel members list error: %s", error)
                 raise ValueError(f"Channel members list failed: {error}")
 
             return result.get("results", [])
 
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
+                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
             )
             raise ValueError(
                 f"Channel members list failed: {e.response.status_code}"
             ) from e
         except Exception as e:
-            logger.error(f"Channel members list error: {e}")
+            logger.error("Channel members list error: %s", e)
             raise
 
     async def check_channel_membership(
@@ -1689,7 +1697,7 @@ class SlackSession:
 
             if not result.get("ok"):
                 error = result.get("error", "Unknown error")
-                logger.error(f"Channel membership check error: {error}")
+                logger.error("Channel membership check error: %s", error)
                 return {"ok": False, "error": error, "members": []}
 
             return {
@@ -1702,13 +1710,13 @@ class SlackSession:
 
         except httpx.HTTPStatusError as e:
             logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
+                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
             )
             raise ValueError(
                 f"Channel membership check failed: {e.response.status_code}"
             ) from e
         except Exception as e:
-            logger.error(f"Channel membership check error: {e}")
+            logger.error("Channel membership check error: %s", e)
             raise
 
     async def list_channel_members_and_cache(
@@ -1845,7 +1853,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"Channel sections error: {error}")
+                logger.error("Channel sections error: %s", error)
                 return {"ok": False, "error": error, "channel_sections": []}
 
             return {
@@ -1856,7 +1864,7 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"Channel sections request failed: {e}")
+            logger.error("Channel sections request failed: %s", e)
             return {"ok": False, "error": str(e), "channel_sections": []}
 
     def get_channel_sections_summary(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -1998,7 +2006,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"Channel history error: {error}")
+                logger.error("Channel history error: %s", error)
                 return {"ok": False, "error": error, "messages": []}
 
             return {
@@ -2010,7 +2018,7 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"Channel history request failed: {e}")
+            logger.error("Channel history request failed: %s", e)
             return {"ok": False, "error": str(e), "messages": []}
 
     def simplify_channel_history(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -2219,7 +2227,7 @@ class SlackSession:
 
             if not data.get("ok"):
                 error = data.get("error", "Unknown error")
-                logger.error(f"App commands error: {error}")
+                logger.error("App commands error: %s", error)
                 return {"ok": False, "error": error, "app_actions": [], "commands": []}
 
             return {
@@ -2230,10 +2238,11 @@ class SlackSession:
             }
 
         except Exception as e:
-            logger.error(f"App commands request failed: {e}")
+            logger.error("App commands request failed: %s", e)
             return {"ok": False, "error": str(e), "app_actions": [], "commands": []}
 
     def get_app_commands_summary(self, data: dict[str, Any]) -> dict[str, Any]:
+        "Get app commands summary."
         return _shared_get_app_commands_summary(data)
 
     get_app_commands_summary.__doc__ = _shared_get_app_commands_summary.__doc__
@@ -2315,10 +2324,10 @@ class SlackSession:
             return result
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"Profile API error: {e.response.status_code}")
+            logger.error("Profile API error: %s", e.response.status_code)
             raise ValueError(f"Profile fetch failed: {e.response.status_code}") from e
         except Exception as e:
-            logger.error(f"Profile fetch error: {e}")
+            logger.error("Profile fetch error: %s", e)
             raise
 
     async def get_user_profile_details(self, user_id: str) -> dict[str, Any]:

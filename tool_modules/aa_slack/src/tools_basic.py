@@ -79,9 +79,8 @@ async def _shared__send_via_dbus(
             await client.disconnect()
             logger.debug(f"D-Bus send result: {result}")
             return result
-        else:
-            logger.debug("D-Bus connect failed")
-            return None
+        logger.debug("D-Bus connect failed")
+        return None
     except Exception as e:
         # D-Bus not available, will fall back to direct API
         logger.debug(f"D-Bus not available: {e}")
@@ -136,6 +135,7 @@ async def _shared_get_manager(*, logger):
 
 
 async def get_manager():
+    "Get manager."
     return await _shared_get_manager(logger=logger)
 
 
@@ -409,7 +409,7 @@ async def _slack_send_message_impl(
                 }
             )
 
-        elif target.startswith("@"):
+        if target.startswith("@"):
             # @username - need to resolve to user ID first
             username = target[1:]  # Remove @
             users = await manager.session.get_users_list()
@@ -438,43 +438,41 @@ async def _slack_send_message_impl(
                     "message": f"DM sent to @{username}",
                 }
             )
+        # Channel ID (C...) or DM ID (D...) - try D-Bus first, then direct
+        msg_type = "dm" if target.startswith("D") else "channel"
 
-        else:
-            # Channel ID (C...) or DM ID (D...) - try D-Bus first, then direct
-            msg_type = "dm" if target.startswith("D") else "channel"
-
-            # Try D-Bus daemon first (if running with --dbus)
-            dbus_result = await _send_via_dbus(target, text, thread_ts or "")
-            if dbus_result and dbus_result.get("success"):
-                return json.dumps(
-                    {
-                        "success": True,
-                        "type": msg_type,
-                        "channel": dbus_result.get("channel", target),
-                        "timestamp": dbus_result.get("ts", ""),
-                        "message": "Message sent successfully (via D-Bus)",
-                        "method": "dbus",
-                    }
-                )
-
-            # Fall back to direct API
-            result = await manager.session.send_message(
-                channel_id=target,
-                text=text,
-                thread_ts=thread_ts if thread_ts else None,
-                typing_delay=typing_delay,
-            )
-
+        # Try D-Bus daemon first (if running with --dbus)
+        dbus_result = await _send_via_dbus(target, text, thread_ts or "")
+        if dbus_result and dbus_result.get("success"):
             return json.dumps(
                 {
                     "success": True,
                     "type": msg_type,
-                    "channel": result.get("channel", target),
-                    "timestamp": result.get("ts", ""),
-                    "message": "Message sent successfully (direct API)",
-                    "method": "direct",
+                    "channel": dbus_result.get("channel", target),
+                    "timestamp": dbus_result.get("ts", ""),
+                    "message": "Message sent successfully (via D-Bus)",
+                    "method": "dbus",
                 }
             )
+
+        # Fall back to direct API
+        result = await manager.session.send_message(
+            channel_id=target,
+            text=text,
+            thread_ts=thread_ts if thread_ts else None,
+            typing_delay=typing_delay,
+        )
+
+        return json.dumps(
+            {
+                "success": True,
+                "type": msg_type,
+                "channel": result.get("channel", target),
+                "timestamp": result.get("ts", ""),
+                "message": "Message sent successfully (direct API)",
+                "method": "direct",
+            }
+        )
 
     except Exception as e:
         return json.dumps({"error": str(e), "success": False})
@@ -519,7 +517,7 @@ async def _query_via_dbus(method_name: str, *args) -> dict | None:
             return result
         return None
     except Exception as e:
-        logger.debug(f"D-Bus query failed: {e}")
+        logger.debug("D-Bus query failed: %s", e)
         return None
 
 
@@ -541,7 +539,7 @@ async def _query_knowledge_cache(method_name: str, *args) -> dict:
     # Fall back to config.json for some queries
     if method_name == "find_channel":
         return await _find_channel_from_config(args[0] if args else "")
-    elif method_name == "resolve_target":
+    if method_name == "resolve_target":
         return await _resolve_target_from_config(args[0] if args else "")
 
     return {
