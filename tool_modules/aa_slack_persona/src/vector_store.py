@@ -14,14 +14,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Lazy imports for heavy dependencies
+# pylint: disable-next=invalid-name
 _lancedb = None
+# pylint: disable-next=invalid-name
 _model = None
 
 
 def _get_lancedb():
     """Lazy load lancedb."""
+    # pylint: disable-next=global-statement
     global _lancedb
     if _lancedb is None:
+        # pylint: disable-next=import-outside-toplevel
         import lancedb
 
         _lancedb = lancedb
@@ -30,8 +34,10 @@ def _get_lancedb():
 
 def _get_embedding_model():
     """Lazy load sentence transformer model."""
+    # pylint: disable-next=global-statement
     global _model
     if _model is None:
+        # pylint: disable-next=import-outside-toplevel
         from sentence_transformers import SentenceTransformer
 
         _model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -40,6 +46,7 @@ def _get_embedding_model():
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class SlackMessage:
     """Represents a Slack message for vector storage."""
 
@@ -86,6 +93,8 @@ class SlackVectorStore:
         if self._table is None:
             try:
                 self._table = self.db.open_table(self.table_name)
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception:
                 # Table doesn't exist, will be created on first insert
                 self._table = None
@@ -138,14 +147,15 @@ class SlackVectorStore:
             }
             records.append(record)
 
-        # Add to table
-        if self.table is None:
+        # Add to table. The property opens an existing table when one is present.
+        table = self.table
+        if table is None:
             # Create table with first batch
             self._table = self.db.create_table(self.table_name, records)
         else:
-            self._table.add(records)
+            table.add(records)
 
-        logger.info(f"Added {len(records)} messages to vector store")
+        logger.info("Added %s messages to vector store", len(records))
         return len(records)
 
     def search(
@@ -222,6 +232,8 @@ class SlackVectorStore:
         # Count before
         try:
             count_before = self.table.count_rows()
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             count_before = 0
 
@@ -231,11 +243,13 @@ class SlackVectorStore:
         # Count after
         try:
             count_after = self.table.count_rows()
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             count_after = 0
 
         deleted = count_before - count_after
-        logger.info(f"Deleted {deleted} messages older than {cutoff_ts}")
+        logger.info("Deleted %s messages older than %s", deleted, cutoff_ts)
         return deleted
 
     def get_stats(self) -> dict[str, Any]:
@@ -249,6 +263,8 @@ class SlackVectorStore:
 
         try:
             count = self.table.count_rows()
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             count = 0
 

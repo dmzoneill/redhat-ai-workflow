@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,too-many-lines
 """Workspace State - Per-workspace and per-session context management.
 
 Enables each Cursor chat to have independent state while sharing
@@ -57,11 +58,12 @@ def get_default_persona() -> str:
     Reads from config.json agent.default_persona setting.
     """
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import load_config
 
         cfg = load_config()
         return cfg.get("agent", {}).get("default_persona", "researcher")
-    except Exception:
+    except Exception:  # Best-effort fallback. pylint: disable=broad-exception-caught
         return "researcher"
 
 
@@ -72,6 +74,7 @@ SESSION_STALE_HOURS = 24
 MAX_FILTER_CACHE_SIZE = 50
 
 # Persistence file location - centralized in server.paths
+# pylint: disable-next=wrong-import-position
 from server.paths import AA_CONFIG_DIR, WORKSPACE_STATES_FILE  # noqa: E402
 
 PERSIST_DIR = AA_CONFIG_DIR
@@ -89,7 +92,7 @@ def get_persona_tool_count(persona: str) -> int:
 def update_persona_tool_count(persona: str, count: int) -> None:
     """Update the cached tool count for a persona."""
     _persona_tool_counts[persona] = count
-    logger.debug(f"Updated persona tool count cache: {persona} = {count}")
+    logger.debug("Updated persona tool count cache: %s = %s", persona, count)
 
 
 def get_all_persona_tool_counts() -> dict[str, int]:
@@ -110,6 +113,7 @@ def _generate_session_id() -> str:
     return str(uuid.uuid4())
 
 
+# pylint: disable-next=too-many-locals,too-many-return-statements
 def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | None]:
     """Read Cursor's database to get the current chat's UUID and name.
 
@@ -122,6 +126,7 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
     Returns:
         Tuple of (chat_id, chat_name) if found, (None, None) otherwise
     """
+    # pylint: disable-next=import-outside-toplevel
     import subprocess
 
     try:
@@ -141,8 +146,6 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
                 continue
 
             try:
-                import json
-
                 workspace_data = json.loads(workspace_json.read_text())
                 folder_uri = workspace_data.get("folder", "")
 
@@ -160,10 +163,11 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
                         capture_output=True,
                         text=True,
                         timeout=5,
+                        check=False,
                     )
 
                     if result.returncode != 0 or not result.stdout.strip():
-                        logger.debug(f"No composer data in {db_path}")
+                        logger.debug("No composer data in %s", db_path)
                         return None, None
 
                     composer_data = json.loads(result.stdout.strip())
@@ -191,18 +195,20 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
                     chat_id = most_recent.get("composerId")
                     chat_name = most_recent.get("name")
 
-                    logger.info(f"Found Cursor chat: {chat_id} ({chat_name})")
+                    logger.info("Found Cursor chat: %s (%s)", chat_id, chat_name)
                     return chat_id, chat_name
 
             except (json.JSONDecodeError, KeyError) as e:
-                logger.debug(f"Error parsing workspace.json in {storage_dir}: {e}")
+                logger.debug("Error parsing workspace.json in %s: %s", storage_dir, e)
                 continue
 
-        logger.debug(f"No matching workspace storage found for {workspace_uri}")
+        logger.debug("No matching workspace storage found for %s", workspace_uri)
         return None, None
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error reading Cursor database: {e}")
+        logger.warning("Error reading Cursor database: %s", e)
         return None, None
 
 
@@ -219,6 +225,7 @@ def get_cursor_chat_id_from_db(workspace_uri: str) -> str | None:
     return chat_id
 
 
+# pylint: disable-next=too-many-branches,too-many-locals
 def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
     """List all Cursor chats for a workspace and get the active chat ID.
 
@@ -232,8 +239,10 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
     Returns:
         Tuple of (list of chat info dicts, active_chat_id or None)
     """
+    # pylint: disable-next=import-outside-toplevel
     import subprocess
 
+    # pylint: disable-next=too-many-nested-blocks
     try:
         workspace_storage_dir = _cursor_workspace_storage()
 
@@ -253,8 +262,6 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
                 continue
 
             try:
-                import json
-
                 workspace_data = json.loads(workspace_json.read_text())
                 folder_uri = workspace_data.get("folder", "")
 
@@ -269,6 +276,7 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
                         capture_output=True,
                         text=True,
                         timeout=5,
+                        check=False,
                     )
 
                     if result.returncode != 0 or not result.stdout.strip():
@@ -320,8 +328,10 @@ def list_cursor_chats(workspace_uri: str) -> tuple[list[dict], str | None]:
         )
         return chats, active_chat_id
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error listing Cursor chats: {e}")
+        logger.warning("Error listing Cursor chats: %s", e)
         return [], None
 
 
@@ -338,6 +348,7 @@ def get_cursor_chat_ids(workspace_uri: str) -> set[str]:
     return {c["composerId"] for c in chats if c.get("composerId")}
 
 
+# pylint: disable-next=too-many-branches,too-many-locals
 def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, str]:
     """Scan Cursor chat content for Jira issue keys (AAP-XXXXX pattern).
 
@@ -352,7 +363,10 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
     Returns:
         Dict mapping chat ID to comma-separated issue keys (e.g., "AAP-12345, AAP-12346")
     """
+    # pylint: disable-next=import-outside-toplevel
     import re
+
+    # pylint: disable-next=import-outside-toplevel
     import sqlite3
 
     # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
@@ -389,7 +403,8 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                 try:
                     # Query for this specific chat's messages containing AAP-
                     cursor.execute(
-                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? AND value LIKE '%AAP-%' LIMIT 100",
+                        "SELECT key, value FROM cursorDiskKV WHERE key LIKE ? "
+                        "AND value LIKE '%AAP-%' LIMIT 100",
                         (f"bubbleId:{cid}:%",),
                     )
 
@@ -414,7 +429,7 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                         except (json.JSONDecodeError, ValueError):
                             continue
                 except sqlite3.Error as e:
-                    logger.debug(f"Error querying chat {cid}: {e}")
+                    logger.debug("Error querying chat %s: %s", cid, e)
                     continue
 
         # Return sorted, comma-separated issue keys for each chat
@@ -426,18 +441,21 @@ def get_cursor_chat_issue_keys(chat_ids: list[str] | None = None) -> dict[str, s
                 result_map[chat_id] = ", ".join(sorted_issues)
 
         if result_map:
-            logger.debug(f"Found issue keys in {len(result_map)} chat(s)")
+            logger.debug("Found issue keys in %s chat(s)", len(result_map))
 
         return result_map
 
     except sqlite3.Error as e:
-        logger.warning(f"SQLite error scanning for issue keys: {e}")
+        logger.warning("SQLite error scanning for issue keys: %s", e)
         return {}
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error scanning Cursor chats for issue keys: {e}")
+        logger.warning("Error scanning Cursor chats for issue keys: %s", e)
         return {}
 
 
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
 def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
     """Extract conversation content from a Cursor chat.
 
@@ -472,11 +490,13 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
             }
         }
     """
+    # pylint: disable-next=import-outside-toplevel
     import re
-    import subprocess
-    import uuid
 
-    result = {
+    # pylint: disable-next=import-outside-toplevel
+    import subprocess
+
+    result: dict[str, Any] = {
         "chat_id": chat_id,
         "message_count": 0,
         "messages": [],
@@ -494,10 +514,12 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
         uuid.UUID(chat_id)
     except (ValueError, TypeError):
         logger.warning(
-            f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}"
+            "Invalid chat_id format (expected UUID): %s",
+            chat_id[:50] if chat_id else "None",
         )
         return result
 
+    # pylint: disable-next=too-many-nested-blocks
     try:
         global_db = (
             Path.home()
@@ -520,10 +542,11 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
 
         if db_result.returncode != 0:
-            logger.debug(f"Failed to query Cursor global DB: {db_result.stderr}")
+            logger.debug("Failed to query Cursor global DB: %s", db_result.stderr)
             return result
 
         # Parse messages
@@ -547,11 +570,12 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
                 created_at = data.get("createdAt")
 
                 # Type 1 = user, Type 2 = assistant
-                msg_role = (
-                    "user"
-                    if msg_type == 1
-                    else "assistant" if msg_type == 2 else "system"
-                )
+                if msg_type == 1:
+                    msg_role = "user"
+                elif msg_type == 2:
+                    msg_role = "assistant"
+                else:
+                    msg_role = "system"
 
                 # Extract tool results
                 tool_results = []
@@ -597,7 +621,7 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
                     result["summary"]["assistant_messages"] += 1
 
             except (json.JSONDecodeError, ValueError, KeyError) as e:
-                logger.debug(f"Error parsing bubble: {e}")
+                logger.debug("Error parsing bubble: %s", e)
                 continue
 
         # Sort by timestamp if available, otherwise by bubble_id
@@ -609,18 +633,21 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
         result["summary"]["issue_keys"] = sorted(all_issue_keys)
 
         logger.info(
-            f"Extracted {len(messages_raw)} messages from chat {chat_id[:8]}..."
+            "Extracted %s messages from chat %s...", len(messages_raw), chat_id[:8]
         )
         return result
 
     except subprocess.TimeoutExpired:
         logger.warning("Timeout extracting Cursor chat content")
         return result
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error extracting Cursor chat content: {e}")
+        logger.warning("Error extracting Cursor chat content: %s", e)
         return result
 
 
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
 def format_session_context_for_jira(
     chat_content: dict,
     session: "ChatSession | None" = None,
@@ -668,7 +695,9 @@ def format_session_context_for_jira(
     summary = chat_content.get("summary", {})
     lines.append("h3. Summary")
     lines.append(
-        f"* *Messages:* {summary.get('user_messages', 0)} user, {summary.get('assistant_messages', 0)} assistant"
+        "* *Messages:* "
+        f"{summary.get('user_messages', 0)} user, "
+        f"{summary.get('assistant_messages', 0)} assistant"
     )
     lines.append(f"* *Tool Calls:* {summary.get('tool_calls', 0)}")
     lines.append(f"* *Code References:* {summary.get('code_changes', 0)}")
@@ -726,6 +755,7 @@ def format_session_context_for_jira(
     return "\n".join(lines)
 
 
+# pylint: disable-next=too-many-branches,too-many-locals
 def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str]:
     """Scan Cursor chat content to detect the last persona loaded in each chat.
 
@@ -743,7 +773,10 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
     Returns:
         Dict mapping chat ID to the last detected persona name.
     """
+    # pylint: disable-next=import-outside-toplevel
     import re
+
+    # pylint: disable-next=import-outside-toplevel
     import sqlite3
 
     # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
@@ -754,6 +787,7 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
         return {}
 
     # Valid persona names (from personas/ directory)
+    # pylint: disable-next=invalid-name
     VALID_PERSONAS = {
         "admin",
         "code",
@@ -811,12 +845,17 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
             cursor = conn.cursor()
 
             # Query each chat ID separately
+            # pylint: disable-next=too-many-nested-blocks
             for cid in chat_ids:
                 try:
                     cursor.execute(
                         """SELECT key, value FROM cursorDiskKV
                            WHERE key LIKE ?
-                           AND (value LIKE '%persona%' OR value LIKE '%agent=%' OR value LIKE '%Persona%')
+                           AND (
+                               value LIKE '%persona%'
+                               OR value LIKE '%agent=%'
+                               OR value LIKE '%Persona%'
+                           )
                            LIMIT 50""",
                         (f"bubbleId:{cid}:%",),
                     )
@@ -846,7 +885,7 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
                         except (json.JSONDecodeError, ValueError):
                             continue
                 except sqlite3.Error as e:
-                    logger.debug(f"Error querying chat {cid} for personas: {e}")
+                    logger.debug("Error querying chat %s for personas: %s", cid, e)
                     continue
 
         # Return the last (highest bubble_id) persona for each chat
@@ -858,18 +897,23 @@ def get_cursor_chat_personas(chat_ids: list[str] | None = None) -> dict[str, str
                 result_map[chat_id] = last_persona
 
         if result_map:
-            logger.debug(f"Detected personas in {len(result_map)} chat(s) from content")
+            logger.debug(
+                "Detected personas in %s chat(s) from content", len(result_map)
+            )
 
         return result_map
 
     except sqlite3.Error as e:
-        logger.warning(f"SQLite error scanning for personas: {e}")
+        logger.warning("SQLite error scanning for personas: %s", e)
         return {}
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error scanning Cursor chats for personas: {e}")
+        logger.warning("Error scanning Cursor chats for personas: %s", e)
         return {}
 
 
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
 def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str]:
     """Scan Cursor chat content to detect the project being worked on in each chat.
 
@@ -889,7 +933,10 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
     Returns:
         Dict mapping chat ID to the detected project name.
     """
+    # pylint: disable-next=import-outside-toplevel
     import re
+
+    # pylint: disable-next=import-outside-toplevel
     import sqlite3
 
     # OPTIMIZATION: If no specific chat IDs provided, skip the expensive full scan
@@ -901,13 +948,16 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
 
     # Load valid project names from config
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import load_config
 
         config = load_config()
         repos = config.get("repositories", {})
+        # pylint: disable-next=invalid-name
         VALID_PROJECTS = set(repos.keys())
-    except Exception:
+    except Exception:  # Best-effort fallback. pylint: disable=broad-exception-caught
         # Fallback to known projects
+        # pylint: disable-next=invalid-name
         VALID_PROJECTS = {
             "automation-analytics-backend",
             "pdf-generator",
@@ -968,6 +1018,7 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
             cursor = conn.cursor()
 
             # Query each chat ID separately
+            # pylint: disable-next=too-many-nested-blocks
             for cid in chat_ids:
                 try:
                     # Build a simple query for this chat - check for project-related content
@@ -1011,7 +1062,7 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
                         except (json.JSONDecodeError, ValueError):
                             continue
                 except sqlite3.Error as e:
-                    logger.debug(f"Error querying chat {cid} for projects: {e}")
+                    logger.debug("Error querying chat %s for projects: %s", cid, e)
                     continue
 
         # Return the best project for each chat
@@ -1024,18 +1075,23 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
                     result_map[chat_id] = best_project
 
         if result_map:
-            logger.debug(f"Detected projects in {len(result_map)} chat(s) from content")
+            logger.debug(
+                "Detected projects in %s chat(s) from content", len(result_map)
+            )
 
         return result_map
 
     except sqlite3.Error as e:
-        logger.warning(f"SQLite error scanning for projects: {e}")
+        logger.warning("SQLite error scanning for projects: %s", e)
         return {}
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error scanning Cursor chats for projects: {e}")
+        logger.warning("Error scanning Cursor chats for projects: %s", e)
         return {}
 
 
+# pylint: disable-next=too-many-branches,too-many-locals
 def get_meeting_transcript_issue_keys(
     issue_keys: list[str] | None = None,
 ) -> dict[str, list[dict]]:
@@ -1049,7 +1105,8 @@ def get_meeting_transcript_issue_keys(
     - "ticket 12345"
 
     Args:
-        issue_keys: Optional list of issue keys to search for. If None, finds all AAP-XXXXX patterns.
+        issue_keys: Optional list of issue keys to search for.
+            If None, finds all AAP-XXXXX patterns.
 
     Returns:
         Dict mapping issue key to list of meeting info dicts:
@@ -1060,11 +1117,17 @@ def get_meeting_transcript_issue_keys(
             ]
         }
     """
+    # pylint: disable-next=import-outside-toplevel
     import re
+
+    # pylint: disable-next=import-outside-toplevel
     import subprocess
+
+    # pylint: disable-next=import-outside-toplevel
     from collections import defaultdict
 
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.paths import MEETINGS_DB_FILE
 
         db_path = MEETINGS_DB_FILE
@@ -1090,10 +1153,11 @@ def get_meeting_transcript_issue_keys(
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
 
         if result.returncode != 0:
-            logger.debug(f"Failed to query meet bot DB: {result.stderr}")
+            logger.debug("Failed to query meet bot DB: %s", result.stderr)
             return {}
 
         # Flexible patterns for spoken issue references
@@ -1168,7 +1232,7 @@ def get_meeting_transcript_issue_keys(
 
         if result_map:
             logger.info(
-                f"Found {len(result_map)} issue(s) mentioned in meeting transcripts"
+                "Found %s issue(s) mentioned in meeting transcripts", len(result_map)
             )
 
         return result_map
@@ -1176,8 +1240,10 @@ def get_meeting_transcript_issue_keys(
     except subprocess.TimeoutExpired:
         logger.warning("Timeout scanning meet bot DB for issue keys")
         return {}
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error scanning meeting transcripts for issue keys: {e}")
+        logger.warning("Error scanning meeting transcripts for issue keys: %s", e)
         return {}
 
 
@@ -1191,9 +1257,18 @@ def get_cursor_chat_names(workspace_uri: str) -> dict[str, str]:
         Dict mapping chat ID to chat name
     """
     chats, _ = list_cursor_chats(workspace_uri)
-    return {c["composerId"]: c.get("name") for c in chats if c.get("composerId")}
+    names: dict[str, str] = {}
+    for chat in chats:
+        composer_id = chat.get("composerId")
+        if not composer_id:
+            continue
+        name = chat.get("name")
+        names[str(composer_id)] = name if isinstance(name, str) else ""
+    return names
 
 
+# pylint: disable-next=line-too-long
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
 def inject_context_to_cursor_chat(
     workspace_uri: str,
     chat_id: str | None = None,
@@ -1217,9 +1292,13 @@ def inject_context_to_cursor_chat(
     Returns:
         True if successful, False otherwise
     """
+    # pylint: disable-next=import-outside-toplevel
     import subprocess
+
+    # pylint: disable-next=import-outside-toplevel
     import time
 
+    # pylint: disable-next=too-many-nested-blocks
     try:
         workspace_storage_dir = _cursor_workspace_storage()
 
@@ -1243,7 +1322,7 @@ def inject_context_to_cursor_chat(
                 if folder_uri == workspace_uri:
                     db_path = storage_dir / "state.vscdb"
                     if not db_path.exists():
-                        logger.warning(f"Cursor state.vscdb not found at {db_path}")
+                        logger.warning("Cursor state.vscdb not found at %s", db_path)
                         return False
 
                     # Read current composer data
@@ -1253,12 +1332,16 @@ def inject_context_to_cursor_chat(
                         capture_output=True,
                         text=True,
                         timeout=5,
+                        check=False,
                     )
 
                     if result.returncode != 0:
-                        logger.warning(f"Failed to read composer data: {result.stderr}")
+                        logger.warning(
+                            "Failed to read composer data: %s", result.stderr
+                        )
                         return False
 
+                    composer_data: dict[str, Any]
                     if not result.stdout.strip():
                         # No existing composer data, create new structure
                         composer_data = {
@@ -1269,17 +1352,16 @@ def inject_context_to_cursor_chat(
                         composer_data = json.loads(result.stdout.strip())
 
                     # Generate a new chat ID if not provided, or validate provided one
-                    import uuid as uuid_module
-
                     if chat_id is None:
-                        chat_id = str(uuid_module.uuid4())
+                        chat_id = str(uuid.uuid4())
                     else:
                         # Validate chat_id is a valid UUID to prevent SQL injection
                         try:
-                            uuid_module.UUID(chat_id)
+                            uuid.UUID(chat_id)
                         except (ValueError, TypeError):
                             logger.warning(
-                                f"Invalid chat_id format (expected UUID): {chat_id[:50] if chat_id else 'None'}"
+                                "Invalid chat_id format (expected UUID): %s",
+                                chat_id[:50] if chat_id else "None",
                             )
                             return False
 
@@ -1335,37 +1417,46 @@ def inject_context_to_cursor_chat(
                     # Write back to database
                     # Need to escape the JSON for SQLite
                     json_value = json.dumps(composer_data).replace("'", "''")
-                    update_query = f"UPDATE ItemTable SET value = '{json_value}' WHERE key = 'composer.composerData'"
+                    update_query = (
+                        "UPDATE ItemTable SET value = "
+                        f"'{json_value}' WHERE key = 'composer.composerData'"
+                    )
 
                     result = subprocess.run(
                         ["sqlite3", str(db_path), update_query],
                         capture_output=True,
                         text=True,
                         timeout=5,
+                        check=False,
                     )
 
                     if result.returncode != 0:
                         logger.warning(
-                            f"Failed to update composer data: {result.stderr}"
+                            "Failed to update composer data: %s", result.stderr
                         )
                         return False
 
-                    logger.info(f"Injected context into Cursor chat {chat_id}")
+                    logger.info("Injected context into Cursor chat %s", chat_id)
                     return True
 
             except (json.JSONDecodeError, KeyError) as e:
-                logger.debug(f"Error processing workspace.json in {storage_dir}: {e}")
+                logger.debug(
+                    "Error processing workspace.json in %s: %s", storage_dir, e
+                )
                 continue
 
-        logger.warning(f"No matching workspace storage found for {workspace_uri}")
+        logger.warning("No matching workspace storage found for %s", workspace_uri)
         return False
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.warning(f"Error injecting context to Cursor chat: {e}")
+        logger.warning("Error injecting context to Cursor chat: %s", e)
         return False
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class ChatSession:
     """State for a single chat session within a workspace.
 
@@ -1419,7 +1510,8 @@ class ChatSession:
     tool_call_count: int = 0  # Total tool calls in this session
 
     # Meeting transcript references (meetings where session's issues were discussed)
-    # Format: [{"meeting_id": 1, "title": "Sprint Planning", "date": "2025-01-20", "matches": 3}, ...]
+    # Format: [{"meeting_id": 1, "title": "Sprint Planning",
+    #           "date": "2025-01-20", "matches": 3}, ...]
     meeting_references: list[dict] = field(default_factory=list)
 
     # Memory abstraction caches (per-session to avoid cross-chat interference)
@@ -1440,6 +1532,11 @@ class ChatSession:
             if self.dynamic_tool_count > 0
             else self.static_tool_count
         )
+
+    @tool_count.setter
+    def tool_count(self, value: int) -> None:
+        """Set the baseline count used when no dynamic count is active."""
+        self.static_tool_count = value
 
     # Backward compatibility property
     @property
@@ -1656,11 +1753,13 @@ class WorkspaceState:
             if cursor_chat_id:
                 session_id = cursor_chat_id
                 logger.info(
-                    f"Using Cursor chat ID as session ID: {session_id} ({cursor_chat_name})"
+                    "Using Cursor chat ID as session ID: %s (%s)",
+                    session_id,
+                    cursor_chat_name,
                 )
             else:
                 session_id = _generate_session_id()
-                logger.info(f"Generated fallback session ID: {session_id}")
+                logger.info("Generated fallback session ID: %s", session_id)
 
         # Use Cursor's chat name if no name provided
         if name is None and cursor_chat_name:
@@ -1694,7 +1793,10 @@ class WorkspaceState:
         self.touch()
 
         logger.info(
-            f"Created session {session_id} in workspace {self.workspace_uri} with project '{session_project}'"
+            "Created session %s in workspace %s with project '%s'",
+            session_id,
+            self.workspace_uri,
+            session_project,
         )
 
         # Persist to disk after creating session
@@ -1782,7 +1884,7 @@ class WorkspaceState:
                 else:
                     self.active_session_id = None
             logger.info(
-                f"Removed session {session_id} from workspace {self.workspace_uri}"
+                "Removed session %s from workspace %s", session_id, self.workspace_uri
             )
 
             # Persist to disk after removing session
@@ -1819,7 +1921,9 @@ class WorkspaceState:
 
         if stale_ids:
             logger.info(
-                f"Cleaned up {len(stale_ids)} stale session(s) not in Cursor DB from {self.workspace_uri}"
+                "Cleaned up %s stale session(s) not in Cursor DB from %s",
+                len(stale_ids),
+                self.workspace_uri,
             )
 
         return len(stale_ids)
@@ -1828,6 +1932,7 @@ class WorkspaceState:
         """Get number of sessions in this workspace."""
         return len(self.sessions)
 
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     def sync_with_cursor_db(  # noqa: C901
         self, session_ids: list[str] | None = None, skip_content_scan: bool = False
     ) -> dict:
@@ -1861,7 +1966,7 @@ class WorkspaceState:
         # Update active session from Cursor's lastFocusedComposerIds
         if cursor_active_id and cursor_active_id in cursor_ids:
             if self.active_session_id != cursor_active_id:
-                logger.info(f"Updating active session from Cursor: {cursor_active_id}")
+                logger.info("Updating active session from Cursor: %s", cursor_active_id)
                 self.active_session_id = cursor_active_id
 
         # Get currently loaded tools count (for active session)
@@ -1878,6 +1983,7 @@ class WorkspaceState:
 
         # Extract all issue keys from chat names and content
         # Pattern: AAP-XXXXX (4-7 digits, case insensitive)
+        # pylint: disable-next=import-outside-toplevel
         import re
 
         issue_pattern = re.compile(r"AAP-\d{4,7}", re.IGNORECASE)
@@ -1928,7 +2034,7 @@ class WorkspaceState:
         # 1. Remove sessions that no longer exist in Cursor
         removed_ids = our_ids - cursor_ids
         for sid in removed_ids:
-            logger.info(f"Removing session {sid} - no longer in Cursor DB")
+            logger.info("Removing session %s - no longer in Cursor DB", sid)
             del self.sessions[sid]
             result["removed"] += 1
             # Update active session if needed
@@ -1942,7 +2048,7 @@ class WorkspaceState:
         for sid in added_ids:
             cursor_chat = cursor_chat_map[sid]
             logger.info(
-                f"Adding session {sid} from Cursor DB: {cursor_chat.get('name')}"
+                "Adding session %s from Cursor DB: %s", sid, cursor_chat.get("name")
             )
 
             # Convert Cursor's lastUpdatedAt (ms timestamp) to datetime
@@ -1957,7 +2063,9 @@ class WorkspaceState:
             session_persona = detected_persona or get_default_persona()
             if detected_persona:
                 logger.info(
-                    f"Detected persona '{detected_persona}' from chat content for {sid}"
+                    "Detected persona '%s' from chat content for %s",
+                    detected_persona,
+                    sid,
                 )
 
             # Use detected project from chat content if available, otherwise workspace default
@@ -1966,7 +2074,9 @@ class WorkspaceState:
             is_project_auto = detected_project is None and self.is_auto_detected
             if detected_project:
                 logger.info(
-                    f"Detected project '{detected_project}' from chat content for {sid}"
+                    "Detected project '%s' from chat content for %s",
+                    detected_project,
+                    sid,
                 )
 
             session = ChatSession(
@@ -1997,7 +2107,7 @@ class WorkspaceState:
             cursor_name = cursor_chat.get("name")
             if cursor_name and cursor_name != session.name:
                 logger.debug(
-                    f"Renaming session {sid}: '{session.name}' -> '{cursor_name}'"
+                    "Renaming session %s: '%s' -> '%s'", sid, session.name, cursor_name
                 )
                 session.name = cursor_name
                 result["renamed"] += 1
@@ -2036,7 +2146,7 @@ class WorkspaceState:
             # Update issue_key if not already set and found in chat content
             if not session.issue_key and sid in issue_keys:
                 session.issue_key = issue_keys[sid]
-                logger.info(f"Found issue key {issue_keys[sid]} in chat {sid}")
+                logger.info("Found issue key %s in chat %s", issue_keys[sid], sid)
                 updated = True
 
             # Update persona from chat content if session has a generic/default persona
@@ -2050,8 +2160,10 @@ class WorkspaceState:
                 detected_persona = personas_from_content[sid]
                 if detected_persona not in generic_personas:
                     logger.info(
-                        f"Updating persona for {sid} from chat content: "
-                        f"'{session.persona}' -> '{detected_persona}'"
+                        "Updating persona for %s from chat content: '%s' -> '%s'",
+                        sid,
+                        session.persona,
+                        detected_persona,
                     )
                     session.persona = detected_persona
                     # Update tool count for new persona
@@ -2060,14 +2172,17 @@ class WorkspaceState:
                         session.static_tool_count = new_tool_count
                     updated = True
 
-            # Update project from chat content if session has auto-detected (workspace default) project
+            # Update project from chat content when the session project
+            # was auto-detected from the workspace default.
             # Only update if we detected a more specific project than the workspace default
             if session.is_project_auto_detected and sid in projects_from_content:
                 detected_project = projects_from_content[sid]
                 if detected_project and detected_project != session.project:
                     logger.info(
-                        f"Updating project for {sid} from chat content: "
-                        f"'{session.project}' -> '{detected_project}'"
+                        "Updating project for %s from chat content: '%s' -> '%s'",
+                        sid,
+                        session.project,
+                        detected_project,
                     )
                     session.project = detected_project
                     session.is_project_auto_detected = False  # Now explicitly detected
@@ -2084,6 +2199,7 @@ class WorkspaceState:
                 for key in session.issue_key.split(", "):
                     all_issue_keys.add(key.strip())
 
+        # pylint: disable-next=too-many-nested-blocks
         if all_issue_keys:
             # Get meeting references for all issue keys
             meeting_refs = get_meeting_transcript_issue_keys(list(all_issue_keys))
@@ -2114,14 +2230,20 @@ class WorkspaceState:
                         session.meeting_references = new_refs
                         if new_refs:
                             logger.debug(
-                                f"Session {session.session_id[:8]} has {len(new_refs)} meeting reference(s)"
+                                "Session %s has %s meeting reference(s)",
+                                session.session_id[:8],
+                                len(new_refs),
                             )
 
         total_changes = sum(result.values())
         if total_changes > 0:
             logger.info(
-                f"Synced with Cursor DB for {self.workspace_uri}: "
-                f"+{result['added']} -{result['removed']} ~{result['renamed']} ↻{result['updated']}"
+                "Synced with Cursor DB for %s: +%s -%s ~%s ↻%s",
+                self.workspace_uri,
+                result["added"],
+                result["removed"],
+                result["renamed"],
+                result["updated"],
             )
 
         return result
@@ -2135,20 +2257,25 @@ class WorkspaceState:
     def _get_loaded_tools(self) -> set[str]:
         """Get currently loaded tool names from PersonaLoader."""
         try:
+            # pylint: disable-next=cyclic-import,import-outside-toplevel
             from .persona_loader import get_loader
 
             loader = get_loader()
             if loader:
                 # Get actual tool names, not module names
+                # pylint: disable-next=protected-access
                 tools = set(loader._tool_to_module.keys())
                 logger.info(
-                    f"_get_loaded_tools: found {len(tools)} tools from {len(loader.loaded_modules)} modules"
+                    "_get_loaded_tools: found %s tools from %s modules",
+                    len(tools),
+                    len(loader.loaded_modules),
                 )
                 return tools
-            else:
-                logger.warning("_get_loaded_tools: PersonaLoader not initialized")
+            logger.warning("_get_loaded_tools: PersonaLoader not initialized")
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Could not get loaded tools: {e}")
+            logger.warning("Could not get loaded tools: %s", e)
 
         return set()
 
@@ -2265,7 +2392,8 @@ class WorkspaceRegistry:
             WorkspaceState for the current workspace
         """
         logger.debug(
-            f"get_for_ctx called, current registry has {len(cls._workspaces)} workspace(s)"
+            "get_for_ctx called, current registry has %s workspace(s)",
+            len(cls._workspaces),
         )
 
         # Periodic cleanup to prevent memory leaks
@@ -2274,10 +2402,10 @@ class WorkspaceRegistry:
             cls._access_count = 0
             cleaned = cls.cleanup_stale(max_age_hours=SESSION_STALE_HOURS)
             if cleaned > 0:
-                logger.info(f"Periodic cleanup: removed {cleaned} stale workspace(s)")
+                logger.info("Periodic cleanup: removed %s stale workspace(s)", cleaned)
 
         workspace_uri = await cls._get_workspace_uri(ctx)
-        logger.debug(f"Resolved workspace_uri: {workspace_uri}")
+        logger.debug("Resolved workspace_uri: %s", workspace_uri)
 
         is_new_workspace = workspace_uri not in cls._workspaces
 
@@ -2289,7 +2417,7 @@ class WorkspaceRegistry:
 
             # Check again after potential restore
             if workspace_uri in cls._workspaces:
-                logger.info(f"Restored workspace {workspace_uri} from disk")
+                logger.info("Restored workspace %s from disk", workspace_uri)
                 is_new_workspace = False
             else:
                 # Create new workspace state
@@ -2301,16 +2429,19 @@ class WorkspaceRegistry:
                     state.project = detected_project
                     state.is_auto_detected = True
                     logger.info(
-                        f"Auto-detected project '{detected_project}' for workspace {workspace_uri}"
+                        "Auto-detected project '%s' for workspace %s",
+                        detected_project,
+                        workspace_uri,
                     )
 
                 cls._workspaces[workspace_uri] = state
                 logger.info(
-                    f"Created new workspace state for {workspace_uri}, "
-                    f"registry now has {len(cls._workspaces)} workspace(s)"
+                    "Created new workspace state for %s, registry now has %s workspace(s)",
+                    workspace_uri,
+                    len(cls._workspaces),
                 )
         else:
-            logger.debug(f"Found existing workspace state for {workspace_uri}")
+            logger.debug("Found existing workspace state for %s", workspace_uri)
             cls._workspaces[workspace_uri].touch()
 
         workspace = cls._workspaces[workspace_uri]
@@ -2318,11 +2449,13 @@ class WorkspaceRegistry:
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
             logger.info(
-                f"No active session in workspace {workspace_uri}, auto-creating one"
+                "No active session in workspace %s, auto-creating one", workspace_uri
             )
             session = workspace.create_session(name="Auto-created")
             logger.info(
-                f"Auto-created session {session.session_id} for workspace {workspace_uri}"
+                "Auto-created session %s for workspace %s",
+                session.session_id,
+                workspace_uri,
             )
 
         return workspace
@@ -2349,19 +2482,20 @@ class WorkspaceRegistry:
             # Try to get roots
             logger.info("Calling list_roots()...")
             roots_result = await ctx.session.list_roots()
-            logger.info(f"list_roots() returned: {roots_result}")
+            logger.info("list_roots() returned: %s", roots_result)
 
             if roots_result and hasattr(roots_result, "roots") and roots_result.roots:
                 # Use the first root as the workspace identifier
                 root = roots_result.roots[0]
                 uri = str(root.uri) if hasattr(root, "uri") else str(root)
-                logger.info(f"Got workspace URI from list_roots: {uri}")
+                logger.info("Got workspace URI from list_roots: %s", uri)
                 return uri
-            else:
-                logger.info("list_roots() returned empty or no roots")
+            logger.info("list_roots() returned empty or no roots")
 
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.info(f"Failed to get workspace from list_roots: {e}")
+            logger.info("Failed to get workspace from list_roots: %s", e)
 
         logger.info("Falling back to DEFAULT_WORKSPACE")
         return DEFAULT_WORKSPACE
@@ -2376,6 +2510,7 @@ class WorkspaceRegistry:
         Returns:
             Project name if found, None otherwise
         """
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import load_config
 
         config = load_config()
@@ -2389,6 +2524,8 @@ class WorkspaceRegistry:
             # Try current working directory for default workspace
             try:
                 workspace_path = Path.cwd()
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception:
                 return None
         else:
@@ -2396,6 +2533,8 @@ class WorkspaceRegistry:
 
         try:
             workspace_path = workspace_path.resolve()
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             return None
 
@@ -2412,12 +2551,15 @@ class WorkspaceRegistry:
                 return project_name
             except ValueError:
                 continue
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception:
                 continue
 
         return None
 
     @classmethod
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     def _try_restore_workspace_from_disk(cls, workspace_uri: str) -> bool:
         """Try to restore a specific workspace from the persisted file.
 
@@ -2553,13 +2695,17 @@ class WorkspaceRegistry:
             # Add to registry
             cls._workspaces[workspace_uri] = workspace
             logger.info(
-                f"Restored workspace {workspace_uri} with {len(workspace.sessions)} session(s) from disk"
+                "Restored workspace %s with %s session(s) from disk",
+                workspace_uri,
+                len(workspace.sessions),
             )
             return True
 
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             logger.warning(
-                f"Failed to restore workspace {workspace_uri} from disk: {e}"
+                "Failed to restore workspace %s from disk: %s", workspace_uri, e
             )
             return False
 
@@ -2601,11 +2747,13 @@ class WorkspaceRegistry:
         # Auto-create session if none exists and ensure_session is True
         if ensure_session and not workspace.get_active_session():
             logger.info(
-                f"No active session in workspace {workspace_uri}, auto-creating one"
+                "No active session in workspace %s, auto-creating one", workspace_uri
             )
             session = workspace.create_session(name="Auto-created")
             logger.info(
-                f"Auto-created session {session.session_id} for workspace {workspace_uri}"
+                "Auto-created session %s for workspace %s",
+                session.session_id,
+                workspace_uri,
             )
 
         return workspace
@@ -2680,8 +2828,11 @@ class WorkspaceRegistry:
         total_changes = sum(totals.values())
         if total_changes > 0:
             logger.info(
-                "Synced all workspaces with Cursor DB: "
-                f"+{totals['added']} -{totals['removed']} ~{totals['renamed']} ↻{totals['updated']}"
+                "Synced all workspaces with Cursor DB: +%s -%s ~%s ↻%s",
+                totals["added"],
+                totals["removed"],
+                totals["renamed"],
+                totals["updated"],
             )
             # Persist changes to disk
             cls.save_to_disk()
@@ -2722,9 +2873,9 @@ class WorkspaceRegistry:
 
         # Sync only the relevant workspaces, passing the target session IDs
         for workspace_uri, target_ids in target_workspaces.items():
-            workspace = cls._workspaces.get(workspace_uri)
-            if workspace:
-                result = workspace.sync_with_cursor_db(session_ids=list(target_ids))
+            target_state = cls._workspaces.get(workspace_uri)
+            if target_state:
+                result = target_state.sync_with_cursor_db(session_ids=list(target_ids))
                 totals["added"] += result["added"]
                 totals["removed"] += result["removed"]
                 totals["renamed"] += result["renamed"]
@@ -2733,8 +2884,12 @@ class WorkspaceRegistry:
         total_changes = sum(totals.values())
         if total_changes > 0:
             logger.debug(
-                f"Synced {len(session_ids)} sessions with Cursor DB: "
-                f"+{totals['added']} -{totals['removed']} ~{totals['renamed']} ↻{totals['updated']}"
+                "Synced %s sessions with Cursor DB: +%s -%s ~%s ↻%s",
+                len(session_ids),
+                totals["added"],
+                totals["removed"],
+                totals["renamed"],
+                totals["updated"],
             )
             # Persist changes to disk
             cls.save_to_disk()
@@ -2753,7 +2908,7 @@ class WorkspaceRegistry:
         """
         if workspace_uri in cls._workspaces:
             del cls._workspaces[workspace_uri]
-            logger.debug(f"Removed workspace state for {workspace_uri}")
+            logger.debug("Removed workspace state for %s", workspace_uri)
             return True
         return False
 
@@ -2816,10 +2971,10 @@ class WorkspaceRegistry:
 
         for uri in stale_uris:
             del cls._workspaces[uri]
-            logger.info(f"Cleaned up stale workspace: {uri}")
+            logger.info("Cleaned up stale workspace: %s", uri)
 
         if stale_uris:
-            logger.info(f"Cleaned up {len(stale_uris)} stale workspace(s)")
+            logger.info("Cleaned up %s stale workspace(s)", len(stale_uris))
 
         return len(stale_uris)
 
@@ -2856,11 +3011,15 @@ class WorkspaceRegistry:
                 len(ws.get("sessions", {})) for ws in all_workspaces.values()
             )
             logger.info(
-                f"save_to_disk: saving {len(all_workspaces)} workspace(s) with {total_sessions} session(s)"
+                "save_to_disk: saving %s workspace(s) with %s session(s)",
+                len(all_workspaces),
+                total_sessions,
             )
             for uri, ws in all_workspaces.items():
                 session_ids = list(ws.get("sessions", {}).keys())
-                logger.info(f"  - {uri}: {len(session_ids)} sessions: {session_ids}")
+                logger.info(
+                    "  - %s: %s sessions: %s", uri, len(session_ids), session_ids
+                )
 
             export_data = {
                 "version": 2,
@@ -2872,13 +3031,16 @@ class WorkspaceRegistry:
             with open(PERSIST_FILE, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, indent=2, default=str)
 
-            logger.info(f"save_to_disk: successfully saved to {PERSIST_FILE}")
+            logger.info("save_to_disk: successfully saved to %s", PERSIST_FILE)
             return True
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to save workspace state: {e}")
+            logger.error("Failed to save workspace state: %s", e)
             return False
 
     @classmethod
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     def load_from_disk(cls) -> int:  # noqa: C901
         """Restore workspace states from disk.
 
@@ -2891,20 +3053,21 @@ class WorkspaceRegistry:
             logger.debug("load_from_disk: No persisted workspace state found")
             return 0
 
-        logger.debug(f"load_from_disk: Loading from {PERSIST_FILE}")
+        logger.debug("load_from_disk: Loading from %s", PERSIST_FILE)
 
         try:
             with open(PERSIST_FILE, encoding="utf-8") as f:
                 data = json.load(f)
 
             logger.info(
-                f"load_from_disk: File contains {len(data.get('workspaces', {}))} workspace(s)"
+                "load_from_disk: File contains %s workspace(s)",
+                len(data.get("workspaces", {})),
             )
 
             version = data.get("version", 1)
             if version < 2:
                 logger.warning(
-                    f"Old persist format version {version}, skipping restore"
+                    "Old persist format version %s, skipping restore", version
                 )
                 return 0
 
@@ -2927,8 +3090,10 @@ class WorkspaceRegistry:
                     workspace.is_auto_detected = True
                     if detected_project != persisted_project:
                         logger.info(
-                            f"Re-detected project '{detected_project}' for workspace "
-                            f"{workspace_uri} (was '{persisted_project}')"
+                            "Re-detected project '%s' for workspace %s (was '%s')",
+                            detected_project,
+                            workspace_uri,
+                            persisted_project,
                         )
                 else:
                     # No project detected from URI, use persisted value
@@ -3039,7 +3204,10 @@ class WorkspaceRegistry:
                         cursor_name = cursor_chat_map[session_id].get("name")
                         if cursor_name and cursor_name != session.name:
                             logger.info(
-                                f"Updating session {session_id} name from '{session.name}' to '{cursor_name}'"
+                                "Updating session %s name from '%s' to '%s'",
+                                session_id,
+                                session.name,
+                                cursor_name,
                             )
                             session.name = cursor_name
 
@@ -3048,15 +3216,20 @@ class WorkspaceRegistry:
                     cls._workspaces[workspace_uri] = workspace
 
             logger.info(
-                f"Restored {restored_sessions} session(s) from {len(cls._workspaces)} workspace(s)"
+                "Restored %s session(s) from %s workspace(s)",
+                restored_sessions,
+                len(cls._workspaces),
             )
             return restored_sessions
 
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in persist file: {e}")
+            logger.error("Invalid JSON in persist file: %s", e)
             return 0
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to load workspace state: {e}")
+            logger.error("Failed to load workspace state: %s", e)
+            # pylint: disable-next=import-outside-toplevel
             import traceback
 
             logger.error(traceback.format_exc())
@@ -3074,8 +3247,10 @@ class WorkspaceRegistry:
         if cls._workspaces:
             total_sessions = sum(ws.session_count() for ws in cls._workspaces.values())
             logger.info(
-                f"restore_if_empty: Registry already has {len(cls._workspaces)} workspace(s) "
-                f"with {total_sessions} session(s), skipping restore"
+                "restore_if_empty: Registry already has %s workspace(s) "
+                "with %s session(s), skipping restore",
+                len(cls._workspaces),
+                total_sessions,
             )
             return 0
         logger.info("restore_if_empty: Registry is empty, loading from disk")

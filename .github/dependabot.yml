@@ -1,0 +1,109 @@
+---
+# Managed by https://github.com/dmzoneill/dmzoneill setup.sh.
+# Entries follow manifests detected in this repository.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+  - package-ecosystem: "npm"
+    directory: "/extensions/aa_workflow_vscode"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      npm:
+        patterns:
+          - "*"
+  - package-ecosystem: "pip"
+    directories:
+      - "/tool_modules/aa_alertmanager"
+      - "/tool_modules/aa_ansible"
+      - "/tool_modules/aa_appinterface"
+      - "/tool_modules/aa_aws"
+      - "/tool_modules/aa_bonfire"
+      - "/tool_modules/aa_code_search"
+      - "/tool_modules/aa_concur"
+      - "/tool_modules/aa_curl"
+      - "/tool_modules/aa_dev_workflow"
+      - "/tool_modules/aa_docker"
+      - "/tool_modules/aa_gcloud"
+      - "/tool_modules/aa_gdrive"
+      - "/tool_modules/aa_git"
+      - "/tool_modules/aa_github"
+      - "/tool_modules/aa_gitlab"
+      - "/tool_modules/aa_gmail"
+      - "/tool_modules/aa_google_calendar"
+      - "/tool_modules/aa_google_slides"
+      - "/tool_modules/aa_inscope"
+      - "/tool_modules/aa_jira"
+      - "/tool_modules/aa_k8s"
+      - "/tool_modules/aa_kibana"
+      - "/tool_modules/aa_knowledge"
+      - "/tool_modules/aa_konflux"
+      - "/tool_modules/aa_libvirt"
+      - "/tool_modules/aa_lint"
+      - "/tool_modules/aa_make"
+      - "/tool_modules/aa_meet_bot"
+      - "/tool_modules/aa_memory_yaml"
+      - "/tool_modules/aa_mysql"
+      - "/tool_modules/aa_nmap"
+      - "/tool_modules/aa_ollama"
+      - "/tool_modules/aa_openssl"
+      - "/tool_modules/aa_performance"
+      - "/tool_modules/aa_podman"
+      - "/tool_modules/aa_postgres"
+      - "/tool_modules/aa_project"
+      - "/tool_modules/aa_prometheus"
+      - "/tool_modules/aa_quay"
+      - "/tool_modules/aa_scheduler"
+      - "/tool_modules/aa_slack"
+      - "/tool_modules/aa_slack_persona"
+      - "/tool_modules/aa_slop_fixer"
+      - "/tool_modules/aa_sqlite"
+      - "/tool_modules/aa_ssh"
+      - "/tool_modules/aa_sso"
+      - "/tool_modules/aa_style"
+      - "/tool_modules/aa_systemd"
+      - "/tool_modules/aa_workflow"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      pip:
+        patterns:
+          - "*"
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      uv:
+        patterns:
+          - "*"
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    groups:
+      pre-commit:
+        patterns:
+          - "*"

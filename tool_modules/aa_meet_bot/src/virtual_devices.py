@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Virtual Audio/Video Device Management.
 
@@ -26,21 +27,23 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+from tool_modules.aa_meet_bot.src.config import get_config
+from tool_modules.aa_meet_bot.src.pulse_defaults import (
+    configured_source_metadata_args,
+    default_source_metadata_args,
+)
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
 # Import centralized paths
 try:
-    from server.paths import MEETBOT_DATA_DIR, MEETBOT_PIPES_DIR
+    from server.paths import MEETBOT_DATA_DIR
 except ImportError:
     # Fallback for standalone usage
     MEETBOT_DATA_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot"
-    MEETBOT_PIPES_DIR = MEETBOT_DATA_DIR / "pipes"
-
-from tool_modules.aa_meet_bot.src.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ DATA_DIR = MEETBOT_DATA_DIR
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class InstanceDevices:
     """Per-meeting-instance virtual audio and video devices."""
 
@@ -84,6 +88,7 @@ class VirtualDeviceStatus:
 
     @property
     def all_ready(self) -> bool:
+        """Whether the required audio devices are ready."""
         # Video is optional for voice pipeline
         return self.audio_sink_ready and self.audio_source_ready
 
@@ -98,12 +103,15 @@ async def run_cmd(cmd: list[str], check: bool = True) -> tuple[bool, str]:
         output = stdout.decode() + stderr.decode()
         success = proc.returncode == 0
         if not success and check:
-            logger.warning(f"Command failed: {' '.join(cmd)}\n{output}")
+            logger.warning("Command failed: %s\n%s", " ".join(cmd), output)
         return success, output
+    # Best-effort: failure is contained, not raised.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
         return False, str(e)
 
 
+# pylint: disable-next=too-many-instance-attributes
 class InstanceDeviceManager:
     """
     Manages virtual audio devices for a single meeting instance.
@@ -145,9 +153,8 @@ class InstanceDeviceManager:
 
         # Save browser audio connections before we create devices
         # This allows us to restore them if something goes wrong
-        self._saved_browser_connections: list[tuple[str, str]] = (
-            []
-        )  # [(output_id, source_name)]
+        # [(output_id, source_name)]
+        self._saved_browser_connections: list[tuple[str, str]] = []
         self._original_default_source: Optional[str] = None
 
         # Background task to monitor and restore default source
@@ -189,8 +196,11 @@ class InstanceDeviceManager:
         )
 
         logger.info(
-            f"[{self.instance_id}] Created devices: sink={self.sink_name}, "
-            f"source={self.source_name}, video={video_device}"
+            "[%s] Created devices: sink=%s, source=%s, video=%s",
+            self.instance_id,
+            self.sink_name,
+            self.source_name,
+            video_device,
         )
 
         # Start background task to monitor and restore default source if WirePlumber changes it
@@ -210,7 +220,9 @@ class InstanceDeviceManager:
         """
         check_interval = 10  # Check every 10 seconds
         logger.info(
-            f"[{self.instance_id}] Starting default source monitor (original: {original_source})"
+            "[%s] Starting default source monitor (original: %s)",
+            self.instance_id,
+            original_source,
         )
 
         try:
@@ -226,14 +238,18 @@ class InstanceDeviceManager:
                     # If it changed to our meetbot source, restore it
                     if "meet_bot" in current.lower() and current != original_source:
                         logger.warning(
-                            f"[{self.instance_id}] Default source changed to {current}, "
-                            f"restoring to {original_source}"
+                            "[%s] Default source changed to %s, restoring to %s",
+                            self.instance_id,
+                            current,
+                            original_source,
                         )
                         await self._force_restore_default_source(original_source)
         except asyncio.CancelledError:
-            logger.info(f"[{self.instance_id}] Default source monitor stopped")
+            logger.info("[%s] Default source monitor stopped", self.instance_id)
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"[{self.instance_id}] Default source monitor error: {e}")
+            logger.warning("[%s] Default source monitor error: %s", self.instance_id, e)
 
     async def _save_browser_audio_state(self) -> None:
         """
@@ -251,7 +267,9 @@ class InstanceDeviceManager:
         if success:
             self._original_default_source = output.strip()
             logger.info(
-                f"[{self.instance_id}] Saved original default source: {self._original_default_source}"
+                "[%s] Saved original default source: %s",
+                self.instance_id,
+                self._original_default_source,
             )
 
         # Save browser source-output connections
@@ -275,7 +293,10 @@ class InstanceDeviceManager:
                         (current_output_id, current_source)
                     )
                     logger.info(
-                        f"[{self.instance_id}] Saved browser connection: output {current_output_id} -> {current_source}"
+                        "[%s] Saved browser connection: output %s -> %s",
+                        self.instance_id,
+                        current_output_id,
+                        current_source,
                     )
 
                 current_output_id = line.split("#")[1]
@@ -294,12 +315,17 @@ class InstanceDeviceManager:
         if current_output_id and is_browser and current_source:
             self._saved_browser_connections.append((current_output_id, current_source))
             logger.info(
-                f"[{self.instance_id}] Saved browser connection: output {current_output_id} -> {current_source}"
+                "[%s] Saved browser connection: output %s -> %s",
+                self.instance_id,
+                current_output_id,
+                current_source,
             )
 
         if self._saved_browser_connections:
             logger.info(
-                f"[{self.instance_id}] Saved {len(self._saved_browser_connections)} browser audio connections"
+                "[%s] Saved %s browser audio connections",
+                self.instance_id,
+                len(self._saved_browser_connections),
             )
 
     async def _create_sink(self) -> Optional[int]:
@@ -309,7 +335,7 @@ class InstanceDeviceManager:
             ["pactl", "list", "short", "sinks"], check=False
         )
         if success and self.sink_name in output:
-            logger.info(f"[{self.instance_id}] Sink {self.sink_name} already exists")
+            logger.info("[%s] Sink %s already exists", self.instance_id, self.sink_name)
             return None
 
         # Create null sink
@@ -326,16 +352,19 @@ class InstanceDeviceManager:
             try:
                 self._sink_module_id = int(output.strip())
                 logger.info(
-                    f"[{self.instance_id}] Created sink {self.sink_name} (module {self._sink_module_id})"
+                    "[%s] Created sink %s (module %s)",
+                    self.instance_id,
+                    self.sink_name,
+                    self._sink_module_id,
                 )
                 return self._sink_module_id
             except ValueError:
                 logger.warning(
-                    f"[{self.instance_id}] Could not parse module ID: {output}"
+                    "[%s] Could not parse module ID: %s", self.instance_id, output
                 )
                 return None
 
-        logger.error(f"[{self.instance_id}] Failed to create sink: {output}")
+        logger.error("[%s] Failed to create sink: %s", self.instance_id, output)
         return None
 
     async def _create_pipe(self) -> bool:
@@ -344,15 +373,21 @@ class InstanceDeviceManager:
             # Remove stale pipe
             try:
                 self.pipe_path.unlink()
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(f"[{self.instance_id}] Could not remove stale pipe: {e}")
+                logger.warning(
+                    "[%s] Could not remove stale pipe: %s", self.instance_id, e
+                )
 
         try:
             os.mkfifo(str(self.pipe_path))
-            logger.info(f"[{self.instance_id}] Created named pipe: {self.pipe_path}")
+            logger.info("[%s] Created named pipe: %s", self.instance_id, self.pipe_path)
             return True
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"[{self.instance_id}] Failed to create pipe: {e}")
+            logger.error("[%s] Failed to create pipe: %s", self.instance_id, e)
             return False
 
     async def _create_source(self) -> Optional[int]:
@@ -363,7 +398,7 @@ class InstanceDeviceManager:
         )
         if success and self.source_name in output:
             logger.info(
-                f"[{self.instance_id}] Source {self.source_name} already exists"
+                "[%s] Source %s already exists", self.instance_id, self.source_name
             )
             return None
 
@@ -374,7 +409,9 @@ class InstanceDeviceManager:
         if success:
             original_default_source = output.strip()
             logger.info(
-                f"[{self.instance_id}] Saving original default source: {original_default_source}"
+                "[%s] Saving original default source: %s",
+                self.instance_id,
+                original_default_source,
             )
 
         config = get_config()
@@ -402,7 +439,10 @@ class InstanceDeviceManager:
             try:
                 self._source_module_id = int(output.strip())
                 logger.info(
-                    f"[{self.instance_id}] Created source {self.source_name} (module {self._source_module_id})"
+                    "[%s] Created source %s (module %s)",
+                    self.instance_id,
+                    self.source_name,
+                    self._source_module_id,
                 )
 
                 # CRITICAL: Immediately restore the original default source
@@ -416,11 +456,11 @@ class InstanceDeviceManager:
                 return self._source_module_id
             except ValueError:
                 logger.warning(
-                    f"[{self.instance_id}] Could not parse module ID: {output}"
+                    "[%s] Could not parse module ID: %s", self.instance_id, output
                 )
                 return None
 
-        logger.error(f"[{self.instance_id}] Failed to create source: {output}")
+        logger.error("[%s] Failed to create source: %s", self.instance_id, output)
         return None
 
     async def _force_restore_default_source(self, original_source: str) -> None:
@@ -446,27 +486,13 @@ class InstanceDeviceManager:
             # Method 1: Lock using default.configured.audio.source (highest priority)
             # This prevents WirePlumber from ever changing the system default
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.configured.audio.source",
-                    f'{{"name":"{original_source}"}}',
-                ],
+                configured_source_metadata_args(original_source),
                 check=False,
             )
 
             # Method 2: Also set default.audio.source for immediate effect
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.audio.source",
-                    f'{{"name":"{original_source}"}}',
-                ],
+                default_source_metadata_args(original_source),
                 check=False,
             )
 
@@ -482,50 +508,40 @@ class InstanceDeviceManager:
             )
             if success:
                 current = current.strip()
+                # pylint: disable-next=no-else-return
                 if current == original_source:
                     logger.info(
-                        f"[{self.instance_id}] Default source LOCKED to {current} "
-                        f"(attempt {attempt + 1})"
+                        "[%s] Default source LOCKED to %s (attempt %s)",
+                        self.instance_id,
+                        current,
+                        attempt + 1,
                     )
                     return  # Success!
                 elif "meet_bot" not in current.lower():
                     # Different physical source - acceptable (user may have switched)
                     logger.info(
-                        f"[{self.instance_id}] Default source is {current} (physical device) "
-                        f"(attempt {attempt + 1})"
+                        "[%s] Default source is %s (physical device) (attempt %s)",
+                        self.instance_id,
+                        current,
+                        attempt + 1,
                     )
                     return
                 else:
                     logger.warning(
-                        f"[{self.instance_id}] Default source is still {current}, "
-                        f"retrying (attempt {attempt + 1}/{max_attempts})"
+                        "[%s] Default source is still %s, retrying (attempt %s/%s)",
+                        self.instance_id,
+                        current,
+                        attempt + 1,
+                        max_attempts,
                     )
                     await asyncio.sleep(0.1 * (attempt + 1))
 
         # Final attempt
-        logger.warning(f"[{self.instance_id}] Final lock attempt for {original_source}")
-        await run_cmd(
-            [
-                "pw-metadata",
-                "-n",
-                "default",
-                "0",
-                "default.configured.audio.source",
-                f'{{"name":"{original_source}"}}',
-            ],
-            check=False,
+        logger.warning(
+            "[%s] Final lock attempt for %s", self.instance_id, original_source
         )
-        await run_cmd(
-            [
-                "pw-metadata",
-                "-n",
-                "default",
-                "0",
-                "default.audio.source",
-                f'{{"name":"{original_source}"}}',
-            ],
-            check=False,
-        )
+        await run_cmd(configured_source_metadata_args(original_source), check=False)
+        await run_cmd(default_source_metadata_args(original_source), check=False)
         await run_cmd(["pactl", "set-default-source", original_source], check=False)
 
         # Also restore any browser streams that got moved to meetbot devices
@@ -552,24 +568,19 @@ class InstanceDeviceManager:
             current_default = current_default.strip()
             if "meet_bot" in current_default.lower():
                 logger.warning(
-                    f"[{self.instance_id}] Default source is meetbot device, "
-                    f"restoring to {original_source}"
+                    "[%s] Default source is meetbot device, restoring to %s",
+                    self.instance_id,
+                    original_source,
                 )
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{original_source}"}}',
-                    ],
+                    default_source_metadata_args(original_source),
                     check=False,
                 )
 
         # Now find and restore any browser streams that got moved to our device
         await self._reconnect_browsers_to_physical_mic(original_source)
 
+    # pylint: disable-next=too-many-branches
     async def _reconnect_browsers_to_physical_mic(self, target_source: str) -> None:
         """
         Find any browser streams connected to meetbot devices and reconnect them
@@ -594,7 +605,9 @@ class InstanceDeviceManager:
 
             if not target_index:
                 logger.warning(
-                    f"[{self.instance_id}] Could not find index for source: {target_source}"
+                    "[%s] Could not find index for source: %s",
+                    self.instance_id,
+                    target_source,
                 )
                 return
 
@@ -617,8 +630,11 @@ class InstanceDeviceManager:
                     if current_output_id and is_browser and current_source:
                         if "meet_bot" in str(current_source).lower():
                             logger.info(
-                                f"[{self.instance_id}] Reconnecting browser stream {current_output_id} "
-                                f"from {current_source} to {target_source}"
+                                "[%s] Reconnecting browser stream %s from %s to %s",
+                                self.instance_id,
+                                current_output_id,
+                                current_source,
+                                target_source,
                             )
                             await run_cmd(
                                 [
@@ -649,8 +665,11 @@ class InstanceDeviceManager:
             if current_output_id and is_browser and current_source:
                 if "meet_bot" in str(current_source).lower():
                     logger.info(
-                        f"[{self.instance_id}] Reconnecting browser stream {current_output_id} "
-                        f"from {current_source} to {target_source}"
+                        "[%s] Reconnecting browser stream %s from %s to %s",
+                        self.instance_id,
+                        current_output_id,
+                        current_source,
+                        target_source,
                     )
                     await run_cmd(
                         [
@@ -662,8 +681,10 @@ class InstanceDeviceManager:
                         check=False,
                     )
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"[{self.instance_id}] Failed to reconnect browsers: {e}")
+            logger.warning("[%s] Failed to reconnect browsers: %s", self.instance_id, e)
 
     async def _restore_saved_browser_connections(self) -> None:
         """
@@ -677,17 +698,12 @@ class InstanceDeviceManager:
             and "meet_bot" not in self._original_default_source.lower()
         ):
             logger.info(
-                f"[{self.instance_id}] Restoring default source: {self._original_default_source}"
+                "[%s] Restoring default source: %s",
+                self.instance_id,
+                self._original_default_source,
             )
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.audio.source",
-                    f'{{"name":"{self._original_default_source}"}}',
-                ],
+                default_source_metadata_args(self._original_default_source),
                 check=False,
             )
 
@@ -716,7 +732,10 @@ class InstanceDeviceManager:
                 if source_name and source_name in source_indices:
                     target_index = source_indices[source_name]
                     logger.info(
-                        f"[{self.instance_id}] Restoring browser output {output_id} to {source_name}"
+                        "[%s] Restoring browser output %s to %s",
+                        self.instance_id,
+                        output_id,
+                        source_name,
                     )
                     await run_cmd(
                         ["pactl", "move-source-output", output_id, target_index],
@@ -729,10 +748,11 @@ class InstanceDeviceManager:
                     self._original_default_source
                 )
 
+    # pylint: disable-next=unused-argument
     async def _ensure_user_browser_has_mic(self, target_source: str) -> None:
         """DEPRECATED: Use _restore_saved_browser_connections instead."""
         logger.debug(
-            f"[{self.instance_id}] _ensure_user_browser_has_mic called but deprecated"
+            "[%s] _ensure_user_browser_has_mic called but deprecated", self.instance_id
         )
 
     async def _create_video_device(self) -> Optional[str]:
@@ -741,7 +761,8 @@ class InstanceDeviceManager:
         success, _ = await run_cmd(["which", "v4l2loopback-ctl"], check=False)
         if not success:
             logger.warning(
-                f"[{self.instance_id}] v4l2loopback-ctl not found, skipping video device"
+                "[%s] v4l2loopback-ctl not found, skipping video device",
+                self.instance_id,
             )
             return None
 
@@ -749,23 +770,26 @@ class InstanceDeviceManager:
         success, output = await run_cmd(["lsmod"], check=False)
         if not success or "v4l2loopback" not in output:
             # Try to load the module with control device support
-            logger.info(f"[{self.instance_id}] Loading v4l2loopback module...")
+            logger.info("[%s] Loading v4l2loopback module...", self.instance_id)
             load_success = await self._load_v4l2loopback_module()
             if not load_success:
                 logger.warning(
-                    f"[{self.instance_id}] v4l2loopback module not available, skipping video device"
+                    "[%s] v4l2loopback module not available, skipping video device",
+                    self.instance_id,
                 )
                 return None
 
         # Check if control device exists (required for dynamic add/delete)
         if not Path("/dev/v4l2loopback").exists():
             logger.warning(
-                f"[{self.instance_id}] v4l2loopback control device not found, trying to reload module"
+                "[%s] v4l2loopback control device not found, trying to reload module",
+                self.instance_id,
             )
             await self._reload_v4l2loopback_with_control()
             if not Path("/dev/v4l2loopback").exists():
                 logger.warning(
-                    f"[{self.instance_id}] Cannot create control device, skipping video device"
+                    "[%s] Cannot create control device, skipping video device",
+                    self.instance_id,
                 )
                 return None
 
@@ -791,6 +815,7 @@ class InstanceDeviceManager:
             device_path = None
             for line in output.strip().split("\n"):
                 line = line.strip()
+                # pylint: disable-next=no-else-break
                 if line.startswith("/dev/video"):
                     device_path = line.split()[0]  # First word is the path
                     break
@@ -807,11 +832,14 @@ class InstanceDeviceManager:
             if device_path and device_path.startswith("/dev/video"):
                 self._video_device = device_path
                 logger.info(
-                    f"[{self.instance_id}] Created video device: {device_path} ({self.video_device_name})"
+                    "[%s] Created video device: %s (%s)",
+                    self.instance_id,
+                    device_path,
+                    self.video_device_name,
                 )
                 return device_path
 
-        logger.error(f"[{self.instance_id}] Failed to create video device: {output}")
+        logger.error("[%s] Failed to create video device: %s", self.instance_id, output)
         return None
 
     async def _load_v4l2loopback_module(self) -> bool:
@@ -826,12 +854,12 @@ class InstanceDeviceManager:
             success, output = await run_cmd(cmd, check=False)
 
         if success:
-            logger.info(f"[{self.instance_id}] Loaded v4l2loopback module")
+            logger.info("[%s] Loaded v4l2loopback module", self.instance_id)
             # Give it a moment to create the control device
             await asyncio.sleep(0.5)
             return True
 
-        logger.warning(f"[{self.instance_id}] Failed to load v4l2loopback: {output}")
+        logger.warning("[%s] Failed to load v4l2loopback: %s", self.instance_id, output)
         return False
 
     async def _reload_v4l2loopback_with_control(self) -> bool:
@@ -841,7 +869,8 @@ class InstanceDeviceManager:
         success, output = await run_cmd(["v4l2loopback-ctl", "list"], check=False)
         if success and "MeetBot_" in output:
             logger.warning(
-                f"[{self.instance_id}] Other MeetBot devices exist, cannot reload module"
+                "[%s] Other MeetBot devices exist, cannot reload module",
+                self.instance_id,
             )
             return False
 
@@ -867,6 +896,7 @@ class InstanceDeviceManager:
 
         # Fallback: search /sys/devices for our device name
         try:
+            # pylint: disable-next=import-outside-toplevel
             import glob
 
             for card_path in glob.glob("/sys/devices/virtual/video4linux/video*/name"):
@@ -876,8 +906,10 @@ class InstanceDeviceManager:
                         # Extract video number from path
                         video_dir = Path(card_path).parent.name
                         return f"/dev/{video_dir}"
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"[{self.instance_id}] Fallback device search failed: {e}")
+            logger.debug("[%s] Fallback device search failed: %s", self.instance_id, e)
 
         return None
 
@@ -898,30 +930,39 @@ class InstanceDeviceManager:
 
         if success:
             logger.info(
-                f"[{self.instance_id}] Removed video device: {self._video_device} ({self.video_device_name})"
+                "[%s] Removed video device: %s (%s)",
+                self.instance_id,
+                self._video_device,
+                self.video_device_name,
             )
         else:
             # Try by device number if path failed
             if self._video_device.startswith("/dev/video"):
                 video_num = self._video_device.replace("/dev/video", "")
-                success2, output2 = await run_cmd(
+                success2, _output = await run_cmd(
                     ["v4l2loopback-ctl", "delete", video_num], check=False
                 )
                 if success2:
                     logger.info(
-                        f"[{self.instance_id}] Removed video device by number: {video_num}"
+                        "[%s] Removed video device by number: %s",
+                        self.instance_id,
+                        video_num,
                     )
                 else:
                     logger.warning(
-                        f"[{self.instance_id}] Failed to remove video device {self._video_device}: {output}"
+                        "[%s] Failed to remove video device %s: %s",
+                        self.instance_id,
+                        self._video_device,
+                        output,
                     )
             else:
                 logger.warning(
-                    f"[{self.instance_id}] Failed to remove video device: {output}"
+                    "[%s] Failed to remove video device: %s", self.instance_id, output
                 )
 
         self._video_device = None
 
+    # pylint: disable-next=too-many-branches
     async def cleanup(self, restore_browser_audio: bool = False) -> None:
         """Remove all audio and video devices when meeting ends.
 
@@ -952,29 +993,17 @@ class InstanceDeviceManager:
             )
             if success and "meet_bot" in current.strip().lower():
                 logger.info(
-                    f"[{self.instance_id}] Restoring default source to {self._original_default_source}"
+                    "[%s] Restoring default source to %s",
+                    self.instance_id,
+                    self._original_default_source,
                 )
                 # Re-lock to original physical device
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.configured.audio.source",
-                        f'{{"name":"{self._original_default_source}"}}',
-                    ],
+                    configured_source_metadata_args(self._original_default_source),
                     check=False,
                 )
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{self._original_default_source}"}}',
-                    ],
+                    default_source_metadata_args(self._original_default_source),
                     check=False,
                 )
                 await run_cmd(
@@ -992,7 +1021,9 @@ class InstanceDeviceManager:
                 for line in output.strip().split("\n"):
                     if self.source_name in line:
                         logger.warning(
-                            f"[{self.instance_id}] Stream still connected to our source: {line}"
+                            "[%s] Stream still connected to our source: %s",
+                            self.instance_id,
+                            line,
                         )
 
         # Unload sink module (this is OUR virtual sink, not the user's)
@@ -1001,7 +1032,7 @@ class InstanceDeviceManager:
                 ["pactl", "unload-module", str(self._sink_module_id)], check=False
             )
             logger.info(
-                f"[{self.instance_id}] Removed sink module {self._sink_module_id}"
+                "[%s] Removed sink module %s", self.instance_id, self._sink_module_id
             )
             self._sink_module_id = None
 
@@ -1011,7 +1042,9 @@ class InstanceDeviceManager:
                 ["pactl", "unload-module", str(self._source_module_id)], check=False
             )
             logger.info(
-                f"[{self.instance_id}] Removed source module {self._source_module_id}"
+                "[%s] Removed source module %s",
+                self.instance_id,
+                self._source_module_id,
             )
             self._source_module_id = None
 
@@ -1022,20 +1055,23 @@ class InstanceDeviceManager:
         if self.pipe_path and self.pipe_path.exists():
             try:
                 self.pipe_path.unlink()
-                logger.info(f"[{self.instance_id}] Removed pipe {self.pipe_path}")
+                logger.info("[%s] Removed pipe %s", self.instance_id, self.pipe_path)
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(f"[{self.instance_id}] Could not remove pipe: {e}")
+                logger.warning("[%s] Could not remove pipe: %s", self.instance_id, e)
 
         self._devices = None
 
         # Only restore browser connections if explicitly requested (meeting died/crashed)
         if restore_browser_audio:
             logger.info(
-                f"[{self.instance_id}] Restoring browser audio connections (meeting died)"
+                "[%s] Restoring browser audio connections (meeting died)",
+                self.instance_id,
             )
             await self._restore_saved_browser_connections()
 
-        logger.info(f"[{self.instance_id}] Audio device cleanup complete")
+        logger.info("[%s] Audio device cleanup complete", self.instance_id)
 
     def get_devices(self) -> Optional[InstanceDevices]:
         """Get the created devices (None if not created yet)."""
@@ -1073,7 +1109,7 @@ class VirtualAudioManager:
             ["pactl", "list", "short", "sinks"], check=False
         )
         if success and sink_name in output:
-            logger.info(f"Virtual sink '{sink_name}' already exists")
+            logger.info("Virtual sink '%s' already exists", sink_name)
             # Extract module ID if possible
             return True, None
 
@@ -1091,14 +1127,16 @@ class VirtualAudioManager:
             try:
                 self.sink_module_id = int(output.strip())
                 logger.info(
-                    f"Created virtual sink '{sink_name}' (module {self.sink_module_id})"
+                    "Created virtual sink '%s' (module %s)",
+                    sink_name,
+                    self.sink_module_id,
                 )
                 return True, self.sink_module_id
             except ValueError:
-                logger.warning(f"Could not parse module ID from: {output}")
+                logger.warning("Could not parse module ID from: %s", output)
                 return True, None
 
-        logger.error(f"Failed to create virtual sink: {output}")
+        logger.error("Failed to create virtual sink: %s", output)
         return False, None
 
     async def create_virtual_source(self) -> tuple[bool, Optional[int]]:
@@ -1115,7 +1153,7 @@ class VirtualAudioManager:
             ["pactl", "list", "short", "sources"], check=False
         )
         if success and source_name in output:
-            logger.info(f"Virtual source '{source_name}' already exists")
+            logger.info("Virtual source '%s' already exists", source_name)
             return True, None
 
         # Create virtual source using module-pipe-source
@@ -1139,14 +1177,16 @@ class VirtualAudioManager:
             try:
                 self.source_module_id = int(output.strip())
                 logger.info(
-                    f"Created virtual source '{source_name}' (module {self.source_module_id})"
+                    "Created virtual source '%s' (module %s)",
+                    source_name,
+                    self.source_module_id,
                 )
                 return True, self.source_module_id
             except ValueError:
-                logger.warning(f"Could not parse module ID from: {output}")
+                logger.warning("Could not parse module ID from: %s", output)
                 return True, None
 
-        logger.error(f"Failed to create virtual source: {output}")
+        logger.error("Failed to create virtual source: %s", output)
         return False, None
 
     async def cleanup(self) -> None:
@@ -1201,7 +1241,7 @@ class VirtualVideoManager:
             logger.info("Loaded v4l2loopback module")
             return True
 
-        logger.error(f"Failed to load v4l2loopback: {output}")
+        logger.error("Failed to load v4l2loopback: %s", output)
         logger.info(
             "Try running: sudo modprobe v4l2loopback devices=1 "
             "video_nr=10 card_label=MeetBot_Camera exclusive_caps=1"
@@ -1243,7 +1283,7 @@ class VirtualVideoManager:
         # Find device
         device = await self.find_virtual_camera()
         if device:
-            logger.info(f"Virtual camera ready at {device}")
+            logger.info("Virtual camera ready at %s", device)
             return True, device
 
         logger.error("Could not find virtual camera device")
@@ -1326,6 +1366,7 @@ class VirtualDeviceManager:
 
 
 # Orphaned device cleanup
+# pylint: disable-next=too-many-locals,too-many-branches,too-many-statements
 async def cleanup_orphaned_meetbot_devices(
     active_instance_ids: set[str] | None = None,
 ) -> dict:
@@ -1342,7 +1383,7 @@ async def cleanup_orphaned_meetbot_devices(
     Returns:
         Dict with cleanup results: removed_sinks, removed_sources, removed_pipes, errors
     """
-    results = {
+    results: dict[str, Any] = {
         "removed_sinks": [],
         "removed_sources": [],
         "removed_modules": [],
@@ -1426,7 +1467,10 @@ async def cleanup_orphaned_meetbot_devices(
                 f"{module_id} ({module_type}, instance: {instance_id})"
             )
             logger.info(
-                f"Removed orphaned module {module_id} ({module_type}) for instance {instance_id}"
+                "Removed orphaned module %s (%s) for instance %s",
+                module_id,
+                module_type,
+                instance_id,
             )
         else:
             results["errors"].append(f"Failed to unload module {module_id}: {output}")
@@ -1448,7 +1492,9 @@ async def cleanup_orphaned_meetbot_devices(
             try:
                 pipe_file.unlink()
                 results["removed_pipes"].append(str(pipe_file))
-                logger.info(f"Removed orphaned pipe: {pipe_file}")
+                logger.info("Removed orphaned pipe: %s", pipe_file)
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 results["errors"].append(f"Failed to remove pipe {pipe_file}: {e}")
 
@@ -1474,7 +1520,7 @@ async def cleanup_orphaned_meetbot_devices(
         + len(results["killed_processes"])
     )
     if total_removed > 0:
-        logger.info(f"Orphaned device cleanup complete: {total_removed} items removed")
+        logger.info("Orphaned device cleanup complete: %s items removed", total_removed)
 
     return results
 
@@ -1502,14 +1548,17 @@ async def _find_parec_via_pgrep() -> list[tuple[int, str]]:
                         results.append((int(parts[0]), parts[1]))
                     except ValueError:
                         continue
+    # Best-effort: failure is contained, not raised.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.debug(f"pgrep method failed: {e}")
+        logger.debug("pgrep method failed: %s", e)
     return results
 
 
 async def _find_parec_via_ps() -> list[tuple[int, str]]:
     """Find parec processes using ps aux."""
     results = []
+    # pylint: disable-next=too-many-nested-blocks
     try:
         proc = await asyncio.create_subprocess_exec(
             "ps",
@@ -1528,13 +1577,16 @@ async def _find_parec_via_ps() -> list[tuple[int, str]]:
                             results.append((int(parts[1]), " ".join(parts[10:])))
                         except ValueError:
                             continue
+    # Best-effort: failure is contained, not raised.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.debug(f"ps aux method failed: {e}")
+        logger.debug("ps aux method failed: %s", e)
     return results
 
 
 def _find_parec_via_proc(existing_pids: set[int]) -> list[tuple[int, str]]:
     """Find parec processes by scanning /proc."""
+    # pylint: disable-next=import-outside-toplevel
     import glob
 
     results = []
@@ -1549,8 +1601,10 @@ def _find_parec_via_proc(existing_pids: set[int]) -> list[tuple[int, str]]:
                             results.append((pid, cmdline))
             except (IOError, ValueError, IndexError):
                 continue
+    # Best-effort: failure is contained, not raised.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.debug(f"/proc method failed: {e}")
+        logger.debug("/proc method failed: %s", e)
     return results
 
 
@@ -1559,6 +1613,7 @@ def _extract_instance_id_from_cmdline(cmd_line: str) -> Optional[str]:
     if "meet_bot_" not in cmd_line:
         return None
 
+    # pylint: disable-next=import-outside-toplevel
     import re
 
     match = re.search(r"meet_bot_([a-zA-Z0-9_]+)", cmd_line)
@@ -1573,6 +1628,7 @@ def _extract_instance_id_from_cmdline(cmd_line: str) -> Optional[str]:
 
 async def _kill_process(pid: int) -> bool:
     """Kill a process with SIGTERM, then SIGKILL if needed. Returns True if killed."""
+    # pylint: disable-next=import-outside-toplevel
     import signal
 
     try:
@@ -1587,10 +1643,6 @@ async def _kill_process(pid: int) -> bool:
         return True
     except ProcessLookupError:
         return False  # Already gone
-    except PermissionError:
-        raise
-    except Exception:
-        raise
 
 
 async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
@@ -1606,7 +1658,7 @@ async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
     Returns:
         Dict with killed, errors lists
     """
-    results = {"killed": [], "errors": []}
+    results: dict[str, Any] = {"killed": [], "errors": []}
 
     # Collect parec processes from multiple sources
     parec_pids = await _find_parec_via_pgrep()
@@ -1629,7 +1681,7 @@ async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
         # Skip if instance is active
         if instance_id and active_safe_ids and instance_id in active_safe_ids:
             logger.debug(
-                f"Skipping active parec process {pid} for instance {instance_id}"
+                "Skipping active parec process %s for instance %s", pid, instance_id
             )
             continue
 
@@ -1640,10 +1692,12 @@ async def _cleanup_orphaned_parec_processes(active_safe_ids: set[str]) -> dict:
                     f"parec {pid} (instance: {instance_id or 'unknown'})"
                 )
                 logger.info(
-                    f"Killed orphaned parec process {pid} targeting MeetBot sink"
+                    "Killed orphaned parec process %s targeting MeetBot sink", pid
                 )
         except PermissionError as e:
             results["errors"].append(f"Permission denied killing parec {pid}: {e}")
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             results["errors"].append(f"Failed to kill parec {pid}: {e}")
 
@@ -1660,7 +1714,7 @@ async def _cleanup_orphaned_video_devices(active_safe_ids: set[str]) -> dict:
     Returns:
         Dict with removed, errors, skipped lists
     """
-    results = {"removed": [], "errors": [], "skipped": []}
+    results: dict[str, Any] = {"removed": [], "errors": [], "skipped": []}
 
     # Check if v4l2loopback-ctl is available
     success, _ = await run_cmd(["which", "v4l2loopback-ctl"], check=False)
@@ -1702,7 +1756,7 @@ async def _cleanup_orphaned_video_devices(active_safe_ids: set[str]) -> dict:
             if success:
                 results["removed"].append(f"{device_path} ({device_name})")
                 logger.info(
-                    f"Removed orphaned video device: {device_path} ({device_name})"
+                    "Removed orphaned video device: %s (%s)", device_path, device_name
                 )
             else:
                 results["errors"].append(
@@ -1730,7 +1784,7 @@ async def _restore_default_audio_source() -> bool:
     if "meet_bot" not in current_default.lower():
         return False
 
-    logger.warning(f"Default audio source is a MeetBot device: {current_default}")
+    logger.warning("Default audio source is a MeetBot device: %s", current_default)
 
     # Find a physical microphone to use instead
     success, output = await run_cmd(["pactl", "list", "sources", "short"], check=False)
@@ -1761,7 +1815,7 @@ async def _restore_default_audio_source() -> bool:
     )
 
     if success:
-        logger.info(f"Restored default audio source to: {new_default}")
+        logger.info("Restored default audio source to: %s", new_default)
 
         # Also unmute the physical mic
         await run_cmd(["pactl", "set-source-mute", new_default, "0"], check=False)
@@ -1770,6 +1824,7 @@ async def _restore_default_audio_source() -> bool:
     return False
 
 
+# pylint: disable-next=too-many-branches
 async def get_meetbot_device_count() -> dict:
     """
     Get count of current MeetBot audio and video devices.

@@ -96,7 +96,9 @@ class ToolRegistry:
         """
         exclude = exclude or set()
         lines = []
-        for name, cat in sorted(self.categories.items(), key=lambda x: -x.priority):
+        for name, cat in sorted(
+            self.categories.items(), key=lambda item: -item[1].priority
+        ):
             if name not in exclude:
                 lines.append(f"- {name}: {cat.description}")
         return "\n".join(lines)
@@ -129,7 +131,7 @@ class ToolRegistry:
 
 
 # Cached registry instance
-_registry: Optional[ToolRegistry] = None
+_registry: Optional[ToolRegistry] = None  # pylint: disable=invalid-name
 
 
 def load_registry() -> ToolRegistry:
@@ -140,12 +142,13 @@ def load_registry() -> ToolRegistry:
     Returns:
         Loaded ToolRegistry
     """
-    global _registry
+    global _registry  # pylint: disable=global-statement
     if _registry is not None:
         return _registry
 
     # Try loading from config.json
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.config_manager import config as config_manager
 
         tool_filtering = config_manager.get("tool_filtering") or {}
@@ -155,7 +158,7 @@ def load_registry() -> ToolRegistry:
             _registry = ToolRegistry.from_dict(custom_categories)
             return _registry
     except (json.JSONDecodeError, KeyError) as e:
-        logger.warning(f"Failed to load categories from config.json: {e}")
+        logger.warning("Failed to load categories from config.json: %s", e)
 
     # Fall back to built-in categories
     logger.info("Loading built-in tool categories")
@@ -165,7 +168,7 @@ def load_registry() -> ToolRegistry:
 
 def reload_registry() -> ToolRegistry:
     """Force reload the registry."""
-    global _registry
+    global _registry  # pylint: disable=global-statement
     _registry = None
     return load_registry()
 

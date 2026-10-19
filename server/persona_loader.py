@@ -29,9 +29,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Import protocol for validation
+# pylint: disable-next=wrong-import-position
 from .protocols import is_tool_module, validate_tool_module  # noqa: E402
 
 # Import shared path resolution utilities
+# pylint: disable-next=wrong-import-position
 from .tool_paths import (  # noqa: E402
     PROJECT_DIR,
     TOOL_MODULES_DIR,
@@ -60,10 +62,10 @@ def discover_tool_modules() -> set[str]:
     Returns:
         Set of available module names (e.g., {'git', 'git_core', 'git_basic', 'git_extra', ...})
     """
-    modules = set()
+    modules: set[str] = set()
 
     if not TOOL_MODULES_DIR.exists():
-        logger.warning(f"Tool modules directory not found: {TOOL_MODULES_DIR}")
+        logger.warning("Tool modules directory not found: %s", TOOL_MODULES_DIR)
         return modules
 
     for module_dir in TOOL_MODULES_DIR.iterdir():
@@ -104,16 +106,18 @@ def discover_tool_modules() -> set[str]:
         if tools_style_py.exists():
             modules.add(f"{base_name}_style")
 
-    logger.debug(f"Discovered {len(modules)} tool modules: {sorted(modules)}")
+    logger.debug("Discovered %s tool modules: %s", len(modules), sorted(modules))
     return modules
 
 
 # Dynamically discovered tool modules (cached on first access)
+# pylint: disable-next=invalid-name
 _discovered_modules: set[str] | None = None
 
 
 def get_available_modules() -> set[str]:
     """Get available tool modules, discovering them if needed."""
+    # pylint: disable-next=global-statement
     global _discovered_modules
     if _discovered_modules is None:
         _discovered_modules = discover_tool_modules()
@@ -161,7 +165,7 @@ class PersonaLoader:
             with open(persona_file, encoding="utf-8") as f:
                 return cast(dict, yaml.safe_load(f))
         except (yaml.YAMLError, OSError) as e:
-            logger.error(f"Failed to load persona config {persona_name}: {e}")
+            logger.error("Failed to load persona config %s: %s", persona_name, e)
             return None
 
     async def _load_tool_module(self, module_name: str) -> list[str]:
@@ -169,7 +173,7 @@ class PersonaLoader:
         tools_file = get_tools_file_path(module_name)
 
         if not tools_file.exists():
-            logger.warning(f"Tools file not found: {tools_file}")
+            logger.warning("Tools file not found: %s", tools_file)
             return []
 
         try:
@@ -190,14 +194,14 @@ class PersonaLoader:
             # Validate module structure before calling register_tools
             if not is_tool_module(module):
                 logger.warning(
-                    f"Module {module_name} does not implement ToolModuleProtocol"
+                    "Module %s does not implement ToolModuleProtocol", module_name
                 )
                 return []
 
             # Log any validation warnings (non-fatal)
             validation_errors = validate_tool_module(module, module_name)
             for error in validation_errors:
-                logger.warning(f"Tool module validation: {error}")
+                logger.warning("Tool module validation: %s", error)
 
             module.register_tools(self.server)
 
@@ -211,12 +215,14 @@ class PersonaLoader:
                     self._tool_to_module[tool_name] = module_name
                 self.loaded_modules.add(module_name)
 
-            logger.info(f"Loaded {module_name}: {len(new_tool_names)} tools")
+            logger.info("Loaded %s: %s tools", module_name, len(new_tool_names))
 
             return new_tool_names
 
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Error loading {module_name}: {e}")
+            logger.error("Error loading %s: %s", module_name, e)
             return []
 
     async def _unload_module_tools(self, module_name: str) -> int:
@@ -232,8 +238,10 @@ class PersonaLoader:
                 try:
                     self.server.remove_tool(tool_name)
                     del self._tool_to_module[tool_name]
+                # Best-effort: log and continue.
+                # pylint: disable-next=broad-exception-caught
                 except Exception as e:
-                    logger.warning(f"Failed to remove tool {tool_name}: {e}")
+                    logger.warning("Failed to remove tool %s: %s", tool_name, e)
 
             self.loaded_modules.discard(module_name)
 
@@ -250,8 +258,10 @@ class PersonaLoader:
                 try:
                     self.server.remove_tool(tool_name)
                     removed += 1
+                # Best-effort: log and continue.
+                # pylint: disable-next=broad-exception-caught
                 except Exception as e:
-                    logger.warning(f"Failed to remove {tool_name}: {e}")
+                    logger.warning("Failed to remove %s: %s", tool_name, e)
 
         async with self._state_lock:
             self._tool_to_module.clear()
@@ -259,6 +269,7 @@ class PersonaLoader:
 
         return removed
 
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     async def switch_persona(
         self,
         persona_name: str,
@@ -283,11 +294,14 @@ class PersonaLoader:
         if not config:
             # Emit failure notification
             try:
+                # pylint: disable-next=import-outside-toplevel
                 from tool_modules.aa_workflow.src.notification_emitter import (
                     notify_persona_failed,
                 )
 
                 notify_persona_failed(persona_name, "Persona not found")
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception as exc:
                 logger.debug("Suppressed error: %s", exc)
             return {
@@ -300,13 +314,13 @@ class PersonaLoader:
 
         # Clear existing tools (except core)
         removed = await self._clear_non_core_tools()
-        logger.info(f"Removed {removed} tools from previous persona")
+        logger.info("Removed %s tools from previous persona", removed)
 
         # Load new persona's tools
         loaded_tools = []
         for module_name in tool_modules:
             if not is_valid_module(module_name):
-                logger.warning(f"Unknown module: {module_name}")
+                logger.warning("Unknown module: %s", module_name)
                 continue
 
             new_tools = await self._load_tool_module(module_name)
@@ -317,6 +331,7 @@ class PersonaLoader:
 
         # Update workspace-specific persona
         try:
+            # pylint: disable-next=cyclic-import,import-outside-toplevel
             from .workspace_state import WorkspaceRegistry, update_persona_tool_count
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
@@ -329,16 +344,21 @@ class PersonaLoader:
                 session.persona = persona_name
                 session.static_tool_count = len(loaded_tools)
                 logger.info(
-                    f"Updated session {session.session_id[:8]}: "
-                    f"persona '{old_persona}' -> '{persona_name}', tools: {len(loaded_tools)}"
+                    "Updated session %s: persona '%s' -> '%s', tools: %s",
+                    session.session_id[:8],
+                    old_persona,
+                    persona_name,
+                    len(loaded_tools),
                 )
             else:
                 # No active session - create one with the new persona
                 session = workspace_state.create_session(persona=persona_name)
                 session.static_tool_count = len(loaded_tools)
                 logger.info(
-                    f"Created session {session.session_id[:8]} with "
-                    f"persona '{persona_name}', tools: {len(loaded_tools)}"
+                    "Created session %s with persona '%s', tools: %s",
+                    session.session_id[:8],
+                    persona_name,
+                    len(loaded_tools),
                 )
 
             workspace_state.clear_filter_cache()  # Clear NPU cache when persona changes
@@ -347,14 +367,19 @@ class PersonaLoader:
             update_persona_tool_count(persona_name, len(loaded_tools))
 
             logger.info(
-                f"Set persona '{persona_name}' for workspace "
-                f"{workspace_state.workspace_uri} with {len(loaded_tools)} tools"
+                "Set persona '%s' for workspace %s with %s tools",
+                persona_name,
+                workspace_state.workspace_uri,
+                len(loaded_tools),
             )
 
             # Persist to disk so UI can see the change
             WorkspaceRegistry.save_to_disk()
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Failed to update workspace state: {e}")
+            logger.warning("Failed to update workspace state: %s", e)
+            # pylint: disable-next=import-outside-toplevel
             import traceback
 
             logger.warning(traceback.format_exc())
@@ -364,18 +389,23 @@ class PersonaLoader:
             if ctx.session:
                 await ctx.session.send_tool_list_changed()
                 logger.info("Sent tool_list_changed notification")
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Failed to send notification: {e}")
+            logger.warning("Failed to send notification: %s", e)
 
         # Emit toast notification for persona load
         try:
+            # pylint: disable-next=import-outside-toplevel
             from tool_modules.aa_workflow.src.notification_emitter import (
                 notify_persona_loaded,
             )
 
             notify_persona_loaded(persona_name, len(loaded_tools))
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Failed to emit persona notification: {e}")
+            logger.debug("Failed to emit persona notification: %s", e)
 
         # Load persona description
         # Check if persona points to a file or is inline
@@ -420,19 +450,25 @@ class PersonaLoader:
             Persona name for the current workspace
         """
         try:
+            # pylint: disable-next=cyclic-import,import-outside-toplevel
             from .workspace_state import WorkspaceRegistry
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             return workspace_state.persona
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             if self.current_persona:
                 return self.current_persona
             # Fall back to config default
             try:
+                # pylint: disable-next=import-outside-toplevel
                 from server.utils import load_config
 
                 cfg = load_config()
                 return cfg.get("agent", {}).get("default_persona", "researcher")
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception:
                 return "researcher"
 
@@ -447,14 +483,17 @@ class PersonaLoader:
             persona_name: Persona name to set
         """
         try:
+            # pylint: disable-next=cyclic-import,import-outside-toplevel
             from .workspace_state import WorkspaceRegistry
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
             workspace_state.persona = persona_name
             workspace_state.clear_filter_cache()
-            logger.debug(f"Set workspace persona to '{persona_name}'")
+            logger.debug("Set workspace persona to '%s'", persona_name)
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Failed to set workspace persona: {e}")
+            logger.warning("Failed to set workspace persona: %s", e)
 
     def get_status(self) -> dict:
         """Get current persona loader status (global)."""
@@ -475,6 +514,7 @@ class PersonaLoader:
             dict with workspace-specific persona status
         """
         try:
+            # pylint: disable-next=cyclic-import,import-outside-toplevel
             from .workspace_state import WorkspaceRegistry
 
             workspace_state = await WorkspaceRegistry.get_for_ctx(ctx)
@@ -487,12 +527,15 @@ class PersonaLoader:
                 "loaded_modules": list(self.loaded_modules),
                 "tool_count": len(self._tool_to_module),
             }
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Failed to get workspace status: {e}")
+            logger.warning("Failed to get workspace status: %s", e)
             return self.get_status()
 
 
 # Global instance (set by server on startup)
+# pylint: disable-next=invalid-name
 _loader: PersonaLoader | None = None
 
 
@@ -503,6 +546,7 @@ def get_loader() -> PersonaLoader | None:
 
 def init_loader(server: "FastMCP") -> PersonaLoader:
     """Initialize the global persona loader."""
+    # pylint: disable-next=global-statement
     global _loader
     _loader = PersonaLoader(server)
     return _loader

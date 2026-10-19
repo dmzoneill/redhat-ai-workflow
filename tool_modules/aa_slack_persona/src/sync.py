@@ -14,7 +14,7 @@ import logging
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, cast
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class ProgressDisplay:
 
     def __init__(self, num_workers: int):
         self.num_workers = num_workers
-        self.worker_states = {}
+        self.worker_states: dict[int, Any] = {}
         self._lock = asyncio.Lock()
         self._header_printed = False
 
@@ -71,6 +71,7 @@ class ProgressDisplay:
         print(header)
         print(separator)
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def update_worker(
         self,
         worker_id: int,
@@ -105,6 +106,7 @@ class ProgressDisplay:
             )
             print(row)
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def print_channel_complete(
         self,
         worker_id: int,
@@ -175,18 +177,18 @@ class SlackPersonaSync:
     async def _get_session(self):
         """Get or create Slack session."""
         if self._session is None:
-            from pathlib import Path
-
             # Add slack client to path
             project_root = Path(__file__).parent.parent.parent.parent
             slack_src = project_root / "aa_slack" / "src"
             if str(slack_src) not in sys.path:
                 sys.path.insert(0, str(slack_src))
 
+            # pylint: disable-next=import-outside-toplevel
             from slack_client import SlackSession
 
             # Load config
             sys.path.insert(0, str(project_root.parent))
+            # pylint: disable-next=import-outside-toplevel
             from server.utils import load_config
 
             config = load_config()
@@ -202,13 +204,14 @@ class SlackPersonaSync:
 
             await self._session.validate_session()
             self._my_user_id = self._session.user_id
-            logger.info(f"Slack session validated, user: {self._my_user_id}")
+            logger.info("Slack session validated, user: %s", self._my_user_id)
 
         return self._session
 
     def _get_vector_store(self):
         """Get or create vector store."""
         if self._vector_store is None:
+            # pylint: disable-next=import-outside-toplevel
             from tool_modules.aa_slack_persona.src.vector_store import SlackVectorStore
 
             self._vector_store = SlackVectorStore(self.vector_dir)
@@ -312,13 +315,15 @@ class SlackPersonaSync:
                 }
             )
 
-        logger.info(f"Found {len(conversations)} conversations")
+        logger.info("Found %s conversations", len(conversations))
         return conversations
 
     # -------------------------------------------------------------------------
     # Day-based message fetching
     # -------------------------------------------------------------------------
 
+    # pylint: disable-next=line-too-long
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements  # noqa: E501
     async def _fetch_channel_day(
         self,
         channel_id: str,
@@ -346,7 +351,7 @@ class SlackPersonaSync:
             Tuple of (messages, thread_count, http_code)
         """
         session = await self._get_session()
-        messages = []
+        messages: list[Any] = []
         seen_ids = set()
         thread_count = 0
         last_http_code = 200
@@ -363,6 +368,7 @@ class SlackPersonaSync:
         cursor = None
         page_count = 0
 
+        # pylint: disable-next=too-many-nested-blocks
         try:
             while True:
                 page_count += 1
@@ -428,6 +434,8 @@ class SlackPersonaSync:
                     try:
                         dt = datetime.fromtimestamp(float(ts))
                         datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    # Best-effort: failure is contained, not raised.
+                    # pylint: disable-next=broad-exception-caught
                     except Exception:
                         datetime_str = ""
 
@@ -476,6 +484,8 @@ class SlackPersonaSync:
                                     reply_datetime_str = reply_dt.strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     )
+                                # Best-effort: failure is contained, not raised.
+                                # pylint: disable-next=broad-exception-caught
                                 except Exception:
                                     reply_datetime_str = ""
 
@@ -494,8 +504,10 @@ class SlackPersonaSync:
                                         "datetime_str": reply_datetime_str,
                                     }
                                 )
+                        # Best-effort: failure is contained, not raised.
+                        # pylint: disable-next=broad-exception-caught
                         except Exception as e:
-                            logger.debug(f"Error fetching thread {thread_ts}: {e}")
+                            logger.debug("Error fetching thread %s: %s", thread_ts, e)
 
                 # Check for more pages
                 has_more = result.get("has_more", False)
@@ -506,6 +518,8 @@ class SlackPersonaSync:
                 if not cursor:
                     break
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             await progress.update_worker(
                 worker_id=worker_id,
@@ -524,6 +538,7 @@ class SlackPersonaSync:
     # Parallel sync worker
     # -------------------------------------------------------------------------
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
     async def _process_channel(
         self,
         worker_id: int,
@@ -546,7 +561,7 @@ class SlackPersonaSync:
         channel_name = conv["name"]
         display_name = channel_name or channel_id[:12]
 
-        all_messages = []
+        all_messages: list[Any] = []
         total_threads = 0
         days_synced = 0
         days_skipped = 0
@@ -572,7 +587,7 @@ class SlackPersonaSync:
                     continue
 
             # Fetch this day
-            messages, thread_count, http_code = await self._fetch_channel_day(
+            messages, thread_count, _http_code = await self._fetch_channel_day(
                 channel_id=channel_id,
                 channel_type=channel_type,
                 channel_name=channel_name,
@@ -608,6 +623,8 @@ class SlackPersonaSync:
     # Main parallel sync
     # -------------------------------------------------------------------------
 
+    # pylint: disable-next=line-too-long
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-statements
     async def full_sync_parallel(
         self,
         days: int = 90,
@@ -640,7 +657,7 @@ class SlackPersonaSync:
             logger.info("Reset channel tracking state")
         else:
             channel_state = self._load_channel_state()
-            logger.info(f"Loaded state for {len(channel_state)} channels")
+            logger.info("Loaded state for %s channels", len(channel_state))
 
         # Get all conversations
         conversations = await self._get_all_conversations()
@@ -663,7 +680,7 @@ class SlackPersonaSync:
         total_messages = 0
         total_days_synced = 0
         total_days_skipped = 0
-        all_messages = []
+        all_messages: list[Any] = []
 
         async def worker_task(worker_id: int, conv: dict) -> tuple[list, int, int]:
             async with semaphore:
@@ -691,9 +708,12 @@ class SlackPersonaSync:
         # Collect results
         for result in results:
             if isinstance(result, Exception):
-                logger.error(f"Worker error: {result}")
+                logger.error("Worker error: %s", result)
                 continue
-            messages, days_synced, days_skipped = result
+            # gather(return_exceptions=True) also yields BaseException; the
+            # success path is the worker tuple.
+            outcome = cast(tuple[list[Any], int, int], result)
+            messages, days_synced, days_skipped = outcome
             all_messages.extend(messages)
             total_messages += len(messages)
             total_days_synced += days_synced
@@ -703,7 +723,7 @@ class SlackPersonaSync:
 
         # Save channel state
         self._save_channel_state(channel_state)
-        logger.info(f"Saved state for {len(channel_state)} channels")
+        logger.info("Saved state for %s channels", len(channel_state))
 
         # Insert all messages to vector store (single write, no race condition)
         if all_messages:
@@ -768,7 +788,8 @@ class SlackPersonaSync:
         self,
         months: int = 6,
         include_threads: bool = True,
-        progress_callback: callable | None = None,
+        # pylint: disable-next=unused-argument
+        progress_callback: Callable[..., Any] | None = None,
         resume: bool = False,
     ) -> dict[str, Any]:
         """Legacy full sync - redirects to parallel sync."""
@@ -797,13 +818,13 @@ class SlackPersonaSync:
         prune_cutoff = datetime.now() - timedelta(days=total_days)
         prune_ts = str(prune_cutoff.timestamp())
 
-        logger.info(f"Starting incremental sync for {days} day(s)")
+        logger.info("Starting incremental sync for %s day(s)", days)
 
         vector_store = self._get_vector_store()
 
         # Prune old messages first
         deleted = vector_store.delete_older_than(prune_ts)
-        logger.info(f"Pruned {deleted} old messages")
+        logger.info("Pruned %s old messages", deleted)
 
         # Use parallel sync for the incremental days
         result = await self.full_sync_parallel(
