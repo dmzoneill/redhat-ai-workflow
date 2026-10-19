@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,duplicate-code
+# pylint: disable=too-many-lines
 """State Persistence Layer for Slack Listener.
 
 Manages persistent state using SQLite to survive server restarts:
@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+
+from services.slack.message_fields import SlackMessageFields
 
 logger = logging.getLogger(__name__)
 
@@ -133,15 +135,10 @@ def parse_sidebar_file(file_path: str | Path) -> list[dict[str, str]]:
 
 @dataclass
 # pylint: disable-next=too-many-instance-attributes
-class PendingMessage:
+class PendingMessage(SlackMessageFields):
     """Represents a message waiting to be processed by the LLM."""
 
     id: str  # Unique message ID (channel_ts)
-    channel_id: str
-    channel_name: str
-    user_id: str
-    user_name: str
-    text: str
     timestamp: str  # Slack ts (e.g., "1234567890.123456")
     thread_ts: str | None
     is_mention: bool
@@ -154,11 +151,7 @@ class PendingMessage:
         """Serialize to dict for storage."""
         return {
             "id": self.id,
-            "channel_id": self.channel_id,
-            "channel_name": self.channel_name,
-            "user_id": self.user_id,
-            "user_name": self.user_name,
-            "text": self.text,
+            **self.identity_dict(),
             "timestamp": self.timestamp,
             "thread_ts": self.thread_ts,
             "is_mention": self.is_mention,

@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code
 """
 Message history tracking for Slack D-Bus daemon.
 
@@ -9,21 +8,18 @@ Extracted from dbus.py to reduce class size. Contains:
 
 import json
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+
+from services.slack.message_fields import SlackMessageFields
 
 
 # Every field is part of the history payload returned over D-Bus.
 @dataclass
-class MessageRecord:  # pylint: disable=too-many-instance-attributes
+class MessageRecord(SlackMessageFields):  # pylint: disable=too-many-instance-attributes
     """Record of a processed message."""
 
     id: str
     timestamp: str
-    channel_id: str
-    channel_name: str
-    user_id: str
-    user_name: str
-    text: str
     intent: str
     classification: str
     response: str
@@ -33,8 +29,23 @@ class MessageRecord:  # pylint: disable=too-many-instance-attributes
     thread_ts: str | None = None  # Thread timestamp for replies
 
     def to_dict(self) -> dict:
-        """Return the record as a plain dictionary."""
-        return asdict(self)
+        """Return the record as a plain dictionary.
+
+        Key order matches the historical asdict() order from before the
+        shared channel fields moved to SlackMessageFields.
+        """
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            **self.identity_dict(),
+            "intent": self.intent,
+            "classification": self.classification,
+            "response": self.response,
+            "status": self.status,
+            "created_at": self.created_at,
+            "processed_at": self.processed_at,
+            "thread_ts": self.thread_ts,
+        }
 
     def to_json(self) -> str:
         """Return the record as a JSON string."""

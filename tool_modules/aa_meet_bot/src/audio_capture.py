@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code
 """
 Real-time Audio Capture for NPU STT.
 
@@ -15,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import numpy as np
+
+from tool_modules.aa_meet_bot.src.pulse_defaults import read_pactl_sources_short
 
 logger = logging.getLogger(__name__)
 
@@ -738,20 +739,12 @@ async def create_meeting_stt_pipeline(
     monitor_source = f"meet_bot_{safe_id}.monitor"
 
     # Verify the source exists
-    proc = await asyncio.create_subprocess_exec(
-        "pactl",
-        "list",
-        "sources",
-        "short",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, _ = await proc.communicate()
+    sources = await read_pactl_sources_short()
 
-    if monitor_source not in stdout.decode():
+    if monitor_source not in sources:
         logger.error("Monitor source not found: %s", monitor_source)
         logger.info("Available sources:")
-        for line in stdout.decode().strip().split("\n"):
+        for line in sources.strip().split("\n"):
             logger.info("  %s", line)
         return None
 

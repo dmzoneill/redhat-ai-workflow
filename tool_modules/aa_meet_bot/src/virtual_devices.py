@@ -1,4 +1,4 @@
-# pylint: disable=too-many-lines,duplicate-code
+# pylint: disable=too-many-lines
 """
 Virtual Audio/Video Device Management.
 
@@ -30,6 +30,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 from tool_modules.aa_meet_bot.src.config import get_config
+from tool_modules.aa_meet_bot.src.pulse_defaults import (
+    configured_source_metadata_args,
+    default_source_metadata_args,
+)
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -482,27 +486,13 @@ class InstanceDeviceManager:
             # Method 1: Lock using default.configured.audio.source (highest priority)
             # This prevents WirePlumber from ever changing the system default
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.configured.audio.source",
-                    f'{{"name":"{original_source}"}}',
-                ],
+                configured_source_metadata_args(original_source),
                 check=False,
             )
 
             # Method 2: Also set default.audio.source for immediate effect
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.audio.source",
-                    f'{{"name":"{original_source}"}}',
-                ],
+                default_source_metadata_args(original_source),
                 check=False,
             )
 
@@ -550,28 +540,8 @@ class InstanceDeviceManager:
         logger.warning(
             "[%s] Final lock attempt for %s", self.instance_id, original_source
         )
-        await run_cmd(
-            [
-                "pw-metadata",
-                "-n",
-                "default",
-                "0",
-                "default.configured.audio.source",
-                f'{{"name":"{original_source}"}}',
-            ],
-            check=False,
-        )
-        await run_cmd(
-            [
-                "pw-metadata",
-                "-n",
-                "default",
-                "0",
-                "default.audio.source",
-                f'{{"name":"{original_source}"}}',
-            ],
-            check=False,
-        )
+        await run_cmd(configured_source_metadata_args(original_source), check=False)
+        await run_cmd(default_source_metadata_args(original_source), check=False)
         await run_cmd(["pactl", "set-default-source", original_source], check=False)
 
         # Also restore any browser streams that got moved to meetbot devices
@@ -603,14 +573,7 @@ class InstanceDeviceManager:
                     original_source,
                 )
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{original_source}"}}',
-                    ],
+                    default_source_metadata_args(original_source),
                     check=False,
                 )
 
@@ -740,14 +703,7 @@ class InstanceDeviceManager:
                 self._original_default_source,
             )
             await run_cmd(
-                [
-                    "pw-metadata",
-                    "-n",
-                    "default",
-                    "0",
-                    "default.audio.source",
-                    f'{{"name":"{self._original_default_source}"}}',
-                ],
+                default_source_metadata_args(self._original_default_source),
                 check=False,
             )
 
@@ -1043,25 +999,11 @@ class InstanceDeviceManager:
                 )
                 # Re-lock to original physical device
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.configured.audio.source",
-                        f'{{"name":"{self._original_default_source}"}}',
-                    ],
+                    configured_source_metadata_args(self._original_default_source),
                     check=False,
                 )
                 await run_cmd(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{self._original_default_source}"}}',
-                    ],
+                    default_source_metadata_args(self._original_default_source),
                     check=False,
                 )
                 await run_cmd(

@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code
 """Command-line entry point for the research video generator."""
 
 import asyncio
@@ -9,7 +8,10 @@ import signal
 import sys
 from pathlib import Path
 
-from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
+from tool_modules.aa_meet_bot.src.pulse_defaults import (
+    default_source_metadata_args,
+    read_pactl_sources_short,
+)
 from tool_modules.aa_meet_bot.src.video_config import VideoConfig
 from tool_modules.aa_meet_bot.src.video_realtime import RealtimeVideoRenderer
 from tool_modules.aa_meet_bot.src.video_research import (
@@ -145,18 +147,10 @@ async def ensure_default_source_not_meetbot():
             print("Restoring to physical microphone...", file=sys.stderr)
 
             # Find a physical microphone
-            proc = await asyncio.create_subprocess_exec(
-                "pactl",
-                "list",
-                "sources",
-                "short",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
+            sources = await read_pactl_sources_short()
 
             physical_mic = None
-            for line in stdout.decode().strip().split("\n"):
+            for line in sources.strip().split("\n"):
                 parts = line.split("\t")
                 if len(parts) >= 2:
                     source_name = parts[1]
