@@ -17,7 +17,6 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-
 from tool_modules.aa_workflow.src.skill_engine import (
     _shared_SkillExecutor__detect_auto_heal_type,
     _shared_SkillExecutor__determine_fix_type,
@@ -66,9 +65,7 @@ class SkillAutoHealer:
             (matched_pattern, pattern_category) tuple or (None, None)
         """
         try:
-            patterns_file = (
-                self._skills_dir.parent / "memory" / "learned" / "patterns.yaml"
-            )
+            patterns_file = self._skills_dir.parent / "memory" / "learned" / "patterns.yaml"
             if not patterns_file.exists():
                 return None, None
 
@@ -93,12 +90,8 @@ class SkillAutoHealer:
 
         return None, None
 
-    def determine_fix_type(
-        self, error_lower: str, matched_pattern: dict | None, matches: list
-    ) -> str | None:
-        return _shared_SkillExecutor__determine_fix_type(
-            self, error_lower, matched_pattern, matches
-        )
+    def determine_fix_type(self, error_lower: str, matched_pattern: dict | None, matches: list) -> str | None:
+        return _shared_SkillExecutor__determine_fix_type(self, error_lower, matched_pattern, matches)
 
     determine_fix_type.__doc__ = _shared_SkillExecutor__determine_fix_type.__doc__
 
@@ -122,17 +115,11 @@ class SkillAutoHealer:
         """
         try:
             if heal_type == "auth":
-                output_lines.append(
-                    f"   🔧 Auto-healing: running kube_login({cluster})..."
-                )
+                output_lines.append(f"   🔧 Auto-healing: running kube_login({cluster})...")
                 self._debug(f"Auto-heal: kube_login({cluster})")
 
                 # Emit remediation step event
-                step_idx = (
-                    self.executor.event_emitter.current_step_index
-                    if self.executor.event_emitter
-                    else 0
-                )
+                step_idx = self.executor.event_emitter.current_step_index if self.executor.event_emitter else 0
                 self.executor._emit_event(
                     "remediation_step",
                     step_index=step_idx,
@@ -141,14 +128,10 @@ class SkillAutoHealer:
                 )
 
                 # Call kube_login tool
-                heal_result = await self.executor._exec_tool(
-                    "kube_login", {"cluster": cluster}
-                )
+                heal_result = await self.executor._exec_tool("kube_login", {"cluster": cluster})
                 if not heal_result.get("success"):
                     # Get error from either 'error' key or 'result' key
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -161,11 +144,7 @@ class SkillAutoHealer:
                 self._debug("Auto-heal: vpn_connect()")
 
                 # Emit remediation step event
-                step_idx = (
-                    self.executor.event_emitter.current_step_index
-                    if self.executor.event_emitter
-                    else 0
-                )
+                step_idx = self.executor.event_emitter.current_step_index if self.executor.event_emitter else 0
                 self.executor._emit_event(
                     "remediation_step",
                     step_index=step_idx,
@@ -177,9 +156,7 @@ class SkillAutoHealer:
                 heal_result = await self.executor._exec_tool("vpn_connect", {})
                 if not heal_result.get("success"):
                     # Get error from either 'error' key or 'result' key
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -263,9 +240,7 @@ class SkillAutoHealer:
             if success:
                 data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
             else:
-                data["stats"]["manual_required"] = (
-                    data["stats"].get("manual_required", 0) + 1
-                )
+                data["stats"]["manual_required"] = data["stats"].get("manual_required", 0) + 1
 
             # Keep only last 100 entries
             if len(data["failures"]) > 100:
@@ -298,9 +273,7 @@ class SkillAutoHealer:
         try:
             import fcntl
 
-            patterns_file = (
-                self._skills_dir.parent / "memory" / "learned" / "patterns.yaml"
-            )
+            patterns_file = self._skills_dir.parent / "memory" / "learned" / "patterns.yaml"
             if not patterns_file.exists():
                 return
 
@@ -330,9 +303,7 @@ class SkillAutoHealer:
 
                             # Update counters
                             if matched:
-                                stats["times_matched"] = (
-                                    stats.get("times_matched", 0) + 1
-                                )
+                                stats["times_matched"] = stats.get("times_matched", 0) + 1
                                 stats["last_matched"] = datetime.now().isoformat()
 
                             if fixed:
@@ -340,9 +311,7 @@ class SkillAutoHealer:
 
                             # Recalculate success rate
                             if stats["times_matched"] > 0:
-                                stats["success_rate"] = round(
-                                    stats["times_fixed"] / stats["times_matched"], 2
-                                )
+                                stats["success_rate"] = round(stats["times_fixed"] / stats["times_matched"], 2)
 
                             # Write back
                             f.seek(0)
@@ -393,9 +362,7 @@ class SkillAutoHealer:
         # Track fix success for matched pattern
         if fix_success and matched_pattern and pattern_category:
             pattern_text = matched_pattern.get("pattern", "")
-            self.update_pattern_usage_stats(
-                pattern_category, pattern_text, matched=False, fixed=True
-            )
+            self.update_pattern_usage_stats(pattern_category, pattern_text, matched=False, fixed=True)
 
         return fix_success
 
@@ -412,9 +379,7 @@ class SkillAutoHealer:
             vpn_script = paths.get("vpn_connect_script")
 
             if not vpn_script:
-                vpn_script = os.path.expanduser(
-                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
-                )
+                vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
             else:
                 vpn_script = os.path.expanduser(vpn_script)
 
@@ -447,9 +412,7 @@ class SkillAutoHealer:
                     try:
                         await asyncio.wait_for(proc.wait(), timeout=30)
                         if proc.returncode == 0:
-                            self._debug(
-                                f"  → VPN connect result: success with {vpn_name}"
-                            )
+                            self._debug(f"  → VPN connect result: success with {vpn_name}")
                             await asyncio.sleep(2)
                             return True
                     except asyncio.TimeoutError:

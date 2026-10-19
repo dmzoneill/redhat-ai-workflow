@@ -29,7 +29,6 @@ class RateLimitState:
     backoff_until: float = 0
 
 
-@dataclass
 async def _shared_SlackApiClient_get_client(self) -> httpx.AsyncClient:
     """Get or create the HTTP client."""
     if self._client is None or self._client.is_closed:
@@ -51,6 +50,7 @@ async def _shared_SlackApiClient_get_client(self) -> httpx.AsyncClient:
     return self._client
 
 
+@dataclass
 class SlackApiClient:
     """Low-level HTTP transport for the Slack web API.
 
@@ -75,11 +75,7 @@ class SlackApiClient:
     _rate_limit: RateLimitState = field(default_factory=RateLimitState)
 
     # High-fidelity spoofing headers
-    USER_AGENT = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/143.0.0.0 Safari/537.36"
-    )
+    USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
     # Enterprise Slack URLs
     SLACK_HOST = os.getenv("SLACK_HOST", "redhat.enterprise.slack.com")
@@ -158,8 +154,7 @@ class SlackApiClient:
                     self._rate_limit.backoff_until = time.time() + backoff
 
                     logger.warning(
-                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. "
-                        f"Backing off {backoff:.1f}s"
+                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. Backing off {backoff:.1f}s"
                     )
 
                     await asyncio.sleep(backoff)
@@ -181,9 +176,7 @@ class SlackApiClient:
                             "Re-obtain from browser dev tools."
                         )
                     elif error == "token_revoked":
-                        raise ValueError(
-                            "Token has been revoked. Re-authenticate via browser."
-                        )
+                        raise ValueError("Token has been revoked. Re-authenticate via browser.")
                     elif error == "ratelimited":
                         await asyncio.sleep(self.base_backoff * (2**attempt))
                         continue
@@ -361,9 +354,5 @@ class SlackApiClient:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
-            )
-            raise ValueError(
-                f"Edge API request to {edge_path} failed: {e.response.status_code}"
-            ) from e
+            logger.error(f"Edge API error: {e.response.status_code} - {e.response.text[:200]}")
+            raise ValueError(f"Edge API request to {edge_path} failed: {e.response.status_code}") from e

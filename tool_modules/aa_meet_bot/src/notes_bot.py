@@ -75,9 +75,7 @@ class NotesBotState:
     errors: list[str] = field(default_factory=list)
 
 
-async def _shared_NotesBot__stream_and_speak(
-    self, command: str, speaker: str, context_before: list, *, logger
-) -> None:
+async def _shared_NotesBot__stream_and_speak(self, command: str, speaker: str, context_before: list, *, logger) -> None:
     """Stream LLM response and speak sentences as they arrive.
 
     This reduces perceived latency by starting TTS as soon as the first
@@ -117,12 +115,8 @@ async def _shared_NotesBot__stream_and_speak(
 
     if full_response:
         # Add to conversation history
-        self._llm_responder.conversation_history.append(
-            {"role": "user", "content": command}
-        )
-        self._llm_responder.conversation_history.append(
-            {"role": "assistant", "content": " ".join(full_response)}
-        )
+        self._llm_responder.conversation_history.append({"role": "user", "content": command})
+        self._llm_responder.conversation_history.append({"role": "assistant", "content": " ".join(full_response)})
         logger.info(f"🎤 Streamed {sentence_count} sentences")
     else:
         logger.warning("No response from streaming")
@@ -147,9 +141,7 @@ async def _shared_NotesBot__speak_response(self, text: str, *, logger) -> None:
         traceback.print_exc()
 
 
-async def _shared_NotesBot__speak_response_audio_only(
-    self, text: str, *, logger
-) -> None:
+async def _shared_NotesBot__speak_response_audio_only(self, text: str, *, logger) -> None:
     """Speak a response using TTS by writing audio to the virtual pipe.
 
     The bot's mic is a virtual pipe - no physical microphone is connected.
@@ -182,9 +174,7 @@ async def _shared_NotesBot__speak_response_audio_only(
             # The duration includes silence padding (500ms lead-in, 800ms tail)
             # plus extra buffer for PulseAudio latency and stream flushing
             wait_time = duration + 0.5  # Extra 500ms for PA latency
-            logger.info(
-                f"🔊 Playing audio ({duration:.1f}s), waiting {wait_time:.1f}s..."
-            )
+            logger.info(f"🔊 Playing audio ({duration:.1f}s), waiting {wait_time:.1f}s...")
             await asyncio.sleep(wait_time)
             logger.info("🔊 Finished speaking")
         else:
@@ -267,9 +257,7 @@ class NotesBot:
             if self._enable_wake_word:
                 self._wake_word_manager = WakeWordManager()
                 await self._wake_word_manager.initialize()
-                logger.info(
-                    f'Wake word detection enabled (wake word: "{self.config.wake_word}")'
-                )
+                logger.info(f'Wake word detection enabled (wake word: "{self.config.wake_word}")')
 
             # Don't initialize browser here - do it lazily when joining a meeting
             # This prevents the daemon from opening Chrome on startup
@@ -325,18 +313,12 @@ class NotesBot:
                 cleanup_orphaned_meetbot_devices,
             )
 
-            cleanup_results = await cleanup_orphaned_meetbot_devices(
-                active_instance_ids=set()
-            )
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
 
             results["modules_removed"] = len(cleanup_results.get("removed_modules", []))
-            results["processes_killed"] = len(
-                cleanup_results.get("killed_processes", [])
-            )
+            results["processes_killed"] = len(cleanup_results.get("killed_processes", []))
             results["pipes_removed"] = len(cleanup_results.get("removed_pipes", []))
-            results["video_devices_removed"] = len(
-                cleanup_results.get("removed_video_devices", [])
-            )
+            results["video_devices_removed"] = len(cleanup_results.get("removed_video_devices", []))
             results["errors"].extend(cleanup_results.get("errors", []))
 
             total = (
@@ -448,9 +430,7 @@ class NotesBot:
         if self.state.status == "capturing":
             # Check if browser is still alive
             if self._controller and self._controller.is_browser_closed():
-                logger.warning(
-                    "JOIN: Browser was closed - cleaning up stale meeting state"
-                )
+                logger.warning("JOIN: Browser was closed - cleaning up stale meeting state")
                 await self._cleanup_stale_meeting()
             else:
                 logger.warning("JOIN: Already in a meeting")
@@ -479,9 +459,7 @@ class NotesBot:
                     actual_start=datetime.now(),
                 )
                 self.state.meeting_id = await self.db.create_meeting(meeting)
-                logger.info(
-                    f"Created meeting record: {self.state.meeting_id} (mode={mode})"
-                )
+                logger.info(f"Created meeting record: {self.state.meeting_id} (mode={mode})")
 
             # START NPU STT IMMEDIATELY - audio devices are already created during browser init
             # This ensures we're listening from the moment Chrome connects to the meeting
@@ -499,9 +477,7 @@ class NotesBot:
                 if self._controller.state and self._controller.state.errors:
                     self.state.errors.extend(self._controller.state.errors)
                 else:
-                    self.state.errors.append(
-                        "Failed to join meeting - check browser controller logs"
-                    )
+                    self.state.errors.append("Failed to join meeting - check browser controller logs")
                 return False
 
             # Start caption capture
@@ -525,14 +501,10 @@ class NotesBot:
             self._flush_task = asyncio.create_task(self._flush_loop())
 
             # Start screenshot capture loop (every 10 seconds)
-            self._screenshot_task = asyncio.create_task(
-                self._controller.start_screenshot_loop(interval_seconds=10)
-            )
+            self._screenshot_task = asyncio.create_task(self._controller.start_screenshot_loop(interval_seconds=10))
 
             # Start browser health monitor (checks if browser was closed)
-            self._browser_monitor_task = asyncio.create_task(
-                self._monitor_browser_health()
-            )
+            self._browser_monitor_task = asyncio.create_task(self._monitor_browser_health())
 
             # NPU STT was already started early (before UI automation)
             # No need to start it again here
@@ -573,19 +545,13 @@ class NotesBot:
             idx = self.state.caption_id_to_index[cap_id]
             if 0 <= idx < len(self.state.transcript_buffer):
                 self.state.transcript_buffer[idx] = transcript_entry
-                logger.debug(
-                    f"Caption UPDATE (id={cap_id}): [{entry.speaker}] {entry.text[:50]}..."
-                )
+                logger.debug(f"Caption UPDATE (id={cap_id}): [{entry.speaker}] {entry.text[:50]}...")
             else:
                 # Index out of range (shouldn't happen), treat as new
-                self.state.caption_id_to_index[cap_id] = len(
-                    self.state.transcript_buffer
-                )
+                self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
                 self.state.transcript_buffer.append(transcript_entry)
                 self.state.captions_captured += 1
-                logger.debug(
-                    f"Caption NEW (idx invalid): [{entry.speaker}] {entry.text[:50]}..."
-                )
+                logger.debug(f"Caption NEW (idx invalid): [{entry.speaker}] {entry.text[:50]}...")
         elif entry.is_update and self.state.transcript_buffer:
             # Fallback: is_update flag set but no ID tracking - replace last if same speaker
             last_entry = self.state.transcript_buffer[-1]
@@ -593,34 +559,22 @@ class NotesBot:
                 self.state.transcript_buffer[-1] = transcript_entry
                 if cap_id:
                     # Track this ID for future updates
-                    self.state.caption_id_to_index[cap_id] = (
-                        len(self.state.transcript_buffer) - 1
-                    )
-                logger.debug(
-                    f"Caption UPDATE (fallback): [{entry.speaker}] {entry.text[:50]}..."
-                )
+                    self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer) - 1
+                logger.debug(f"Caption UPDATE (fallback): [{entry.speaker}] {entry.text[:50]}...")
             else:
                 # Speaker changed, treat as new
                 if cap_id:
-                    self.state.caption_id_to_index[cap_id] = len(
-                        self.state.transcript_buffer
-                    )
+                    self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
                 self.state.transcript_buffer.append(transcript_entry)
                 self.state.captions_captured += 1
-                logger.debug(
-                    f"Caption NEW (speaker changed): [{entry.speaker}] {entry.text[:50]}..."
-                )
+                logger.debug(f"Caption NEW (speaker changed): [{entry.speaker}] {entry.text[:50]}...")
         else:
             # NEW caption
             if cap_id:
-                self.state.caption_id_to_index[cap_id] = len(
-                    self.state.transcript_buffer
-                )
+                self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
             self.state.transcript_buffer.append(transcript_entry)
             self.state.captions_captured += 1
-            logger.debug(
-                f"Caption NEW (id={cap_id}): [{entry.speaker}] {entry.text[:50]}..."
-            )
+            logger.debug(f"Caption NEW (id={cap_id}): [{entry.speaker}] {entry.text[:50]}...")
 
         # Update activity timestamp to show we're not hung
         if self._controller:
@@ -652,9 +606,7 @@ class NotesBot:
             event = self._wake_word_manager.check_pause()
             if event and event.command_text.strip():
                 self.state.wake_word_triggers += 1
-                logger.info(
-                    f"🔔 WAKE WORD + PAUSE DETECTED from {event.speaker}: {event.command_text}"
-                )
+                logger.info(f"🔔 WAKE WORD + PAUSE DETECTED from {event.speaker}: {event.command_text}")
 
                 # Handle wake word in interactive mode
                 if self._interactive_mode:
@@ -669,11 +621,7 @@ class NotesBot:
 
             # Log progress every 2 seconds
             if check_count % 4 == 0:
-                buffer_text = (
-                    " ".join(detector.command_buffer)
-                    if detector.command_buffer
-                    else "(empty)"
-                )
+                buffer_text = " ".join(detector.command_buffer) if detector.command_buffer else "(empty)"
                 logger.debug(f"🎯 Still listening... buffer: {buffer_text[:50]}...")
 
             # Check for timeout (10 seconds)
@@ -692,11 +640,7 @@ class NotesBot:
         """
         try:
             # Create meeting ID from database ID or generate one
-            meeting_id = (
-                str(self.state.meeting_id)
-                if self.state.meeting_id
-                else f"meet-{id(self)}"
-            )
+            meeting_id = str(self.state.meeting_id) if self.state.meeting_id else f"meet-{id(self)}"
             meeting_title = self.state.title or "Untitled Meeting"
 
             # Initialize LLM responder with meeting context
@@ -707,14 +651,10 @@ class NotesBot:
             logger.info(
                 f"🎤 Interactive mode: LLM responder initialized for meeting '{meeting_title}' (ID: {meeting_id})"
             )
-            logger.info(
-                "🎤 Interactive mode: Conversation history will be maintained throughout this meeting"
-            )
+            logger.info("🎤 Interactive mode: Conversation history will be maintained throughout this meeting")
 
             # Set up wake word callback for voice responses
-            logger.info(
-                f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'"
-            )
+            logger.info(f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'")
 
         except Exception as e:
             logger.error(f"Failed to set up interactive mode: {e}")
@@ -747,17 +687,11 @@ class NotesBot:
                     video_device = devices.video_device
                     sink_name = devices.sink_name
                     # Audio source is the sink's monitor (for logging - actual capture via sink-input)
-                    audio_source = (
-                        f"{devices.sink_name}.monitor" if devices.sink_name else None
-                    )
-                    logger.info(
-                        f"📺 Device info: video={video_device}, audio={audio_source}"
-                    )
+                    audio_source = f"{devices.sink_name}.monitor" if devices.sink_name else None
+                    logger.info(f"📺 Device info: video={video_device}, audio={audio_source}")
 
             if not video_device:
-                logger.warning(
-                    "📺 No video device available, skipping video integration"
-                )
+                logger.warning("📺 No video device available, skipping video integration")
                 return
 
             # Find Chromium's sink-input index for monitor-stream capture
@@ -766,9 +700,7 @@ class NotesBot:
             if sink_input_index is not None:
                 logger.info(f"📺 Found Chromium sink-input index: {sink_input_index}")
             else:
-                logger.warning(
-                    "📺 Could not find Chromium sink-input, waveform may not work"
-                )
+                logger.warning("📺 Could not find Chromium sink-input, waveform may not work")
 
             # Update audio source on the video daemon
             # The video daemon is already rendering - just update the audio capture
@@ -784,9 +716,7 @@ class NotesBot:
                 if not result or not result.get("success"):
                     # Fall back to switch_to_full_video if update_audio_source fails
                     # (e.g., if in black screen mode)
-                    logger.info(
-                        f"📺 update_audio_source failed ({result}), trying switch_to_full_video..."
-                    )
+                    logger.info(f"📺 update_audio_source failed ({result}), trying switch_to_full_video...")
                     result = await client.call_method(
                         "switch_to_full_video",
                         [
@@ -804,9 +734,7 @@ class NotesBot:
                     logger.info(f"📺 Video integration active on {video_device}")
 
                     # Start participant polling task
-                    self._participant_poll_task = asyncio.create_task(
-                        self._poll_participants()
-                    )
+                    self._participant_poll_task = asyncio.create_task(self._poll_participants())
                 else:
                     # May fail if video was disabled - that's OK, keep black screen
                     logger.info(f"📺 Video result: {result}")
@@ -818,9 +746,7 @@ class NotesBot:
         except Exception as e:
             logger.warning(f"📺 Failed to start video integration: {e}")
 
-    async def _find_chromium_sink_input(
-        self, target_sink: Optional[str]
-    ) -> Optional[int]:
+    async def _find_chromium_sink_input(self, target_sink: Optional[str]) -> Optional[int]:
         """Find Chromium's sink-input index for monitor-stream capture.
 
         PipeWire's null-sink monitors don't work properly (output zeros).
@@ -876,9 +802,7 @@ class NotesBot:
                 if line.startswith("Sink Input #"):
                     # Save previous if it was Chromium
                     if is_chromium and current_index is not None:
-                        sink_name = sink_id_to_name.get(
-                            current_sink_id, current_sink_id
-                        )
+                        sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
                         chromium_candidates.append((current_index, sink_name))
 
                     # Start new sink-input
@@ -905,25 +829,19 @@ class NotesBot:
                 sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
                 chromium_candidates.append((current_index, sink_name))
 
-            logger.info(
-                f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}"
-            )
+            logger.info(f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}")
 
             # Find the one connected to our target sink
             for idx, sink_name in chromium_candidates:
                 if target_sink and target_sink in sink_name:
-                    logger.info(
-                        f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})"
-                    )
+                    logger.info(f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})")
                     return idx
 
             # If no match but we have candidates, return the last one (most recent)
             # This handles cases where Playwright Chromium might be named differently
             if chromium_candidates:
                 idx, sink_name = chromium_candidates[-1]
-                logger.info(
-                    f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})"
-                )
+                logger.info(f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})")
                 return idx
 
             return None
@@ -944,11 +862,7 @@ class NotesBot:
         rapid_interval = 2.0  # Fast polling at start
         normal_interval = 15.0  # Match video rotation interval
 
-        while (
-            self.state.status == "capturing"
-            and self._controller
-            and self._video_daemon_active
-        ):
+        while self.state.status == "capturing" and self._controller and self._video_daemon_active:
             try:
                 # Get participants from Google Meet
                 participants = await self._controller.get_participants()
@@ -957,13 +871,9 @@ class NotesBot:
                     # Send to video daemon via D-Bus
                     await self._update_video_attendees(participants)
                     if poll_count == 0:
-                        logger.info(
-                            f"📺 Initial participant poll: {len(participants)} participants"
-                        )
+                        logger.info(f"📺 Initial participant poll: {len(participants)} participants")
                     else:
-                        logger.debug(
-                            f"📺 Sent {len(participants)} participants to video daemon"
-                        )
+                        logger.debug(f"📺 Sent {len(participants)} participants to video daemon")
 
             except Exception as e:
                 logger.debug(f"Participant poll error: {e}")
@@ -1061,9 +971,7 @@ class NotesBot:
                 # Fallback to constructed name from instance_id
                 safe_id = instance_id.replace("-", "_")
                 monitor_source = f"meet_bot_{safe_id}.monitor"
-                logger.info(
-                    f"🧠 NPU STT: Using constructed sink name: {monitor_source}"
-                )
+                logger.info(f"🧠 NPU STT: Using constructed sink name: {monitor_source}")
             else:
                 logger.warning("No instance_id or devices - cannot set up NPU STT")
                 return
@@ -1083,9 +991,7 @@ class NotesBot:
 
             # Start the pipeline
             if await self._npu_stt_pipeline.start():
-                logger.info(
-                    "🧠 NPU STT pipeline started - real-time transcription active"
-                )
+                logger.info("🧠 NPU STT pipeline started - real-time transcription active")
             else:
                 logger.error("🧠 Failed to start NPU STT pipeline")
                 self._npu_stt_pipeline = None
@@ -1113,9 +1019,7 @@ class NotesBot:
             logger.debug(f"🧠 NPU (ignored - bot speaking): '{text}'")
             return
 
-        logger.info(
-            f"🧠 NPU→WakeWord {'[FINAL]' if is_final else '[partial]'}: '{text}'"
-        )
+        logger.info(f"🧠 NPU→WakeWord {'[FINAL]' if is_final else '[partial]'}: '{text}'")
 
         # Create a transcript entry (speaker is "Meeting" since we can't identify)
         transcript_entry = TranscriptEntry(
@@ -1149,9 +1053,7 @@ class NotesBot:
             logger.debug("No wake word manager - skipping wake word check")
             return
 
-        logger.debug(
-            f"🔍 Checking for wake word in: '{entry.text}' (speaker: {entry.speaker})"
-        )
+        logger.debug(f"🔍 Checking for wake word in: '{entry.text}' (speaker: {entry.speaker})")
 
         event = self._wake_word_manager.process_caption(
             speaker=entry.speaker,
@@ -1160,9 +1062,7 @@ class NotesBot:
 
         if event:
             # Complete command detected - handle it immediately!
-            logger.info(
-                f"🔔 COMPLETE COMMAND from {event.speaker}: {event.command_text}"
-            )
+            logger.info(f"🔔 COMPLETE COMMAND from {event.speaker}: {event.command_text}")
             self.state.wake_word_triggers += 1
 
             if self._interactive_mode:
@@ -1176,9 +1076,7 @@ class NotesBot:
             # Wake word detected but waiting for more input - start pause checker
             if not self._wake_word_check_task or self._wake_word_check_task.done():
                 logger.info("🎯 Wake word detected, starting pause checker...")
-                self._wake_word_check_task = asyncio.create_task(
-                    self._check_wake_word_pause()
-                )
+                self._wake_word_check_task = asyncio.create_task(self._check_wake_word_pause())
 
     async def _handle_wake_word_command(self, event: WakeWordEvent) -> None:
         """Handle a wake word command in interactive mode.
@@ -1241,12 +1139,8 @@ class NotesBot:
                 self._wake_word_manager.text_detector.reset()
                 logger.debug("Wake word detector reset after response")
 
-    async def _stream_and_speak(
-        self, command: str, speaker: str, context_before: list
-    ) -> None:
-        return await _shared_NotesBot__stream_and_speak(
-            self, command, speaker, context_before, logger=logger
-        )
+    async def _stream_and_speak(self, command: str, speaker: str, context_before: list) -> None:
+        return await _shared_NotesBot__stream_and_speak(self, command, speaker, context_before, logger=logger)
 
     _stream_and_speak.__doc__ = _shared_NotesBot__stream_and_speak.__doc__
 
@@ -1256,13 +1150,9 @@ class NotesBot:
     _speak_response.__doc__ = _shared_NotesBot__speak_response.__doc__
 
     async def _speak_response_audio_only(self, text: str) -> None:
-        return await _shared_NotesBot__speak_response_audio_only(
-            self, text, logger=logger
-        )
+        return await _shared_NotesBot__speak_response_audio_only(self, text, logger=logger)
 
-    _speak_response_audio_only.__doc__ = (
-        _shared_NotesBot__speak_response_audio_only.__doc__
-    )
+    _speak_response_audio_only.__doc__ = _shared_NotesBot__speak_response_audio_only.__doc__
 
     async def _flush_loop(self) -> None:
         """Periodically flush transcript buffer to database."""
@@ -1314,11 +1204,7 @@ class NotesBot:
                 break
 
             # Also check if controller state shows not joined
-            if (
-                self._controller
-                and self._controller.state
-                and not self._controller.state.joined
-            ):
+            if self._controller and self._controller.state and not self._controller.state.joined:
                 logger.warning("Browser health monitor: Meeting ended (not joined)")
                 await self._cleanup_stale_meeting()
                 break
@@ -1335,9 +1221,7 @@ class NotesBot:
                         f"Browser health monitor: Page check failed ({consecutive_failures}/{max_failures}): {e}"
                     )
                     if consecutive_failures >= max_failures:
-                        logger.warning(
-                            "Browser health monitor: Page unresponsive - triggering cleanup"
-                        )
+                        logger.warning("Browser health monitor: Page unresponsive - triggering cleanup")
                         await self._cleanup_stale_meeting()
                         break
 
@@ -1354,9 +1238,7 @@ class NotesBot:
                     # Don't cleanup on exception - could be a transient error
                     consecutive_failures += 1
                     if consecutive_failures >= max_failures:
-                        logger.warning(
-                            "Browser health monitor: Too many browser check failures - triggering cleanup"
-                        )
+                        logger.warning("Browser health monitor: Too many browser check failures - triggering cleanup")
                         await self._cleanup_stale_meeting()
                         break
 
@@ -1408,9 +1290,7 @@ class NotesBot:
 
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
-                logger.info(
-                    f"CLEANUP: Force-killed {killed} orphaned audio capture processes"
-                )
+                logger.info(f"CLEANUP: Force-killed {killed} orphaned audio capture processes")
         except Exception as e:
             logger.warning(f"CLEANUP: Error killing audio captures: {e}")
             cleanup_errors.append(f"Audio capture kill error: {e}")
@@ -1471,9 +1351,7 @@ class NotesBot:
                     status="completed",
                     actual_end=datetime.now(),
                 )
-                logger.info(
-                    f"CLEANUP: Meeting {self.state.meeting_id} marked as completed"
-                )
+                logger.info(f"CLEANUP: Meeting {self.state.meeting_id} marked as completed")
             except Exception as e:
                 logger.warning(f"CLEANUP: Failed to update meeting record: {e}")
 
@@ -1482,9 +1360,7 @@ class NotesBot:
         if self._controller:
             logger.info("CLEANUP: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
                 logger.info("CLEANUP: Browser controller closed")
             except asyncio.TimeoutError:
                 logger.warning("CLEANUP: Timeout closing controller, force killing...")
@@ -1648,9 +1524,7 @@ class NotesBot:
         if self._controller:
             logger.info("LEAVE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=False), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=False), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout closing controller")
             except Exception as e:
@@ -1679,9 +1553,7 @@ class NotesBot:
         self.state = NotesBotState()
 
         logger.info("=" * 60)
-        logger.info(
-            f"LEAVE: Meeting ended. Captured {result['captions_captured']} captions."
-        )
+        logger.info(f"LEAVE: Meeting ended. Captured {result['captions_captured']} captions.")
         logger.info("=" * 60)
 
         return result
@@ -1790,9 +1662,7 @@ class NotesBot:
         if self._controller:
             logger.info("CLOSE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("CLOSE: Timeout closing controller, force killing...")
                 try:
@@ -1921,18 +1791,12 @@ class NotesBotManager:
                 cleanup_orphaned_meetbot_devices,
             )
 
-            cleanup_results = await cleanup_orphaned_meetbot_devices(
-                active_instance_ids=active_ids
-            )
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=active_ids)
 
             results["modules_removed"] = len(cleanup_results.get("removed_modules", []))
-            results["processes_killed"] = len(
-                cleanup_results.get("killed_processes", [])
-            )
+            results["processes_killed"] = len(cleanup_results.get("killed_processes", []))
             results["pipes_removed"] = len(cleanup_results.get("removed_pipes", []))
-            results["video_devices_removed"] = len(
-                cleanup_results.get("removed_video_devices", [])
-            )
+            results["video_devices_removed"] = len(cleanup_results.get("removed_video_devices", []))
             results["errors"].extend(cleanup_results.get("errors", []))
 
             total = (
@@ -2040,13 +1904,9 @@ class NotesBotManager:
                 results = await cleanup_orphaned_meetbot_devices(active_ids)
 
                 if results["removed_modules"]:
-                    logger.info(
-                        f"Cleaned up {len(results['removed_modules'])} orphaned audio modules"
-                    )
+                    logger.info(f"Cleaned up {len(results['removed_modules'])} orphaned audio modules")
                 if results["removed_pipes"]:
-                    logger.info(
-                        f"Cleaned up {len(results['removed_pipes'])} orphaned pipes"
-                    )
+                    logger.info(f"Cleaned up {len(results['removed_pipes'])} orphaned pipes")
                 if results["errors"]:
                     for err in results["errors"]:
                         logger.warning(f"Cleanup error: {err}")
@@ -2065,9 +1925,7 @@ class NotesBotManager:
                 # Check scheduled end time
                 if session.scheduled_end:
                     # Add grace period
-                    end_with_grace = session.scheduled_end + timedelta(
-                        minutes=session.grace_period_minutes
-                    )
+                    end_with_grace = session.scheduled_end + timedelta(minutes=session.grace_period_minutes)
                     if now > end_with_grace:
                         expired_sessions.append(session_id)
                         logger.info(
@@ -2079,10 +1937,7 @@ class NotesBotManager:
                 if session.bot._controller:
                     last_activity = session.bot._controller._last_activity
                     inactive_minutes = (now - last_activity).total_seconds() / 60
-                    if (
-                        inactive_minutes > 30
-                        and session.bot.state.status == "capturing"
-                    ):
+                    if inactive_minutes > 30 and session.bot.state.status == "capturing":
                         hung_sessions.append((session_id, inactive_minutes))
                         logger.warning(
                             f"Meeting '{session.title}' ({session_id}) appears hung "
@@ -2101,9 +1956,7 @@ class NotesBotManager:
 
         # Force-kill hung sessions
         for session_id, inactive_minutes in hung_sessions:
-            logger.warning(
-                f"Force-killing hung meeting: {session_id} (inactive {inactive_minutes:.1f} min)"
-            )
+            logger.warning(f"Force-killing hung meeting: {session_id} (inactive {inactive_minutes:.1f} min)")
             await self._force_kill_session(session_id)
 
     async def _force_kill_session(self, session_id: str) -> None:
@@ -2118,9 +1971,7 @@ class NotesBotManager:
             # Stop NPU STT pipeline first (kills parec processes)
             if session.bot._npu_stt_pipeline:
                 try:
-                    await asyncio.wait_for(
-                        session.bot._npu_stt_pipeline.stop(), timeout=3.0
-                    )
+                    await asyncio.wait_for(session.bot._npu_stt_pipeline.stop(), timeout=3.0)
                 except (asyncio.TimeoutError, Exception):
                     pass
                 session.bot._npu_stt_pipeline = None
@@ -2251,9 +2102,7 @@ class NotesBotManager:
                 end_info = ""
                 if scheduled_end:
                     end_info = f" (auto-leave at {scheduled_end.strftime('%H:%M')} + {grace_period_minutes}min)"
-                logger.info(
-                    f"Joined meeting {session_id}{end_info}. Active meetings: {len(self._sessions)}"
-                )
+                logger.info(f"Joined meeting {session_id}{end_info}. Active meetings: {len(self._sessions)}")
                 return session_id, True, []
             else:
                 errors = bot.state.errors or ["Failed to join meeting"]
@@ -2295,9 +2144,7 @@ class NotesBotManager:
             if not has_scheduled and self._monitor_task:
                 await self._stop_monitor()
 
-            logger.info(
-                f"Left meeting {session_id}. Active meetings: {len(self._sessions)}"
-            )
+            logger.info(f"Left meeting {session_id}. Active meetings: {len(self._sessions)}")
             return result
 
     async def leave_all(self) -> list[dict]:
@@ -2330,9 +2177,7 @@ class NotesBotManager:
                 return {"error": f"No active meeting with session ID: {session_id}"}
             session = self._sessions[session_id]
             status = await session.bot.get_status()
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             return status
 
@@ -2340,9 +2185,7 @@ class NotesBotManager:
         statuses = {}
         for sid, session in self._sessions.items():
             status = await session.bot.get_status()
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             statuses[sid] = status
         return statuses
@@ -2353,16 +2196,12 @@ class NotesBotManager:
         for session_id, session in self._sessions.items():
             status = await session.bot.get_status()
             status["session_id"] = session_id
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             # Calculate time remaining
             if session.scheduled_end:
                 remaining = session.scheduled_end - datetime.now()
-                status["time_remaining_minutes"] = max(
-                    0, remaining.total_seconds() / 60
-                )
+                status["time_remaining_minutes"] = max(0, remaining.total_seconds() / 60)
             statuses.append(status)
         return statuses
 
@@ -2383,9 +2222,7 @@ class NotesBotManager:
         """Get a specific session."""
         return self._sessions.get(session_id)
 
-    async def update_scheduled_end(
-        self, session_id: str, scheduled_end: datetime
-    ) -> bool:
+    async def update_scheduled_end(self, session_id: str, scheduled_end: datetime) -> bool:
         """Update the scheduled end time for a meeting."""
         if session_id not in self._sessions:
             return False

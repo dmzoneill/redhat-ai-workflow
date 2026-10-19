@@ -72,9 +72,7 @@ class MeetDevices:
                 mic_name = self._devices.source_name
                 # The sink name is what appears as speaker in Chrome
                 speaker_name = self._devices.sink_name
-                logger.info(
-                    f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}"
-                )
+                logger.info(f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}")
 
             # Step 1: Select the camera
             logger.info("[DEVICES] Selecting MeetBot camera...")
@@ -83,16 +81,12 @@ class MeetDevices:
             # Step 2: Select the microphone
             if mic_name:
                 logger.info("[DEVICES] Selecting MeetBot microphone...")
-                results["microphone"] = await self._select_audio_device(
-                    "microphone", mic_name
-                )
+                results["microphone"] = await self._select_audio_device("microphone", mic_name)
 
             # Step 3: Select the speaker
             if speaker_name:
                 logger.info("[DEVICES] Selecting MeetBot speaker...")
-                results["speaker"] = await self._select_audio_device(
-                    "speaker", speaker_name
-                )
+                results["speaker"] = await self._select_audio_device("speaker", speaker_name)
 
             logger.info(f"[DEVICES] Selection results: {results}")
             return results
@@ -102,22 +96,14 @@ class MeetDevices:
             return results
 
     async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
-        return await _shared_GoogleMeetController__select_audio_device(
-            self, device_type, device_name, logger=logger
-        )
+        return await _shared_GoogleMeetController__select_audio_device(self, device_type, device_name, logger=logger)
 
-    _select_audio_device.__doc__ = (
-        _shared_GoogleMeetController__select_audio_device.__doc__
-    )
+    _select_audio_device.__doc__ = _shared_GoogleMeetController__select_audio_device.__doc__
 
     async def select_meetbot_camera(self) -> bool:
-        return await _shared_GoogleMeetController__select_meetbot_camera(
-            self, logger=logger
-        )
+        return await _shared_GoogleMeetController__select_meetbot_camera(self, logger=logger)
 
-    select_meetbot_camera.__doc__ = (
-        _shared_GoogleMeetController__select_meetbot_camera.__doc__
-    )
+    select_meetbot_camera.__doc__ = _shared_GoogleMeetController__select_meetbot_camera.__doc__
 
     async def select_camera_in_meeting(self) -> bool:
         """Select MeetBot camera via Video settings dropdown in the meeting.
@@ -138,17 +124,13 @@ class MeetDevices:
                 logger.info("[CAMERA-SELECT] Opening Video settings dropdown...")
 
                 # Wait for the Video settings button to be visible and clickable
-                video_settings = self.page.locator(
-                    'button[aria-label="Video settings"]'
-                )
+                video_settings = self.page.locator('button[aria-label="Video settings"]')
 
                 try:
                     # Wait up to 5 seconds for button to be visible
                     await video_settings.first.wait_for(state="visible", timeout=5000)
                 except Exception:
-                    logger.warning(
-                        f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})"
-                    )
+                    logger.warning(f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})")
                     continue
 
                 # Click with a shorter timeout
@@ -159,9 +141,7 @@ class MeetDevices:
                 meetbot_pattern = "MeetBot"
 
                 # Try to find and click the MeetBot option
-                menu_items = self.page.locator(
-                    '[role="menuitem"], [role="menuitemradio"], li'
-                )
+                menu_items = self.page.locator('[role="menuitem"], [role="menuitemradio"], li')
                 count = await menu_items.count()
                 logger.info(f"[CAMERA-SELECT] Found {count} menu items")
 
@@ -179,9 +159,7 @@ class MeetDevices:
                         continue
 
                 # Close dropdown if we didn't find MeetBot
-                logger.warning(
-                    "[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape"
-                )
+                logger.warning("[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape")
                 await self.page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
@@ -191,18 +169,12 @@ class MeetDevices:
                 try:
                     await self.page.keyboard.press("Escape")
                 except Exception as e:
-                    logger.debug(
-                        f"Suppressed error in _select_meetbot_camera (escape key): {e}"
-                    )
+                    logger.debug(f"Suppressed error in _select_meetbot_camera (escape key): {e}")
 
         logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
         return False
 
     async def set_devices_via_js(self) -> bool:
-        return await _shared_GoogleMeetController__set_devices_via_js(
-            self, logger=logger
-        )
+        return await _shared_GoogleMeetController__set_devices_via_js(self, logger=logger)
 
-    set_devices_via_js.__doc__ = (
-        _shared_GoogleMeetController__set_devices_via_js.__doc__
-    )
+    set_devices_via_js.__doc__ = _shared_GoogleMeetController__set_devices_via_js.__doc__

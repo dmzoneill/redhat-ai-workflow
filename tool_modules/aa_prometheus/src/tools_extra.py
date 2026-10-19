@@ -13,7 +13,6 @@ from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import prometheus_client
 from server.tool_registry import ToolRegistry
@@ -162,12 +161,10 @@ async def _prometheus_get_alerts_impl(
     environment: str = "stage",
 ) -> list[TextContent]:
     """Implementation of prometheus_get_alerts tool."""
-    # Re-use prometheus_alerts implementation from tools_basic
+    # Reuse prometheus_alerts implementation from tools_basic
     from .tools_basic import _prometheus_alerts_impl
 
-    result = await _prometheus_alerts_impl(
-        environment=environment, state="", namespace=namespace, severity=""
-    )
+    result = await _prometheus_alerts_impl(environment=environment, state="", namespace=namespace, severity="")
     return result
 
 
@@ -222,12 +219,10 @@ async def _prometheus_namespace_metrics_impl(
         "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m]))',
         "Memory (GB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) / 1024 / 1024 / 1024',
         "Network RX (MB/s)": (
-            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) '
-            f"/ 1024 / 1024"
+            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'
         ),
         "Network TX (MB/s)": (
-            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) '
-            f"/ 1024 / 1024"
+            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'
         ),
     }
 
@@ -391,11 +386,7 @@ async def _prometheus_targets_impl(
 
     if not active_targets:
         filter_msg = f" with state={state}" if state else ""
-        return [
-            TextContent(
-                type="text", text=f"No active targets{filter_msg} in {environment}"
-            )
-        ]
+        return [TextContent(type="text", text=f"No active targets{filter_msg} in {environment}")]
 
     # Count by health
     up = len([t for t in active_targets if t.get("health") == "up"])

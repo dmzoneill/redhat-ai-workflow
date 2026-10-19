@@ -20,7 +20,6 @@ from typing import Any, Optional
 import yaml
 from fastmcp import Context, FastMCP
 from mcp.types import TextContent
-
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
@@ -67,9 +66,7 @@ try:
     LAYER5_AVAILABLE = True
 except ImportError:
     LAYER5_AVAILABLE = False
-    logger.warning(
-        "Layer 5 (Usage Pattern Learning) not available - errors won't be learned from"
-    )
+    logger.warning("Layer 5 (Usage Pattern Learning) not available - errors won't be learned from")
 
 # WebSocket server for real-time updates
 try:
@@ -103,9 +100,7 @@ def _get_agent_stats_module():
 
         spec = importlib.util.spec_from_file_location("agent_stats", agent_stats_path)
         module = importlib.util.module_from_spec(spec)
-        sys.modules["agent_stats"] = (
-            module  # Register before exec to handle circular imports
-        )
+        sys.modules["agent_stats"] = module  # Register before exec to handle circular imports
         spec.loader.exec_module(module)
         return module
 
@@ -132,9 +127,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
             ]:
                 for pattern in patterns.get(category, []):
                     pattern_text = pattern.get("pattern", "").lower()
-                    if pattern_text and (
-                        pattern_text in error_lower or pattern_text in tool_lower
-                    ):
+                    if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
                         matches.append(
                             {
                                 "source": category,
@@ -273,9 +266,7 @@ class SprintSafetyGuard:
 
         try:
             # Call git_status tool
-            status_result = await self.server.call_tool(
-                "git_status", {"repo": self.repo_path}
-            )
+            status_result = await self.server.call_tool("git_status", {"repo": self.repo_path})
 
             # Parse the result
             if status_result and len(status_result.content) > 0:
@@ -302,10 +293,7 @@ class SprintSafetyGuard:
                 if "rebase in progress" in text.lower():
                     result["in_progress"] = "rebase"
                     result["clean"] = False
-                elif (
-                    "merge in progress" in text.lower()
-                    or "you have unmerged paths" in text.lower()
-                ):
+                elif "merge in progress" in text.lower() or "you have unmerged paths" in text.lower():
                     result["in_progress"] = "merge"
                     result["clean"] = False
 
@@ -355,11 +343,7 @@ class SprintSafetyGuard:
 
             return {
                 "success": self._stash_created,
-                "message": (
-                    f"Stashed changes: {stash_message}"
-                    if self._stash_created
-                    else "No changes to stash"
-                ),
+                "message": (f"Stashed changes: {stash_message}" if self._stash_created else "No changes to stash"),
             }
 
         except Exception as e:
@@ -401,17 +385,14 @@ class SprintSafetyGuard:
         # Check for rebase/merge in progress
         if status["in_progress"]:
             result["safe"] = False
-            result["reason"] = (
-                f"A {status['in_progress']} is in progress. Please complete or abort it first."
-            )
+            result["reason"] = f"A {status['in_progress']} is in progress. Please complete or abort it first."
             return result
 
         # Check for protected branch
         if status["branch"].lower() in self.PROTECTED_BRANCHES:
             result["safe"] = False
             result["reason"] = (
-                f"Currently on protected branch '{status['branch']}'. "
-                "Please create a feature branch first."
+                f"Currently on protected branch '{status['branch']}'. Please create a feature branch first."
             )
             return result
 
@@ -421,20 +402,15 @@ class SprintSafetyGuard:
                 stash_result = await self.stash_changes(issue_key)
                 if stash_result["success"]:
                     result["stashed"] = True
-                    result["warnings"].append(
-                        f"Stashed uncommitted changes: {stash_result['message']}"
-                    )
+                    result["warnings"].append(f"Stashed uncommitted changes: {stash_result['message']}")
                 else:
                     result["safe"] = False
-                    result["reason"] = (
-                        f"Failed to stash uncommitted changes: {stash_result['message']}"
-                    )
+                    result["reason"] = f"Failed to stash uncommitted changes: {stash_result['message']}"
                     return result
             else:
                 result["safe"] = False
                 result["reason"] = (
-                    "Uncommitted changes detected. Please commit or stash them first, "
-                    "or enable auto_stash."
+                    "Uncommitted changes detected. Please commit or stash them first, or enable auto_stash."
                 )
                 return result
 
@@ -516,9 +492,7 @@ def _shared_SkillExecutor__determine_fix_type(
     return None
 
 
-def _shared_SkillExecutor__detect_auto_heal_type(
-    self, error_msg: str
-) -> tuple[str | None, str]:
+def _shared_SkillExecutor__detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
     """Detect if error is auto-healable and what type.
 
     Returns:
@@ -688,17 +662,13 @@ class SkillExecutor:
                 # Debug: write to a file to confirm emitter is created
                 from pathlib import Path
 
-                debug_file = (
-                    Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
-                )
+                debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
                 debug_file.parent.mkdir(parents=True, exist_ok=True)
                 with open(debug_file, "a", encoding="utf-8") as f:
                     from datetime import datetime
 
                     skill_name = skill.get("name", "unknown")
-                    f.write(
-                        f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"
-                    )
+                    f.write(f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n")
             except Exception as e:
                 logger.warning(f"Failed to initialize event emitter: {e}")
                 # Also write to debug file on failure
@@ -706,14 +676,10 @@ class SkillExecutor:
                     from datetime import datetime
                     from pathlib import Path
 
-                    debug_file = (
-                        Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
-                    )
+                    debug_file = Path.home() / ".config" / "aa-workflow" / "emitter_debug.log"
                     debug_file.parent.mkdir(parents=True, exist_ok=True)
                     with open(debug_file, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n"
-                        )
+                        f.write(f"{datetime.now().isoformat()} - FAILED to create emitter: {e}\n")
                 except Exception as exc:
                     logger.debug("Suppressed error: %s", exc)
 
@@ -743,9 +709,7 @@ class SkillExecutor:
         if self.debug:
             import time
 
-            elapsed = (
-                f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
-            )
+            elapsed = f"[{time.time() - self.start_time:.2f}s]" if self.start_time else ""
             self.log.append(f"🔍 {elapsed} {msg}")
 
     async def _learn_from_error(self, tool_name: str, params: dict, error_msg: str):
@@ -800,21 +764,15 @@ class SkillExecutor:
                     pattern_text = pattern.get("pattern", "").lower()
                     if pattern_text and pattern_text in error_lower:
                         # Track that pattern was matched
-                        self._update_pattern_usage_stats(
-                            cat, pattern_text, matched=True
-                        )
+                        self._update_pattern_usage_stats(cat, pattern_text, matched=True)
                         return pattern, cat
         except Exception as e:
             self._debug(f"Pattern lookup failed: {e}")
 
         return None, None
 
-    def _determine_fix_type(
-        self, error_lower: str, matched_pattern: dict | None, matches: list
-    ) -> str | None:
-        return _shared_SkillExecutor__determine_fix_type(
-            self, error_lower, matched_pattern, matches
-        )
+    def _determine_fix_type(self, error_lower: str, matched_pattern: dict | None, matches: list) -> str | None:
+        return _shared_SkillExecutor__determine_fix_type(self, error_lower, matched_pattern, matches)
 
     _determine_fix_type.__doc__ = _shared_SkillExecutor__determine_fix_type.__doc__
 
@@ -832,9 +790,7 @@ class SkillExecutor:
             vpn_script = paths.get("vpn_connect_script")
 
             if not vpn_script:
-                vpn_script = os.path.expanduser(
-                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
-                )
+                vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
             else:
                 vpn_script = os.path.expanduser(vpn_script)
 
@@ -867,9 +823,7 @@ class SkillExecutor:
                     try:
                         await asyncio.wait_for(proc.wait(), timeout=30)
                         if proc.returncode == 0:
-                            self._debug(
-                                f"  → VPN connect result: success with {vpn_name}"
-                            )
+                            self._debug(f"  → VPN connect result: success with {vpn_name}")
                             await asyncio.sleep(2)
                             return True
                     except asyncio.TimeoutError:
@@ -951,9 +905,7 @@ class SkillExecutor:
         # Track fix success for matched pattern
         if fix_success and matched_pattern and pattern_category:
             pattern_text = matched_pattern.get("pattern", "")
-            self._update_pattern_usage_stats(
-                pattern_category, pattern_text, matched=False, fixed=True
-            )
+            self._update_pattern_usage_stats(pattern_category, pattern_text, matched=False, fixed=True)
 
         return fix_success
 
@@ -1005,9 +957,7 @@ class SkillExecutor:
 
                             # Update counters
                             if matched:
-                                stats["times_matched"] = (
-                                    stats.get("times_matched", 0) + 1
-                                )
+                                stats["times_matched"] = stats.get("times_matched", 0) + 1
                                 stats["last_matched"] = datetime.now().isoformat()
 
                             if fixed:
@@ -1015,9 +965,7 @@ class SkillExecutor:
 
                             # Recalculate success rate
                             if stats["times_matched"] > 0:
-                                stats["success_rate"] = round(
-                                    stats["times_fixed"] / stats["times_matched"], 2
-                                )
+                                stats["success_rate"] = round(stats["times_fixed"] / stats["times_matched"], 2)
 
                             # Write back
                             f.seek(0)
@@ -1065,9 +1013,7 @@ class SkillExecutor:
             return text
 
         is_slack = self.inputs.get("slack_format", False)
-        gitlab_url = self.config.get("gitlab", {}).get(
-            "url", "https://gitlab.cee.redhat.com"
-        )
+        gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
         project = "automation-analytics/automation-analytics-backend"
 
         pattern = re.compile(r"!(\d+)")
@@ -1145,9 +1091,7 @@ class SkillExecutor:
                 pattern_text = pattern.get("pattern", "").lower()
                 if pattern_text and pattern_text in error_lower:
                     # Track pattern match
-                    self._update_pattern_usage_stats(
-                        "error_patterns", pattern_text, matched=True
-                    )
+                    self._update_pattern_usage_stats("error_patterns", pattern_text, matched=True)
 
                     fix = pattern.get("fix", "")
                     meaning = pattern.get("meaning", "")
@@ -1263,17 +1207,14 @@ class SkillExecutor:
             self.error_recovery.log_fix_attempt(
                 error_info,
                 action="auto_fix",
-                success=not isinstance(fixed_result, str)
-                or not fixed_result.startswith("<compute error:"),
+                success=not isinstance(fixed_result, str) or not fixed_result.startswith("<compute error:"),
                 details=f"Auto-fixed {error_info.get('pattern_id')}",
             )
 
             return fixed_result
         except Exception as e:
             self._debug(f"Auto-fix failed: {e}")
-            self.error_recovery.log_fix_attempt(
-                error_info, action="auto_fix", success=False, details=str(e)
-            )
+            self.error_recovery.log_fix_attempt(error_info, action="auto_fix", success=False, details=str(e))
             return None
 
     def _handle_edit_action(self, error_info: dict, error_msg: str, step_name: str):
@@ -1302,11 +1243,9 @@ class SkillExecutor:
 
     def _handle_skip_action(self, error_info: dict, step_name: str):
         """Handle skip action for interactive recovery."""
-        print("\n⏭️  Skipping skill execution.\n" f"   Error in step: {step_name}\n")
+        print(f"\n⏭️  Skipping skill execution.\n   Error in step: {step_name}\n")
 
-        self.error_recovery.log_fix_attempt(
-            error_info, action="skip", success=False, details="User chose to skip"
-        )
+        self.error_recovery.log_fix_attempt(error_info, action="skip", success=False, details="User chose to skip")
         return None
 
     def _handle_abort_action(self, error_info: dict, error_msg: str, step_name: str):
@@ -1392,9 +1331,7 @@ class SkillExecutor:
         try:
             # Call ask_question_fn which is already async
             action_result = asyncio.get_event_loop().run_until_complete(
-                self.error_recovery.prompt_user_for_action(
-                    error_info, self.ask_question_fn
-                )
+                self.error_recovery.prompt_user_for_action(error_info, self.ask_question_fn)
             )
         except Exception as e:
             self._debug(f"Interactive prompt failed: {e}")
@@ -1470,9 +1407,7 @@ class SkillExecutor:
                 if loop and loop.is_running():
                     # We're already in an async context, schedule on the existing loop
                     # Use run_coroutine_threadsafe to safely run from sync context
-                    future = asyncio.run_coroutine_threadsafe(
-                        nested_executor.execute(), loop
-                    )
+                    future = asyncio.run_coroutine_threadsafe(nested_executor.execute(), loop)
                     outputs, _ = future.result(timeout=300)  # type: ignore[misc]
                 else:
                     # No running loop, can use asyncio.run directly
@@ -1643,9 +1578,7 @@ class SkillExecutor:
 
             # Try interactive recovery if enabled
             if self.enable_interactive_recovery and self.ask_question_fn:
-                recovery_result = self._try_interactive_recovery(
-                    code, str(e), output_name
-                )
+                recovery_result = self._try_interactive_recovery(code, str(e), output_name)
                 if recovery_result is not None:
                     return recovery_result
 
@@ -1692,9 +1625,7 @@ class SkillExecutor:
 
         return {"success": not is_error, "result": text, "duration": duration}
 
-    async def _execute_workflow_tool(
-        self, tool_name: str, args: dict, start_time: float
-    ) -> dict:
+    async def _execute_workflow_tool(self, tool_name: str, args: dict, start_time: float) -> dict:
         """Execute a tool from the workflow module."""
         import time
 
@@ -1722,9 +1653,7 @@ class SkillExecutor:
                 logger.debug("Suppressed error: %s", exc)
             return {"success": False, "error": str(e)}
 
-    async def _load_and_execute_module_tool(
-        self, module: str, tool_name: str, args: dict, start_time: float
-    ) -> dict:
+    async def _load_and_execute_module_tool(self, module: str, tool_name: str, args: dict, start_time: float) -> dict:
         """Load a tool module and execute the specified tool."""
         import importlib.util
         import time
@@ -1761,9 +1690,7 @@ class SkillExecutor:
                 if partial not in sys.modules:
                     stub = types.ModuleType(partial)
                     stub.__package__ = partial
-                    stub.__path__ = [
-                        str(TOOL_MODULES_DIR.parent / partial.replace(".", "/"))
-                    ]
+                    stub.__path__ = [str(TOOL_MODULES_DIR.parent / partial.replace(".", "/"))]
                     sys.modules[partial] = stub
 
             full_module_name = f"{pkg_name}.{tools_file.stem}"
@@ -1776,9 +1703,7 @@ class SkillExecutor:
                 loaded_module = sys.modules[full_module_name]
                 self._debug(f"  → Reusing already-loaded module: {full_module_name}")
             else:
-                spec = importlib.util.spec_from_file_location(
-                    full_module_name, tools_file
-                )
+                spec = importlib.util.spec_from_file_location(full_module_name, tools_file)
                 if spec is None or spec.loader is None:
                     return {"success": False, "error": f"Could not load: {module}"}
 
@@ -1835,9 +1760,7 @@ class SkillExecutor:
             return await self._execute_workflow_tool(tool_name, args, start)
 
         # Execute other module tools with error recovery
-        result = await self._load_and_execute_module_tool(
-            module, tool_name, args, start
-        )
+        result = await self._load_and_execute_module_tool(module, tool_name, args, start)
 
         # If there was an error, try auto-fix and retry
         if not result.get("success"):
@@ -1849,24 +1772,18 @@ class SkillExecutor:
                 self._debug(f"  → Error: {error_msg}")
 
                 # Check for known issues and attempt auto-fix
-                matches = _check_known_issues_sync(
-                    tool_name=tool_name, error_text=error_msg
-                )
+                matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
                 known_text = _format_known_issues(matches)
 
                 if matches:
-                    self._debug(
-                        f"  → Found {len(matches)} known issue(s), attempting auto-fix"
-                    )
+                    self._debug(f"  → Found {len(matches)} known issue(s), attempting auto-fix")
                     fix_applied = await self._try_auto_fix(error_msg, matches)
 
                     if fix_applied:
                         self._debug("  → Auto-fix applied, retrying tool")
                         # Emit auto-heal event
                         if self.event_emitter:
-                            fix_type = self._determine_fix_type(
-                                error_msg.lower(), None, matches
-                            )
+                            fix_type = self._determine_fix_type(error_msg.lower(), None, matches)
                             self.event_emitter.auto_heal(
                                 self.event_emitter.current_step_index,
                                 f"Applied {fix_type or 'auto'} fix for: {error_msg[:50]}",
@@ -1886,9 +1803,7 @@ class SkillExecutor:
                             # Record successful retry
                             try:
                                 agent_stats = _get_agent_stats_module()
-                                agent_stats.record_tool_call(
-                                    tool_name, True, duration_ms
-                                )
+                                agent_stats.record_tool_call(tool_name, True, duration_ms)
                             except Exception as exc:
                                 logger.debug("Suppressed error: %s", exc)
 
@@ -1908,9 +1823,7 @@ class SkillExecutor:
     def _detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
         return _shared_SkillExecutor__detect_auto_heal_type(self, error_msg)
 
-    _detect_auto_heal_type.__doc__ = (
-        _shared_SkillExecutor__detect_auto_heal_type.__doc__
-    )
+    _detect_auto_heal_type.__doc__ = _shared_SkillExecutor__detect_auto_heal_type.__doc__
 
     async def _attempt_auto_heal(
         self,
@@ -1927,9 +1840,7 @@ class SkillExecutor:
         """
         try:
             if heal_type == "auth":
-                output_lines.append(
-                    f"   🔧 Auto-healing: running kube_login({cluster})..."
-                )
+                output_lines.append(f"   🔧 Auto-healing: running kube_login({cluster})...")
                 self._debug(f"Auto-heal: kube_login({cluster})")
 
                 # Emit remediation step event
@@ -1944,9 +1855,7 @@ class SkillExecutor:
                 heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
                 if not heal_result.get("success"):
                     # Get error from either 'error' key or 'result' key (for tools that return error text)
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -1970,9 +1879,7 @@ class SkillExecutor:
                 heal_result = await self._exec_tool("vpn_connect", {})
                 if not heal_result.get("success"):
                     # Get error from either 'error' key or 'result' key (for tools that return error text)
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -2060,9 +1967,7 @@ class SkillExecutor:
             if success:
                 data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
             else:
-                data["stats"]["manual_required"] = (
-                    data["stats"].get("manual_required", 0) + 1
-                )
+                data["stats"]["manual_required"] = data["stats"].get("manual_required", 0) + 1
 
             # Keep only last 100 entries
             if len(data["failures"]) > 100:
@@ -2104,30 +2009,20 @@ class SkillExecutor:
             heal_type, cluster = self._detect_auto_heal_type(error_msg)
 
             if heal_type:
-                output_lines.append(
-                    f"   🩹 Detected {heal_type} error, attempting auto-heal..."
-                )
+                output_lines.append(f"   🩹 Detected {heal_type} error, attempting auto-heal...")
 
                 # Emit auto-heal triggered event (WebSocket)
                 if self.ws_server and self.ws_server.is_running:
                     import asyncio
 
                     # Get current step index from event_emitter or calculate it
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
+                    step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
                     asyncio.create_task(
                         self.ws_server.auto_heal_triggered(
                             skill_id=self.skill_id,
                             step_index=step_idx,
                             error_type=heal_type,
-                            fix_action=(
-                                f"kube_login({cluster})"
-                                if heal_type == "auth"
-                                else "vpn_connect()"
-                            ),
+                            fix_action=(f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"),
                             error_snippet=error_msg[:200],
                         )
                     )
@@ -2138,42 +2033,28 @@ class SkillExecutor:
                         notify_auto_heal_triggered,
                     )
 
-                    fix_action = (
-                        f"kube_login({cluster})"
-                        if heal_type == "auth"
-                        else "vpn_connect()"
-                    )
+                    fix_action = f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
                 except Exception as exc:
                     logger.debug("Suppressed error: %s", exc)
 
-                retry_result = await self._attempt_auto_heal(
-                    heal_type, cluster, tool, step, output_lines
-                )
+                retry_result = await self._attempt_auto_heal(heal_type, cluster, tool, step, output_lines)
 
                 if retry_result and retry_result.get("success"):
                     # Auto-heal worked! Store result and continue
                     output_lines.append("   ✅ Auto-heal successful!")
                     output_name = step.get("output", step_name)
                     self.context[output_name] = retry_result["result"]
-                    self._parse_and_store_tool_result(
-                        retry_result["result"], output_name
-                    )
+                    self._parse_and_store_tool_result(retry_result["result"], output_name)
 
                     # Log success to memory
-                    await self._log_auto_heal_to_memory(
-                        tool, heal_type, error_msg[:100], success=True
-                    )
+                    await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=True)
 
                     # Emit auto-heal completed event (WebSocket)
                     if self.ws_server and self.ws_server.is_running:
                         import asyncio
 
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
+                        step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
                         asyncio.create_task(
                             self.ws_server.auto_heal_completed(
                                 skill_id=self.skill_id,
@@ -2206,19 +2087,13 @@ class SkillExecutor:
                 else:
                     # Auto-heal failed, log and continue
                     output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
-                    await self._log_auto_heal_to_memory(
-                        tool, heal_type, error_msg[:100], success=False
-                    )
+                    await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=False)
 
                     # Emit auto-heal completed (failed) event (WebSocket)
                     if self.ws_server and self.ws_server.is_running:
                         import asyncio
 
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
+                        step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
                         asyncio.create_task(
                             self.ws_server.auto_heal_completed(
                                 skill_id=self.skill_id,
@@ -2254,13 +2129,9 @@ class SkillExecutor:
             if "args" in step:
                 args_data = step["args"]
                 if isinstance(args_data, dict):
-                    tool_params = {
-                        k: self._template(str(v)) for k, v in args_data.items()
-                    }
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
 
-            await self._learn_from_error(
-                tool_name=tool, params=tool_params, error_msg=error_msg
-            )
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
 
             self.step_results.append(
                 {
@@ -2286,14 +2157,10 @@ class SkillExecutor:
                 )
 
                 if issue_result["success"]:
-                    output_lines.append(
-                        f"\n   🐛 **Issue created:** {issue_result['issue_url']}"
-                    )
+                    output_lines.append(f"\n   🐛 **Issue created:** {issue_result['issue_url']}")
                 elif issue_result["issue_url"]:
                     output_lines.append("\n   💡 **Report this error:**")
-                    output_lines.append(
-                        f"   📝 [Create GitHub Issue]({issue_result['issue_url']})"
-                    )
+                    output_lines.append(f"   📝 [Create GitHub Issue]({issue_result['issue_url']})")
             except Exception as e:
                 self._debug(f"Failed to create issue: {e}")
 
@@ -2318,13 +2185,9 @@ class SkillExecutor:
             if "args" in step:
                 args_data = step["args"]
                 if isinstance(args_data, dict):
-                    tool_params = {
-                        k: self._template(str(v)) for k, v in args_data.items()
-                    }
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
 
-            await self._learn_from_error(
-                tool_name=tool, params=tool_params, error_msg=error_msg
-            )
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
 
             # Emit toast notification for continue-mode failures (helps visibility)
             try:
@@ -2414,9 +2277,7 @@ class SkillExecutor:
 
         return False, None
 
-    def _validate_tool_args(
-        self, tool: str, raw_args: dict, args: dict, step_name: str
-    ) -> str | None:
+    def _validate_tool_args(self, tool: str, raw_args: dict, args: dict, step_name: str) -> str | None:
         """Validate tool arguments after template rendering.
 
         Returns:
@@ -2443,9 +2304,7 @@ class SkillExecutor:
                     )
         return None
 
-    async def _process_tool_step(
-        self, step: dict, step_num: int, step_name: str, output_lines: list[str]
-    ) -> bool:
+    async def _process_tool_step(self, step: dict, step_num: int, step_name: str, output_lines: list[str]) -> bool:
         """Process a 'tool' step and append results to output_lines.
 
         Returns:
@@ -2494,9 +2353,7 @@ class SkillExecutor:
 
             if is_soft_failure and step.get("on_error") == "auto_heal":
                 # Treat as error and trigger auto-heal
-                output_lines.append(
-                    f"   ⚠️ Soft failure detected: {(soft_error or '')[:100]}"
-                )
+                output_lines.append(f"   ⚠️ Soft failure detected: {(soft_error or '')[:100]}")
                 self._debug(f"Soft failure in {tool}: {soft_error}")
 
                 # Store result anyway (some steps may need it even if failed)
@@ -2527,16 +2384,12 @@ class SkillExecutor:
                 result_preview += "..."
             output_lines.append(f"   ```\n   {result_preview}\n   ```\n")
 
-            self.step_results.append(
-                {"step": step_name, "tool": tool, "success": True, "duration": duration}
-            )
+            self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
             return True
 
         # Handle error - error message can be in 'error' key or 'result' key
         error_msg = result.get("error") or result.get("result", "Unknown error")
-        should_continue = await self._handle_tool_error(
-            tool, step, step_name, error_msg, output_lines
-        )
+        should_continue = await self._handle_tool_error(tool, step, step_name, error_msg, output_lines)
         if not should_continue:
             output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
         return should_continue
@@ -2558,9 +2411,7 @@ class SkillExecutor:
                     output_value = (
                         self._template_dict(val)
                         if isinstance(val, dict)
-                        else [
-                            self._template(i) if isinstance(i, str) else i for i in val
-                        ]
+                        else [self._template(i) if isinstance(i, str) else i for i in val]
                     )
                 else:
                     output_value = val
@@ -2583,11 +2434,7 @@ class SkillExecutor:
         for then_item in step["then"]:
             if "return" in then_item:
                 ret = then_item["return"]
-                templated = (
-                    self._template_dict(ret)
-                    if isinstance(ret, dict)
-                    else self._template(str(ret))
-                )
+                templated = self._template_dict(ret) if isinstance(ret, dict) else self._template(str(ret))
                 self._debug(f"Early return: {templated}")
 
                 total_time = time.time() - (self.start_time or 0.0)
@@ -2666,9 +2513,7 @@ class SkillExecutor:
             if "condition" in step:
                 if not self._eval_condition(step["condition"]):
                     self._debug(f"Skipping step '{step_name}' - condition false")
-                    output_lines.append(
-                        f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n"
-                    )
+                    output_lines.append(f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n")
                     # Emit step skipped event
                     if self.event_emitter:
                         self.event_emitter.step_skipped(step_index, "condition false")
@@ -2709,13 +2554,9 @@ class SkillExecutor:
                 # Check for memory operations
                 tool_name = step.get("tool", "")
                 if self.event_emitter:
-                    self._emit_memory_events_for_tool(
-                        step_index, tool_name, step.get("args", {})
-                    )
+                    self._emit_memory_events_for_tool(step_index, tool_name, step.get("args", {}))
 
-                should_continue = await self._process_tool_step(
-                    step, step_num, step_name, output_lines
-                )
+                should_continue = await self._process_tool_step(step, step_num, step_name, output_lines)
 
                 # Check step result
                 if self.step_results:
@@ -2728,9 +2569,7 @@ class SkillExecutor:
                     # Emit step failed event
                     if self.event_emitter:
                         duration_ms = int((time.time() - step_start_time) * 1000)
-                        self.event_emitter.step_failed(
-                            step_index, duration_ms, step_error or "Step failed"
-                        )
+                        self.event_emitter.step_failed(step_index, duration_ms, step_error or "Step failed")
                     break
 
             elif "compute" in step:
@@ -2762,9 +2601,7 @@ class SkillExecutor:
                         )
                     else:
                         self.context[output_name] = result
-                        output_lines.append(
-                            f"   → `{output_name}` = {str(result)[:100]}\n"
-                        )
+                        output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
                 except Exception as e:
                     step_success = False
                     step_error = str(e)
@@ -2780,9 +2617,7 @@ class SkillExecutor:
                 if step_success:
                     self.event_emitter.step_complete(step_index, duration_ms)
                 else:
-                    self.event_emitter.step_failed(
-                        step_index, duration_ms, step_error or "Unknown error"
-                    )
+                    self.event_emitter.step_failed(step_index, duration_ms, step_error or "Unknown error")
 
             # Emit step complete/failed event (WebSocket)
             if self.ws_server and self.ws_server.is_running:
@@ -2815,8 +2650,7 @@ class SkillExecutor:
         fail_count = sum(1 for r in self.step_results if not r.get("success"))
 
         output_lines.append(
-            f"\n---\n⏱️ *Completed in {total_time:.2f}s* | "
-            f"✅ {success_count} succeeded | ❌ {fail_count} failed"
+            f"\n---\n⏱️ *Completed in {total_time:.2f}s* | ✅ {success_count} succeeded | ❌ {fail_count} failed"
         )
 
         # Emit skill complete event (file-based)
@@ -2883,9 +2717,7 @@ class SkillExecutor:
 
         return "\n".join(output_lines)
 
-    def _emit_memory_events_for_tool(
-        self, step_index: int, tool_name: str, args: dict
-    ) -> None:
+    def _emit_memory_events_for_tool(self, step_index: int, tool_name: str, args: dict) -> None:
         """Emit memory read/write events based on tool being called."""
         if not self.event_emitter:
             return
@@ -3010,12 +2842,8 @@ class SkillExecutor:
                 knowledge["learned_from_tasks"] = knowledge["learned_from_tasks"][-50:]
 
                 # Slightly increase confidence
-                current_confidence = knowledge.get("metadata", {}).get(
-                    "confidence", 0.5
-                )
-                knowledge["metadata"]["confidence"] = min(
-                    current_confidence + 0.01, 1.0
-                )
+                current_confidence = knowledge.get("metadata", {}).get("confidence", 0.5)
+                knowledge["metadata"]["confidence"] = min(current_confidence + 0.01, 1.0)
 
                 # Save
                 _save_knowledge(persona, project, knowledge)
@@ -3046,9 +2874,7 @@ def _skill_list_impl() -> list[TextContent]:
                     }
                 )
             except Exception as e:
-                skills.append(
-                    {"name": f.stem, "description": f"Error loading: {e}", "inputs": []}
-                )
+                skills.append({"name": f.stem, "description": f"Error loading: {e}", "inputs": []})
 
     if not skills:
         return [
@@ -3078,9 +2904,7 @@ def _validate_skill_inputs(skill: dict, input_data: dict) -> list[str]:
     return missing
 
 
-def _format_skill_plan(
-    skill: dict, skill_name: str, input_data: dict
-) -> list[TextContent]:
+def _format_skill_plan(skill: dict, skill_name: str, input_data: dict) -> list[TextContent]:
     """Format skill execution plan (preview mode)."""
     lines = [f"## 📋 Skill Plan: {skill.get('name', skill_name)}\n"]
     lines.append(f"*{skill.get('description', '')}*\n")
@@ -3135,14 +2959,11 @@ async def _skill_run_impl(
     """
     skill_file = SKILLS_DIR / f"{skill_name}.yaml"
     if not skill_file.exists():
-        available = (
-            [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
-        )
+        available = [f.stem for f in SKILLS_DIR.glob("*.yaml")] if SKILLS_DIR.exists() else []
         return [
             TextContent(
                 type="text",
-                text=f"❌ Skill not found: {skill_name}\n\n"
-                f"Available: {', '.join(available) or 'none'}",
+                text=f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(available) or 'none'}",
             )
         ]
 
@@ -3163,9 +2984,7 @@ async def _skill_run_impl(
             for inp in skill.get("inputs", []):
                 req = "**required**" if inp.get("required") else "optional"
                 default = f" (default: {inp['default']})" if "default" in inp else ""
-                lines.append(
-                    f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}"
-                )
+                lines.append(f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}")
                 if inp.get("description"):
                     lines.append(f"  {inp['description']}")
             return [TextContent(type="text", text="\n".join(lines))]
@@ -3226,9 +3045,7 @@ async def _skill_run_impl(
         return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
 
 
-def register_skill_tools(
-    server: "FastMCP", create_issue_fn=None, ask_question_fn=None
-) -> int:
+def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_fn=None) -> int:
     """Register skill tools with the MCP server."""
     registry = ToolRegistry(server)
 

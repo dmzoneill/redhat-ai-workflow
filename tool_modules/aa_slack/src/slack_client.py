@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-
 from tool_modules.aa_slack.src.slack_api_client import _shared_SlackApiClient_get_client
 from tool_modules.aa_slack.src.slack_message_builder import (
     _shared_get_app_commands_summary,
@@ -61,11 +60,7 @@ class SlackSession:
     _user_id: str = ""
 
     # High-fidelity spoofing headers - updated to match current Chrome
-    USER_AGENT = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/143.0.0.0 Safari/537.36"
-    )
+    USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
     # Enterprise Slack URLs - configurable via environment
     SLACK_HOST = os.getenv("SLACK_HOST", "redhat.enterprise.slack.com")
@@ -223,8 +218,7 @@ class SlackSession:
                     self._rate_limit.backoff_until = time.time() + backoff
 
                     logger.warning(
-                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. "
-                        f"Backing off {backoff:.1f}s"
+                        f"Rate limited (429). Attempt {attempt + 1}/{self.max_retries}. Backing off {backoff:.1f}s"
                     )
 
                     await asyncio.sleep(backoff)
@@ -247,9 +241,7 @@ class SlackSession:
                             "Re-obtain from browser dev tools."
                         )
                     elif error == "token_revoked":
-                        raise ValueError(
-                            "Token has been revoked. Re-authenticate via browser."
-                        )
+                        raise ValueError("Token has been revoked. Re-authenticate via browser.")
                     elif error == "ratelimited":
                         # Slack-level rate limiting
                         await asyncio.sleep(self.base_backoff * (2**attempt))
@@ -348,9 +340,7 @@ class SlackSession:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Get list of conversations (channels, DMs, etc.)."""
-        result = await self._request(
-            "conversations.list", {"types": types, "limit": limit}
-        )
+        result = await self._request("conversations.list", {"types": types, "limit": limit})
         return result.get("channels", [])
 
     async def get_user_conversations(
@@ -624,9 +614,7 @@ class SlackSession:
             ]
         )
 
-        url, body, headers = self._build_web_api_request(
-            "conversations.replies", form_parts
-        )
+        url, body, headers = self._build_web_api_request("conversations.replies", form_parts)
 
         client = await self.get_client()
 
@@ -706,9 +694,7 @@ class SlackSession:
             for block in msg.get("blocks", []):
                 for element in block.get("elements", []):
                     if isinstance(element, dict):
-                        self._extract_from_element(
-                            element, mentioned_users, links, code_blocks
-                        )
+                        self._extract_from_element(element, mentioned_users, links, code_blocks)
 
             # Collect reactions
             for reaction in msg.get("reactions", []):
@@ -1066,7 +1052,9 @@ class SlackSession:
         # Bold: *text* (but not ** or *text *text*)
         # Italic: _text_ (but not __ or _text _text_)
         # Inline code: `code`
-        pattern = r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)"  # noqa: E501
+        pattern = (
+            r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)"  # noqa: E501
+        )
 
         parts = re.split(pattern, text)
 
@@ -1315,9 +1303,7 @@ class SlackSession:
             return channels
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
-            )
+            logger.error(f"Edge API error: {e.response.status_code} - {e.response.text[:200]}")
             raise ValueError(f"Channel search failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"Channel search error: {e}")
@@ -1400,9 +1386,7 @@ class SlackSession:
                     # Check for the avatars format
                     elif "_" in last_part:
                         # Format: 2965715167392_15b10eb54da5b144a96b_original.jpg
-                        segments = (
-                            last_part.replace(".jpg", "").replace(".png", "").split("_")
-                        )
+                        segments = last_part.replace(".jpg", "").replace(".png", "").split("_")
                         if len(segments) >= 2:
                             return segments[1]  # The hash is the second part
 
@@ -1533,9 +1517,7 @@ class SlackSession:
             return users
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Edge API user search error: {e.response.status_code} - {e.response.text[:200]}"
-            )
+            logger.error(f"Edge API user search error: {e.response.status_code} - {e.response.text[:200]}")
             raise ValueError(f"User search failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"User search error: {e}")
@@ -1567,9 +1549,7 @@ class SlackSession:
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         if not eid:
-            raise ValueError(
-                "Enterprise ID not available. Set enterprise_id in config.json slack.auth section."
-            )
+            raise ValueError("Enterprise ID not available. Set enterprise_id in config.json slack.auth section.")
 
         # Edge API URL for users list
         edge_url = f"https://edgeapi.slack.com/cache/{eid}/users/list"
@@ -1620,12 +1600,8 @@ class SlackSession:
             return result.get("results", [])
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
-            )
-            raise ValueError(
-                f"Channel members list failed: {e.response.status_code}"
-            ) from e
+            logger.error(f"Edge API error: {e.response.status_code} - {e.response.text[:200]}")
+            raise ValueError(f"Channel members list failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"Channel members list error: {e}")
             raise
@@ -1655,9 +1631,7 @@ class SlackSession:
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         if not eid:
-            raise ValueError(
-                "Enterprise ID not available. Set enterprise_id in config.json slack.auth section."
-            )
+            raise ValueError("Enterprise ID not available. Set enterprise_id in config.json slack.auth section.")
 
         # Edge API URL for membership check
         edge_url = f"https://edgeapi.slack.com/cache/{eid}/channels/membership"
@@ -1707,12 +1681,8 @@ class SlackSession:
             }
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
-            )
-            raise ValueError(
-                f"Channel membership check failed: {e.response.status_code}"
-            ) from e
+            logger.error(f"Edge API error: {e.response.status_code} - {e.response.text[:200]}")
+            raise ValueError(f"Channel membership check failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error(f"Channel membership check error: {e}")
             raise
@@ -1746,9 +1716,7 @@ class SlackSession:
                 if avatar_hash and user_id:
                     avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
                 else:
-                    avatar_url = profile.get(
-                        "image_original", profile.get("image_72", "")
-                    )
+                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
 
                 results.append(
                     {
@@ -1888,8 +1856,7 @@ class SlackSession:
             sections.append(
                 {
                     "id": section.get("channel_section_id", ""),
-                    "name": section.get("name", "")
-                    or section_type.replace("_", " ").title(),
+                    "name": section.get("name", "") or section_type.replace("_", " ").title(),
                     "type": section_type,
                     "emoji": section.get("emoji", ""),
                     "channel_count": len(channel_ids),
@@ -2126,9 +2093,7 @@ class SlackSession:
                 if avatar_hash and user_id:
                     avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
                 else:
-                    avatar_url = profile.get(
-                        "image_original", profile.get("image_72", "")
-                    )
+                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
 
                 results.append(
                     {
@@ -2240,7 +2205,7 @@ class SlackSession:
             return {"ok": False, "error": str(e), "app_actions": [], "commands": []}
 
     def get_app_commands_summary(self, data: dict[str, Any]) -> dict[str, Any]:
-        return _shared_get_app_commands_summary(self, data)
+        return _shared_get_app_commands_summary(data)
 
     get_app_commands_summary.__doc__ = _shared_get_app_commands_summary.__doc__
 

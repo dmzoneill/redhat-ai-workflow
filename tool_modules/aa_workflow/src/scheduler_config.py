@@ -54,9 +54,7 @@ def _load_default_retry_config() -> dict:
 DEFAULT_RETRY_CONFIG = _load_default_retry_config()
 
 
-def _shared_RetryConfig_from_config(
-    cls, job_config: dict, default_config: dict | None = None
-) -> "RetryConfig":
+def _shared_RetryConfig_from_config(cls, job_config: dict, default_config: dict | None = None) -> "RetryConfig":
     """Create RetryConfig from job configuration.
 
     Args:
@@ -149,12 +147,8 @@ class RetryConfig:
     retry_on: list[str] = field(default_factory=lambda: ["auth", "network"])
 
     @classmethod
-    def from_config(
-        cls, job_config: dict, default_config: dict | None = None
-    ) -> "RetryConfig":
+    def from_config(cls, job_config: dict, default_config: dict | None = None) -> "RetryConfig":
         return _shared_RetryConfig_from_config(cls, job_config, default_config)
-
-    from_config.__func__.__doc__ = _shared_RetryConfig_from_config.__doc__
 
     def calculate_delay(self, attempt: int) -> int:
         return _shared_RetryConfig_calculate_delay(self, attempt)
@@ -177,9 +171,7 @@ from server.config_manager import config as config_manager  # noqa: E402
 from server.state_manager import state as state_manager  # noqa: E402
 
 
-def _shared_SchedulerConfig___init__(
-    self, config_data: dict | None = None, *, state_manager
-):
+def _shared_SchedulerConfig___init__(self, config_data: dict | None = None, *, state_manager):
     """Initialize scheduler config from config data or load from file."""
     if config_data is None:
         config_data = self._load_config()
@@ -201,9 +193,7 @@ def _shared_SchedulerConfig___init__(
     self.default_retry = schedules.get("default_retry", DEFAULT_RETRY_CONFIG)
 
 
-def _shared_SchedulerConfig__is_job_enabled(
-    self, job_config: dict, *, state_manager
-) -> bool:
+def _shared_SchedulerConfig__is_job_enabled(self, job_config: dict, *, state_manager) -> bool:
     """Resolve job enabled state: config.json first, state.json override.
 
     Args:
@@ -226,18 +216,21 @@ def _shared_SchedulerConfig_get_poll_jobs(self) -> list[dict]:
     Enabled resolution: config.json per-job 'enabled' field first,
     then state.json runtime override if present.
     """
-    return [
-        j for j in self.jobs if j.get("trigger") == "poll" and self._is_job_enabled(j)
-    ]
+    return [j for j in self.jobs if j.get("trigger") == "poll" and self._is_job_enabled(j)]
 
 
 class SchedulerConfig:
     """Configuration for the scheduler loaded from config.json and state.json."""
 
+    enabled: bool
+    timezone: str
+    jobs: list
+    poll_sources: dict
+    execution_mode: str
+    default_retry: dict
+
     def __init__(self, config_data: dict | None = None):
-        return _shared_SchedulerConfig___init__(
-            self, config_data, state_manager=state_manager
-        )
+        _shared_SchedulerConfig___init__(self, config_data, state_manager=state_manager)
 
     __init__.__doc__ = _shared_SchedulerConfig___init__.__doc__
 
@@ -246,9 +239,7 @@ class SchedulerConfig:
         return config_manager.get_all()
 
     def _is_job_enabled(self, job_config: dict) -> bool:
-        return _shared_SchedulerConfig__is_job_enabled(
-            self, job_config, state_manager=state_manager
-        )
+        return _shared_SchedulerConfig__is_job_enabled(self, job_config, state_manager=state_manager)
 
     _is_job_enabled.__doc__ = _shared_SchedulerConfig__is_job_enabled.__doc__
 

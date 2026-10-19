@@ -15,7 +15,6 @@ from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
@@ -91,10 +90,7 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
     # Get URL template from config or use default
     slack_config = config.get("slack", {})
     user_mapping_config = slack_config.get("user_mapping", {})
-    default_url = (
-        "https://gitlab.cee.redhat.com/service/app-interface/"
-        "-/raw/master/data/teams/{team}/users/{user}.yml"
-    )
+    default_url = "https://gitlab.cee.redhat.com/service/app-interface/-/raw/master/data/teams/{team}/users/{user}.yml"
     url_template = user_mapping_config.get("app_interface_url", default_url)
 
     url = url_template.format(team=team, user=username)
@@ -130,19 +126,13 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
             if "manager" in data:
                 manager_ref = data["manager"]
                 if isinstance(manager_ref, dict) and "$ref" in manager_ref:
-                    manager_name = (
-                        manager_ref["$ref"].split("/")[-1].replace(".yml", "")
-                    )
+                    manager_name = manager_ref["$ref"].split("/")[-1].replace(".yml", "")
                     lines.append(f"- **Manager:** {manager_name}")
 
             lines.append("")
             lines.append("### Raw YAML")
             lines.append("```yaml")
-            lines.append(
-                truncate_output(
-                    yaml.dump(data, default_flow_style=False), max_length=1500
-                )
-            )
+            lines.append(truncate_output(yaml.dump(data, default_flow_style=False), max_length=1500))
             lines.append("```")
         else:
             lines.append(f"```yaml\n{truncate_output(content, max_length=2000)}\n```")
@@ -152,9 +142,7 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
             lines.append(f"⚠️ User `{username}` not found in team `{team}`")
             lines.append(f"URL tried: {url}")
             lines.append("")
-            lines.append(
-                "Try a different team directory or check the username spelling."
-            )
+            lines.append("Try a different team directory or check the username spelling.")
         else:
             lines.append(f"❌ HTTP Error: {e.code} {e.reason}")
     except Exception as e:
@@ -163,9 +151,7 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _appinterface_search_impl(
-    query: str, file_type: str, path: str
-) -> list[TextContent]:
+async def _appinterface_search_impl(query: str, file_type: str, path: str) -> list[TextContent]:
     """Implementation of appinterface_search tool."""
     repo_path = path or APP_INTERFACE_PATH
     if not repo_path or not os.path.isdir(repo_path):

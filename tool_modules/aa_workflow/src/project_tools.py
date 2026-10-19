@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
-
 from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
@@ -72,9 +71,7 @@ def _save_config(config: dict) -> bool:
 
 def _detect_language(project_path: Path) -> str:
     """Detect project language from config files."""
-    if (project_path / "pyproject.toml").exists() or (
-        project_path / "setup.py"
-    ).exists():
+    if (project_path / "pyproject.toml").exists() or (project_path / "setup.py").exists():
         return "python"
     if (project_path / "package.json").exists():
         return "javascript"
@@ -183,9 +180,7 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
                 if "eslint" in scripts:
                     return "npm run eslint"
             except (json.JSONDecodeError, OSError) as e:
-                logger.debug(
-                    f"Suppressed error in _detect_lint_command (package.json): {e}"
-                )
+                logger.debug(f"Suppressed error in _detect_lint_command (package.json): {e}")
         return "npm run lint"
 
     if language == "go":
@@ -197,9 +192,7 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
 def _detect_test_command(project_path: Path, language: str) -> str:
     """Detect test command based on project type."""
     if language == "python":
-        if (project_path / "pytest.ini").exists() or (
-            project_path / "pyproject.toml"
-        ).exists():
+        if (project_path / "pytest.ini").exists() or (project_path / "pyproject.toml").exists():
             return "pytest tests/ -v"
         return "python -m pytest"
 
@@ -212,9 +205,7 @@ def _detect_test_command(project_path: Path, language: str) -> str:
                 if "test" in scripts:
                     return "npm test"
             except (json.JSONDecodeError, OSError) as e:
-                logger.debug(
-                    f"Suppressed error in _detect_test_command (package.json): {e}"
-                )
+                logger.debug(f"Suppressed error in _detect_test_command (package.json): {e}")
         return "npm test"
 
     if language == "go":
@@ -267,9 +258,7 @@ def _generate_test_setup(project_path: Path, language: str) -> str:
         )
 
         # Check for docker-compose
-        if (project_path / "docker-compose.yml").exists() or (
-            project_path / "docker-compose.yaml"
-        ).exists():
+        if (project_path / "docker-compose.yml").exists() or (project_path / "docker-compose.yaml").exists():
             lines.extend(
                 [
                     "# 3. Start services:",
@@ -524,9 +513,7 @@ async def _project_add_impl(
     lines.append("```")
 
     lines.append("\n### Next Steps\n")
-    lines.append(
-        f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge"
-    )
+    lines.append(f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge")
     lines.append(f"2. Verify GitLab access: `gitlab_mr_list(project='{gitlab}')`")
     lines.append(f"3. Verify Jira access: `jira_list_issues(project='{jira_project}')`")
 
@@ -554,9 +541,7 @@ async def _project_remove_impl(name: str, confirm: bool = False) -> list[TextCon
         lines.append("```json")
         lines.append(json.dumps({name: entry}, indent=2))
         lines.append("```")
-        lines.append(
-            f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*"
-        )
+        lines.append(f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*")
         return [TextContent(type="text", text="\n".join(lines))]
 
     # Remove from config
@@ -616,8 +601,7 @@ async def _project_update_impl(
         return [
             TextContent(
                 type="text",
-                text=f"❌ Project '{name}' not found.\n\n"
-                f"Available: {', '.join(available) if available else 'none'}",
+                text=f"❌ Project '{name}' not found.\n\nAvailable: {', '.join(available) if available else 'none'}",
             )
         ]
 

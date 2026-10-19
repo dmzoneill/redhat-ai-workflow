@@ -119,9 +119,7 @@ def text_to_rich_blocks(text: str) -> list[dict[str, Any]]:
 
     # Wrap in rich_text block
     if not elements:
-        elements = [
-            {"type": "rich_text_section", "elements": [{"type": "text", "text": text}]}
-        ]
+        elements = [{"type": "rich_text_section", "elements": [{"type": "text", "text": text}]}]
 
     return [{"type": "rich_text", "elements": elements}]
 
@@ -362,8 +360,7 @@ def get_channel_sections_summary(data: dict[str, Any]) -> dict[str, Any]:
         sections.append(
             {
                 "id": section.get("channel_section_id", ""),
-                "name": section.get("name", "")
-                or section_type.replace("_", " ").title(),
+                "name": section.get("name", "") or section_type.replace("_", " ").title(),
                 "type": section_type,
                 "emoji": section.get("emoji", ""),
                 "channel_count": len(channel_ids),
@@ -448,9 +445,7 @@ def _shared_get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
         "service_commands": service_commands,
         "global_actions": global_actions,
         "message_actions": message_actions,
-        "total_commands": len(core_commands)
-        + len(app_commands)
-        + len(service_commands),
+        "total_commands": len(core_commands) + len(app_commands) + len(service_commands),
         "total_actions": len(global_actions) + len(message_actions),
     }
 
@@ -531,9 +526,7 @@ def extract_avatar_hash(profile: dict[str, Any]) -> str:
                     if len(segments) >= 3:
                         return segments[-2]
                 elif "_" in last_part:
-                    segments = (
-                        last_part.replace(".jpg", "").replace(".png", "").split("_")
-                    )
+                    segments = last_part.replace(".jpg", "").replace(".png", "").split("_")
                     if len(segments) >= 2:
                         return segments[1]
 

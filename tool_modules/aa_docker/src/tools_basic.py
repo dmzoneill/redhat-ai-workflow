@@ -41,7 +41,6 @@ System tools:
 import logging
 
 from fastmcp import FastMCP
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -80,9 +79,7 @@ async def _docker_compose_status_impl(
         return f"❌ Docker not running or not available: {output}"
 
     if not output.strip():
-        return "No containers running" + (
-            f" matching '{filter_name}'" if filter_name else ""
-        )
+        return "No containers running" + (f" matching '{filter_name}'" if filter_name else "")
 
     lines = ["## Docker Containers", ""]
     for line in output.strip().split("\n"):
@@ -129,18 +126,14 @@ async def _shared__docker_compose_up_impl(
 
 
 @auto_heal()
-async def _docker_compose_up_impl(
-    repo: str, detach: bool = True, services: str = "", timeout: int = 180
-) -> str:
+async def _docker_compose_up_impl(repo: str, detach: bool = True, services: str = "", timeout: int = 180) -> str:
     return await _shared__docker_compose_up_impl(repo, detach, services, timeout)
 
 
 _docker_compose_up_impl.__doc__ = _shared__docker_compose_up_impl.__doc__
 
 
-async def _shared__docker_cp_impl(
-    source: str, destination: str, to_container: bool = True
-) -> str:
+async def _shared__docker_cp_impl(source: str, destination: str, to_container: bool = True) -> str:
     """
     Copy files to/from a Docker container.
 
@@ -167,18 +160,14 @@ async def _shared__docker_cp_impl(
 
 
 @auto_heal()
-async def _docker_cp_impl(
-    source: str, destination: str, to_container: bool = True
-) -> str:
+async def _docker_cp_impl(source: str, destination: str, to_container: bool = True) -> str:
     return await _shared__docker_cp_impl(source, destination, to_container)
 
 
 _docker_cp_impl.__doc__ = _shared__docker_cp_impl.__doc__
 
 
-async def _shared__docker_exec_impl(
-    container: str, command: str, timeout: int = 300
-) -> str:
+async def _shared__docker_exec_impl(container: str, command: str, timeout: int = 300) -> str:
     """
     Execute a command in a running Docker container.
 
@@ -342,13 +331,8 @@ async def _docker_ps_impl(
     if not success:
         return f"❌ Failed to list containers: {output}"
 
-    if (
-        not output.strip()
-        or output.strip() == "CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS"
-    ):
-        return "No containers found" + (
-            " matching filters" if filter_name or filter_status else ""
-        )
+    if not output.strip() or output.strip() == "CONTAINER ID\tNAMES\tIMAGE\tSTATUS\tPORTS":
+        return "No containers found" + (" matching filters" if filter_name or filter_status else "")
 
     return f"## Docker Containers\n\n```\n{output}\n```"
 

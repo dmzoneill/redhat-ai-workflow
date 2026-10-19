@@ -76,9 +76,7 @@ class SkillTemplateEngine:
             return text
 
         is_slack = self.inputs.get("slack_format", False)
-        gitlab_url = self.config.get("gitlab", {}).get(
-            "url", "https://gitlab.cee.redhat.com"
-        )
+        gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
         if project is None:
             # Resolve from config: use the first repository's gitlab path
             repos = self.config.get("repositories", {})
