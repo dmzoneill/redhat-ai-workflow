@@ -87,9 +87,10 @@ scripts/debug_*.py
 # Super-linter output
 .super-linter-output/
 
-# TypeScript/JavaScript compiled output
+# TypeScript/JavaScript compiled output and vendored installs
 **/out/
 **/dist/
+node_modules/
 
 # Tool module backup files (auto-generated during refactoring)
 tool_modules/*/src/backup/
