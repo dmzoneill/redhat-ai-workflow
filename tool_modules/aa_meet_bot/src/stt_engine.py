@@ -11,7 +11,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Callable, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 
 import numpy as np
 
@@ -47,6 +47,7 @@ class StreamingConfig:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class NPUStats:
     """Real-time NPU inference statistics."""
 
@@ -73,6 +74,7 @@ class NPUStats:
         return (self.total_inference_time / self.inference_count) * 1000
 
 
+# pylint: disable-next=too-many-instance-attributes
 class NPUWhisperSTT:
     """
     Real-time Speech-to-Text using Whisper on Intel NPU.
@@ -95,9 +97,9 @@ class NPUWhisperSTT:
         """
         self.device = device
         self.model_dir = model_dir or WHISPER_MODEL_DIR
-        self._pipeline = None
+        self._pipeline: Any = None
         self._initialized = False
-        self._actual_device = None
+        self._actual_device: Optional[str] = None
 
         # Streaming state
         self._audio_buffer: deque = deque(maxlen=int(16000 * 30))  # 30s max
@@ -113,10 +115,11 @@ class NPUWhisperSTT:
             return True
 
         try:
+            # pylint: disable-next=import-outside-toplevel
             import openvino_genai as ov_genai
 
             if not self.model_dir.exists():
-                logger.error(f"Whisper model not found at {self.model_dir}")
+                logger.error("Whisper model not found at %s", self.model_dir)
                 logger.info(
                     "Download with: huggingface-cli download OpenVINO/whisper-base-fp16-ov"
                 )
@@ -127,7 +130,7 @@ class NPUWhisperSTT:
                 [self.device, "CPU"] if self.device == "NPU" else [self.device]
             ):
                 try:
-                    logger.info(f"Loading Whisper on {device}...")
+                    logger.info("Loading Whisper on %s...", device)
                     start = time.time()
                     self._pipeline = ov_genai.WhisperPipeline(
                         str(self.model_dir), device
@@ -135,10 +138,10 @@ class NPUWhisperSTT:
                     load_time = time.time() - start
                     self._actual_device = device
                     self._initialized = True
-                    logger.info(f"✅ Whisper loaded on {device} in {load_time:.2f}s")
+                    logger.info("✅ Whisper loaded on %s in %.2fs", device, load_time)
                     return True
                 except Exception as e:
-                    logger.warning(f"Failed to load on {device}: {e}")
+                    logger.warning("Failed to load on %s: %s", device, e)
                     if device == "NPU":
                         logger.info("Falling back to CPU...")
                         continue
@@ -147,8 +150,10 @@ class NPUWhisperSTT:
         except ImportError:
             logger.error("openvino_genai not installed. Run: uv add openvino-genai")
             return False
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to initialize STT: {e}")
+            logger.error("Failed to initialize STT: %s", e)
             return False
 
         return False
@@ -173,6 +178,7 @@ class NPUWhisperSTT:
         try:
             # Resample if needed
             if sample_rate != 16000:
+                # pylint: disable-next=import-outside-toplevel
                 import scipy.signal
 
                 num_samples = int(len(audio) * 16000 / sample_rate)
@@ -209,8 +215,11 @@ class NPUWhisperSTT:
                 text = str(result).strip() if result else ""
 
             logger.debug(
-                f"Transcribed {duration:.1f}s in {processing_time:.2f}s"
-                f" (RTF: {rtf:.2f}) [inf #{self.stats.inference_count}]"
+                "Transcribed %.1fs in %.2fs (RTF: %.2f) [inf #%s]",
+                duration,
+                processing_time,
+                rtf,
+                self.stats.inference_count,
             )
 
             return TranscriptionResult(
@@ -221,8 +230,10 @@ class NPUWhisperSTT:
                 processing_time=processing_time,
             )
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Transcription error: {e}")
+            logger.error("Transcription error: %s", e)
             return TranscriptionResult(text="", confidence=0.0)
 
     def _detect_silence(self, audio: np.ndarray, threshold: float = 0.01) -> bool:
@@ -230,6 +241,7 @@ class NPUWhisperSTT:
         rms = np.sqrt(np.mean(audio**2))
         return rms < threshold
 
+    # pylint: disable-next=too-many-locals,too-many-branches
     async def transcribe_stream(
         self,
         audio_stream: AsyncIterator[np.ndarray],
@@ -324,6 +336,7 @@ class NPUWhisperSTT:
     async def transcribe_file(self, audio_path: Path) -> TranscriptionResult:
         """Transcribe an audio file."""
         try:
+            # pylint: disable-next=import-outside-toplevel
             import soundfile as sf
 
             audio, sample_rate = sf.read(str(audio_path))
@@ -334,8 +347,10 @@ class NPUWhisperSTT:
 
             return await self.transcribe(audio, sample_rate)
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to transcribe file: {e}")
+            logger.error("Failed to transcribe file: %s", e)
             return TranscriptionResult(text="", confidence=0.0)
 
     def get_device_info(self) -> dict:
@@ -386,7 +401,7 @@ class RealtimeSTT:
         self.source_name = source_name
         self.stt = NPUWhisperSTT(device=device)
         self._running = False
-        self._audio_queue: asyncio.Queue = None
+        self._audio_queue: asyncio.Queue[Any] | None = None
 
     async def start(
         self,
@@ -426,8 +441,6 @@ class RealtimeSTT:
     async def _capture_audio(self, config: StreamingConfig):
         """Capture audio from PulseAudio source."""
         try:
-            pass
-
             # Use parec to capture audio
             cmd = [
                 "parec",
@@ -450,26 +463,37 @@ class RealtimeSTT:
             chunk_size = int(
                 config.sample_rate * config.chunk_duration * 4
             )  # 4 bytes per float32
+            audio_queue = self._audio_queue
+            if audio_queue is None:
+                return
 
             while self._running:
-                data = await proc.stdout.read(chunk_size)
+                stdout = proc.stdout
+                if stdout is None:
+                    break
+                data = await stdout.read(chunk_size)
                 if not data:
                     break
 
                 # Convert to numpy
                 audio = np.frombuffer(data, dtype=np.float32)
-                await self._audio_queue.put(audio)
+                await audio_queue.put(audio)
 
             proc.terminate()
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Audio capture error: {e}")
+            logger.error("Audio capture error: %s", e)
 
     async def _audio_generator(self) -> AsyncIterator[np.ndarray]:
         """Generate audio chunks from queue."""
+        audio_queue = self._audio_queue
+        if audio_queue is None:
+            return
         while self._running:
             try:
-                chunk = await asyncio.wait_for(self._audio_queue.get(), timeout=1.0)
+                chunk = await asyncio.wait_for(audio_queue.get(), timeout=1.0)
                 yield chunk
             except asyncio.TimeoutError:
                 continue
@@ -480,11 +504,13 @@ class RealtimeSTT:
 
 
 # Global instance
+# pylint: disable-next=invalid-name
 _stt_engine: Optional[NPUWhisperSTT] = None
 
 
 def get_stt_engine(device: str = "NPU") -> NPUWhisperSTT:
     """Get or create the global STT engine."""
+    # pylint: disable-next=global-statement
     global _stt_engine
     if _stt_engine is None:
         _stt_engine = NPUWhisperSTT(device=device)

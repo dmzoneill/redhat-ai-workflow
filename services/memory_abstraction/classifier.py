@@ -210,12 +210,16 @@ class IntentClassifier:
                 result = await self._npu_classify(query)
                 if result and result.confidence > 0.7:
                     logger.debug(
-                        f"NPU classification: {result.intent} ({result.confidence:.2f})"
+                        "NPU classification: %s (%.2f)",
+                        result.intent,
+                        result.confidence,
                     )
                     return result
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 logger.warning(
-                    f"NPU classification failed, falling back to keywords: {e}"
+                    "NPU classification failed, falling back to keywords: %s", e
                 )
 
         # Fall back to keyword-based classification
@@ -252,7 +256,7 @@ class IntentClassifier:
             )
 
         # Get highest scoring intent
-        best_intent = max(scores, key=scores.get)
+        best_intent = max(scores, key=lambda intent: scores[intent])
         max_score = scores[best_intent]
 
         # Normalize confidence (0.5 - 1.0 range)
@@ -275,18 +279,21 @@ class IntentClassifier:
 
         try:
             # Try to import the Ollama client
+            # pylint: disable-next=import-outside-toplevel
             from tool_modules.aa_ollama.src.client import OllamaClient
 
             client = OllamaClient(instance="npu")
-            # Quick health check
-            self._npu_available = await client.is_available()
+            # is_available() is synchronous; awaiting a bool raises TypeError.
+            self._npu_available = client.is_available()
             self._npu_client = client if self._npu_available else None
 
         except ImportError:
             logger.debug("Ollama client not available")
             self._npu_available = False
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"NPU not available: {e}")
+            logger.debug("NPU not available: %s", e)
             self._npu_available = False
 
         return self._npu_available
@@ -314,11 +321,10 @@ Respond with JSON only:
 Available sources: code, slack, yaml, inscope, jira"""
 
         try:
-            response = await self._npu_client.generate(
-                model="qwen2.5:0.5b",
+            response = self._npu_client.generate(
                 prompt=prompt,
-                format="json",
-                options={"temperature": 0.1},  # Low temperature for consistency
+                model="qwen2.5:0.5b",
+                temperature=0.1,
             )
 
             # Parse response
@@ -330,10 +336,12 @@ Available sources: code, slack, yaml, inscope, jira"""
             )
 
         except json.JSONDecodeError:
-            logger.warning(f"NPU returned invalid JSON: {response[:100]}")
+            logger.warning("NPU returned invalid JSON: %s", response[:100])
             return None
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"NPU classification error: {e}")
+            logger.warning("NPU classification error: %s", e)
             return None
 
     async def learn(
@@ -369,12 +377,14 @@ Available sources: code, slack, yaml, inscope, jira"""
                 f.write(json.dumps(entry) + "\n")
 
             logger.info(
-                f"Recorded intent learning: {correct_intent} for '{query[:50]}...'"
+                "Recorded intent learning: %s for '%s...'", correct_intent, query[:50]
             )
             return True
 
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to record learning: {e}")
+            logger.error("Failed to record learning: %s", e)
             return False
 
     def _get_default_sources(self) -> list[str]:
@@ -400,7 +410,7 @@ Available sources: code, slack, yaml, inscope, jira"""
     def add_pattern(self, pattern: IntentPattern) -> None:
         """Add a custom intent pattern."""
         self.patterns.append(pattern)
-        logger.debug(f"Added intent pattern: {pattern.intent}")
+        logger.debug("Added intent pattern: %s", pattern.intent)
 
     def get_training_stats(self) -> dict[str, Any]:
         """Get statistics about training data."""
@@ -419,7 +429,9 @@ Available sources: code, slack, yaml, inscope, jira"""
                     count += 1
                     intent = entry.get("intent", "unknown")
                     intents[intent] = intents.get(intent, 0) + 1
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Error reading training data: {e}")
+            logger.error("Error reading training data: %s", e)
 
         return {"count": count, "intents": intents}

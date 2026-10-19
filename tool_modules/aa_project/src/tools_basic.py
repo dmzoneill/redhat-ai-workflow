@@ -31,13 +31,12 @@ from tool_modules.aa_workflow.src.project_tools import (
     _project_remove_impl,
     _project_update_impl,
     _save_config,
+    _shared_register_project_tools,
     _validate_project_entry,
 )
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
-
-from tool_modules.aa_workflow.src.project_tools import _shared_register_project_tools
 
 # Re-export for backwards compatibility
 __all__ = [
@@ -66,6 +65,7 @@ __all__ = [
 
 
 def register_tools(server: "FastMCP") -> int:
+    "Register tools."
     return _shared_register_project_tools(server)
 
 

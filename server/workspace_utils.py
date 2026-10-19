@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fastmcp import Context
 
+# pylint: disable-next=wrong-import-position
 from .workspace_state import (
     DEFAULT_PROJECT,
     ChatSession,
@@ -141,7 +142,10 @@ async def set_workspace_project(ctx: "Context", project: str) -> bool:
     Returns:
         True if project is valid, False otherwise
     """
+    # pylint: disable-next=import-outside-toplevel
     from .utils import load_config
+
+    # pylint: disable-next=import-outside-toplevel,redefined-outer-name
     from .workspace_state import WorkspaceRegistry
 
     # Validate project exists in config
@@ -157,14 +161,16 @@ async def set_workspace_project(ctx: "Context", project: str) -> bool:
         session.project = project
         session.is_project_auto_detected = False
         session.clear_filter_cache()  # Clear cache when project changes
-        logger.info(f"Set project to '{project}' for session {session.session_id}")
+        logger.info("Set project to '%s' for session %s", project, session.session_id)
     else:
         # Fallback to workspace level if no active session
         state.project = project
         state.is_auto_detected = False
         state.clear_filter_cache()
         logger.info(
-            f"Set project to '{project}' for workspace {state.workspace_uri} (no active session)"
+            "Set project to '%s' for workspace %s (no active session)",
+            project,
+            state.workspace_uri,
         )
 
     # Persist the change to disk
@@ -182,7 +188,7 @@ async def set_workspace_persona(ctx: "Context", persona: str) -> None:
     state = await get_workspace_from_ctx(ctx)
     state.persona = persona
     state.clear_filter_cache()  # Clear cache when persona changes
-    logger.info(f"Set persona to '{persona}' for workspace {state.workspace_uri}")
+    logger.info("Set persona to '%s' for workspace %s", persona, state.workspace_uri)
 
 
 async def set_workspace_issue(ctx: "Context", issue_key: str | None) -> None:
@@ -194,7 +200,7 @@ async def set_workspace_issue(ctx: "Context", issue_key: str | None) -> None:
     """
     state = await get_workspace_from_ctx(ctx)
     state.issue_key = issue_key
-    logger.debug(f"Set issue to '{issue_key}' for workspace {state.workspace_uri}")
+    logger.debug("Set issue to '%s' for workspace %s", issue_key, state.workspace_uri)
 
 
 async def set_workspace_branch(ctx: "Context", branch: str | None) -> None:
@@ -206,7 +212,7 @@ async def set_workspace_branch(ctx: "Context", branch: str | None) -> None:
     """
     state = await get_workspace_from_ctx(ctx)
     state.branch = branch
-    logger.debug(f"Set branch to '{branch}' for workspace {state.workspace_uri}")
+    logger.debug("Set branch to '%s' for workspace %s", branch, state.workspace_uri)
 
 
 async def set_workspace_tool_count(ctx: "Context", count: int) -> None:
@@ -220,7 +226,7 @@ async def set_workspace_tool_count(ctx: "Context", count: int) -> None:
     session = state.get_active_session()
     if session:
         session.tool_count = count
-    logger.debug(f"Set tool count to {count} for workspace {state.workspace_uri}")
+    logger.debug("Set tool count to %s for workspace %s", count, state.workspace_uri)
 
 
 async def get_workspace_state_dict(ctx: "Context") -> dict:
@@ -238,6 +244,7 @@ async def get_workspace_state_dict(ctx: "Context") -> dict:
     return state.to_dict()
 
 
+# pylint: disable-next=unused-argument
 async def is_tool_active_for_workspace(ctx: "Context", tool_module: str) -> bool:
     """Check if a tool module is active for the current workspace.
 
@@ -252,6 +259,7 @@ async def is_tool_active_for_workspace(ctx: "Context", tool_module: str) -> bool
     Returns:
         True (tool availability is now managed by persona loader)
     """
+    # pylint: disable-next=import-outside-toplevel
     import warnings
 
     warnings.warn(
@@ -284,7 +292,7 @@ async def ensure_session_exists(ctx: "Context", export: bool = True) -> ChatSess
 
     if not session:
         logger.info(
-            f"No active session, auto-creating for workspace {state.workspace_uri}"
+            "No active session, auto-creating for workspace %s", state.workspace_uri
         )
         session = state.create_session(name="Auto-created")
 

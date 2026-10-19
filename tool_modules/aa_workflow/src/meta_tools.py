@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,cyclic-import
 """Meta Tools - Dynamic tool discovery and execution.
 
 Provides tools for:
@@ -9,27 +10,30 @@ Provides tools for:
 import importlib.util
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+import yaml
 from fastmcp import Context, FastMCP
 from mcp.types import TextContent
 from server.tool_discovery import build_full_manifest, get_module_for_tool
 from server.tool_registry import ToolRegistry
-from tool_modules.aa_workflow.src.skill_engine import _shared__format_known_issues
+from tool_modules.aa_workflow.src.meta_tool_handlers import (
+    apply_tool_filter_impl,
+    context_filter_impl,
+    session_info_impl,
+    session_list_impl,
+    session_rename_impl,
+    session_switch_impl,
+    session_sync_impl,
+    tool_gap_update_impl,
+    tool_gaps_list_impl,
+    workspace_state_export_impl,
+    workspace_state_list_impl,
+)
+from tool_modules.aa_workflow.src.skill_engine import _format_known_issues
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT
-
-# Import tool filtering for context-aware recommendations
-try:
-    from tool_modules.aa_ollama.src.skill_discovery import detect_skill
-    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed
-
-    TOOL_FILTER_AVAILABLE = True
-except ImportError:
-    TOOL_FILTER_AVAILABLE = False
-    filter_tools_detailed = None  # type: ignore[assignment]
-    detect_skill = None  # type: ignore[assignment]
 
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 
@@ -40,83 +44,74 @@ logger = logging.getLogger(__name__)
 
 
 # Known issues checking - loads patterns from memory
-def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
-    """Check memory for known issues matching this tool/error."""
-    import yaml
-
+def _learned_matches(document: dict, error_lower: str, tool_lower: str) -> list:
+    """Collect learned error patterns that mention this tool or error."""
     matches = []
-    error_lower = error_text.lower() if error_text else ""
-    tool_lower = tool_name.lower() if tool_name else ""
-
-    try:
-        memory_dir = PROJECT_ROOT / "memory" / "learned"
-
-        patterns_file = memory_dir / "patterns.yaml"
-        if patterns_file.exists():
-            with open(patterns_file, encoding="utf-8") as f:
-                patterns = yaml.safe_load(f) or {}
-
-            # Check all pattern categories
-            for category in [
-                "error_patterns",
-                "auth_patterns",
-                "bonfire_patterns",
-                "pipeline_patterns",
-            ]:
-                for pattern in patterns.get(category, []):
-                    pattern_text = pattern.get("pattern", "").lower()
-                    if pattern_text and (
-                        pattern_text in error_lower or pattern_text in tool_lower
-                    ):
-                        matches.append(
-                            {
-                                "source": category,
-                                "pattern": pattern.get("pattern"),
-                                "meaning": pattern.get("meaning", ""),
-                                "fix": pattern.get("fix", ""),
-                                "commands": pattern.get("commands", []),
-                            }
-                        )
-
-        # Check tool_fixes.yaml
-        fixes_file = memory_dir / "tool_fixes.yaml"
-        if fixes_file.exists():
-            with open(fixes_file, encoding="utf-8") as f:
-                fixes = yaml.safe_load(f) or {}
-
-            for fix in fixes.get("tool_fixes", []):
-                if tool_name and fix.get("tool_name", "").lower() == tool_lower:
-                    matches.append(
-                        {
-                            "source": "tool_fixes",
-                            "tool_name": fix.get("tool_name"),
-                            "pattern": fix.get("error_pattern", ""),
-                            "fix": fix.get("fix_applied", ""),
-                        }
-                    )
-                elif error_text:
-                    fix_pattern = fix.get("error_pattern", "").lower()
-                    if fix_pattern and fix_pattern in error_lower:
-                        matches.append(
-                            {
-                                "source": "tool_fixes",
-                                "tool_name": fix.get("tool_name"),
-                                "pattern": fix.get("error_pattern", ""),
-                                "fix": fix.get("fix_applied", ""),
-                            }
-                        )
-
-    except Exception as exc:
-        logger.debug("Suppressed error: %s", exc)
-
+    categories = (
+        "error_patterns",
+        "auth_patterns",
+        "bonfire_patterns",
+        "pipeline_patterns",
+    )
+    for category in categories:
+        for pattern in document.get(category, []):
+            pattern_text = pattern.get("pattern", "").lower()
+            if pattern_text and (
+                pattern_text in error_lower or pattern_text in tool_lower
+            ):
+                matches.append(
+                    {
+                        "source": category,
+                        "pattern": pattern.get("pattern"),
+                        "meaning": pattern.get("meaning", ""),
+                        "fix": pattern.get("fix", ""),
+                        "commands": pattern.get("commands", []),
+                    }
+                )
     return matches
 
 
-def _format_known_issues(matches: list) -> str:
-    return _shared__format_known_issues(matches)
+def _fix_matches(document: dict, tool_name: str, error_lower: str) -> list:
+    """Collect tool-fix records that match this tool or error text."""
+    matches = []
+    tool_lower = tool_name.lower() if tool_name else ""
+    for fix in document.get("tool_fixes", []):
+        same_tool = tool_name and fix.get("tool_name", "").lower() == tool_lower
+        fix_pattern = fix.get("error_pattern", "").lower()
+        same_error = bool(error_lower) and fix_pattern and fix_pattern in error_lower
+        if same_tool or same_error:
+            matches.append(
+                {
+                    "source": "tool_fixes",
+                    "tool_name": fix.get("tool_name"),
+                    "pattern": fix.get("error_pattern", ""),
+                    "fix": fix.get("fix_applied", ""),
+                }
+            )
+    return matches
 
 
-_format_known_issues.__doc__ = _shared__format_known_issues.__doc__
+def _read_yaml(path) -> dict:
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
+    """Check memory for known issues matching this tool/error."""
+    error_lower = error_text.lower() if error_text else ""
+    tool_lower = tool_name.lower() if tool_name else ""
+    try:
+        memory_dir = PROJECT_ROOT / "memory" / "learned"
+        patterns = _read_yaml(memory_dir / "patterns.yaml")
+        fixes = _read_yaml(memory_dir / "tool_fixes.yaml")
+    except (yaml.YAMLError, OSError) as exc:
+        logger.debug("Suppressed error: %s", exc)
+        return []
+    matches = _learned_matches(patterns, error_lower, tool_lower)
+    matches.extend(_fix_matches(fixes, tool_name, error_lower))
+    return matches
 
 
 # ============== Dynamic Tool Discovery ==============
@@ -152,7 +147,10 @@ async def _tool_list_impl(module: str) -> list[TextContent]:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Unknown module: {module}\n\nAvailable: {', '.join(tool_registry.keys())}",
+                    text=(
+                        f"❌ Unknown module: {module}\n\n"
+                        f"Available: {', '.join(tool_registry.keys())}"
+                    ),
                 )
             ]
 
@@ -245,8 +243,8 @@ async def _handle_tool_exec_error(
                 lines.append("")
                 lines.append("💡 **Report this error:**")
                 lines.append(f"📝 [Create GitHub Issue]({issue_result['issue_url']})")
-        except Exception as issue_err:
-            logger.debug(f"Failed to create GitHub issue: {issue_err}")
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError) as issue_err:
+            logger.debug("Failed to create GitHub issue: %s", issue_err)
 
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -306,13 +304,21 @@ async def _tool_exec_impl(
         # Extract text from result
         return _extract_tool_result(result)
 
-    except Exception as e:
-        return await _handle_tool_exec_error(tool_name, str(e), args, create_issue_fn)
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Dynamic tools can raise anything; report it instead of killing the server.
+        return await _handle_tool_exec_error(tool_name, str(exc), args, create_issue_fn)
 
 
-def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa: C901
+def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
     """Register meta tools with the MCP server."""
     registry = ToolRegistry(server)
+    _register_lookup_tools(registry, create_issue_fn)
+    _register_session_tools(registry)
+    return registry.count
+
+
+def _register_lookup_tools(registry, create_issue_fn) -> None:
+    """Register discovery and workspace meta tools."""
 
     @registry.tool()
     async def tool_list(module: str = "") -> list[TextContent]:
@@ -380,135 +386,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             context_filter("deploy MR 1459 to ephemeral")
             # Returns: detected skill, recommended tools, memory state, etc.
         """
-        if not TOOL_FILTER_AVAILABLE:
-            return [
-                TextContent(
-                    type="text",
-                    text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
-                )
-            ]
-
-        try:
-            # Detect skill first
-            detected_skill = detect_skill(message) if detect_skill is not None else None
-
-            # Run the 4-layer filter
-            result = filter_tools_detailed(
-                message=message,
-                persona=persona,
-                detected_skill=detected_skill,
-            )
-
-            # Format the response
-            ctx = result.get("context", {})
-            lines = []
-
-            # Header
-            lines.append(f'## 🎯 Context Analysis for: "{message[:50]}..."')
-            lines.append("")
-
-            # Persona
-            persona_icon = {
-                "developer": "👨‍💻",
-                "devops": "🔧",
-                "incident": "🚨",
-                "release": "📦",
-            }.get(result["persona"], "👤")
-            if result.get("persona_auto_detected"):
-                lines.append(
-                    f"**Persona**: {persona_icon} {result['persona']} "
-                    f"(auto-detected via {result.get('persona_detection_reason', 'keyword')})"
-                )
-            else:
-                lines.append(f"**Persona**: {persona_icon} {result['persona']}")
-
-            # Skill
-            skill = ctx.get("skill", {})
-            if skill.get("name"):
-                lines.append(f"**Detected Skill**: 🎯 {skill['name']}")
-                if skill.get("description"):
-                    lines.append(f"  - {skill['description'][:100]}")
-                if skill.get("tools"):
-                    lines.append(f"  - Tools: {', '.join(skill['tools'][:10])}")
-                if skill.get("memory_ops"):
-                    mem_ops = skill["memory_ops"]
-                    if mem_ops.get("reads"):
-                        lines.append(f"  - Memory reads: {len(mem_ops['reads'])}")
-                    if mem_ops.get("writes"):
-                        lines.append(f"  - Memory writes: {len(mem_ops['writes'])}")
-            else:
-                lines.append("**Detected Skill**: None (will use general tools)")
-
-            lines.append("")
-
-            # Memory state
-            mem = ctx.get("memory_state", {})
-            lines.append("### 🧠 Memory State")
-            if mem.get("current_repo"):
-                lines.append(f"- Active repo: `{mem['current_repo']}`")
-            if mem.get("current_branch"):
-                lines.append(f"- Branch: `{mem['current_branch']}`")
-            active_issues = mem.get("active_issues", [])
-            if active_issues:
-                issue_keys = [i.get("key", str(i)) for i in active_issues[:3]]
-                lines.append(f"- Active issues: {', '.join(issue_keys)}")
-            if not any(
-                [mem.get("current_repo"), mem.get("current_branch"), active_issues]
-            ):
-                lines.append("- No active work context")
-
-            lines.append("")
-
-            # Learned patterns
-            patterns = ctx.get("learned_patterns", [])
-            if patterns:
-                lines.append("### 💡 Relevant Learned Patterns")
-                for p in patterns[:3]:
-                    lines.append(f"- **{p.get('pattern', 'Unknown')[:40]}**")
-                    if p.get("fix"):
-                        lines.append(f"  Fix: {p['fix'][:60]}")
-
-            # Semantic knowledge
-            semantic = ctx.get("semantic_knowledge", [])
-            if semantic:
-                lines.append("")
-                lines.append("### 🔍 Relevant Code (Semantic Search)")
-                for s in semantic[:3]:
-                    lines.append(f"- `{s.get('file', 'unknown')}`")
-                    if s.get("content"):
-                        lines.append(f"  ```\n  {s['content'][:100]}...\n  ```")
-
-            lines.append("")
-
-            # Recommended tools
-            tools = result.get("tools", [])
-            lines.append(f"### 📋 Recommended Tools ({len(tools)} tools)")
-            lines.append(
-                f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms"
-            )
-            lines.append("")
-
-            # Group tools by category
-            tool_groups: dict[str, list[str]] = {}
-            for t in tools:
-                prefix = t.split("_")[0] if "_" in t else "other"
-                if prefix not in tool_groups:
-                    tool_groups[prefix] = []
-                tool_groups[prefix].append(t)
-
-            for group, group_tools in sorted(tool_groups.items()):
-                lines.append(
-                    f"**{group}**: {', '.join(group_tools[:5])}"
-                    + (f" +{len(group_tools) - 5} more" if len(group_tools) > 5 else "")
-                )
-
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        except Exception as e:
-            logger.error(f"Context filter error: {e}")
-            return [
-                TextContent(type="text", text=f"❌ Error running context filter: {e}")
-            ]
+        return await context_filter_impl(message, persona)
 
     @registry.tool()
     async def apply_tool_filter(
@@ -541,179 +419,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             apply_tool_filter("deploy MR 1459 to ephemeral")
             # Hides git, jira, lint tools; keeps k8s, bonfire, gitlab, quay
         """
-        if not TOOL_FILTER_AVAILABLE:
-            return [
-                TextContent(
-                    type="text",
-                    text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
-                )
-            ]
-
-        if not ctx:
-            return [
-                TextContent(
-                    type="text",
-                    text="⚠️ Context not available - cannot apply filter dynamically.\n\n"
-                    "Use `context_filter` instead to see recommendations.",
-                )
-            ]
-
-        try:
-            # Get the FastMCP server from context
-            server: Any = ctx._fastmcp if hasattr(ctx, "_fastmcp") else None
-            if not server:
-                return [
-                    TextContent(
-                        type="text",
-                        text="⚠️ Server not available in context - cannot apply filter.\n\n"
-                        "Use `context_filter` instead to see recommendations.",
-                    )
-                ]
-
-            # Detect skill first
-            detected_skill = detect_skill(message) if detect_skill is not None else None
-
-            # Run the 4-layer filter
-            result = filter_tools_detailed(
-                message=message,
-                persona=persona,
-                detected_skill=detected_skill,
-            )
-
-            relevant_tools = set(result.get("tools", []))
-
-            # Core tools that should NEVER be removed
-            CORE_TOOLS = {
-                "persona_load",
-                "persona_list",
-                "session_start",
-                "session_info",
-                "session_list",
-                "session_switch",
-                "session_rename",
-                "debug_tool",
-                "memory_read",
-                "memory_write",
-                "memory_update",
-                "memory_append",
-                "memory_query",
-                "memory_session_log",
-                "memory_stats",
-                "check_known_issues",
-                "learn_tool_fix",
-                "skill_list",
-                "skill_run",
-                "tool_list",
-                "tool_exec",
-                "context_filter",
-                "apply_tool_filter",
-                "vpn_connect",
-                "kube_login",
-                "workspace_state_export",
-                "workspace_state_list",
-            }
-
-            # Get current tools
-            current_tools = {t.name for t in await server.list_tools()}
-            tools_to_keep = relevant_tools | CORE_TOOLS
-
-            # Track what we're hiding
-            hidden_tools = []
-            kept_tools = []
-
-            # Remove tools not in the filtered set
-            for tool_name in list(current_tools):
-                if tool_name not in tools_to_keep:
-                    try:
-                        server.remove_tool(tool_name)
-                        hidden_tools.append(tool_name)
-                    except Exception as e:
-                        logger.warning(f"Could not remove tool {tool_name}: {e}")
-                else:
-                    kept_tools.append(tool_name)
-
-            # Notify Cursor that tools changed
-            if hidden_tools:
-                try:
-                    if hasattr(ctx, "session"):
-                        session = ctx.session
-                        if session and hasattr(session, "send_tool_list_changed"):
-                            await session.send_tool_list_changed()
-                            logger.info(
-                                "Sent tools/list_changed notification to client"
-                            )
-                except ValueError as e:
-                    logger.debug(
-                        f"Could not send notification (expected in test mode): {e}"
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not send tool list changed: {e}")
-
-            # Format response
-            lines = [
-                "## ✅ Tool Filter Applied",
-                "",
-                f"**Task**: {message[:60]}{'...' if len(message) > 60 else ''}",
-                f"**Persona**: {result.get('persona', persona)}",
-            ]
-
-            if result.get("persona_auto_detected"):
-                lines.append(
-                    f"  _(auto-detected via {result.get('persona_detection_reason', 'keyword')})_"
-                )
-
-            if detected_skill:
-                lines.append(f"**Skill**: {detected_skill}")
-
-            lines.extend(
-                [
-                    "",
-                    "### 📊 Results",
-                    f"- **Tools available**: {len(kept_tools)}",
-                    f"- **Tools hidden**: {len(hidden_tools)}",
-                    f"- **Reduction**: {result.get('reduction_pct', 0):.1f}%",
-                    f"- **Latency**: {result.get('latency_ms', 0):.0f}ms",
-                    "",
-                ]
-            )
-
-            # Show kept tools by category
-            if kept_tools:
-                lines.append("### 🔧 Available Tools")
-                tool_groups: dict[str, list[str]] = {}
-                for t in sorted(kept_tools):
-                    prefix = t.split("_")[0] if "_" in t else "other"
-                    if prefix not in tool_groups:
-                        tool_groups[prefix] = []
-                    tool_groups[prefix].append(t)
-
-                for group, group_tools in sorted(tool_groups.items()):
-                    if len(group_tools) <= 5:
-                        lines.append(f"- **{group}**: {', '.join(group_tools)}")
-                    else:
-                        lines.append(
-                            f"- **{group}**: {', '.join(group_tools[:5])} +{len(group_tools) - 5} more"
-                        )
-
-            lines.extend(
-                [
-                    "",
-                    "---",
-                    "💡 **Tip**: Call `apply_tool_filter` again with a different message to re-filter,",
-                    "or use `persona_load` to restore all tools for a persona.",
-                ]
-            )
-
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        except Exception as e:
-            logger.error(f"Apply tool filter error: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return [
-                TextContent(type="text", text=f"❌ Error applying tool filter: {e}")
-            ]
+        return await apply_tool_filter_impl(ctx, message, persona)
 
     @registry.tool()
     async def workspace_state_export(ctx: Context) -> list[TextContent]:
@@ -726,31 +432,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             Export status and file path.
         """
-        try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
-
-            result = await export_workspace_state_async(ctx)
-
-            if result.get("success"):
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"✅ Exported {result['workspace_count']} workspace(s) to:\n"
-                        f"`{result['file']}`\n\n"
-                        "The VS Code extension will pick up changes automatically.",
-                    )
-                ]
-            else:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Export failed: {result.get('error', 'Unknown error')}",
-                    )
-                ]
-        except Exception as e:
-            return [TextContent(type="text", text=f"❌ Export error: {e}")]
+        return await workspace_state_export_impl(ctx)
 
     @registry.tool()
     async def workspace_state_list(ctx: Context) -> list[TextContent]:
@@ -763,68 +445,11 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             List of workspace states with session details.
         """
-        from server.workspace_state import WorkspaceRegistry
+        return await workspace_state_list_impl(ctx)
 
-        # Ensure current workspace is included
-        current_state = await WorkspaceRegistry.get_for_ctx(ctx)
-        current_session = current_state.get_active_session()
 
-        all_states = WorkspaceRegistry.get_all()
-
-        if not all_states:
-            return [TextContent(type="text", text="No active workspaces.")]
-
-        lines = ["## 🖥️ Active Workspaces & Sessions\n"]
-        total_sessions = 0
-
-        for uri, state in all_states.items():
-            is_current = uri == current_state.workspace_uri
-            marker = " ← *current*" if is_current else ""
-
-            lines.append(f"### `{uri}`{marker}")
-            lines.append(f"- **Project:** {state.project or 'default'}")
-
-            # Show sessions
-            session_count = state.session_count()
-            total_sessions += session_count
-            lines.append(f"- **Sessions:** {session_count}")
-
-            if state.sessions:
-                current_tools = state._get_loaded_tools()
-
-                for sid, session in state.sessions.items():
-                    is_active = sid == state.active_session_id
-                    is_this_chat = current_session and sid == current_session.session_id
-                    active_marker = " ✓ *active*" if is_active else ""
-                    this_chat_marker = " ← *this chat*" if is_this_chat else ""
-                    lines.append(
-                        f"  - `{sid[:8]}`{active_marker}{this_chat_marker}: {session.persona}"
-                    )
-                    if session.issue_key:
-                        lines.append(f"    - Issue: {session.issue_key}")
-                    if session.branch:
-                        lines.append(f"    - Branch: {session.branch}")
-                    tools = session.tool_count or len(current_tools)
-                    if tools:
-                        lines.append(f"    - Tools: {tools} loaded")
-
-            lines.append("")
-
-        lines.append(
-            f"*Total: {len(all_states)} workspace(s), {total_sessions} session(s)*"
-        )
-
-        # Auto-export to update VS Code extension
-        try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
-
-            await export_workspace_state_async(ctx)
-        except Exception as exc:
-            logger.debug("Suppressed error: %s", exc)
-
-        return [TextContent(type="text", text="\n".join(lines))]
+def _register_session_tools(registry) -> None:
+    """Register session and tool-gap meta tools."""
 
     @registry.tool()
     async def session_info(ctx: Context, session_id: str = "") -> list[TextContent]:
@@ -847,91 +472,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             session_info(session_id="abc123")  # Get YOUR session info
             session_info()                      # Get workspace's active session (shared)
         """
-        from datetime import datetime
-
-        from server.workspace_state import WorkspaceRegistry
-
-        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-
-        # If session_id provided, look up that specific session
-        if session_id:
-            session = workspace.get_session(session_id)
-            if not session:
-                available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Session `{session_id}` not found.\n\n"
-                        f"Available sessions: {', '.join(available) or 'none'}\n\n"
-                        "Use `session_start()` to create a new session.",
-                    )
-                ]
-            workspace.set_active_session(session_id)
-        else:
-            session = workspace.get_active_session()
-
-        if not session:
-            return [
-                TextContent(
-                    type="text",
-                    text="❌ No active session. Call `session_start()` first.",
-                )
-            ]
-
-        session_project = session.project or workspace.project or "default"
-        project_source = (
-            "(auto-detected)" if session.is_project_auto_detected else "(explicit)"
-        )
-
-        lines = [
-            "## 💬 Current Session Info\n",
-            "| Property | Value |",
-            "|----------|-------|",
-            f"| **Session ID** | `{session.session_id}` |",
-            f"| **Workspace** | `{workspace.workspace_uri}` |",
-            f"| **Project** | {session_project} {project_source} |",
-            f"| **Persona** | {session.persona} |",
-        ]
-
-        if session.issue_key:
-            lines.append(f"| **Issue** | {session.issue_key} |")
-        if session.branch:
-            lines.append(f"| **Branch** | {session.branch} |")
-
-        tools = session.tool_count or len(workspace._get_loaded_tools())
-        lines.append(f"| **Tools** | {tools} loaded |")
-
-        if session.started_at:
-            lines.append(f"| **Started** | {session.started_at.isoformat()} |")
-        if session.last_activity:
-            lines.append(f"| **Last Active** | {session.last_activity.isoformat()} |")
-
-        lines.append(f"\n*Session name: {session.name or 'unnamed'}*")
-
-        if session.last_tool:
-            time_ago = ""
-            if session.last_tool_time:
-                delta = datetime.now() - session.last_tool_time
-                if delta.total_seconds() < 60:
-                    time_ago = "just now"
-                elif delta.total_seconds() < 3600:
-                    time_ago = f"{int(delta.total_seconds() / 60)} min ago"
-                else:
-                    time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
-            lines.append(f"*Last tool: `{session.last_tool}` ({time_ago})*")
-            lines.append(f"*Total tool calls: {session.tool_call_count}*")
-
-        # Auto-export
-        try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
-
-            await export_workspace_state_async(ctx)
-        except Exception as exc:
-            logger.debug("Suppressed error: %s", exc)
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await session_info_impl(ctx, session_id)
 
     @registry.tool()
     async def session_rename(
@@ -953,45 +494,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             session_rename(name="Fixing billing calculation bug")
             session_rename(name="AAP-61214 - API refactor", session_id="abc123")
         """
-        from server.workspace_state import WorkspaceRegistry
-
-        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-
-        if session_id:
-            session = workspace.get_session(session_id)
-            if not session:
-                return [
-                    TextContent(
-                        type="text", text=f"❌ Session `{session_id}` not found."
-                    )
-                ]
-        else:
-            session = workspace.get_active_session()
-
-        if not session:
-            return [TextContent(type="text", text="❌ No active session to rename.")]
-
-        old_name = session.name or "(unnamed)"
-        session.name = name
-
-        # Save to disk
-        WorkspaceRegistry.save_to_disk()
-
-        # Export for VS Code extension
-        try:
-            from tool_modules.aa_workflow.src.workspace_exporter import (
-                export_workspace_state_async,
-            )
-
-            await export_workspace_state_async(ctx)
-        except Exception as exc:
-            logger.debug("Suppressed error: %s", exc)
-
-        return [
-            TextContent(
-                type="text", text=f"✅ Session renamed: `{old_name}` → `{name}`"
-            )
-        ]
+        return await session_rename_impl(ctx, name, session_id)
 
     @registry.tool()
     async def session_list(ctx: Context) -> list[TextContent]:
@@ -1004,65 +507,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             List of all sessions with their details.
         """
-        from datetime import datetime
-
-        from server.workspace_state import WorkspaceRegistry
-
-        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-        current_session = workspace.get_active_session()
-
-        if not workspace.sessions:
-            return [TextContent(type="text", text="No sessions in this workspace.")]
-
-        lines = ["## 📋 Sessions in this Workspace\n"]
-
-        # Sort by last activity (most recent first)
-        sorted_sessions = sorted(
-            workspace.sessions.values(),
-            key=lambda s: s.last_activity or datetime.min,
-            reverse=True,
-        )
-
-        for session in sorted_sessions:
-            is_current = (
-                current_session and session.session_id == current_session.session_id
-            )
-            marker = "→ " if is_current else "  "
-
-            # Format time ago
-            time_ago = "unknown"
-            if session.last_activity:
-                delta = datetime.now() - session.last_activity
-                if delta.total_seconds() < 60:
-                    time_ago = "just now"
-                elif delta.total_seconds() < 3600:
-                    time_ago = f"{int(delta.total_seconds() / 60)} min ago"
-                elif delta.total_seconds() < 86400:
-                    time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
-                else:
-                    time_ago = f"{int(delta.total_seconds() / 86400)} days ago"
-
-            name_display = f"**{session.name}**" if session.name else "*unnamed*"
-            lines.append(f"{marker}`{session.session_id}` - {name_display}")
-            lines.append(f"   Persona: {session.persona} | Active: {time_ago}")
-
-            if session.last_tool:
-                lines.append(
-                    f"   Last: `{session.last_tool}` ({session.tool_call_count} calls)"
-                )
-
-            if session.issue_key:
-                lines.append(f"   Issue: {session.issue_key}")
-
-            lines.append("")
-
-        lines.append(f"*Total: {len(workspace.sessions)} session(s)*")
-        lines.append("\n*Tip: Use `session_rename(name='...')` to name your sessions*")
-        lines.append(
-            "*Tip: Use `session_switch(session_id='...')` to switch to a different session*"
-        )
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await session_list_impl(ctx)
 
     @registry.tool()
     async def session_sync(ctx: Context) -> list[TextContent]:
@@ -1081,41 +526,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             Summary of sync operations performed.
         """
-        from server.workspace_state import WorkspaceRegistry
-        from tool_modules.aa_workflow.src.workspace_exporter import (
-            export_workspace_state_async,
-        )
-
-        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-
-        # Perform sync
-        result = workspace.sync_with_cursor_db()
-
-        # Save changes
-        WorkspaceRegistry.save_to_disk()
-
-        # Export for UI
-        await export_workspace_state_async(ctx)
-
-        total = sum(result.values())
-        if total == 0:
-            return [
-                TextContent(
-                    type="text", text="✅ Sessions already in sync with Cursor."
-                )
-            ]
-
-        lines = ["## 🔄 Session Sync Complete\n"]
-        if result["added"] > 0:
-            lines.append(f"- **Added:** {result['added']} session(s)")
-        if result["removed"] > 0:
-            lines.append(f"- **Removed:** {result['removed']} session(s)")
-        if result["renamed"] > 0:
-            lines.append(f"- **Renamed:** {result['renamed']} session(s)")
-
-        lines.append(f"\n*Total sessions: {len(workspace.sessions)}*")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await session_sync_impl(ctx)
 
     @registry.tool()
     async def session_switch(ctx: Context, session_id: str) -> list[TextContent]:
@@ -1135,50 +546,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Examples:
             session_switch(session_id="abc123")
         """
-        from server.workspace_state import WorkspaceRegistry
-
-        workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-
-        # Check if session exists
-        session = workspace.get_session(session_id)
-        if not session:
-            available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}",
-                )
-            ]
-
-        # Switch to the session
-        workspace.set_active_session(session_id)
-        session.touch()
-
-        # Save to disk
-        WorkspaceRegistry.save_to_disk()
-
-        # Build response
-        lines = [
-            f"✅ **Switched to session `{session_id}`**\n",
-            "| Property | Value |",
-            "|----------|-------|",
-            f"| **Name** | {session.name or '(unnamed)'} |",
-            f"| **Persona** | {session.persona} |",
-        ]
-
-        if session.issue_key:
-            lines.append(f"| **Issue** | {session.issue_key} |")
-        if session.branch:
-            lines.append(f"| **Branch** | {session.branch} |")
-
-        lines.append(f"| **Tool Calls** | {session.tool_call_count} |")
-
-        if session.last_tool:
-            lines.append(f"| **Last Tool** | `{session.last_tool}` |")
-
-        lines.append("\n*This session is now active for this chat.*")
-
-        return [TextContent(type="text", text="\n".join(lines))]
+        return await session_switch_impl(ctx, session_id)
 
     @registry.tool()
     async def tool_gaps_list(
@@ -1200,49 +568,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             List of tool gap requests with vote counts and context.
         """
-        try:
-            from tool_modules.aa_workflow.src.tool_gap_detector import tool_gap
-
-            gaps = tool_gap.get_gaps(status=status, limit=limit)
-
-            if not gaps:
-                return [
-                    TextContent(
-                        type="text", text=f"No tool gaps with status '{status}'."
-                    )
-                ]
-
-            lines = [f"## 🔧 Tool Gap Requests (status: {status})\n"]
-
-            for g in gaps:
-                lines.append(f"### `{g.get('suggested_tool_name', 'unknown')}`")
-                lines.append(
-                    f"**Votes:** {g.get('vote_count', 1)} | **Status:** {g.get('status', 'open')}"
-                )
-                lines.append(f"**Action:** {g.get('desired_action', 'N/A')}")
-
-                skills = g.get("requesting_skills", [])
-                if skills:
-                    lines.append(f"**Requested by:** {', '.join(skills)}")
-
-                if g.get("context"):
-                    lines.append(f"**Context:** {str(g.get('context'))[:100]}")
-
-                if g.get("workaround_used"):
-                    lines.append(f"**Workaround:** {g.get('workaround_used')}")
-
-                if g.get("suggested_args"):
-                    lines.append(f"**Suggested args:** `{g.get('suggested_args')}`")
-
-                lines.append("")
-
-            lines.append(f"*Total: {len(gaps)} gap(s) shown*")
-            lines.append("\n*Use `tool_gap_update(gap_id, status)` to update status*")
-
-            return [TextContent(type="text", text="\n".join(lines))]
-
-        except Exception as e:
-            return [TextContent(type="text", text=f"❌ Error loading tool gaps: {e}")]
+        return await tool_gaps_list_impl(status, limit)
 
     @registry.tool()
     async def tool_gap_update(gap_id: str, status: str) -> list[TextContent]:
@@ -1258,29 +584,4 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
         Returns:
             Confirmation of the update.
         """
-        try:
-            from tool_modules.aa_workflow.src.tool_gap_detector import tool_gap
-
-            valid_statuses = ["open", "in_progress", "implemented", "rejected"]
-            if status not in valid_statuses:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}",
-                    )
-                ]
-
-            if tool_gap.update_status(gap_id, status):
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"✅ Updated gap `{gap_id}` status to `{status}`",
-                    )
-                ]
-            else:
-                return [TextContent(type="text", text=f"❌ Gap `{gap_id}` not found")]
-
-        except Exception as e:
-            return [TextContent(type="text", text=f"❌ Error updating tool gap: {e}")]
-
-    return registry.count
+        return await tool_gap_update_impl(gap_id, status)

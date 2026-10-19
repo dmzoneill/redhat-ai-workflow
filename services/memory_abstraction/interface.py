@@ -26,6 +26,7 @@ Usage:
 import logging
 import time
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from .discovery import discover_and_load_all_adapters
@@ -76,12 +77,14 @@ class MemoryInterface:
         else:
             self._adapters = adapters or {}
 
-        logger.info(f"MemoryInterface initialized with {len(self._adapters)} adapters")
+        logger.info("MemoryInterface initialized with %s adapters", len(self._adapters))
 
+    # pylint: disable-next=too-many-locals
     async def query(
         self,
         question: str,
-        sources: list[SourceFilter | str | dict] | None = None,
+        sources: Sequence[SourceFilter | str | dict] | None = None,
+        # pylint: disable-next=unused-argument
         thread_context: list[dict] | None = None,
     ) -> QueryResult:
         """
@@ -145,10 +148,10 @@ class MemoryInterface:
             else:
                 # Get adapter instances
                 adapters_with_instances = []
-                for info, filter in adapter_filters:
+                for info, source_filter in adapter_filters:
                     instance = ADAPTER_MANIFEST.get_instance(info.name)
                     if instance:
-                        adapters_with_instances.append((info, filter, instance))
+                        adapters_with_instances.append((info, source_filter, instance))
 
                 # Execute queries in parallel
                 results = await self.executor.execute(
@@ -171,8 +174,10 @@ class MemoryInterface:
 
             return result
 
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Query failed: {e}", exc_info=True)
+            logger.error("Query failed: %s", e, exc_info=True)
 
             # Return error result
             return QueryResult(
@@ -192,7 +197,7 @@ class MemoryInterface:
     async def search(
         self,
         query: str,
-        sources: list[SourceFilter | str | dict] | None = None,
+        sources: Sequence[SourceFilter | str | dict] | None = None,
         limit: int = 10,
     ) -> QueryResult:
         """
@@ -235,10 +240,10 @@ class MemoryInterface:
 
         # Get instances and execute
         adapters_with_instances = []
-        for info, filter in adapter_filters:
+        for info, source_filter in adapter_filters:
             instance = ADAPTER_MANIFEST.get_instance(info.name)
             if instance:
-                adapters_with_instances.append((info, filter, instance))
+                adapters_with_instances.append((info, source_filter, instance))
 
         results = await self.executor.execute(
             adapters_with_instances,
@@ -311,6 +316,7 @@ class MemoryInterface:
             True if learning was recorded
         """
         # Store in YAML memory
+        # pylint: disable-next=import-outside-toplevel
         from datetime import datetime
 
         entry = {
@@ -355,7 +361,7 @@ class MemoryInterface:
 
     def _normalize_sources(
         self,
-        sources: list[SourceFilter | str | dict] | None,
+        sources: Sequence[SourceFilter | str | dict] | None,
     ) -> list[SourceFilter]:
         """Normalize sources to SourceFilter objects."""
         if not sources:
@@ -391,8 +397,10 @@ class MemoryInterface:
                     "sources": [s.name for s in sources],
                 }
             )
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Failed to emit query_started: {e}")
+            logger.debug("Failed to emit query_started: %s", e)
 
     async def _emit_query_completed(
         self,
@@ -414,8 +422,10 @@ class MemoryInterface:
                     "latency_ms": result.latency_ms,
                 }
             )
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Failed to emit query_completed: {e}")
+            logger.debug("Failed to emit query_completed: %s", e)
 
     async def health_check(self) -> dict[str, Any]:
         """
@@ -435,6 +445,8 @@ class MemoryInterface:
             try:
                 status = await instance.health_check()
                 results[name] = status.to_dict()
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 results[name] = {"healthy": False, "error": str(e)}
 
@@ -450,6 +462,7 @@ class MemoryInterface:
 
 
 # Singleton instance for easy access
+# pylint: disable-next=invalid-name
 _memory_interface: MemoryInterface | None = None
 
 
@@ -459,6 +472,7 @@ def get_memory_interface() -> MemoryInterface:
 
     Creates one if it doesn't exist.
     """
+    # pylint: disable-next=global-statement
     global _memory_interface
 
     if _memory_interface is None:
@@ -473,5 +487,6 @@ def set_memory_interface(interface: MemoryInterface) -> None:
 
     Used by server/main.py to set up the interface with WebSocket.
     """
+    # pylint: disable-next=global-statement
     global _memory_interface
     _memory_interface = interface

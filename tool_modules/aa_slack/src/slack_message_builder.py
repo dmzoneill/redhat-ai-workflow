@@ -126,100 +126,72 @@ def text_to_rich_blocks(text: str) -> list[dict[str, Any]]:
     return [{"type": "rich_text", "elements": elements}]
 
 
+_INLINE_PATTERN = (
+    r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|"
+    r"<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|"
+    r"\*[^*\n]+\*|_[^_\n]+_)"
+)
+
+
+def _channel_token(part: str) -> dict[str, Any] | None:
+    """Build a channel mention element, if the token matches."""
+    match = re.match(r"<#(C[A-Z0-9]+)(?:\|([^>]*))?>", part)
+    if not match:
+        return None
+    return {"type": "channel", "channel_id": match.group(1)}
+
+
+def _link_token(part: str) -> dict[str, Any] | None:
+    """Build a link element, if the token matches."""
+    match = re.match(r"<(https?://[^|>]+)(?:\|([^>]*))?>", part)
+    if not match:
+        return None
+    url = match.group(1)
+    link_text = match.group(2) if match.group(2) else url
+    return {"type": "link", "url": url, "text": link_text}
+
+
+def _styled_text_token(part: str) -> dict[str, Any] | None:
+    """Build a styled text element for code, bold, or italic tokens."""
+    if part.startswith("`") and part.endswith("`") and len(part) > 2:
+        return {"type": "text", "text": part[1:-1], "style": {"code": True}}
+    if part.startswith("*") and part.endswith("*") and len(part) > 2:
+        return {"type": "text", "text": part[1:-1], "style": {"bold": True}}
+    if part.startswith("_") and part.endswith("_") and len(part) > 2:
+        return {"type": "text", "text": part[1:-1], "style": {"italic": True}}
+    return None
+
+
+def _inline_token(part: str) -> dict[str, Any] | None:
+    """Convert one inline token into a rich-text element."""
+    if part.startswith("<@U"):
+        return {"type": "user", "user_id": part[2:-1]}
+    if part.startswith("<#C"):
+        return _channel_token(part)
+    if part.startswith("<http"):
+        return _link_token(part)
+    styled = _styled_text_token(part)
+    if styled is not None:
+        return styled
+    return {"type": "text", "text": part}
+
+
 def parse_inline_elements(text: str) -> list[dict[str, Any]]:
     """Parse inline elements (mentions, links, inline code, bold, italic) from text."""
     if not text.strip():
         return []
 
-    elements: list[dict[str, Any]] = []
     section_elements: list[dict[str, Any]] = []
-
-    # Pattern for user mentions, channel mentions, links, inline code, bold, and italic
-    pattern = r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)"
-
-    parts = re.split(pattern, text)
-
-    for part in parts:
+    for part in re.split(_INLINE_PATTERN, text):
         if not part:
             continue
+        token = _inline_token(part)
+        if token is not None:
+            section_elements.append(token)
 
-        if part.startswith("<@U"):
-            # User mention
-            user_id = part[2:-1]
-            section_elements.append({"type": "user", "user_id": user_id})
-
-        elif part.startswith("<#C"):
-            # Channel mention
-            match = re.match(r"<#(C[A-Z0-9]+)(?:\|([^>]*))?>", part)
-            if match:
-                channel_id = match.group(1)
-                section_elements.append(
-                    {
-                        "type": "channel",
-                        "channel_id": channel_id,
-                    }
-                )
-
-        elif part.startswith("<http"):
-            # Link
-            match = re.match(r"<(https?://[^|>]+)(?:\|([^>]*))?>", part)
-            if match:
-                url = match.group(1)
-                link_text = match.group(2) if match.group(2) else url
-                section_elements.append(
-                    {
-                        "type": "link",
-                        "url": url,
-                        "text": link_text,
-                    }
-                )
-
-        elif part.startswith("`") and part.endswith("`") and len(part) > 2:
-            # Inline code
-            code = part[1:-1]
-            section_elements.append(
-                {
-                    "type": "text",
-                    "text": code,
-                    "style": {"code": True},
-                }
-            )
-
-        elif part.startswith("*") and part.endswith("*") and len(part) > 2:
-            # Bold text
-            bold_text = part[1:-1]
-            section_elements.append(
-                {
-                    "type": "text",
-                    "text": bold_text,
-                    "style": {"bold": True},
-                }
-            )
-
-        elif part.startswith("_") and part.endswith("_") and len(part) > 2:
-            # Italic text
-            italic_text = part[1:-1]
-            section_elements.append(
-                {
-                    "type": "text",
-                    "text": italic_text,
-                    "style": {"italic": True},
-                }
-            )
-
-        else:
-            # Plain text
-            section_elements.append({"type": "text", "text": part})
-
-    if section_elements:
-        elements.append(
-            {
-                "type": "rich_text_section",
-                "elements": section_elements,
-            }
-        )
-
-    return elements
+    if not section_elements:
+        return []
+    return [{"type": "rich_text_section", "elements": section_elements}]
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +428,7 @@ def _shared_get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
+    "Get app commands summary."
     return _shared_get_app_commands_summary(data)
 
 

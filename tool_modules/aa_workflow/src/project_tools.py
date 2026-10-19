@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,cyclic-import
 """Project Tools - Manage projects in config.json.
 
 Provides tools for:
@@ -17,13 +18,6 @@ from mcp.types import TextContent
 from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
-# Support both package import and direct loading
-try:
-    from .constants import PROJECT_DIR
-except ImportError:
-    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
-    PROJECT_DIR = TOOL_MODULES_DIR.parent
-
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -33,7 +27,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = ["path", "gitlab", "jira_project", "default_branch"]
 
 # Optional fields with defaults
-OPTIONAL_FIELDS = {
+OPTIONAL_FIELDS: dict[str, Any] = {
     "jira_component": "",
     "lint_command": "",
     "test_command": "",
@@ -64,8 +58,9 @@ def _save_config(config: dict) -> bool:
             config_manager.update_section(section, data, merge=False)
         config_manager.flush()
         return True
-    except Exception as e:
-        logger.error(f"Failed to save config: {e}")
+    # ConfigManager can raise any Exception; callers expect False, not a crash.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to save config: %s", exc)
         return False
 
 
@@ -95,12 +90,13 @@ def _detect_default_branch(project_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             # refs/remotes/origin/main -> main
             return result.stdout.strip().split("/")[-1]
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_default_branch (symbolic-ref): {e}")
+        logger.debug("Suppressed error in _detect_default_branch (symbolic-ref): %s", e)
 
     # Fallback: check if main or master exists
     try:
@@ -110,6 +106,7 @@ def _detect_default_branch(project_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             branches = result.stdout
@@ -118,7 +115,7 @@ def _detect_default_branch(project_path: Path) -> str:
             if "origin/master" in branches:
                 return "master"
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_default_branch (branch list): {e}")
+        logger.debug("Suppressed error in _detect_default_branch (branch list): %s", e)
 
     return "main"  # Default
 
@@ -132,6 +129,7 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             url = result.stdout.strip()
@@ -150,46 +148,53 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
                     path = path[:-4]
                 return path
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_gitlab_remote: {e}")
+        logger.debug("Suppressed error in _detect_gitlab_remote: %s", e)
     return None
+
+
+def _python_lint_command(project_path: Path) -> str:
+    """Detect a Python lint command from project config."""
+    pyproject = project_path / "pyproject.toml"
+    if not pyproject.exists():
+        return "black --check . && flake8 ."
+    content = pyproject.read_text()
+    commands = []
+    if "black" in content or (project_path / ".black").exists():
+        commands.append("black --check .")
+    if "flake8" in content or (project_path / ".flake8").exists():
+        commands.append("flake8 .")
+    if "ruf" in content or (project_path / "ruff.toml").exists():
+        commands.append("ruff check .")
+    if commands:
+        return " && ".join(commands)
+    return "black --check . && flake8 ."
+
+
+def _package_script(project_path: Path, *script_names: str, default: str) -> str:
+    """Return an npm script command when package.json defines one of the names."""
+    package_json = project_path / "package.json"
+    if not package_json.exists():
+        return default
+    try:
+        with open(package_json, encoding="utf-8") as handle:
+            scripts = json.load(handle).get("scripts", {})
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.debug("Suppressed error reading package.json: %s", exc)
+        return default
+    for name in script_names:
+        if name in scripts:
+            return f"npm run {name}" if name != "test" else "npm test"
+    return default
 
 
 def _detect_lint_command(project_path: Path, language: str) -> str:
     """Detect lint command based on project type."""
     if language == "python":
-        # Check for common Python linters
-        if (project_path / "pyproject.toml").exists():
-            content = (project_path / "pyproject.toml").read_text()
-            commands = []
-            if "black" in content or (project_path / ".black").exists():
-                commands.append("black --check .")
-            if "flake8" in content or (project_path / ".flake8").exists():
-                commands.append("flake8 .")
-            if "ruf" in content or (project_path / "ruff.toml").exists():
-                commands.append("ruff check .")
-            if commands:
-                return " && ".join(commands)
-        return "black --check . && flake8 ."
-
+        return _python_lint_command(project_path)
     if language == "javascript":
-        if (project_path / "package.json").exists():
-            try:
-                with open(project_path / "package.json", encoding="utf-8") as f:
-                    pkg = json.load(f)
-                scripts = pkg.get("scripts", {})
-                if "lint" in scripts:
-                    return "npm run lint"
-                if "eslint" in scripts:
-                    return "npm run eslint"
-            except (json.JSONDecodeError, OSError) as e:
-                logger.debug(
-                    f"Suppressed error in _detect_lint_command (package.json): {e}"
-                )
-        return "npm run lint"
-
+        return _package_script(project_path, "lint", "eslint", default="npm run lint")
     if language == "go":
         return "go fmt ./... && go vet ./..."
-
     return ""
 
 
@@ -203,18 +208,7 @@ def _detect_test_command(project_path: Path, language: str) -> str:
         return "python -m pytest"
 
     if language == "javascript":
-        if (project_path / "package.json").exists():
-            try:
-                with open(project_path / "package.json", encoding="utf-8") as f:
-                    pkg = json.load(f)
-                scripts = pkg.get("scripts", {})
-                if "test" in scripts:
-                    return "npm test"
-            except (json.JSONDecodeError, OSError) as e:
-                logger.debug(
-                    f"Suppressed error in _detect_test_command (package.json): {e}"
-                )
-        return "npm test"
+        return _package_script(project_path, "test", default="npm test")
 
     if language == "go":
         return "go test ./..."
@@ -422,7 +416,76 @@ async def _project_detect_impl(path: str) -> list[TextContent]:
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _project_add_impl(
+def _with_detected_settings(
+    project_path: Path, settings: dict, auto_detect: bool
+) -> dict:
+    """Fill empty project settings from the filesystem when auto-detect is on."""
+    updated = dict(settings)
+    if not auto_detect or not project_path.exists():
+        return updated
+    language = _detect_language(project_path)
+    branch = updated.get("default_branch") or ""
+    if not branch or branch == "main":
+        detected_branch = _detect_default_branch(project_path)
+        if detected_branch:
+            updated["default_branch"] = detected_branch
+    if not updated.get("lint_command"):
+        updated["lint_command"] = _detect_lint_command(project_path, language)
+    if not updated.get("test_command"):
+        updated["test_command"] = _detect_test_command(project_path, language)
+    if not updated.get("scopes"):
+        updated["scopes"] = ",".join(_detect_scopes(project_path))
+    if not updated.get("test_setup"):
+        updated["test_setup"] = _generate_test_setup(project_path, language)
+    return updated
+
+
+def _project_entry(project_path: Path, settings: dict) -> dict:
+    """Build a config.json repository entry from project settings."""
+    entry = {
+        "path": str(project_path),
+        "gitlab": settings["gitlab"],
+        "jira_project": settings["jira_project"],
+        "default_branch": settings["default_branch"],
+    }
+    optional = (
+        "jira_component",
+        "lint_command",
+        "test_command",
+        "test_setup",
+        "konflux_namespace",
+        "scopes",
+    )
+    for key in optional:
+        value = settings.get(key) or ""
+        if not value:
+            continue
+        if key == "scopes":
+            entry[key] = [part.strip() for part in value.split(",") if part.strip()]
+        else:
+            entry[key] = value
+    return entry
+
+
+def _added_project_message(
+    name: str, gitlab: str, jira_project: str, entry: dict
+) -> str:
+    """Format the project_add success message."""
+    lines = [f"✅ **Project '{name}' added to config.json**\n"]
+    lines.append("### Configuration\n")
+    lines.append("```json")
+    lines.append(json.dumps({name: entry}, indent=2))
+    lines.append("```")
+    lines.append("\n### Next Steps\n")
+    lines.append(
+        f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge"
+    )
+    lines.append(f"2. Verify GitLab access: `gitlab_mr_list(project='{gitlab}')`")
+    lines.append(f"3. Verify Jira access: `jira_list_issues(project='{jira_project}')`")
+    return "\n".join(lines)
+
+
+async def _project_add_impl(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     name: str,
     path: str,
     gitlab: str,
@@ -436,166 +499,138 @@ async def _project_add_impl(
     scopes: str = "",
     auto_detect: bool = True,
 ) -> list[TextContent]:
-    """Add a new project to config.json."""
+    """Add a new project to config.json.
+
+    The parameter list matches the project_add MCP tool.
+    """
     config = _load_config()
-
-    if "repositories" not in config:
-        config["repositories"] = {}
-
-    # Check if project already exists
+    config.setdefault("repositories", {})
     if name in config["repositories"]:
         return [
             TextContent(
                 type="text",
-                text=f"❌ Project '{name}' already exists in config.json.\n\n"
-                f"Use `project_remove('{name}')` first if you want to replace it.",
+                text=(
+                    f"❌ Project '{name}' already exists in config.json.\n\n"
+                    f"Use `project_remove('{name}')` first if you want to replace it."
+                ),
             )
         ]
 
-    # Expand and validate path
     project_path = Path(path).expanduser().resolve()
-
-    # Auto-detect settings if enabled and path exists
-    if auto_detect and project_path.exists():
-        language = _detect_language(project_path)
-
-        if not default_branch or default_branch == "main":
-            detected_branch = _detect_default_branch(project_path)
-            if detected_branch:
-                default_branch = detected_branch
-
-        if not lint_command:
-            lint_command = _detect_lint_command(project_path, language)
-
-        if not test_command:
-            test_command = _detect_test_command(project_path, language)
-
-        if not scopes:
-            detected_scopes = _detect_scopes(project_path)
-            scopes = ",".join(detected_scopes)
-
-        if not test_setup:
-            test_setup = _generate_test_setup(project_path, language)
-
-    # Build entry
-    entry: dict[str, Any] = {
-        "path": str(project_path),
-        "gitlab": gitlab,
-        "jira_project": jira_project,
-        "default_branch": default_branch,
-    }
-
-    # Add optional fields if provided
-    if jira_component:
-        entry["jira_component"] = jira_component
-    if lint_command:
-        entry["lint_command"] = lint_command
-    if test_command:
-        entry["test_command"] = test_command
-    if test_setup:
-        entry["test_setup"] = test_setup
-    if konflux_namespace:
-        entry["konflux_namespace"] = konflux_namespace
-    if scopes:
-        entry["scopes"] = [s.strip() for s in scopes.split(",") if s.strip()]
-
-    # Validate
+    settings = _with_detected_settings(
+        project_path,
+        {
+            "gitlab": gitlab,
+            "jira_project": jira_project,
+            "jira_component": jira_component,
+            "lint_command": lint_command,
+            "test_command": test_command,
+            "test_setup": test_setup,
+            "default_branch": default_branch,
+            "konflux_namespace": konflux_namespace,
+            "scopes": scopes,
+        },
+        auto_detect,
+    )
+    entry = _project_entry(project_path, settings)
     errors = _validate_project_entry(entry)
     if errors:
-        return [
-            TextContent(
-                type="text",
-                text="❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
-            )
-        ]
-
-    # Add to config
+        detail = "\n".join(f"- {err}" for err in errors)
+        return [TextContent(type="text", text=f"❌ Validation errors:\n\n{detail}")]
     config["repositories"][name] = entry
-
-    # Save
     if not _save_config(config):
         return [TextContent(type="text", text="❌ Failed to save config.json")]
-
-    lines = [f"✅ **Project '{name}' added to config.json**\n"]
-    lines.append("### Configuration\n")
-    lines.append("```json")
-    lines.append(json.dumps({name: entry}, indent=2))
-    lines.append("```")
-
-    lines.append("\n### Next Steps\n")
-    lines.append(
-        f"1. Run `knowledge_scan(project='{name}')` to generate project knowledge"
-    )
-    lines.append(f"2. Verify GitLab access: `gitlab_mr_list(project='{gitlab}')`")
-    lines.append(f"3. Verify Jira access: `jira_list_issues(project='{jira_project}')`")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    message = _added_project_message(name, gitlab, jira_project, entry)
+    return [TextContent(type="text", text=message)]
 
 
 async def _project_remove_impl(name: str, confirm: bool = False) -> list[TextContent]:
     """Remove a project from config.json."""
     config = _load_config()
-
-    if "repositories" not in config or name not in config["repositories"]:
-        available = list(config.get("repositories", {}).keys())
+    repos = config.get("repositories", {})
+    if name not in repos:
+        available = ", ".join(repos) if repos else "none"
         return [
             TextContent(
                 type="text",
-                text=f"❌ Project '{name}' not found in config.json.\n\n"
-                f"Available projects: {', '.join(available) if available else 'none'}",
+                text=(
+                    f"❌ Project '{name}' not found in config.json.\n\n"
+                    f"Available projects: {available}"
+                ),
             )
         ]
-
     if not confirm:
-        entry = config["repositories"][name]
-        lines = [f"⚠️ **Confirm removal of project '{name}'**\n"]
-        lines.append("### Current Configuration\n")
-        lines.append("```json")
-        lines.append(json.dumps({name: entry}, indent=2))
-        lines.append("```")
-        lines.append(
-            f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*"
-        )
-        return [TextContent(type="text", text="\n".join(lines))]
-
-    # Remove from config
-    removed = config["repositories"].pop(name)
-
-    # Also check and remove from related sections
-    removed_from = []
-
-    # Check quay.repositories
-    if "quay" in config and "repositories" in config["quay"]:
-        if name in config["quay"]["repositories"]:
-            del config["quay"]["repositories"][name]
-            removed_from.append("quay.repositories")
-
-    # Check saas_pipelines.namespaces
-    if "saas_pipelines" in config and "namespaces" in config["saas_pipelines"]:
-        if name in config["saas_pipelines"]["namespaces"]:
-            del config["saas_pipelines"]["namespaces"][name]
-            removed_from.append("saas_pipelines.namespaces")
-
-    # Save
+        return [_project_removal_preview(name, repos[name])]
+    removed = repos.pop(name)
+    removed_from = _drop_related_project(config, name)
     if not _save_config(config):
         return [TextContent(type="text", text="❌ Failed to save config.json")]
+    return [_project_removed_message(name, removed, removed_from)]
 
+
+def _project_removal_preview(name: str, entry: dict) -> TextContent:
+    lines = [f"⚠️ **Confirm removal of project '{name}'**\n"]
+    lines.append("### Current Configuration\n")
+    lines.append("```json")
+    lines.append(json.dumps({name: entry}, indent=2))
+    lines.append("```")
+    lines.append(
+        f"\n*Run `project_remove('{name}', confirm=True)` to confirm removal.*"
+    )
+    return TextContent(type="text", text="\n".join(lines))
+
+
+def _drop_related_project(config: dict, name: str) -> list[str]:
+    removed_from = []
+    quay_repos = config.get("quay", {}).get("repositories", {})
+    if name in quay_repos:
+        del quay_repos[name]
+        removed_from.append("quay.repositories")
+    namespaces = config.get("saas_pipelines", {}).get("namespaces", {})
+    if name in namespaces:
+        del namespaces[name]
+        removed_from.append("saas_pipelines.namespaces")
+    return removed_from
+
+
+def _project_removed_message(
+    name: str, removed: dict, removed_from: list[str]
+) -> TextContent:
     lines = [f"✅ **Project '{name}' removed from config.json**\n"]
-
     if removed_from:
         lines.append("Also removed from:")
-        for section in removed_from:
-            lines.append(f"- `{section}`")
-
+        lines.extend(f"- `{section}`" for section in removed_from)
     lines.append("\n### Removed Configuration\n")
     lines.append("```json")
     lines.append(json.dumps({name: removed}, indent=2))
     lines.append("```")
+    return TextContent(type="text", text="\n".join(lines))
 
-    return [TextContent(type="text", text="\n".join(lines))]
+
+def _collect_project_updates(entry: dict, values: dict) -> list[str]:
+    """Apply non-empty project fields and return the keys that changed."""
+    updated = []
+    for key, value in values.items():
+        if not value:
+            continue
+        if key == "path":
+            entry["path"] = str(Path(value).expanduser().resolve())
+        elif key == "scopes":
+            entry["scopes"] = [
+                part.strip() for part in value.split(",") if part.strip()
+            ]
+        else:
+            entry[key] = value
+        updated.append(key)
+    return updated
 
 
-async def _project_update_impl(
+def _missing_project_message(name: str, available: list[str]) -> str:
+    shown = ", ".join(available) if available else "none"
+    return f"❌ Project '{name}' not found.\n\nAvailable: {shown}"
+
+
+async def _project_update_impl(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     name: str,
     path: str = "",
     gitlab: str = "",
@@ -607,80 +642,54 @@ async def _project_update_impl(
     konflux_namespace: str = "",
     scopes: str = "",
 ) -> list[TextContent]:
-    """Update an existing project in config.json."""
+    """Update an existing project in config.json.
+
+    The parameter list matches the project_update MCP tool.
+    """
     config = _load_config()
+    repos = config.get("repositories", {})
+    if name not in repos:
+        text = _missing_project_message(name, list(repos))
+        return [TextContent(type="text", text=text)]
 
-    if "repositories" not in config or name not in config["repositories"]:
-        available = list(config.get("repositories", {}).keys())
-        return [
-            TextContent(
-                type="text",
-                text=f"❌ Project '{name}' not found.\n\nAvailable: {', '.join(available) if available else 'none'}",
-            )
-        ]
-
-    entry = config["repositories"][name]
-    updated_fields = []
-
-    # Update provided fields
-    if path:
-        entry["path"] = str(Path(path).expanduser().resolve())
-        updated_fields.append("path")
-    if gitlab:
-        entry["gitlab"] = gitlab
-        updated_fields.append("gitlab")
-    if jira_project:
-        entry["jira_project"] = jira_project
-        updated_fields.append("jira_project")
-    if jira_component:
-        entry["jira_component"] = jira_component
-        updated_fields.append("jira_component")
-    if lint_command:
-        entry["lint_command"] = lint_command
-        updated_fields.append("lint_command")
-    if test_command:
-        entry["test_command"] = test_command
-        updated_fields.append("test_command")
-    if default_branch:
-        entry["default_branch"] = default_branch
-        updated_fields.append("default_branch")
-    if konflux_namespace:
-        entry["konflux_namespace"] = konflux_namespace
-        updated_fields.append("konflux_namespace")
-    if scopes:
-        entry["scopes"] = [s.strip() for s in scopes.split(",") if s.strip()]
-        updated_fields.append("scopes")
-
+    entry = repos[name]
+    updated_fields = _collect_project_updates(
+        entry,
+        {
+            "path": path,
+            "gitlab": gitlab,
+            "jira_project": jira_project,
+            "jira_component": jira_component,
+            "lint_command": lint_command,
+            "test_command": test_command,
+            "default_branch": default_branch,
+            "konflux_namespace": konflux_namespace,
+            "scopes": scopes,
+        },
+    )
     if not updated_fields:
         return [
             TextContent(
                 type="text",
-                text="❌ No fields provided to update.\n\n"
-                "Provide at least one field to update (path, gitlab, jira_project, etc.)",
+                text=(
+                    "❌ No fields provided to update.\n\n"
+                    "Provide at least one field to update "
+                    "(path, gitlab, jira_project, etc.)"
+                ),
             )
         ]
-
-    # Validate
     errors = _validate_project_entry(entry)
     if errors:
-        return [
-            TextContent(
-                type="text",
-                text="❌ Validation errors:\n\n" + "\n".join(f"- {e}" for e in errors),
-            )
-        ]
-
-    # Save
+        detail = "\n".join(f"- {err}" for err in errors)
+        return [TextContent(type="text", text=f"❌ Validation errors:\n\n{detail}")]
     if not _save_config(config):
         return [TextContent(type="text", text="❌ Failed to save config.json")]
-
     lines = [f"✅ **Project '{name}' updated**\n"]
     lines.append(f"**Updated fields:** {', '.join(updated_fields)}\n")
     lines.append("### Current Configuration\n")
     lines.append("```json")
     lines.append(json.dumps({name: entry}, indent=2))
     lines.append("```")
-
     return [TextContent(type="text", text="\n".join(lines))]
 
 
@@ -725,7 +734,7 @@ def _shared_register_project_tools(server: "FastMCP") -> int:
         return await _project_detect_impl(path)
 
     @registry.tool()
-    async def project_add(
+    async def project_add(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         name: str,
         path: str,
         gitlab: str,
@@ -795,7 +804,7 @@ def _shared_register_project_tools(server: "FastMCP") -> int:
         return await _project_remove_impl(name, confirm)
 
     @registry.tool()
-    async def project_update(
+    async def project_update(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         name: str,
         path: str = "",
         gitlab: str = "",
@@ -844,6 +853,7 @@ def _shared_register_project_tools(server: "FastMCP") -> int:
 
 
 def register_project_tools(server: "FastMCP") -> int:
+    "Register project tools."
     return _shared_register_project_tools(server)
 
 

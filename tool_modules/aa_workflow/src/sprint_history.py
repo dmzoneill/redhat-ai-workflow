@@ -43,7 +43,7 @@ class TimelineEvent:
 
 
 @dataclass
-class SprintIssue:
+class SprintIssue:  # pylint: disable=too-many-instance-attributes
     """An issue in a sprint with its state and timeline."""
 
     key: str
@@ -75,7 +75,7 @@ class SprintIssue:
 
 
 @dataclass
-class CompletedSprint:
+class CompletedSprint:  # pylint: disable=too-many-instance-attributes
     """A completed sprint with its issues and metadata."""
 
     id: str
@@ -178,7 +178,7 @@ def load_sprint_state() -> SprintState:
             processing_issue=data.get("processingIssue", data.get("processing_issue")),
         )
     except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"Failed to load sprint state: {e}")
+        logger.error("Failed to load sprint state: %s", e)
         return SprintState(last_updated=datetime.now().isoformat())
 
 
@@ -238,8 +238,9 @@ def save_sprint_state(state: SprintState) -> None:
     existing_issues = existing_sprint.get("issues", [])
     if not issues_data and existing_issues:
         logger.warning(
-            f"save_sprint_state called with 0 issues but file has {len(existing_issues)}. "
-            "Preserving existing issues to prevent data loss."
+            "save_sprint_state called with 0 issues but file has %s. "
+            "Preserving existing issues to prevent data loss.",
+            len(existing_issues),
         )
         issues_data = existing_issues
 
@@ -351,7 +352,7 @@ def load_sprint_history(limit: int = 10) -> list[CompletedSprint]:
 
         return sprints
     except (json.JSONDecodeError, KeyError) as e:
-        logger.error(f"Failed to load sprint history: {e}")
+        logger.error("Failed to load sprint history: %s", e)
         return []
 
 
@@ -440,7 +441,7 @@ def add_timeline_event(issue_key: str, event: TimelineEvent) -> bool:
             save_sprint_state(state)
             return True
 
-    logger.warning(f"Issue {issue_key} not found in current sprint")
+    logger.warning("Issue %s not found in current sprint", issue_key)
     return False
 
 
@@ -500,11 +501,15 @@ def get_next_issue_to_process(state: SprintState | None = None) -> SprintIssue |
     Returns:
         Next SprintIssue to process, or None if none available
     """
-    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_history)
+    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_history).
+    # Keep a single import of is_actionable; the fallback assigns the same name.
     try:
+        # pylint: disable-next=import-outside-toplevel
         from .sprint_tools import is_actionable
     except ImportError:
-        from sprint_tools import is_actionable
+        import importlib  # pylint: disable=import-outside-toplevel
+
+        is_actionable = importlib.import_module("sprint_tools").is_actionable
 
     if state is None:
         state = load_sprint_state()
