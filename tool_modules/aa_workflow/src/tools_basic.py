@@ -48,9 +48,17 @@ else:
 
 # GitHub configuration for error reporting - single source of truth in constants.py
 try:
-    from .constants import GITHUB_API_URL, GITHUB_ISSUES_URL
+    from .constants import GITHUB_REPO  # noqa: F401  # pylint: disable=unused-import
+    from .constants import (
+        GITHUB_API_URL,
+        GITHUB_ISSUES_URL,
+    )
 except ImportError:
-    from constants import GITHUB_API_URL, GITHUB_ISSUES_URL  # type: ignore[no-redef]
+    from constants import GITHUB_REPO  # noqa: F401  # pylint: disable=unused-import
+    from constants import (  # type: ignore[no-redef]
+        GITHUB_API_URL,
+        GITHUB_ISSUES_URL,
+    )
 
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}
