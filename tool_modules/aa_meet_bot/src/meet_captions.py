@@ -58,10 +58,12 @@ class MeetCaptions:
 
     @property
     def page(self):
+        "Page."
         return self._controller.page
 
     @property
     def state(self):
+        "State."
         return self._controller.state
 
     @property
@@ -71,6 +73,7 @@ class MeetCaptions:
     async def start_caption_capture(
         self, callback: Callable[[CaptionEntry], None]
     ) -> None:
+        "Start caption capture."
         return await _shared_GoogleMeetController_start_caption_capture(
             self, callback, logger=logger
         )
@@ -87,13 +90,15 @@ class MeetCaptions:
         while self._caption_observer_running and self.page:
             try:
                 # Fetch and clear the caption buffer - these are already debounced/corrected
-                captions = await self.page.evaluate("""
+                captions = await self.page.evaluate(
+                    """
                     () => {
                         const c = window._meetBotCaptions || [];
                         window._meetBotCaptions = [];
                         return c;
                     }
-                """)
+                """
+                )
 
                 for cap in captions:
                     speaker = cap.get("speaker", "Unknown")
@@ -123,7 +128,9 @@ class MeetCaptions:
                         idx = caption_id_to_index[cap_id]
                         if self.state and 0 <= idx < len(self.state.caption_buffer):
                             self.state.caption_buffer[idx] = entry
-                            logger.debug(f"Caption UPDATE [{speaker}] {text[:50]}...")
+                            logger.debug(
+                                "Caption UPDATE [%s] %s...", speaker, text[:50]
+                            )
                         # Also notify callback with updated entry (for live display)
                         if self._caption_callback:
                             self._caption_callback(entry)
@@ -147,7 +154,7 @@ class MeetCaptions:
                                 }
                         if self._caption_callback:
                             self._caption_callback(entry)
-                        logger.debug(f"Caption NEW [{speaker}] {text[:50]}...")
+                        logger.debug("Caption NEW [%s] %s...", speaker, text[:50])
 
                 await asyncio.sleep(0.5)  # Poll every 500ms
 
@@ -160,13 +167,13 @@ class MeetCaptions:
                     or "Browser has been closed" in error_msg
                 ):
                     logger.warning(
-                        f"[Caption poll] Browser closed detected: {error_msg}"
+                        "[Caption poll] Browser closed detected: %s", error_msg
                     )
                     self._controller._browser_closed = True
                     if self.state:
                         self.state.joined = False
                     break
-                logger.debug(f"Caption poll error: {e}")
+                logger.debug("Caption poll error: %s", e)
                 await asyncio.sleep(1)
 
     async def stop_caption_capture(self) -> None:
@@ -185,16 +192,19 @@ class MeetCaptions:
 
         if self.page:
             try:
-                await self.page.evaluate("""
+                await self.page.evaluate(
+                    """
                     () => {
                         if (window._meetBotObserver) {
                             window._meetBotObserver.disconnect();
                         }
                     }
-                """)
+                """
+                )
             except Exception as e:
                 logger.debug(
-                    f"Suppressed error in stop_caption_capture (observer disconnect): {e}"
+                    "Suppressed error in stop_caption_capture (observer disconnect): %s",
+                    e,
                 )
 
         logger.info("Caption capture stopped")

@@ -36,10 +36,12 @@ class MeetParticipants:
 
     @property
     def page(self):
+        "Page."
         return self._controller.page
 
     @property
     def state(self):
+        "State."
         return self._controller.state
 
     @property
@@ -122,7 +124,9 @@ class MeetParticipants:
                 if panel and await panel.is_visible():
                     panel_open = True
             except Exception as e:
-                logger.debug(f"Suppressed error in get_participants (panel check): {e}")
+                logger.debug(
+                    "Suppressed error in get_participants (panel check): %s", e
+                )
 
             # If panel not open, click the People button to open it
             if not panel_open:
@@ -149,7 +153,8 @@ class MeetParticipants:
 
             # Primary method: Use JavaScript to extract from accessibility tree
             # This is the most reliable as it uses stable ARIA attributes
-            js_participants = await self.page.evaluate("""
+            js_participants = await self.page.evaluate(
+                """
                 () => {
                     const participants = [];
                     const seen = new Set();
@@ -257,12 +262,13 @@ class MeetParticipants:
 
                     return participants;
                 }
-            """)
+            """
+            )
 
             if js_participants:
                 participants = js_participants
                 logger.debug(
-                    f"JavaScript extraction found {len(participants)} participants"
+                    "JavaScript extraction found %s participants", len(participants)
                 )
 
             # Fallback: Try Playwright selectors if JS extraction failed
@@ -285,7 +291,7 @@ class MeetParticipants:
                         except Exception:
                             continue
                 except Exception as e:
-                    logger.debug(f"Playwright fallback failed: {e}")
+                    logger.debug("Playwright fallback failed: %s", e)
 
             # Secondary fallback: data-participant-id elements
             if not participants:
@@ -306,16 +312,18 @@ class MeetParticipants:
                         except Exception:
                             continue
                 except Exception as e:
-                    logger.debug(f"data-participant-id fallback failed: {e}")
+                    logger.debug("data-participant-id fallback failed: %s", e)
 
             # Update state with participant list
             if self.state:
                 self.state.participants = [p["name"] for p in participants]
 
-            logger.info(f"[{self._instance_id}] Found {len(participants)} participants")
+            logger.info(
+                "[%s] Found %s participants", self._instance_id, len(participants)
+            )
 
         except Exception as e:
-            logger.error(f"[{self._instance_id}] Failed to get participants: {e}")
+            logger.error("[%s] Failed to get participants: %s", self._instance_id, e)
 
         finally:
             # Close the panel if we opened it
@@ -325,12 +333,13 @@ class MeetParticipants:
                     await asyncio.sleep(0.3)  # Brief wait for panel to close
                 except Exception as e:
                     logger.debug(
-                        f"Suppressed error in get_participants (panel close): {e}"
+                        "Suppressed error in get_participants (panel close): %s", e
                     )
 
         return participants
 
     async def get_participant_count(self) -> int:
+        "Get participant count."
         return await _shared_GoogleMeetController_get_participant_count(
             self, logger=logger
         )

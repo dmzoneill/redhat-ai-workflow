@@ -465,6 +465,7 @@ class VideoOverlayRenderer:
         return img
 
     def generate_waveform_frame(self, t: float, out: np.ndarray = None) -> np.ndarray:
+        "Generate waveform frame."
         return _shared_RealtimeVideoRenderer__generate_waveform_frame(self, t, out)
 
     generate_waveform_frame.__doc__ = (
@@ -474,6 +475,7 @@ class VideoOverlayRenderer:
     def generate_npu_frame(
         self, t: float, frame_num: int, out: np.ndarray = None
     ) -> np.ndarray:
+        "Generate npu frame."
         return _shared_RealtimeVideoRenderer__generate_npu_frame(
             self, t, frame_num, out
         )
@@ -522,10 +524,14 @@ class VideoOverlayRenderer:
                         img, (new_w, new_h), interpolation=cv2.INTER_AREA
                     )
                     logger.debug(
-                        f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}"
+                        "Loaded photo for %s: %s -> %sx%s",
+                        attendee.name,
+                        photo_path,
+                        new_w,
+                        new_h,
                     )
             except Exception as e:
-                logger.warning(f"Failed to load photo {photo_path}: {e}")
+                logger.warning("Failed to load photo %s: %s", photo_path, e)
 
         return {
             "username": username,

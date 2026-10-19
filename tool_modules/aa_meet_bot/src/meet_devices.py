@@ -38,6 +38,7 @@ class MeetDevices:
 
     @property
     def page(self):
+        "Page."
         return self._controller.page
 
     @property
@@ -73,7 +74,7 @@ class MeetDevices:
                 # The sink name is what appears as speaker in Chrome
                 speaker_name = self._devices.sink_name
                 logger.info(
-                    f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}"
+                    "[DEVICES] Looking for mic: %s, speaker: %s", mic_name, speaker_name
                 )
 
             # Step 1: Select the camera
@@ -94,11 +95,11 @@ class MeetDevices:
                     "speaker", speaker_name
                 )
 
-            logger.info(f"[DEVICES] Selection results: {results}")
+            logger.info("[DEVICES] Selection results: %s", results)
             return results
 
         except Exception as e:
-            logger.warning(f"[DEVICES] Failed to select devices: {e}")
+            logger.warning("[DEVICES] Failed to select devices: %s", e)
             return results
 
     async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
@@ -111,6 +112,7 @@ class MeetDevices:
     )
 
     async def select_meetbot_camera(self) -> bool:
+        "Select meetbot camera."
         return await _shared_GoogleMeetController__select_meetbot_camera(
             self, logger=logger
         )
@@ -132,7 +134,7 @@ class MeetDevices:
         for attempt in range(3):
             try:
                 if attempt > 0:
-                    logger.info(f"[CAMERA-SELECT] Retry attempt {attempt + 1}/3...")
+                    logger.info("[CAMERA-SELECT] Retry attempt %s/3...", attempt + 1)
                     await asyncio.sleep(2.0)  # Wait before retry
 
                 logger.info("[CAMERA-SELECT] Opening Video settings dropdown...")
@@ -147,7 +149,8 @@ class MeetDevices:
                     await video_settings.first.wait_for(state="visible", timeout=5000)
                 except Exception:
                     logger.warning(
-                        f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})"
+                        "[CAMERA-SELECT] Video settings button not visible (attempt %s)",
+                        attempt + 1,
                     )
                     continue
 
@@ -163,14 +166,16 @@ class MeetDevices:
                     '[role="menuitem"], [role="menuitemradio"], li'
                 )
                 count = await menu_items.count()
-                logger.info(f"[CAMERA-SELECT] Found {count} menu items")
+                logger.info("[CAMERA-SELECT] Found %s menu items", count)
 
                 for i in range(count):
                     try:
                         item = menu_items.nth(i)
                         text = await item.text_content(timeout=1000) or ""
                         if meetbot_pattern.lower() in text.lower():
-                            logger.info(f"[CAMERA-SELECT] Found MeetBot option: {text}")
+                            logger.info(
+                                "[CAMERA-SELECT] Found MeetBot option: %s", text
+                            )
                             await item.click(timeout=3000)
                             await asyncio.sleep(0.5)
                             logger.info("[CAMERA-SELECT] MeetBot camera selected")
@@ -186,19 +191,20 @@ class MeetDevices:
                 await asyncio.sleep(0.3)
 
             except Exception as e:
-                logger.warning(f"[CAMERA-SELECT] Attempt {attempt + 1} failed: {e}")
+                logger.warning("[CAMERA-SELECT] Attempt %s failed: %s", attempt + 1, e)
                 # Try to close any open dropdown
                 try:
                     await self.page.keyboard.press("Escape")
                 except Exception as e:
                     logger.debug(
-                        f"Suppressed error in _select_meetbot_camera (escape key): {e}"
+                        "Suppressed error in _select_meetbot_camera (escape key): %s", e
                     )
 
         logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
         return False
 
     async def set_devices_via_js(self) -> bool:
+        "Set devices via js."
         return await _shared_GoogleMeetController__set_devices_via_js(
             self, logger=logger
         )

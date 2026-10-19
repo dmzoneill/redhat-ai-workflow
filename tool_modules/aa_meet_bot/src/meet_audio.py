@@ -73,9 +73,11 @@ class MeetAudio:
 
     @property
     def state(self):
+        "State."
         return self._controller.state
 
     async def create_virtual_audio_sink(self) -> bool:
+        "Create virtual audio sink."
         return await _shared_GoogleMeetController__create_virtual_audio_sink(
             self, logger=logger
         )
@@ -85,6 +87,7 @@ class MeetAudio:
     )
 
     async def remove_virtual_audio_sink(self) -> None:
+        "Remove virtual audio sink."
         return await _shared_GoogleMeetController__remove_virtual_audio_sink(
             self, logger=logger
         )
@@ -112,16 +115,19 @@ class MeetAudio:
         return self._devices
 
     def get_monitor_source(self) -> Optional[str]:
+        "Get monitor source."
         return _shared_GoogleMeetController_get_monitor_source(self)
 
     get_monitor_source.__doc__ = _shared_GoogleMeetController_get_monitor_source.__doc__
 
     def get_pipe_path(self) -> Optional[Path]:
+        "Get pipe path."
         return _shared_GoogleMeetController_get_pipe_path(self)
 
     get_pipe_path.__doc__ = _shared_GoogleMeetController_get_pipe_path.__doc__
 
     async def route_browser_audio_to_sink(self) -> None:
+        "Route browser audio to sink."
         return await _shared_GoogleMeetController__route_browser_audio_to_sink(
             self, logger=logger
         )
@@ -147,21 +153,25 @@ class MeetAudio:
     )
 
     def unmute_audio(self) -> bool:
+        "Unmute audio."
         return _shared_GoogleMeetController_unmute_audio(self, logger=logger)
 
     unmute_audio.__doc__ = _shared_GoogleMeetController_unmute_audio.__doc__
 
     def mute_audio(self) -> bool:
+        "Mute audio."
         return _shared_GoogleMeetController_mute_audio(self, logger=logger)
 
     mute_audio.__doc__ = _shared_GoogleMeetController_mute_audio.__doc__
 
     def is_audio_muted(self) -> bool:
+        "Is audio muted."
         return _shared_GoogleMeetController_is_audio_muted(self, logger=logger)
 
     is_audio_muted.__doc__ = _shared_GoogleMeetController_is_audio_muted.__doc__
 
     async def restore_user_default_source(self) -> None:
+        "Restore user default source."
         return await _shared_GoogleMeetController__restore_user_default_source(
             self, logger=logger
         )
@@ -171,6 +181,7 @@ class MeetAudio:
     )
 
     async def move_user_browser_to_original_source(self, target_source: str) -> None:
+        "Move user browser to original source."
         return await _shared_GoogleMeetController__move_user_browser_to_original_source(
             self, target_source, logger=logger
         )

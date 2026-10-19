@@ -66,8 +66,6 @@ def maybe_gc(force: bool = False) -> None:
 # Live meeting data integration (avatar generation, matrix animation)
 _live_rendering_available = False
 try:
-    pass
-
     _live_rendering_available = True
 except ImportError:
     logger.debug("Live rendering components not available")
@@ -271,7 +269,7 @@ class GPUColorConverter:
         self.ctx = cl.Context([device])
         self.queue = cl.CommandQueue(self.ctx)
 
-        logger.info(f"GPU color converter using: {device.name}")
+        logger.info("GPU color converter using: %s", device.name)
 
         # Compile kernel
         prg = cl.Program(self.ctx, self._KERNEL_SRC).build()
@@ -512,7 +510,7 @@ class UltraLowCPURenderer:
         self.queue = cl.CommandQueue(self.ctx)
 
         flip_str = "FLIPPED (for Google Meet)" if self.mirror_output else "normal"
-        logger.info(f"UltraLowCPU renderer using: {device.name} ({flip_str})")
+        logger.info("UltraLowCPU renderer using: %s (%s)", device.name, flip_str)
 
         # Compile kernel with hardcoded constants
         kernel_src = self._KERNEL_TEMPLATE.format(
@@ -741,7 +739,8 @@ class StreamingRenderer(UltraLowCPURenderer):
         self.global_size_bgra = (self.width, self.height)
 
         logger.info(
-            f"StreamingRenderer initialized (streaming={'enabled' if enable_streaming else 'disabled'})"
+            "StreamingRenderer initialized (streaming=%s)",
+            "enabled" if enable_streaming else "disabled",
         )
 
     def start_streaming(self, signaling_port: int = 8765, v4l2_device: str = None):
@@ -774,12 +773,12 @@ class StreamingRenderer(UltraLowCPURenderer):
             self._streaming_pipeline = IntelStreamingPipeline(config)
             self._streaming_pipeline.start(mode="webrtc")
 
-            logger.info(f"WebRTC streaming started on port {signaling_port}")
+            logger.info("WebRTC streaming started on port %s", signaling_port)
 
         except ImportError as e:
-            logger.error(f"Failed to import streaming module: {e}")
+            logger.error("Failed to import streaming module: %s", e)
         except Exception as e:
-            logger.error(f"Failed to start streaming: {e}")
+            logger.error("Failed to start streaming: %s", e)
 
     def stop_streaming(self):
         """Stop the WebRTC streaming pipeline."""
@@ -1088,10 +1087,12 @@ class VideoConfig:
     # Legacy aliases for FFmpeg fallback mode (computed from native values)
     @property
     def right_column_width(self) -> int:
+        "Right column width."
         return self.width - self.right_col_x
 
     @property
     def npu_width(self) -> int:
+        "Npu width."
         return self.width
 
     # Legacy colors (not used in GPU mode)
@@ -1227,7 +1228,7 @@ class ResearchVideoGenerator:
             str(output_path),
         ]
 
-        logger.info(f"Generating research video: {output_path}")
+        logger.info("Generating research video: %s", output_path)
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -1237,10 +1238,10 @@ class ResearchVideoGenerator:
         stdout, stderr = await process.communicate()
 
         if process.returncode != 0:
-            logger.error(f"FFmpeg error: {stderr.decode()}")
+            logger.error("FFmpeg error: %s", stderr.decode())
             raise RuntimeError(f"Video generation failed: {stderr.decode()[:200]}")
 
-        logger.info(f"Video generated: {output_path}")
+        logger.info("Video generated: %s", output_path)
         return output_path
 
     async def stream_to_device(
@@ -1264,9 +1265,13 @@ class ResearchVideoGenerator:
         total_attendees = len(attendees)
 
         logger.info("🎬 Starting real-time research video stream")
-        logger.info(f"📋 {total_attendees} attendees to analyze")
+        logger.info("📋 %s attendees to analyze", total_attendees)
         logger.info(
-            f"📺 Output: {video_device} @ {config.width}x{config.height} {config.fps}fps"
+            "📺 Output: %s @ %sx%s %sfps",
+            video_device,
+            config.width,
+            config.height,
+            config.fps,
         )
 
         self._running = True
@@ -1275,7 +1280,9 @@ class ResearchVideoGenerator:
         while self._running:
             iteration += 1
             logger.info(
-                f"🔄 Starting iteration {iteration} through {total_attendees} attendees"
+                "🔄 Starting iteration %s through %s attendees",
+                iteration,
+                total_attendees,
             )
 
             for idx, attendee in enumerate(attendees):
@@ -1283,7 +1290,7 @@ class ResearchVideoGenerator:
                     break
 
                 logger.info(
-                    f"🔍 [{idx + 1}/{total_attendees}] Analyzing: {attendee.name}"
+                    "🔍 [%s/%s] Analyzing: %s", idx + 1, total_attendees, attendee.name
                 )
                 await self._stream_single_attendee(
                     attendee=attendee,
@@ -1703,7 +1710,9 @@ class ResearchVideoGenerator:
 
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
-            logger.warning(f"FFmpeg error for {attendee.name}: {stderr.decode()[:200]}")
+            logger.warning(
+                "FFmpeg error for %s: %s", attendee.name, stderr.decode()[:200]
+            )
 
     def _build_filter_graph(self, attendees: list[Attendee]) -> str:
         """Build complete filter graph for all attendees (for file generation)."""
@@ -1858,7 +1867,7 @@ class ResearchVideoGenerator:
 def load_attendees_from_file(filepath: Path) -> list[Attendee]:
     """Load attendee names from a text file (one name per line)."""
     if not filepath.exists():
-        logger.warning(f"Attendees file not found: {filepath}")
+        logger.warning("Attendees file not found: %s", filepath)
         return []
 
     attendees = []
@@ -1867,7 +1876,7 @@ def load_attendees_from_file(filepath: Path) -> list[Attendee]:
         if name and not name.startswith("#"):
             attendees.append(Attendee(name=name))
 
-    logger.info(f"Loaded {len(attendees)} attendees from {filepath}")
+    logger.info("Loaded %s attendees from %s", len(attendees), filepath)
     return attendees
 
 
@@ -2349,7 +2358,7 @@ class RealtimeVideoRenderer:
         self._dynamic_attendees = attendee_objs
         self._attendees_updated = True
         logger.info(
-            f"Updated attendees: {len(attendee_objs)} participants with Slack data"
+            "Updated attendees: %s participants with Slack data", len(attendee_objs)
         )
 
     def _init_static_cache(self):
@@ -2569,7 +2578,7 @@ class RealtimeVideoRenderer:
             )
 
             if await self._audio_capture.start():
-                logger.info(f"Audio capture started from {self._audio_source}")
+                logger.info("Audio capture started from %s", self._audio_source)
                 # Set running flag BEFORE starting processing loop
                 self._running = True
                 # Start audio processing task
@@ -2583,11 +2592,8 @@ class RealtimeVideoRenderer:
                 asyncio.create_task(self._npu_stats_loop())
 
                 return True
-            else:
-                logger.warning(
-                    f"Failed to start audio capture from {self._audio_source}"
-                )
-                return False
+            logger.warning("Failed to start audio capture from %s", self._audio_source)
+            return False
 
         except ImportError:
             logger.warning(
@@ -2595,7 +2601,7 @@ class RealtimeVideoRenderer:
             )
             return False
         except Exception as e:
-            logger.warning(f"Audio capture error: {e}, using simulated waveform")
+            logger.warning("Audio capture error: %s, using simulated waveform", e)
             return False
 
     async def _audio_processing_loop(self):
@@ -2645,7 +2651,8 @@ class RealtimeVideoRenderer:
                         self._stt_write_pos = end_pos
                     elif chunk_count % 100 == 0:  # Log occasionally
                         logger.warning(
-                            f"STT buffer full ({self._stt_write_pos} samples), dropping audio"
+                            "STT buffer full (%s samples), dropping audio",
+                            self._stt_write_pos,
                         )
 
                 # Compute FFT at video frame rate, not audio chunk rate
@@ -2662,13 +2669,15 @@ class RealtimeVideoRenderer:
                 if now - last_log_time >= 5.0:
                     rms = np.sqrt(np.mean(audio_buffer**2))
                     logger.info(
-                        f"Audio processing: {chunk_count} chunks, RMS={rms:.4f}, "
-                        f"buffer set={self._audio_buffer is not None}"
+                        "Audio processing: %s chunks, RMS=%s, buffer set=%s",
+                        chunk_count,
+                        format(rms, ".4f"),
+                        self._audio_buffer is not None,
                     )
                     last_log_time = now
 
             except Exception as e:
-                logger.debug(f"Audio processing error: {e}")
+                logger.debug("Audio processing error: %s", e)
                 await asyncio.sleep(0.01)
 
     async def _init_stt_engine(self):
@@ -2681,7 +2690,7 @@ class RealtimeVideoRenderer:
 
             if await self._stt_engine.initialize():
                 logger.info(
-                    f"STT engine initialized on {self._stt_engine._actual_device}"
+                    "STT engine initialized on %s", self._stt_engine._actual_device
                 )
                 # Start STT processing loop
                 asyncio.create_task(self._stt_processing_loop())
@@ -2692,10 +2701,10 @@ class RealtimeVideoRenderer:
                 self._stt_enabled = False
 
         except ImportError as e:
-            logger.warning(f"STT engine not available: {e}")
+            logger.warning("STT engine not available: %s", e)
             self._stt_enabled = False
         except Exception as e:
-            logger.warning(f"STT initialization error: {e}")
+            logger.warning("STT initialization error: %s", e)
             self._stt_enabled = False
 
     async def _stt_processing_loop(self):
@@ -2739,7 +2748,8 @@ class RealtimeVideoRenderer:
                 elif buffer_duration >= 10.0:
                     should_transcribe = True
                     logger.warning(
-                        f"STT buffer hit 10s cap ({self._stt_write_pos} samples), forcing transcribe"
+                        "STT buffer hit 10s cap (%s samples), forcing transcribe",
+                        self._stt_write_pos,
                     )
 
                 if should_transcribe and self._stt_write_pos > 0:
@@ -2789,7 +2799,7 @@ class RealtimeVideoRenderer:
                                     self._stt_history = self._stt_history[
                                         : self._stt_history_max
                                     ]
-                            logger.info(f"STT [{proc_time:.2f}s]: {text}")
+                            logger.info("STT [%ss]: %s", format(proc_time, ".2f"), text)
                             last_transcription = time.time()
 
                 # Clear old text after 5 seconds of no new transcription
@@ -2800,7 +2810,7 @@ class RealtimeVideoRenderer:
                 await asyncio.sleep(0.2)  # Check every 200ms (reduced from 100ms)
 
             except Exception as e:
-                logger.debug(f"STT processing error: {e}")
+                logger.debug("STT processing error: %s", e)
                 await asyncio.sleep(0.2)
 
     async def _npu_stats_loop(self):
@@ -2862,12 +2872,12 @@ class RealtimeVideoRenderer:
                     # NPU sysfs not available, use defaults
                     pass
                 except Exception as e:
-                    logger.debug(f"NPU stats read error: {e}")
+                    logger.debug("NPU stats read error: %s", e)
 
                 await asyncio.sleep(0.5)  # Update every 500ms
 
             except Exception as e:
-                logger.debug(f"NPU stats loop error: {e}")
+                logger.debug("NPU stats loop error: %s", e)
                 await asyncio.sleep(1.0)
 
     def _compute_fft_bars(self, audio: np.ndarray) -> np.ndarray:
@@ -3023,11 +3033,11 @@ class RealtimeVideoRenderer:
             mode: "black" for black screen, "full" for full AI overlay
         """
         if mode not in ("black", "full"):
-            logger.warning(f"Invalid video mode: {mode}, ignoring")
+            logger.warning("Invalid video mode: %s, ignoring", mode)
             return
 
         if mode != self._video_mode:
-            logger.info(f"Video mode changed: {self._video_mode} -> {mode}")
+            logger.info("Video mode changed: %s -> %s", self._video_mode, mode)
             self._video_mode = mode
 
     def get_video_mode(self) -> str:
@@ -3053,20 +3063,22 @@ class RealtimeVideoRenderer:
         config = self.config
         self._running = True
 
-        logger.info(f"Starting real-time stream to {video_device} at {config.fps}fps")
+        logger.info(
+            "Starting real-time stream to %s at %sfps", video_device, config.fps
+        )
 
         # Start audio capture if configured
         if self._audio_source:
             audio_started = await self._start_audio_capture()
             if audio_started:
                 logger.info(
-                    f"Audio-reactive waveform enabled from {self._audio_source}"
+                    "Audio-reactive waveform enabled from %s", self._audio_source
                 )
                 # Wait for audio buffer to be populated (up to 2s)
                 # This ensures waveform is ready on first frame
                 for i in range(200):  # 200 x 10ms = 2000ms max
                     if self._audio_buffer is not None:
-                        logger.info(f"Audio buffer ready after {i * 10}ms")
+                        logger.info("Audio buffer ready after %sms", i * 10)
                         break
                     await asyncio.sleep(0.01)
                 else:
@@ -3123,9 +3135,9 @@ class RealtimeVideoRenderer:
 
         try:
             fcntl.ioctl(v4l2_fd, VIDIOC_S_FMT, fmt)
-            logger.info(f"Set v4l2 format: {width}x{height} YUYV")
+            logger.info("Set v4l2 format: %sx%s YUYV", width, height)
         except OSError as e:
-            logger.warning(f"Failed to set v4l2 format via ioctl: {e}")
+            logger.warning("Failed to set v4l2 format via ioctl: %s", e)
 
         # Test write to verify device is ready
         test_frame = np.zeros((config.height, config.width * 2), dtype=np.uint8)
@@ -3156,7 +3168,7 @@ class RealtimeVideoRenderer:
                 self._webrtc_pipeline.start(mode="webrtc")
                 logger.info("WebRTC streaming initialized")
             except Exception as e:
-                logger.warning(f"Failed to start WebRTC streaming: {e}")
+                logger.warning("Failed to start WebRTC streaming: %s", e)
                 self._webrtc_pipeline = None
 
         # Pre-create black frame for "black" mode (YUYV format)
@@ -3186,7 +3198,7 @@ class RealtimeVideoRenderer:
                     current_attendees = self._dynamic_attendees
                     self._attendees_updated = False
                     logger.info(
-                        f"Attendee list updated: {len(current_attendees)} participants"
+                        "Attendee list updated: %s participants", len(current_attendees)
                     )
 
                 for attendee_idx, attendee in enumerate(current_attendees):
@@ -3202,13 +3214,17 @@ class RealtimeVideoRenderer:
                         current_attendees = self._dynamic_attendees
                         self._attendees_updated = False
                         logger.info(
-                            f"Attendee list updated mid-loop: {len(current_attendees)} participants"
+                            "Attendee list updated mid-loop: %s participants",
+                            len(current_attendees),
                         )
                         break  # Restart loop with new attendees
 
                     duration = config.duration_per_person
                     logger.info(
-                        f"Streaming attendee {attendee_idx + 1}/{len(current_attendees)}: {attendee.name}"
+                        "Streaming attendee %s/%s: %s",
+                        attendee_idx + 1,
+                        len(current_attendees),
+                        attendee.name,
                     )
 
                     # Stream frames using full GPU pipeline
@@ -3256,10 +3272,11 @@ class RealtimeVideoRenderer:
                     config, use_intel=config.prefer_intel_gpu
                 )
                 logger.info(
-                    f"UltraLowCPU renderer initialized: {self._ulc_renderer.device_name}"
+                    "UltraLowCPU renderer initialized: %s",
+                    self._ulc_renderer.device_name,
                 )
             except Exception as e:
-                logger.error(f"Failed to initialize GPU renderer: {e}")
+                logger.error("Failed to initialize GPU renderer: %s", e)
                 raise RuntimeError(
                     f"GPU renderer required but failed to initialize: {e}"
                 ) from e
@@ -3337,15 +3354,23 @@ class RealtimeVideoRenderer:
                 stt_history_len = len(self._stt_history) if self._stt_history else 0
                 mem_mb = get_memory_mb()
                 logger.info(
-                    f"MEM: {mem_mb:.0f}MB | stt_buf: {stt_buf_samples}/{self._stt_buffer_size} samples | "
-                    f"stt_history: {stt_history_len} | frame: {frame_num}"
+                    "MEM: %sMB | stt_buf: %s/%s samples | stt_history: %s | frame: %s",
+                    format(mem_mb, ".0f"),
+                    stt_buf_samples,
+                    self._stt_buffer_size,
+                    stt_history_len,
+                    frame_num,
                 )
                 # Warn if memory is growing dangerously
                 if mem_mb > MEMORY_WARNING_MB:
-                    logger.warning(f"HIGH MEMORY: {mem_mb:.0f}MB - running GC...")
+                    logger.warning(
+                        "HIGH MEMORY: %sMB - running GC...", format(mem_mb, ".0f")
+                    )
                     gc.collect()
                 if mem_mb > MEMORY_CRITICAL_MB:
-                    logger.error(f"CRITICAL MEMORY: {mem_mb:.0f}MB - forcing cleanup")
+                    logger.error(
+                        "CRITICAL MEMORY: %sMB - forcing cleanup", format(mem_mb, ".0f")
+                    )
                     self._stt_write_pos = 0  # Reset STT buffer
                     # Force full GC with all generations
                     gc.collect(0)
@@ -3360,8 +3385,10 @@ class RealtimeVideoRenderer:
                     audio_bars = None
                 elif frame_num % 60 == 0:
                     logger.info(
-                        f"Audio bars: min={audio_bars.min():.3f}, max={audio_bars.max():.3f}, "
-                        f"mean={audio_bars.mean():.3f}"
+                        "Audio bars: min=%s, max=%s, mean=%s",
+                        format(audio_bars.min(), ".3f"),
+                        format(audio_bars.max(), ".3f"),
+                        format(audio_bars.mean(), ".3f"),
                     )
 
             # Render frame with GPU (waveform, progress bar, YUYV conversion)
@@ -3371,7 +3398,7 @@ class RealtimeVideoRenderer:
             try:
                 os.write(v4l2_fd, memoryview(yuyv))
             except OSError as e:
-                logger.warning(f"v4l2 write error: {e}")
+                logger.warning("v4l2 write error: %s", e)
                 return False
 
             # Push to WebRTC if enabled (direct YUYV - zero CPU conversion)
@@ -3381,7 +3408,7 @@ class RealtimeVideoRenderer:
                     self._webrtc_pipeline.push_frame_yuyv(yuyv)
                 except Exception as e:
                     if frame_num % 60 == 0:  # Log every ~5 seconds at 12fps
-                        logger.warning(f"WebRTC push error: {e}")
+                        logger.warning("WebRTC push error: %s", e)
 
             # Pace output to real-time
             elapsed = asyncio.get_event_loop().time() - start_time
@@ -3760,10 +3787,14 @@ class RealtimeVideoRenderer:
                         img, (new_w, new_h), interpolation=cv2.INTER_AREA
                     )
                     logger.debug(
-                        f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}"
+                        "Loaded photo for %s: %s -> %sx%s",
+                        attendee.name,
+                        photo_path,
+                        new_w,
+                        new_h,
                     )
             except Exception as e:
-                logger.warning(f"Failed to load photo {photo_path}: {e}")
+                logger.warning("Failed to load photo %s: %s", photo_path, e)
 
         return {
             "username": username,
@@ -4209,7 +4240,7 @@ class RealtimeVideoRenderer:
                 self._gpu_text_renderer.cleanup()
                 logger.info("GPU text renderer cleaned up")
             except Exception as e:
-                logger.warning(f"Error cleaning up GPU text renderer: {e}")
+                logger.warning("Error cleaning up GPU text renderer: %s", e)
             self._gpu_text_renderer = None
 
         # Reset state for clean restart
@@ -4235,7 +4266,7 @@ class RealtimeVideoRenderer:
                 self._gpu_text_renderer.cleanup()
                 logger.info("GPU text renderer cleaned up")
             except Exception as e:
-                logger.warning(f"Error cleaning up GPU text renderer: {e}")
+                logger.warning("Error cleaning up GPU text renderer: %s", e)
             self._gpu_text_renderer = None
 
         # Reset state for clean restart
@@ -4305,14 +4336,14 @@ async def get_meeting_audio_source(instance_id: str) -> Optional[str]:
             if "meet_bot" in line and ".monitor" in line:
                 parts = line.split()
                 if len(parts) >= 2:
-                    logger.info(f"Found meeting audio source: {parts[1]}")
+                    logger.info("Found meeting audio source: %s", parts[1])
                     return parts[1]
 
-        logger.warning(f"Monitor source not found: {monitor_source}")
+        logger.warning("Monitor source not found: %s", monitor_source)
         return None
 
     except Exception as e:
-        logger.error(f"Error finding audio source: {e}")
+        logger.error("Error finding audio source: %s", e)
         return None
 
 
@@ -4339,7 +4370,7 @@ async def list_available_audio_sources() -> list[str]:
                     sources.append(source_name)
 
     except Exception as e:
-        logger.error(f"Error listing audio sources: {e}")
+        logger.error("Error listing audio sources: %s", e)
 
     return sources
 
@@ -4374,6 +4405,7 @@ if __name__ == "__main__":  # noqa: C901
     signal.signal(signal.SIGTERM, signal_handler)
 
     def print_usage():
+        "Print usage."
         print("Usage:")
         print("  python -m tool_modules.aa_meet_bot.src.video_generator --realtime")
         print(
@@ -4504,9 +4536,10 @@ if __name__ == "__main__":  # noqa: C901
                         file=sys.stderr,
                     )
         except Exception as e:
-            logger.warning(f"Error checking default source: {e}")
+            logger.warning("Error checking default source: %s", e)
 
     async def main():
+        "Main."
         global _active_device_path
 
         # Always ensure default source isn't a meetbot device at startup
@@ -4557,7 +4590,7 @@ if __name__ == "__main__":  # noqa: C901
                     print(f"Cleanup error: {e}", file=sys.stderr)
                 return
 
-            elif sys.argv[1] == "--stream" and len(sys.argv) > 2:
+            if sys.argv[1] == "--stream" and len(sys.argv) > 2:
                 # Stream to v4l2loopback device (uses pre-rendered overlays)
                 video_device = sys.argv[2]
                 attendees = load_attendees_from_file(DEFAULT_ATTENDEES_FILE)
@@ -4830,7 +4863,7 @@ class VideoGenerator:
             )
 
         except Exception as e:
-            logger.error(f"Video generation failed: {e}")
+            logger.error("Video generation failed: %s", e)
             return VideoResult(success=False, error=str(e))
 
 

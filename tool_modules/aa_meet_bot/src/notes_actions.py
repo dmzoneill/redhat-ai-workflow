@@ -76,6 +76,7 @@ class InteractiveActions:
 
     @property
     def interactive_mode(self) -> bool:
+        "Interactive mode."
         return self._interactive_mode
 
     @interactive_mode.setter
@@ -84,14 +85,17 @@ class InteractiveActions:
 
     @property
     def responding(self) -> bool:
+        "Responding."
         return self._responding
 
     @property
     def video_daemon_active(self) -> bool:
+        "Video daemon active."
         return self._video_daemon_active
 
     @property
     def enable_video_integration(self) -> bool:
+        "Enable video integration."
         return self._enable_video_integration
 
     async def setup_interactive_mode(self) -> None:
@@ -115,7 +119,9 @@ class InteractiveActions:
             await self._llm_responder.initialize()
 
             logger.info(
-                f"🎤 Interactive mode: LLM responder initialized for meeting '{meeting_title}' (ID: {meeting_id})"
+                "🎤 Interactive mode: LLM responder initialized for meeting '%s' (ID: %s)",
+                meeting_title,
+                meeting_id,
             )
             logger.info(
                 "🎤 Interactive mode: Conversation history will be maintained throughout this meeting"
@@ -123,11 +129,12 @@ class InteractiveActions:
 
             # Set up wake word callback for voice responses
             logger.info(
-                f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'"
+                "🎤 Interactive mode: Listening for wake word '%s'",
+                self.config.wake_word,
             )
 
         except Exception as e:
-            logger.error(f"Failed to set up interactive mode: {e}")
+            logger.error("Failed to set up interactive mode: %s", e)
             self._interactive_mode = False
 
     async def handle_wake_word_command(self, event: WakeWordEvent) -> None:
@@ -155,7 +162,7 @@ class InteractiveActions:
 
         self._responding = True
         try:
-            logger.info(f"🎤 Processing command: {command}")
+            logger.info("🎤 Processing command: %s", command)
 
             # Get recent context from transcript buffer (as list of strings)
             context_entries = self._state.transcript_buffer[-10:]
@@ -176,13 +183,13 @@ class InteractiveActions:
                 )
 
                 if llm_response and llm_response.text:
-                    logger.info(f"🎤 Response: {llm_response.text[:100]}...")
+                    logger.info("🎤 Response: %s...", llm_response.text[:100])
                     await self._speak_response(llm_response.text)
                 else:
                     logger.warning("No response generated")
 
         except Exception as e:
-            logger.error(f"Error handling wake word command: {e}")
+            logger.error("Error handling wake word command: %s", e)
         finally:
             self._responding = False
             # Reset wake word detector to clear old buffered captions
@@ -250,7 +257,7 @@ class InteractiveActions:
                         f"{devices.sink_name}.monitor" if devices.sink_name else None
                     )
                     logger.info(
-                        f"📺 Device info: video={video_device}, audio={audio_source}"
+                        "📺 Device info: video=%s, audio=%s", video_device, audio_source
                     )
 
             if not video_device:
@@ -262,7 +269,7 @@ class InteractiveActions:
             # Find Chromium's sink-input index for monitor-stream capture
             sink_input_index = await self._find_chromium_sink_input(sink_name)
             if sink_input_index is not None:
-                logger.info(f"📺 Found Chromium sink-input index: {sink_input_index}")
+                logger.info("📺 Found Chromium sink-input index: %s", sink_input_index)
             else:
                 logger.warning(
                     "📺 Could not find Chromium sink-input, waveform may not work"
@@ -283,7 +290,8 @@ class InteractiveActions:
                     # Fall back to switch_to_full_video if update_audio_source fails
                     # (e.g., if in black screen mode)
                     logger.info(
-                        f"📺 update_audio_source failed ({result}), trying switch_to_full_video..."
+                        "📺 update_audio_source failed (%s), trying switch_to_full_video...",
+                        result,
                     )
                     result = await client.call_method(
                         "switch_to_full_video",
@@ -299,7 +307,7 @@ class InteractiveActions:
 
                 if result and result.get("success"):
                     self._video_daemon_active = True
-                    logger.info(f"📺 Video integration active on {video_device}")
+                    logger.info("📺 Video integration active on %s", video_device)
 
                     # Start participant polling task
                     self._participant_poll_task = asyncio.create_task(
@@ -307,14 +315,14 @@ class InteractiveActions:
                     )
                 else:
                     # May fail if video was disabled - that's OK, keep black screen
-                    logger.info(f"📺 Video result: {result}")
+                    logger.info("📺 Video result: %s", result)
                     # Still mark as active for cleanup purposes
                     self._video_daemon_active = True
             else:
                 logger.warning("📺 Could not connect to video daemon D-Bus service")
 
         except Exception as e:
-            logger.warning(f"📺 Failed to start video integration: {e}")
+            logger.warning("📺 Failed to start video integration: %s", e)
 
     async def _find_chromium_sink_input(
         self, target_sink: Optional[str]
@@ -402,14 +410,18 @@ class InteractiveActions:
                 chromium_candidates.append((current_index, sink_name))
 
             logger.info(
-                f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}"
+                "📺 Found %s Chromium sink-inputs: %s",
+                len(chromium_candidates),
+                chromium_candidates,
             )
 
             # Find the one connected to our target sink
             for idx, sink_name in chromium_candidates:
                 if target_sink and target_sink in sink_name:
                     logger.info(
-                        f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})"
+                        "📺 Selected Chromium sink-input %s (connected to %s)",
+                        idx,
+                        sink_name,
                     )
                     return idx
 
@@ -418,14 +430,16 @@ class InteractiveActions:
             if chromium_candidates:
                 idx, sink_name = chromium_candidates[-1]
                 logger.info(
-                    f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})"
+                    "📺 Using last Chromium sink-input %s (connected to %s)",
+                    idx,
+                    sink_name,
                 )
                 return idx
 
             return None
 
         except Exception as e:
-            logger.warning(f"📺 Error finding Chromium sink-input: {e}")
+            logger.warning("📺 Error finding Chromium sink-input: %s", e)
             return None
 
     async def _poll_participants(self, controller) -> None:
@@ -456,15 +470,16 @@ class InteractiveActions:
                     await self._update_video_attendees(participants)
                     if poll_count == 0:
                         logger.info(
-                            f"📺 Initial participant poll: {len(participants)} participants"
+                            "📺 Initial participant poll: %s participants",
+                            len(participants),
                         )
                     else:
                         logger.debug(
-                            f"📺 Sent {len(participants)} participants to video daemon"
+                            "📺 Sent %s participants to video daemon", len(participants)
                         )
 
             except Exception as e:
-                logger.debug(f"Participant poll error: {e}")
+                logger.debug("Participant poll error: %s", e)
 
             poll_count += 1
 
@@ -491,9 +506,9 @@ class InteractiveActions:
                 await client.disconnect()
 
                 if not (result and result.get("success")):
-                    logger.debug(f"📺 update_attendees returned: {result}")
+                    logger.debug("📺 update_attendees returned: %s", result)
         except Exception as e:
-            logger.debug(f"📺 Failed to update attendees: {e}")
+            logger.debug("📺 Failed to update attendees: %s", e)
 
     async def stop_video_integration(self) -> None:
         """Stop video daemon integration."""
@@ -517,9 +532,9 @@ class InteractiveActions:
                     if result and result.get("success"):
                         logger.info("📺 Video daemon stopped rendering")
                     else:
-                        logger.debug(f"📺 stop_video returned: {result}")
+                        logger.debug("📺 stop_video returned: %s", result)
             except Exception as e:
-                logger.debug(f"📺 Failed to stop video daemon: {e}")
+                logger.debug("📺 Failed to stop video daemon: %s", e)
 
             self._video_daemon_active = False
 
