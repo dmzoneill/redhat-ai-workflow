@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """
 Real-time Audio Capture for NPU STT.
 
@@ -11,7 +12,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -98,6 +99,7 @@ class RingBuffer:
                 return np.array([], dtype=np.float32)
 
             end_pos = self.read_pos + n
+            # pylint: disable-next=no-else-return
             if end_pos <= self.max_samples:
                 return self.buffer[self.read_pos : end_pos].copy()
             else:
@@ -118,6 +120,7 @@ class RingBuffer:
             self.read_pos = self.write_pos
 
 
+# pylint: disable-next=too-many-instance-attributes
 class PulseAudioCapture:
     """
     Captures audio from a PulseAudio/PipeWire source.
@@ -158,9 +161,8 @@ class PulseAudioCapture:
         self.chunk_samples = int(sample_rate * chunk_ms / 1000)
         self.sink_input_index = sink_input_index
 
-        self._process: Optional[asyncio.subprocess.Process] = (
-            None  # pylint: disable=no-member
-        )
+        # pylint: disable-next=no-member
+        self._process: Optional[asyncio.subprocess.Process] = None
         self._process_pid: Optional[int] = None  # Track PID for cleanup
         self._running = False
         self._buffer = RingBuffer(max_seconds=30.0, sample_rate=sample_rate)
@@ -189,7 +191,8 @@ class PulseAudioCapture:
                     str(self.chunk_ms),
                 ]
                 logger.info(
-                    f"Using monitor-stream capture from sink-input {self.sink_input_index}"
+                    "Using monitor-stream capture from sink-input %s",
+                    self.sink_input_index,
                 )
             else:
                 # Method 2: Direct source capture (for testing with physical mic)
@@ -208,9 +211,9 @@ class PulseAudioCapture:
                     "--latency-msec",
                     str(self.chunk_ms),
                 ]
-                logger.info(f"Using direct source capture from {self.source_name}")
+                logger.info("Using direct source capture from %s", self.source_name)
 
-            logger.info(f"Starting audio capture: {' '.join(cmd)}")
+            logger.info("Starting audio capture: %s", " ".join(cmd))
 
             self._process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -223,7 +226,7 @@ class PulseAudioCapture:
             if self._process_pid:
                 PulseAudioCapture._active_captures[self._process_pid] = self
                 logger.info(
-                    f"Audio capture process started with PID {self._process_pid}"
+                    "Audio capture process started with PID %s", self._process_pid
                 )
 
             self._running = True
@@ -234,8 +237,10 @@ class PulseAudioCapture:
             logger.info("Audio capture started")
             return True
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to start audio capture: {e}")
+            logger.error("Failed to start audio capture: %s", e)
             return False
 
     async def _check_command(self, cmd: str) -> bool:
@@ -249,6 +254,8 @@ class PulseAudioCapture:
             )
             await proc.communicate()
             return proc.returncode == 0
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception:
             return False
 
@@ -269,14 +276,16 @@ class PulseAudioCapture:
                 audio = np.frombuffer(data, dtype=np.float32)
                 await self._buffer.write(audio)
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Audio read error: {e}")
+            logger.error("Audio read error: %s", e)
         finally:
             self._running = False
 
     async def stop(self):
         """Stop audio capture and ensure process is fully terminated."""
-        logger.info(f"Stopping audio capture (PID: {self._process_pid})")
+        logger.info("Stopping audio capture (PID: %s)", self._process_pid)
         self._running = False
 
         # Cancel the read task first
@@ -296,11 +305,11 @@ class PulseAudioCapture:
                 self._process.terminate()
                 try:
                     await asyncio.wait_for(self._process.wait(), timeout=2.0)
-                    logger.info(f"Audio capture process {pid} terminated gracefully")
+                    logger.info("Audio capture process %s terminated gracefully", pid)
                 except asyncio.TimeoutError:
                     # Force kill if terminate didn't work
                     logger.warning(
-                        f"Audio capture process {pid} didn't terminate, killing..."
+                        "Audio capture process %s didn't terminate, killing...", pid
                     )
                     self._process.kill()
                     try:
@@ -309,14 +318,17 @@ class PulseAudioCapture:
                         # Last resort: use os.kill directly
                         if pid:
                             try:
+                                # pylint: disable-next=import-outside-toplevel
                                 import signal
 
                                 os.kill(pid, signal.SIGKILL)
-                                logger.info(f"Sent SIGKILL to process {pid}")
+                                logger.info("Sent SIGKILL to process %s", pid)
                             except (ProcessLookupError, PermissionError):
                                 pass  # Process already gone
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(f"Error stopping audio capture process: {e}")
+                logger.warning("Error stopping audio capture process: %s", e)
             finally:
                 self._process = None
 
@@ -326,7 +338,7 @@ class PulseAudioCapture:
             and self._process_pid in PulseAudioCapture._active_captures
         ):
             del PulseAudioCapture._active_captures[self._process_pid]
-            logger.info(f"Removed PID {self._process_pid} from active captures")
+            logger.info("Removed PID %s from active captures", self._process_pid)
 
         self._process_pid = None
 
@@ -338,10 +350,11 @@ class PulseAudioCapture:
 
         for pid in pids_to_remove:
             try:
+                # pylint: disable-next=import-outside-toplevel
                 import signal
 
                 os.kill(pid, signal.SIGKILL)
-                logger.info(f"Force-killed orphaned audio capture PID {pid}")
+                logger.info("Force-killed orphaned audio capture PID %s", pid)
                 killed += 1
             except (ProcessLookupError, PermissionError):
                 pass  # Process already gone
@@ -400,9 +413,11 @@ class PulseAudioCapture:
 
     @property
     def is_running(self) -> bool:
+        """Whether audio capture is currently running."""
         return self._running
 
 
+# pylint: disable-next=too-many-instance-attributes
 class RealtimeSTTPipeline:
     """
     Real-time Speech-to-Text pipeline.
@@ -420,6 +435,7 @@ class RealtimeSTTPipeline:
     - Automatic silence detection and segmentation
     """
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def __init__(
         self,
         source_name: str,
@@ -454,7 +470,7 @@ class RealtimeSTTPipeline:
         self.max_speech_duration = max_speech_duration
 
         self._capture: Optional[PulseAudioCapture] = None
-        self._stt = None  # Lazy load
+        self._stt: Any = None  # Lazy load
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -471,6 +487,7 @@ class RealtimeSTTPipeline:
 
         try:
             # Initialize STT engine
+            # pylint: disable-next=import-outside-toplevel
             from tool_modules.aa_meet_bot.src.stt_engine import NPUWhisperSTT
 
             self._stt = NPUWhisperSTT(device="NPU")
@@ -479,7 +496,7 @@ class RealtimeSTTPipeline:
                 return False
 
             logger.info(
-                f"STT initialized on {self._stt.get_device_info()['actual_device']}"
+                "STT initialized on %s", self._stt.get_device_info()["actual_device"]
             )
 
             # Start audio capture
@@ -496,11 +513,13 @@ class RealtimeSTTPipeline:
             self._running = True
             self._task = asyncio.create_task(self._process_loop())
 
-            logger.info(f"STT pipeline started: {self.source_name} → NPU")
+            logger.info("STT pipeline started: %s → NPU", self.source_name)
             return True
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to start STT pipeline: {e}")
+            logger.error("Failed to start STT pipeline: %s", e)
             return False
 
     async def stop(self):
@@ -516,15 +535,20 @@ class RealtimeSTTPipeline:
             except asyncio.TimeoutError:
                 logger.warning("Timeout stopping audio capture, forcing...")
                 # Force kill if stop times out
+                # pylint: disable-next=protected-access
                 if self._capture._process_pid:
                     try:
+                        # pylint: disable-next=import-outside-toplevel
                         import signal
 
+                        # pylint: disable-next=protected-access
                         os.kill(self._capture._process_pid, signal.SIGKILL)
                     except (ProcessLookupError, PermissionError):
                         pass
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(f"Error stopping audio capture: {e}")
+                logger.warning("Error stopping audio capture: %s", e)
             finally:
                 self._capture = None
 
@@ -544,15 +568,18 @@ class RealtimeSTTPipeline:
         rms = np.sqrt(np.mean(audio**2))
         return rms > self.vad_threshold
 
+    # pylint: disable-next=too-many-branches,too-many-statements
     async def _process_loop(self):
         """Main processing loop."""
         chunk_count = 0
         speech_chunk_count = 0
         last_log_time = time.time()
 
+        # pylint: disable-next=too-many-nested-blocks
         try:
             logger.info(
-                f"🎧 NPU STT: Starting audio processing loop (VAD threshold: {self.vad_threshold})"
+                "🎧 NPU STT: Starting audio processing loop (VAD threshold: %s)",
+                self.vad_threshold,
             )
 
             consecutive_none_chunks = 0
@@ -580,9 +607,12 @@ class RealtimeSTTPipeline:
                 # Log audio levels periodically (every 5 seconds)
                 if now - last_log_time >= 5.0:
                     logger.info(
-                        f"🎧 NPU STT: Audio stats - chunks: {chunk_count}, "
-                        f"speech chunks: {speech_chunk_count}, "
-                        f"current RMS: {rms:.4f}, threshold: {self.vad_threshold}"
+                        "🎧 NPU STT: Audio stats - chunks: %s, speech chunks: %s, "
+                        "current RMS: %.4f, threshold: %s",
+                        chunk_count,
+                        speech_chunk_count,
+                        rms,
+                        self.vad_threshold,
                     )
                     last_log_time = now
 
@@ -594,7 +624,7 @@ class RealtimeSTTPipeline:
                         self._in_speech = True
                         self._speech_start_time = now
                         self._speech_buffer.clear()
-                        logger.info(f"🎧 NPU STT: 🎤 Speech STARTED (RMS: {rms:.4f})")
+                        logger.info("🎧 NPU STT: 🎤 Speech STARTED (RMS: %.4f)", rms)
 
                     self._speech_buffer.append(chunk.data)
                     self._last_speech_time = now
@@ -603,7 +633,8 @@ class RealtimeSTTPipeline:
                     speech_duration = now - self._speech_start_time
                     if speech_duration >= self.max_speech_duration:
                         logger.info(
-                            f"🎧 NPU STT: Max duration reached ({speech_duration:.1f}s), transcribing..."
+                            "🎧 NPU STT: Max duration reached (%.1fs), transcribing...",
+                            speech_duration,
                         )
                         await self._transcribe_buffer(is_final=False)
                         self._speech_buffer.clear()
@@ -624,16 +655,18 @@ class RealtimeSTTPipeline:
                             )
 
                             logger.info(
-                                f"🎧 NPU STT: 🔇 Speech ENDED after {speech_duration:.1f}s "
-                                f"(silence: {silence_time:.1f}s)"
+                                "🎧 NPU STT: 🔇 Speech ENDED after %.1fs (silence: %.1fs)",
+                                speech_duration,
+                                silence_time,
                             )
 
                             if speech_duration >= self.min_speech_duration:
                                 await self._transcribe_buffer(is_final=True)
                             else:
                                 logger.info(
-                                    "🎧 NPU STT: Skipping short speech"
-                                    f" ({speech_duration:.1f}s < {self.min_speech_duration}s)"
+                                    "🎧 NPU STT: Skipping short speech (%.1fs < %ss)",
+                                    speech_duration,
+                                    self.min_speech_duration,
                                 )
 
                             self._in_speech = False
@@ -641,8 +674,11 @@ class RealtimeSTTPipeline:
 
         except asyncio.CancelledError:
             pass
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"🎧 NPU STT: Processing error: {e}")
+            logger.error("🎧 NPU STT: Processing error: %s", e)
+            # pylint: disable-next=import-outside-toplevel
             import traceback
 
             traceback.print_exc()
@@ -657,7 +693,9 @@ class RealtimeSTTPipeline:
         duration = len(audio) / self.sample_rate
 
         logger.info(
-            f"🎧 NPU STT: 🔄 Transcribing {duration:.1f}s of audio (final={is_final})..."
+            "🎧 NPU STT: 🔄 Transcribing %.1fs of audio (final=%s)...",
+            duration,
+            is_final,
         )
 
         # Transcribe on NPU
@@ -669,7 +707,7 @@ class RealtimeSTTPipeline:
             rtf = elapsed / duration if duration > 0 else 0
             # Log the full transcription prominently
             logger.info(
-                f'🎧 NPU STT: ✅ [{elapsed:.2f}s, RTF:{rtf:.2f}] "{result.text}"'
+                '🎧 NPU STT: ✅ [%.2fs, RTF:%.2f] "%s"', elapsed, rtf, result.text
             )
 
             # Call callback with the transcription
@@ -678,7 +716,7 @@ class RealtimeSTTPipeline:
             if not is_final and self.on_partial:
                 self.on_partial(result.text)
         else:
-            logger.info(f"🎧 NPU STT: ⚠️ No text from {duration:.1f}s audio")
+            logger.info("🎧 NPU STT: ⚠️ No text from %.1fs audio", duration)
 
 
 async def create_meeting_stt_pipeline(
@@ -711,10 +749,10 @@ async def create_meeting_stt_pipeline(
     stdout, _ = await proc.communicate()
 
     if monitor_source not in stdout.decode():
-        logger.error(f"Monitor source not found: {monitor_source}")
+        logger.error("Monitor source not found: %s", monitor_source)
         logger.info("Available sources:")
         for line in stdout.decode().strip().split("\n"):
-            logger.info(f"  {line}")
+            logger.info("  %s", line)
         return None
 
     pipeline = RealtimeSTTPipeline(

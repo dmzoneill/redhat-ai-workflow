@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Shared PipeWire commands used by Meet audio routing and the video CLI."""
 
 

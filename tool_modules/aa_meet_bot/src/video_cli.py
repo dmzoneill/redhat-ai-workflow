@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Command-line entry point for the research video generator."""
 
 import asyncio

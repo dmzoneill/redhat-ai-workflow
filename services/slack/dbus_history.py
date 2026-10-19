@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """
 Message history tracking for Slack D-Bus daemon.
 
