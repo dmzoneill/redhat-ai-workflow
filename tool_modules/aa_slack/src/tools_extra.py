@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Slack MCP Tools and Resources.
 
 Provides MCP tools for Slack interaction:
@@ -12,7 +13,6 @@ Provides MCP tools for Slack interaction:
 Also provides MCP resources for proactive updates.
 """
 
-import asyncio
 import json
 import logging
 import sys
@@ -20,10 +20,13 @@ from pathlib import Path
 from typing import cast
 
 from fastmcp import FastMCP
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
+from tool_modules.aa_slack.src.tools_basic import (
+    _shared__send_via_dbus,
+    _shared_get_manager,
+)
 
 # Setup project path for server imports FIRST
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -51,73 +54,18 @@ def _get_slack_config() -> dict:
 async def _send_via_dbus(
     channel_id: str, text: str, thread_ts: str = ""
 ) -> dict | None:
-    """
-    Try to send a message via the D-Bus daemon.
-
-    Uses send_message_rich to properly format Slack links and markdown.
-
-    Returns the result dict if successful, None if D-Bus is not available.
-    """
-    try:
-        # Import D-Bus client
-        scripts_dir = TOOL_MODULES_DIR.parent / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-
-        from services.slack.dbus import SlackAgentClient
-
-        client = SlackAgentClient()
-        if await client.connect():
-            # Use send_message_rich to properly format links like <url|text>
-            result = await client.send_message_rich(channel_id, text, thread_ts)
-            await client.disconnect()
-            logger.debug(f"D-Bus send result: {result}")
-            return result
-        else:
-            logger.debug("D-Bus connect failed")
-            return None
-    except Exception as e:
-        # D-Bus not available, will fall back to direct API
-        logger.debug(f"D-Bus not available: {e}")
-        return None
+    return await _shared__send_via_dbus(channel_id, text, thread_ts, logger=logger)
 
 
-# Global manager instance (initialized on first use)
-_manager = None
-_manager_lock = asyncio.Lock()
+_send_via_dbus.__doc__ = _shared__send_via_dbus.__doc__
 
 
 async def get_manager():
-    """Get or create the SlackListenerManager singleton."""
-    global _manager
-    async with _manager_lock:
-        if _manager is None:
-            # Use dynamic loading to avoid import issues when loaded via spec_from_file_location
-            try:
-                import importlib.util
-                from pathlib import Path
+    "Get manager."
+    return await _shared_get_manager(logger=logger)
 
-                curr_dir = Path(__file__).parent.absolute()
-                listener_file = curr_dir / "listener.py"
 
-                spec = importlib.util.spec_from_file_location(
-                    "slack_listener_dynamic", listener_file
-                )
-                mod = importlib.util.module_from_spec(spec)
-                # Add to sys.modules to handle internal relative imports in listener.py if any
-                sys.modules["slack_listener_dynamic"] = mod
-                spec.loader.exec_module(mod)
-                SlackListenerManager = mod.SlackListenerManager
-            except Exception as e:
-                logger.error(f"Failed to load SlackListenerManager dynamically: {e}")
-                # Fallback to standard imports
-                try:
-                    from listener import SlackListenerManager
-                except ImportError:
-                    from .listener import SlackListenerManager
-
-            _manager = SlackListenerManager()
-        return _manager
+get_manager.__doc__ = _shared_get_manager.__doc__
 
 
 async def _slack_add_reaction_impl(channel_id: str, timestamp: str, emoji: str) -> str:
@@ -135,8 +83,9 @@ async def _slack_add_reaction_impl(channel_id: str, timestamp: str, emoji: str) 
             }
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e), "success": False})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return Slack failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc), "success": False})
 
 
 async def _slack_get_channels_impl() -> str:
@@ -183,8 +132,9 @@ async def _slack_get_channels_impl() -> str:
             indent=2,
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return config failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc)})
 
 
 async def _slack_list_messages_impl(
@@ -237,8 +187,9 @@ async def _slack_list_messages_impl(
                                 "is_reply": True,
                             }
                         )
-                except Exception as e:
-                    logger.warning(f"Could not fetch thread: {e}")
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    # Keep listing messages when one thread fetch fails.
+                    logger.warning("Could not fetch thread: %s", exc)
 
         return json.dumps(
             {
@@ -249,8 +200,9 @@ async def _slack_list_messages_impl(
             indent=2,
         )
 
-    except Exception as e:
-        return json.dumps({"error": str(e)})
+    except Exception as exc:  # pylint: disable=broad-exception-caught
+        # Tool boundary: return history failures to the MCP client as JSON.
+        return json.dumps({"error": str(exc)})
 
 
 def register_tools(server: FastMCP) -> int:
@@ -305,8 +257,9 @@ def register_tools(server: FastMCP) -> int:
                 },
                 indent=2,
             )
-        except Exception as e:
-            return json.dumps({"error": str(e)})
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Resource boundary: return listener failures as JSON.
+            return json.dumps({"error": str(exc)})
 
     @server.resource("slack://listener_status")
     async def listener_status_resource() -> str:
@@ -315,8 +268,9 @@ def register_tools(server: FastMCP) -> int:
             manager = await get_manager()
             status = await manager.get_status()
             return json.dumps(status, indent=2)
-        except Exception as e:
-            return json.dumps({"error": str(e), "status": "error"})
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            # Resource boundary: return listener status failures as JSON.
+            return json.dumps({"error": str(exc), "status": "error"})
 
     # ==================== Message Tools ====================
     # ==================== TOOLS NOT USED IN SKILLS ====================

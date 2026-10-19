@@ -7,7 +7,19 @@ Each category groups related tools with:
 - priority: 1-10, higher = more likely to be selected
 """
 
-TOOL_CATEGORIES = {
+from typing import TypedDict
+
+
+class CategoryInfo(TypedDict):
+    """Fields stored for one tool category."""
+
+    description: str
+    keywords: list[str]
+    tools: list[str]
+    priority: int
+
+
+TOOL_CATEGORIES: dict[str, CategoryInfo] = {
     # === JIRA (High Priority for Developer) ===
     "jira_read": {
         "description": "View and search Jira issues",

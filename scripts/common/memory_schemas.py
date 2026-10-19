@@ -21,25 +21,31 @@ try:
 
     PYDANTIC_AVAILABLE = True
 except ImportError:
-    # Pydantic not installed, provide graceful degradation
+    # Pydantic not installed, provide graceful degradation.
+    # One BaseModel name: the import above, or this fallback assignment.
     PYDANTIC_AVAILABLE = False
 
-    class BaseModel:
-        """Fallback BaseModel when Pydantic not installed."""
+    # pylint: disable-next=too-few-public-methods
+    class _FallbackBaseModel:
+        """Fallback BaseModel when Pydantic is not installed."""
 
         def __init__(self, **kwargs: Any) -> None:
-            pass
+            """Accept and ignore fields; validation is skipped without Pydantic."""
 
         def dict(self) -> Dict[str, Any]:
+            """Return an empty mapping when Pydantic models are unavailable."""
             return {}
 
-    def Field(*args: Any, **kwargs: Any) -> Any:
-        """Fallback Field when Pydantic not installed."""
+    # pylint: disable-next=invalid-name
+    def Field(*_args: Any, **_kwargs: Any) -> Any:
+        """Fallback Field when Pydantic is not installed."""
         return None
 
-    def validator(*args: Any, **kwargs: Any) -> Any:
-        """Fallback validator when Pydantic not installed."""
-        return lambda f: f
+    def validator(*_args: Any, **_kwargs: Any) -> Any:
+        """Fallback validator when Pydantic is not installed."""
+        return lambda func: func
+
+    BaseModel = _FallbackBaseModel
 
 
 # State Memory Schemas
@@ -57,6 +63,7 @@ class ActiveIssue(BaseModel):
         started: str = Field(..., description="ISO timestamp when started")
 
         @validator("key")
+        # pylint: disable-next=no-self-argument
         def validate_key(cls, v):
             """Ensure issue key matches pattern."""
             if not v or "-" not in v:
@@ -64,6 +71,7 @@ class ActiveIssue(BaseModel):
             return v
 
 
+# pylint: disable-next=too-few-public-methods
 class OpenMR(BaseModel):
     """An open merge request."""
 
@@ -75,6 +83,7 @@ class OpenMR(BaseModel):
     needs_review: Optional[bool] = Field(None, description="Whether review is needed")
 
 
+# pylint: disable-next=too-few-public-methods
 class DiscoveredWork(BaseModel):
     """Work discovered during skill execution that needs follow-up.
 
@@ -85,7 +94,10 @@ class DiscoveredWork(BaseModel):
     task: str = Field(..., description="Task/work description")
     work_type: str = Field(
         "discovered_work",
-        description="Type: discovered_work, tech_debt, bug, improvement, missing_test, missing_docs, security",
+        description=(
+            "Type: discovered_work, tech_debt, bug, improvement, "
+            "missing_test, missing_docs, security"
+        ),
     )
     priority: str = Field("medium", description="Priority: low, medium, high, critical")
     source_skill: Optional[str] = Field(
@@ -105,6 +117,7 @@ class DiscoveredWork(BaseModel):
     notes: Optional[str] = Field(None, description="Additional context or notes")
 
 
+# pylint: disable-next=too-few-public-methods
 class FollowUp(BaseModel):
     """A follow-up task or reminder (legacy, use DiscoveredWork for new items)."""
 
@@ -140,6 +153,7 @@ class CurrentWork(BaseModel):
     last_updated: str = Field(..., description="ISO timestamp of last update")
 
     @validator("last_updated")
+    # pylint: disable-next=no-self-argument
     def validate_timestamp(cls, v):
         """Ensure timestamp is valid ISO format."""
         try:
@@ -149,6 +163,7 @@ class CurrentWork(BaseModel):
         return v
 
 
+# pylint: disable-next=too-few-public-methods
 class EnvironmentStatus(BaseModel):
     """Status of a single environment."""
 
@@ -157,6 +172,7 @@ class EnvironmentStatus(BaseModel):
     issues: List[str] = Field(default_factory=list, description="Known issues")
 
 
+# pylint: disable-next=too-few-public-methods
 class EphemeralNamespace(BaseModel):
     """An ephemeral namespace deployment."""
 
@@ -166,6 +182,7 @@ class EphemeralNamespace(BaseModel):
     mr_id: Optional[int] = Field(None, description="Related MR ID")
 
 
+# pylint: disable-next=too-few-public-methods
 class Environments(BaseModel):
     """Environment health tracking."""
 
@@ -181,6 +198,7 @@ class Environments(BaseModel):
 # Learned Memory Schemas
 
 
+# pylint: disable-next=too-few-public-methods
 class PatternUsageStats(BaseModel):
     """Usage statistics for a pattern."""
 
@@ -192,6 +210,7 @@ class PatternUsageStats(BaseModel):
     last_matched: Optional[str] = Field(None, description="ISO timestamp of last match")
 
 
+# pylint: disable-next=too-few-public-methods
 class ErrorPattern(BaseModel):
     """An error pattern with auto-fix commands."""
 
@@ -206,6 +225,7 @@ class ErrorPattern(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class AuthPattern(BaseModel):
     """Authentication error pattern."""
 
@@ -220,6 +240,7 @@ class AuthPattern(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class BonfirePattern(BaseModel):
     """Bonfire-specific error pattern."""
 
@@ -234,6 +255,7 @@ class BonfirePattern(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class PipelinePattern(BaseModel):
     """CI/CD pipeline error pattern."""
 
@@ -248,6 +270,7 @@ class PipelinePattern(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class JiraCLIPattern(BaseModel):
     """Jira CLI error pattern."""
 
@@ -256,6 +279,7 @@ class JiraCLIPattern(BaseModel):
     solution: str = Field(..., description="How to solve this error")
 
 
+# pylint: disable-next=too-few-public-methods
 class Patterns(BaseModel):
     """Learned error patterns for auto-remediation."""
 
@@ -279,6 +303,7 @@ class Patterns(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class ToolFix(BaseModel):
     """A manually saved tool fix."""
 
@@ -292,6 +317,7 @@ class ToolFix(BaseModel):
     )
 
 
+# pylint: disable-next=too-few-public-methods
 class ToolFixes(BaseModel):
     """Manual tool fixes saved by users."""
 
@@ -335,11 +361,10 @@ def validate_memory(key: str, data: Dict[str, Any]) -> bool:
     try:
         schema(**data)
         return True
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        import logging
-
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Memory validation failed for {key}: {e}")
+        logger.warning("Memory validation failed for %s: %s", key, e)
         return False
 
 
@@ -352,6 +377,7 @@ def get_schema_template(key: str) -> Optional[str]:
     Returns:
         YAML template string or None if no schema exists
     """
+    # pylint: disable-next=import-outside-toplevel
     import yaml
 
     if BaseModel is object:
@@ -428,6 +454,8 @@ def get_schema_template(key: str) -> Optional[str]:
 
         return yaml.dump(example.dict(), default_flow_style=False, sort_keys=False)
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
-        logger.debug(f"Suppressed error in get_schema_template: {e}")
+        logger.debug("Suppressed error in get_schema_template: %s", e)
         return None
