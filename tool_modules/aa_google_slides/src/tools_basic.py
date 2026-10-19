@@ -52,7 +52,7 @@ def _try_load_oauth_token(credentials_cls, scopes):
         try:
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
         except Exception as e:
-            logger.debug(f"Suppressed error in _try_load_oauth_token: {e}")
+            logger.debug("Suppressed error in _try_load_oauth_token: %s", e)
     return None
 
 
@@ -65,7 +65,7 @@ def _try_refresh_credentials(creds, request_cls):
                 f.write(creds.to_json())
             return creds
         except Exception as e:
-            logger.debug(f"Suppressed error in _try_refresh_credentials: {e}")
+            logger.debug("Suppressed error in _try_refresh_credentials: %s", e)
     return None
 
 
@@ -77,7 +77,7 @@ def _try_service_account(service_account, scopes):
                 str(SERVICE_ACCOUNT_FILE), scopes=scopes
             )
         except Exception as e:
-            logger.debug(f"Suppressed error in _try_service_account: {e}")
+            logger.debug("Suppressed error in _try_service_account: %s", e)
     return None
 
 

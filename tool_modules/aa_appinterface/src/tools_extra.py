@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def find_app_interface_path() -> str:
+    "Find app interface path."
     return _shared_find_app_interface_path()
 
 

@@ -44,6 +44,7 @@ async def prometheus_api_request(
 
 
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
+    "Get prometheus config."
     return await _shared_get_prometheus_config(environment)
 
 
@@ -304,16 +305,15 @@ async def _prometheus_pre_deploy_check_impl(
                 ),
             )
         ]
-    else:
-        return [
-            TextContent(
-                type="text",
-                text=(
-                    f"## ⚠️ Pre-Deploy Check: WARNING\n\n{namespace} has firing alerts in "
-                    f"{environment}.\n\n{text}\n\n**Recommendation:** Resolve alerts before deploying."
-                ),
-            )
-        ]
+    return [
+        TextContent(
+            type="text",
+            text=(
+                f"## ⚠️ Pre-Deploy Check: WARNING\n\n{namespace} has firing alerts in "
+                f"{environment}.\n\n{text}\n\n**Recommendation:** Resolve alerts before deploying."
+            ),
+        )
+    ]
 
 
 async def _prometheus_series_impl(

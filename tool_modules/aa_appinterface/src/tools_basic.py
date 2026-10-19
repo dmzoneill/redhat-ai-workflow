@@ -68,6 +68,7 @@ def _shared_find_app_interface_path() -> str:
 
 
 def find_app_interface_path() -> str:
+    "Find app interface path."
     return _shared_find_app_interface_path()
 
 
@@ -155,7 +156,7 @@ def _extract_namespace_resources(filepath: str) -> list[str]:
         return lines
 
     try:
-        content = Path(filepath).read_text()
+        content = Path(filepath).read_text(encoding="utf-8")
 
         if "resourceTemplates" not in content and "resources" not in content:
             return lines

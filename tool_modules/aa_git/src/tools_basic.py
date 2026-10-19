@@ -434,20 +434,19 @@ def _detect_commit_type(message: str) -> str:
     msg_lower = message.lower()
     if any(w in msg_lower for w in ["fix", "bug", "issue", "error", "patch"]):
         return "fix"
-    elif any(w in msg_lower for w in ["add", "new", "feature", "implement", "create"]):
+    if any(w in msg_lower for w in ["add", "new", "feature", "implement", "create"]):
         return "feat"
-    elif any(w in msg_lower for w in ["refactor", "clean", "improve", "restructure"]):
+    if any(w in msg_lower for w in ["refactor", "clean", "improve", "restructure"]):
         return "refactor"
-    elif any(w in msg_lower for w in ["doc", "readme", "comment", "documentation"]):
+    if any(w in msg_lower for w in ["doc", "readme", "comment", "documentation"]):
         return "docs"
-    elif any(w in msg_lower for w in ["test", "spec", "coverage"]):
+    if any(w in msg_lower for w in ["test", "spec", "coverage"]):
         return "test"
-    elif any(w in msg_lower for w in ["style", "format", "lint"]):
+    if any(w in msg_lower for w in ["style", "format", "lint"]):
         return "style"
-    elif any(w in msg_lower for w in ["perf", "performance", "optimize", "speed"]):
+    if any(w in msg_lower for w in ["perf", "performance", "optimize", "speed"]):
         return "perf"
-    else:
-        return "chore"
+    return "chore"
 
 
 def _format_commit_msg(
@@ -466,14 +465,12 @@ def _format_commit_msg(
             commit_type=commit_type or "chore",
             scope=scope,
         )
-    elif issue_key:
+    if issue_key:
         # Fallback formatting
         if scope:
             return f"{issue_key} - {commit_type or 'chore'}({scope}): {message}"
-        else:
-            return f"{issue_key} - {commit_type or 'chore'}: {message}"
-    else:
-        return message
+        return f"{issue_key} - {commit_type or 'chore'}: {message}"
+    return message
 
 
 async def _git_commit_impl(

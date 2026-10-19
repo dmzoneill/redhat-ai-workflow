@@ -64,6 +64,7 @@ async def _shared_get_prometheus_config(environment: str) -> tuple[str, str | No
 
 
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
+    "Get prometheus config."
     return await _shared_get_prometheus_config(environment)
 
 

@@ -681,101 +681,98 @@ async def _google_calendar_quick_meeting_impl(
             duration_minutes=duration_minutes,
             auto_find_slot=True,
         )
-    else:
-        # Parse natural language or specific time
-        import re
+    # Parse natural language or specific time
+    import re
 
-        tz = ZoneInfo(TIMEZONE)
-        now = datetime.now(tz)
+    tz = ZoneInfo(TIMEZONE)
+    now = datetime.now(tz)
 
-        when_lower = when.lower()
+    when_lower = when.lower()
 
-        # Check for ISO format first (e.g., "2026-02-10T15:00:00" or "2026-02-10 15:00")
-        iso_match = re.match(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})", when)
-        if iso_match:
-            # Full ISO datetime - parse directly
-            try:
-                if "T" in when:
-                    start_time = datetime.fromisoformat(when.replace("Z", "+00:00"))
-                    if start_time.tzinfo is None:
-                        start_time = start_time.replace(tzinfo=tz)
-                    else:
-                        start_time = start_time.astimezone(tz)
+    # Check for ISO format first (e.g., "2026-02-10T15:00:00" or "2026-02-10 15:00")
+    iso_match = re.match(r"(\d{4}-\d{2}-\d{2})[T\s](\d{2}):(\d{2})", when)
+    if iso_match:
+        # Full ISO datetime - parse directly
+        try:
+            if "T" in when:
+                start_time = datetime.fromisoformat(when.replace("Z", "+00:00"))
+                if start_time.tzinfo is None:
+                    start_time = start_time.replace(tzinfo=tz)
                 else:
-                    start_time = datetime.strptime(when[:16], "%Y-%m-%d %H:%M").replace(
-                        tzinfo=tz
-                    )
-
-                return await _google_calendar_schedule_meeting_impl(
-                    title=title,
-                    attendee_email=attendee_email,
-                    start_time=start_time.isoformat(),
-                    duration_minutes=duration_minutes,
-                    auto_find_slot=False,
-                )
-            except ValueError as exc:
-                logger.debug("Invalid value encountered: %s", exc)
-
-        # Extract time component - look for time after T, space, or "at"
-        # Patterns: "15:00", "3pm", "3:30pm", "at 15:00"
-        time_match = re.search(
-            r"(?:T|\s|at\s*)(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)?", when, re.IGNORECASE
-        )
-        if time_match:
-            hour = int(time_match.group(1))
-            minute = int(time_match.group(2) or 0)
-            ampm = time_match.group(3)
-            if ampm:
-                if ampm.lower() == "pm" and hour < 12:
-                    hour += 12
-                elif ampm.lower() == "am" and hour == 12:
-                    hour = 0
-        else:
-            hour, minute = 15, 0  # Default to 3pm if no time specified
-
-        # Parse date component
-        if "tomorrow" in when_lower:
-            target_date = now + timedelta(days=1)
-        elif "today" in when_lower:
-            target_date = now
-        elif "monday" in when_lower:
-            days_ahead = (0 - now.weekday()) % 7 or 7
-            target_date = now + timedelta(days=days_ahead)
-        elif "tuesday" in when_lower:
-            days_ahead = (1 - now.weekday()) % 7 or 7
-            target_date = now + timedelta(days=days_ahead)
-        elif "wednesday" in when_lower:
-            days_ahead = (2 - now.weekday()) % 7 or 7
-            target_date = now + timedelta(days=days_ahead)
-        elif "thursday" in when_lower:
-            days_ahead = (3 - now.weekday()) % 7 or 7
-            target_date = now + timedelta(days=days_ahead)
-        elif "friday" in when_lower:
-            days_ahead = (4 - now.weekday()) % 7 or 7
-            target_date = now + timedelta(days=days_ahead)
-        elif re.match(r"\d{4}-\d{2}-\d{2}", when):
-            # Date provided (YYYY-MM-DD) without full ISO time
-            try:
-                target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(
+                    start_time = start_time.astimezone(tz)
+            else:
+                start_time = datetime.strptime(when[:16], "%Y-%m-%d %H:%M").replace(
                     tzinfo=tz
                 )
-            except ValueError:
-                target_date = now + timedelta(days=1)
-        else:
-            target_date = now + timedelta(days=1)  # Default to tomorrow
 
-        # Build datetime
-        start_time = target_date.replace(
-            hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz
-        )
+            return await _google_calendar_schedule_meeting_impl(
+                title=title,
+                attendee_email=attendee_email,
+                start_time=start_time.isoformat(),
+                duration_minutes=duration_minutes,
+                auto_find_slot=False,
+            )
+        except ValueError as exc:
+            logger.debug("Invalid value encountered: %s", exc)
 
-        return await _google_calendar_schedule_meeting_impl(
-            title=title,
-            attendee_email=attendee_email,
-            start_time=start_time.isoformat(),
-            duration_minutes=duration_minutes,
-            auto_find_slot=False,
-        )
+    # Extract time component - look for time after T, space, or "at"
+    # Patterns: "15:00", "3pm", "3:30pm", "at 15:00"
+    time_match = re.search(
+        r"(?:T|\s|at\s*)(\d{1,2})[:\.]?(\d{2})?\s*(am|pm)?", when, re.IGNORECASE
+    )
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2) or 0)
+        ampm = time_match.group(3)
+        if ampm:
+            if ampm.lower() == "pm" and hour < 12:
+                hour += 12
+            elif ampm.lower() == "am" and hour == 12:
+                hour = 0
+    else:
+        hour, minute = 15, 0  # Default to 3pm if no time specified
+
+    # Parse date component
+    if "tomorrow" in when_lower:
+        target_date = now + timedelta(days=1)
+    elif "today" in when_lower:
+        target_date = now
+    elif "monday" in when_lower:
+        days_ahead = (0 - now.weekday()) % 7 or 7
+        target_date = now + timedelta(days=days_ahead)
+    elif "tuesday" in when_lower:
+        days_ahead = (1 - now.weekday()) % 7 or 7
+        target_date = now + timedelta(days=days_ahead)
+    elif "wednesday" in when_lower:
+        days_ahead = (2 - now.weekday()) % 7 or 7
+        target_date = now + timedelta(days=days_ahead)
+    elif "thursday" in when_lower:
+        days_ahead = (3 - now.weekday()) % 7 or 7
+        target_date = now + timedelta(days=days_ahead)
+    elif "friday" in when_lower:
+        days_ahead = (4 - now.weekday()) % 7 or 7
+        target_date = now + timedelta(days=days_ahead)
+    elif re.match(r"\d{4}-\d{2}-\d{2}", when):
+        # Date provided (YYYY-MM-DD) without full ISO time
+        try:
+            target_date = datetime.strptime(when[:10], "%Y-%m-%d").replace(tzinfo=tz)
+        except ValueError:
+            target_date = now + timedelta(days=1)
+    else:
+        target_date = now + timedelta(days=1)  # Default to tomorrow
+
+    # Build datetime
+    start_time = target_date.replace(
+        hour=hour, minute=minute, second=0, microsecond=0, tzinfo=tz
+    )
+
+    return await _google_calendar_schedule_meeting_impl(
+        title=title,
+        attendee_email=attendee_email,
+        start_time=start_time.isoformat(),
+        duration_minutes=duration_minutes,
+        auto_find_slot=False,
+    )
 
 
 def _check_duplicate_meeting(

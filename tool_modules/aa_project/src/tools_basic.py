@@ -66,6 +66,7 @@ __all__ = [
 
 
 def register_tools(server: "FastMCP") -> int:
+    "Register tools."
     return _shared_register_project_tools(server)
 
 
