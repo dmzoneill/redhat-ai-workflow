@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,import-outside-toplevel,too-many-lines
 """Memory Tools - Persistent context storage across sessions.
 
 NOTE: For unified memory access across multiple sources (YAML, code search,
@@ -38,7 +39,6 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from fastmcp import Context
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 
@@ -127,7 +127,8 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 
                 project = await get_workspace_project(ctx)
                 return MEMORY_DIR / "state" / "projects" / project / "current_work.yaml"
-            except Exception as exc:
+            # Intentional: optional step must not abort the caller.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.debug("Suppressed error: %s", exc)
 
         # Fall back to sync version
@@ -317,7 +318,9 @@ def _collect_pattern_stats() -> dict:
     }
 
 
-def _format_memory_stats(stats: dict) -> list[str]:
+def _format_memory_stats(  # pylint: disable=too-many-branches,too-many-locals
+    stats: dict,
+) -> list[str]:
     """Format memory statistics for display."""
     lines = ["## 📊 Memory System Statistics\n"]
 
@@ -383,9 +386,8 @@ def _format_memory_stats(stats: dict) -> list[str]:
 
     # Check total storage
     if stats["storage"]["total_kb"] > 1024:
-        warnings.append(
-            f"⚠️ Total storage over 1 MB: {stats['storage']['total_kb']} KB"
-        )
+        storage_kb = stats["storage"]["total_kb"]
+        warnings.append(f"⚠️ Total storage over 1 MB: {storage_kb} KB")
 
     if warnings:
         for w in warnings:
@@ -474,7 +476,8 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
                 type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```"
             )
         ]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error reading memory: {e}")]
 
 
@@ -519,7 +522,8 @@ async def _memory_write_impl(
         return [TextContent(type="text", text=f"✅ Memory saved: {display_key}")]
     except yaml.YAMLError as e:
         return [TextContent(type="text", text=f"❌ Invalid YAML: {e}")]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error writing memory: {e}")]
 
 
@@ -583,7 +587,8 @@ async def _memory_update_impl(
         return [
             TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")
         ]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error updating memory: {e}")]
 
 
@@ -654,7 +659,8 @@ async def _memory_append_impl(
         return [
             TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")
         ]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
 
 
@@ -721,7 +727,8 @@ async def _memory_query_impl(
                     type="text",
                     text=f"No matches found for query: `{query}`\n\n"
                     f"**File:** {display_key}\n\n"
-                    "Try a different JSONPath expression or use memory_read() to see full contents.",
+                    "Try a different JSONPath expression or use memory_read() "
+                    "to see full contents.",
                 )
             ]
 
@@ -736,7 +743,8 @@ async def _memory_query_impl(
                 f"```yaml\n{result_yaml}```",
             )
         ]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         key_normalized = key.replace(".yaml", "")
         return [
             TextContent(
@@ -800,7 +808,8 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
             yaml.dump(data, f, default_flow_style=False)
 
         return [TextContent(type="text", text=f"✅ Logged: {action}")]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error logging: {e}")]
 
 
@@ -971,7 +980,8 @@ async def _learn_tool_fix_impl(
                 "Next time this pattern appears, you'll be reminded of the fix.",
             )
         ]
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error saving fix: {e}")]
 
 
@@ -990,7 +1000,7 @@ async def _memory_stats_impl() -> list[TextContent]:
         Comprehensive memory health dashboard.
     """
     try:
-        stats = {
+        stats: dict[str, Any] = {
             "files": {},
             "auto_heal": {},
             "patterns": {},
@@ -1035,7 +1045,8 @@ async def _memory_stats_impl() -> list[TextContent]:
         lines = _format_memory_stats(stats)
         return [TextContent(type="text", text="\n".join(lines))]
 
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         return [TextContent(type="text", text=f"❌ Error generating stats: {e}")]
 
 
@@ -1150,7 +1161,7 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_session_log(
+    async def memory_session_log(  # pylint: disable=unused-argument
         ctx: Context, action: str, details: str = ""
     ) -> list[TextContent]:
         """
@@ -1169,7 +1180,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         return await _memory_session_log_impl(action, details)
 
     @registry.tool()
-    async def check_known_issues(
+    async def check_known_issues(  # pylint: disable=unused-argument
         ctx: Context, tool_name: str = "", error_text: str = ""
     ) -> list[TextContent]:
         """
@@ -1190,7 +1201,7 @@ def register_memory_tools(server: "FastMCP") -> int:
     @auto_heal()
     @registry.tool()
     async def learn_tool_fix(
-        ctx: Context,
+        ctx: Context,  # pylint: disable=unused-argument
         tool_name: str,
         error_pattern: str,
         root_cause: str,
@@ -1216,7 +1227,9 @@ def register_memory_tools(server: "FastMCP") -> int:
         )
 
     @registry.tool()
-    async def memory_stats(ctx: Context) -> list[TextContent]:
+    async def memory_stats(
+        ctx: Context,  # pylint: disable=unused-argument
+    ) -> list[TextContent]:
         """
         Get memory system statistics and health metrics.
 

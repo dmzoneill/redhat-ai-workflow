@@ -55,17 +55,17 @@ class SkillToolDiscovery:
 
         skill_path = self.skills_dir / f"{skill_name}.yaml"
         if not skill_path.exists():
-            logger.warning(f"Skill not found: {skill_path}")
+            logger.warning("Skill not found: %s", skill_path)
             return set()
 
         try:
             with open(skill_path, encoding="utf-8") as f:
                 skill = yaml.safe_load(f)
         except yaml.YAMLError as e:
-            logger.error(f"Failed to parse skill {skill_name}: {e}")
+            logger.error("Failed to parse skill %s: %s", skill_name, e)
             return set()
 
-        tools = set()
+        tools: set[str] = set()
 
         # Extract from steps
         for step in skill.get("steps", []):
@@ -73,10 +73,14 @@ class SkillToolDiscovery:
 
         self._cache[skill_name] = tools
         logger.info(
-            f"Discovered {len(tools)} tools for skill {skill_name}: {sorted(tools)}"
+            "Discovered %s tools for skill %s: %s",
+            len(tools),
+            skill_name,
+            sorted(tools),
         )
         return tools
 
+    # pylint: disable-next=too-many-branches
     def _extract_tools_from_step(self, step: dict, tools: set[str]) -> None:
         """Recursively extract tools from a step.
 
@@ -184,6 +188,7 @@ class SkillToolDiscovery:
             "memory_ops": memory_ops,
         }
 
+    # pylint: disable-next=too-many-locals,too-many-branches
     def _extract_memory_operations(self, steps: list) -> dict:
         """Extract memory read/write operations from skill steps.
 
@@ -339,7 +344,7 @@ SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
     "investigate_slack_alert": [
         re.compile(r"investigate.*alert", re.I),
         re.compile(r"look.*into.*alert", re.I),
-        re.compile(r"whats.*firing", re.I),
+        re.compile(r"whats.*firing", re.I),  # codespell:ignore
         re.compile(r"what.*alerts", re.I),
     ],
     "create_mr": [
@@ -370,7 +375,7 @@ def detect_skill(message: str) -> str | None:
         for pattern in patterns:
             if pattern.search(message):
                 logger.debug(
-                    f"Fast skill detection: {skill_name} matched '{message[:50]}...'"
+                    "Fast skill detection: %s matched '%s...'", skill_name, message[:50]
                 )
                 return skill_name
     return None
@@ -389,12 +394,12 @@ def add_skill_pattern(skill_name: str, pattern: str) -> None:
 
 
 # Singleton discovery instance
-_discovery: Optional[SkillToolDiscovery] = None
+_discovery: Optional[SkillToolDiscovery] = None  # pylint: disable=invalid-name
 
 
 def get_skill_discovery() -> SkillToolDiscovery:
     """Get or create the skill discovery instance."""
-    global _discovery
+    global _discovery  # pylint: disable=global-statement
     if _discovery is None:
         _discovery = SkillToolDiscovery()
     return _discovery

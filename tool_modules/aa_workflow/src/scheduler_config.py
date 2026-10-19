@@ -1,31 +1,46 @@
+# pylint: disable=duplicate-code,cyclic-import
 """Scheduler configuration and execution log.
 
-Extracted from scheduler.py to reduce class size.
-
-Provides:
-- RetryConfig: Configuration for job retry behavior with exponential backoff
-- SchedulerConfig: Configuration loaded from config.json and state.json
-- JobExecutionLog: Track job execution history with file persistence
-- DEFAULT_RETRY_CONFIG: Default retry configuration dict
+Single implementation of retry settings, schedule config, and job history.
+``scheduler`` re-exports these classes. Methods resolve ``state_manager`` and
+``config_manager`` through the scheduler module when it is loaded so tests that
+patch those names keep working.
 """
 
 import json
 import logging
+import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+try:
+    from scripts.common.config_loader import load_config
+except ImportError:  # optional; retry defaults fall back to hardcoded values
+    load_config = None  # type: ignore[assignment]
+
+from server.config_manager import config as config_manager
+
+try:
+    from server.paths import CRON_HISTORY_FILE as _cron_history_file
+except ImportError:
+    _cron_history_file = None  # type: ignore[assignment]
+
+from server.state_manager import state as state_manager
+from tool_modules.common import PROJECT_ROOT
+
+CRON_HISTORY_FILE: Path | None = _cron_history_file
+
 logger = logging.getLogger(__name__)
 
-# Cron history file path - centralized in server.paths
-try:
-    from server.paths import CRON_HISTORY_FILE
-
-    _CRON_HISTORY_FILE = CRON_HISTORY_FILE
-except ImportError:
+if CRON_HISTORY_FILE is None:
     _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
+else:
+    _CRON_HISTORY_FILE = CRON_HISTORY_FILE
 
+SKILLS_DIR = PROJECT_ROOT / "skills"
 
 # Hardcoded fallback retry configuration (used only if config.json lacks schedules.default_retry)
 _FALLBACK_RETRY_CONFIG = {
@@ -37,17 +52,34 @@ _FALLBACK_RETRY_CONFIG = {
 }
 
 
+_FALLBACKS = {
+    "config_manager": config_manager,
+    "state_manager": state_manager,
+}
+
+
+def _runtime(name: str):
+    """Return a scheduler-module binding when that module is already loaded."""
+    scheduler_mod = sys.modules.get("tool_modules.aa_workflow.src.scheduler")
+    if scheduler_mod is not None and hasattr(scheduler_mod, name):
+        return getattr(scheduler_mod, name)
+    return _FALLBACKS[name]
+
+
+def expand_vpn_script(configured: str | None) -> str:
+    """Expand a configured VPN script path, or the default script location."""
+    script = configured or "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+    return os.path.expanduser(script)
+
+
 def _load_default_retry_config() -> dict:
     """Load default retry config from config.json, falling back to hardcoded defaults."""
-    try:
-        from scripts.common.config_loader import load_config
-
-        config = load_config()
-        cfg_retry = config.get("schedules", {}).get("default_retry")
-        if isinstance(cfg_retry, dict) and cfg_retry:
-            return cfg_retry
-    except ImportError:
-        pass
+    if load_config is None:
+        return dict(_FALLBACK_RETRY_CONFIG)
+    config = load_config()
+    cfg_retry = config.get("schedules", {}).get("default_retry")
+    if isinstance(cfg_retry, dict) and cfg_retry:
+        return cfg_retry
     return dict(_FALLBACK_RETRY_CONFIG)
 
 
@@ -87,15 +119,11 @@ class RetryConfig:
         Returns:
             RetryConfig instance
         """
-        # Check if retry is explicitly disabled
         retry_setting = job_config.get("retry")
         if retry_setting is False:
             return cls(enabled=False)
 
-        # Start with global defaults
         defaults = default_config or DEFAULT_RETRY_CONFIG
-
-        # If retry is a dict, merge with defaults
         if isinstance(retry_setting, dict):
             config = {**defaults, **retry_setting}
         else:
@@ -120,12 +148,9 @@ class RetryConfig:
             Delay in seconds
         """
         if self.backoff == "exponential":
-            # Exponential: initial * 2^attempt
             delay = self.initial_delay_seconds * (2**attempt)
         else:
-            # Linear: initial * (attempt + 1)
             delay = self.initial_delay_seconds * (attempt + 1)
-
         return min(delay, self.max_delay_seconds)
 
     def should_retry(self, failure_type: str, attempt: int) -> bool:
@@ -142,23 +167,18 @@ class RetryConfig:
             return False
         if attempt >= self.max_attempts:
             return False
-        if failure_type not in self.retry_on:
-            return False
-        return True
-
-
-# Project paths - use common module for consistency
-from tool_modules.common import PROJECT_ROOT  # noqa: E402
-
-SKILLS_DIR = PROJECT_ROOT / "skills"
-
-# Import ConfigManager for thread-safe config access
-from server.config_manager import config as config_manager  # noqa: E402
-from server.state_manager import state as state_manager  # noqa: E402
+        return failure_type in self.retry_on
 
 
 class SchedulerConfig:
     """Configuration for the scheduler loaded from config.json and state.json."""
+
+    enabled: bool
+    timezone: str
+    jobs: list
+    poll_sources: dict
+    execution_mode: str
+    default_retry: dict
 
     def __init__(self, config_data: dict | None = None):
         """Initialize scheduler config from config data or load from file."""
@@ -166,24 +186,21 @@ class SchedulerConfig:
             config_data = self._load_config()
 
         schedules = config_data.get("schedules", {})
-        # Enabled state: config.json is the source of truth, state.json can override
         config_enabled = schedules.get("enabled", False)
-        state_override = state_manager.get("services", "scheduler", {})
+        state_override = _runtime("state_manager").get("services", "scheduler", {})
         if isinstance(state_override, dict) and "enabled" in state_override:
-            self.enabled = state_override["enabled"]  # runtime override wins
+            self.enabled = state_override["enabled"]
         else:
-            self.enabled = config_enabled  # config.json default
+            self.enabled = config_enabled
         self.timezone = schedules.get("timezone", "UTC")
         self.jobs = schedules.get("jobs", [])
         self.poll_sources = schedules.get("poll_sources", {})
-        # Execution mode: "claude_cli" (default) or "direct"
         self.execution_mode = schedules.get("execution_mode", "claude_cli")
-        # Default retry configuration for all jobs
         self.default_retry = schedules.get("default_retry", DEFAULT_RETRY_CONFIG)
 
     def _load_config(self) -> dict:
         """Load config using ConfigManager (auto-reloads if file changed)."""
-        return config_manager.get_all()
+        return _runtime("config_manager").get_all()
 
     def _is_job_enabled(self, job_config: dict) -> bool:
         """Resolve job enabled state: config.json first, state.json override.
@@ -195,11 +212,15 @@ class SchedulerConfig:
             True if the job is enabled
         """
         job_name = job_config.get("name", "")
-        config_enabled = job_config.get("enabled", True)  # config.json per-job field
-        state_override = state_manager.get("jobs", job_name, {})
+        config_enabled = job_config.get("enabled", True)
+        state_override = _runtime("state_manager").get("jobs", job_name, {})
         if isinstance(state_override, dict) and "enabled" in state_override:
-            return state_override["enabled"]  # runtime override wins
-        return config_enabled  # config.json default
+            return state_override["enabled"]
+        return config_enabled
+
+    def job_is_enabled(self, job_config: dict) -> bool:
+        """Public wrapper so other classes can check a job without protected access."""
+        return self._is_job_enabled(job_config)
 
     def get_cron_jobs(self) -> list[dict]:
         """Get jobs that use cron triggers (not poll triggers) and are enabled.
@@ -236,7 +257,6 @@ class SchedulerConfig:
 class JobExecutionLog:
     """Track job execution history with file persistence."""
 
-    # File path - centralized in server.paths (set at module level)
     HISTORY_FILE = _CRON_HISTORY_FILE
 
     def __init__(self, max_entries: int = 100):
@@ -248,24 +268,23 @@ class JobExecutionLog:
         """Load execution history from file."""
         try:
             if self.HISTORY_FILE.exists():
-                with open(self.HISTORY_FILE, encoding="utf-8") as f:
-                    data = json.load(f)
+                with open(self.HISTORY_FILE, encoding="utf-8") as handle:
+                    data = json.load(handle)
                     self.entries = data.get("executions", [])[-self.max_entries :]
-        except Exception as e:
-            logger.warning(f"Failed to load cron history: {e}")
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to load cron history: %s", exc)
             self.entries = []
 
     def _save_to_file(self):
         """Save execution history to file."""
         try:
-            # Ensure directory exists
             self.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump({"executions": self.entries}, f, indent=2)
-        except Exception as e:
-            logger.warning(f"Failed to save cron history: {e}")
+            with open(self.HISTORY_FILE, "w", encoding="utf-8") as handle:
+                json.dump({"executions": self.entries}, handle, indent=2)
+        except OSError as exc:
+            logger.warning("Failed to save cron history: %s", exc)
 
-    def log_execution(
+    def log_execution(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         job_name: str,
         skill: str,
@@ -278,6 +297,8 @@ class JobExecutionLog:
     ):
         """Log a job execution.
 
+        The parameter list is the public job-history API used by cron jobs and tests.
+
         Args:
             job_name: Name of the cron job
             skill: Skill that was executed
@@ -286,12 +307,7 @@ class JobExecutionLog:
             error: Error message if failed
             output_preview: Preview of output (truncated to 500 chars)
             session_name: Session name for logging
-            retry_info: Optional retry information dict with:
-                - attempts: Total attempts made (including initial)
-                - retried: Whether any retries occurred
-                - failure_type: Type of failure that triggered retry
-                - remediation_applied: What fix was applied (kube_login, vpn_connect)
-                - remediation_success: Whether the fix worked
+            retry_info: Optional retry information dict
         """
         entry = {
             "job_name": job_name,
@@ -303,8 +319,6 @@ class JobExecutionLog:
             "output_preview": output_preview[:500] if output_preview else None,
             "session_name": session_name,
         }
-
-        # Add retry information if present
         if retry_info:
             entry["retry"] = {
                 "attempts": retry_info.get("attempts", 1),
@@ -313,14 +327,9 @@ class JobExecutionLog:
                 "remediation_applied": retry_info.get("remediation_applied"),
                 "remediation_success": retry_info.get("remediation_success"),
             }
-
         self.entries.append(entry)
-
-        # Trim to max entries
         if len(self.entries) > self.max_entries:
             self.entries = self.entries[-self.max_entries :]
-
-        # Persist to file
         self._save_to_file()
 
     def get_recent(self, limit: int = 10) -> list[dict]:
@@ -329,5 +338,5 @@ class JobExecutionLog:
 
     def get_for_job(self, job_name: str, limit: int = 5) -> list[dict]:
         """Get recent executions for a specific job."""
-        job_entries = [e for e in self.entries if e["job_name"] == job_name]
+        job_entries = [entry for entry in self.entries if entry["job_name"] == job_name]
         return job_entries[-limit:]

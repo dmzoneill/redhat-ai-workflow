@@ -12,7 +12,7 @@ project for loading project-specific memory and semantic search.
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 from fastmcp import Context
@@ -55,7 +55,7 @@ def load_memory_state(project: Optional[str] = None) -> dict:
     Returns:
         Dict with active_issues, current_branch, current_repo, notes
     """
-    result = {
+    result: dict[str, Any] = {
         "active_issues": [],
         "current_branch": None,
         "current_repo": None,
@@ -87,8 +87,9 @@ def load_memory_state(project: Optional[str] = None) -> dict:
         result["open_mrs"] = data.get("open_mrs", [])[:3]
         result["follow_ups"] = data.get("follow_ups", [])[:3]
 
-    except Exception as e:
-        logger.warning(f"Failed to load current_work.yaml: {e}")
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load current_work.yaml: %s", e)
 
     return result
 
@@ -106,11 +107,13 @@ async def load_memory_state_async(ctx: "Context" = None) -> dict:
 
     if ctx:
         try:
+            # pylint: disable-next=import-outside-toplevel
             from server.workspace_utils import get_workspace_project
 
             project = await get_workspace_project(ctx)
-        except Exception as e:
-            logger.warning(f"Failed to get workspace project: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to get workspace project: %s", e)
 
     return load_memory_state(project)
 
@@ -121,7 +124,7 @@ def load_environment_status() -> dict:
     Returns:
         Dict with vpn_connected, kubeconfigs, ollama_instances
     """
-    result = {
+    result: dict[str, Any] = {
         "vpn_connected": False,
         "kubeconfigs": {
             "stage": False,
@@ -149,6 +152,7 @@ def load_environment_status() -> dict:
 
     # Load Ollama instances from config
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.config_manager import config as config_manager
 
         ollama_instances = config_manager.get("ollama_instances") or {}
@@ -160,8 +164,9 @@ def load_environment_status() -> dict:
                     "device": inst.get("device", "unknown"),
                 }
             )
-    except Exception as e:
-        logger.warning(f"Failed to load ollama instances: {e}")
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load ollama instances: %s", e)
 
     return result
 
@@ -190,8 +195,9 @@ def load_learned_patterns(
     try:
         with open(patterns_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Failed to load patterns.yaml: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load patterns.yaml: %s", e)
         return []
 
     all_patterns = data.get("error_patterns", [])
@@ -246,7 +252,7 @@ def load_session_log(limit: int = 5) -> list[dict]:
     Returns:
         List of log entry dicts with time, action, details
     """
-    from datetime import date
+    from datetime import date  # pylint: disable=import-outside-toplevel
 
     memory_dir = _get_memory_dir()
     today = date.today().isoformat()
@@ -258,8 +264,9 @@ def load_session_log(limit: int = 5) -> list[dict]:
     try:
         with open(log_path, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Failed to load session log: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load session log: %s", e)
         return []
 
     entries = data.get("entries", data.get("actions", []))
@@ -290,18 +297,21 @@ def load_persona_prompt(persona_name: str) -> str:
             with open(yaml_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             return data.get("system_prompt", data.get("description", ""))[:500]
-        except Exception as e:
-            logger.debug(f"Suppressed error in load_persona_prompt yaml: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error in load_persona_prompt yaml: %s", e)
 
     if md_path.exists():
         try:
             return md_path.read_text()[:500]
-        except Exception as e:
-            logger.debug(f"Suppressed error in load_persona_prompt md: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error in load_persona_prompt md: %s", e)
 
     return ""
 
 
+# pylint: disable-next=too-many-branches
 def run_semantic_search(
     message: str,
     project: Optional[str] = None,
@@ -319,15 +329,16 @@ def run_semantic_search(
     """
     # Try to import code search tools
     try:
-        import sys
+        import sys  # pylint: disable=import-outside-toplevel
 
         tool_modules_dir = Path(__file__).parents[2]
         if str(tool_modules_dir) not in sys.path:
             sys.path.insert(0, str(tool_modules_dir))
 
+        # pylint: disable-next=import-outside-toplevel
         from aa_code_search.src.tools_basic import _search_code
     except ImportError as e:
-        logger.warning(f"Code search not available: {e}")
+        logger.warning("Code search not available: %s", e)
         return []
 
     # Auto-detect project from memory state if not provided
@@ -346,7 +357,7 @@ def run_semantic_search(
         if isinstance(result, str):
             # Extract relevant info from the formatted output
             snippets = []
-            current_snippet = {}
+            current_snippet: dict[str, Any] = {}
 
             for line in result.split("\n"):
                 if line.startswith("📄 "):
@@ -376,8 +387,9 @@ def run_semantic_search(
 
         return []
 
-    except Exception as e:
-        logger.warning(f"Semantic search failed: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Semantic search failed: %s", e)
         return []
 
 
@@ -401,15 +413,18 @@ async def run_semantic_search_async(
     # Get project from workspace if not provided
     if not project and ctx:
         try:
+            # pylint: disable-next=import-outside-toplevel
             from server.workspace_utils import get_workspace_project
 
             project = await get_workspace_project(ctx)
-        except Exception as e:
-            logger.warning(f"Failed to get workspace project: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to get workspace project: %s", e)
 
     return run_semantic_search(message, project, limit)
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def enrich_context(
     persona: str,
     detected_skill: Optional[str] = None,
@@ -447,6 +462,7 @@ def enrich_context(
     return result
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def enrich_context_async(
     persona: str,
     ctx: "Context" = None,
@@ -472,11 +488,13 @@ async def enrich_context_async(
     project = None
     if ctx:
         try:
+            # pylint: disable-next=import-outside-toplevel
             from server.workspace_utils import get_workspace_project
 
             project = await get_workspace_project(ctx)
-        except Exception as e:
-            logger.warning(f"Failed to get workspace project: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to get workspace project: %s", e)
 
     result = {
         "memory_state": load_memory_state(project),
