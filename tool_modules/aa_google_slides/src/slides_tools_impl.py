@@ -767,7 +767,7 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
 
         from googleapiclient.http import (  # pylint: disable=import-outside-toplevel
             MediaIoBaseDownload,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         fh = BytesIO()
         downloader = MediaIoBaseDownload(fh, request)

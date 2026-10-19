@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 class SkillComputeMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
 
-    def _exec_compute_internal(self, code: str, output_name: str):  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
+    def _exec_compute_internal(self, code: str, output_name: str):
         """Internal compute execution without error recovery (used by recovery itself)."""
         # This is the actual compute logic extracted from _exec_compute
         # to avoid infinite recursion during auto-fix retries
@@ -30,7 +31,7 @@ class SkillComputeMixin:  # pylint: disable=too-few-public-methods
         from datetime import (  # pylint: disable=import-outside-toplevel
             datetime,
             timedelta,
-        )  # pylint: disable=import-outside-toplevel
+        )
         from pathlib import Path  # pylint: disable=import-outside-toplevel
 
         try:
@@ -47,24 +48,32 @@ class SkillComputeMixin:  # pylint: disable=too-few-public-methods
                 config_loader,
                 jira_utils,
                 lint_utils,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: off
             from scripts.common import (  # pylint: disable=import-outside-toplevel
                 memory as memory_helpers,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: on
             from scripts.common import (  # pylint: disable=import-outside-toplevel
                 parsers,
                 repo_utils,
                 slack_utils,
-            )  # pylint: disable=import-outside-toplevel
+            )
             from scripts.common.config_loader import (  # pylint: disable=import-outside-toplevel
                 get_timezone,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: off
             from scripts.common.config_loader import (  # pylint: disable=import-outside-toplevel
                 load_config as load_skill_config,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: on
             from scripts.skill_hooks import (  # pylint: disable=import-outside-toplevel
                 emit_event_sync,
-            )  # pylint: disable=import-outside-toplevel
+            )
         except ImportError:
             parsers = None  # type: ignore[assignment]
             jira_utils = None  # type: ignore[assignment]
@@ -78,12 +87,15 @@ class SkillComputeMixin:  # pylint: disable=too-few-public-methods
             slack_utils = None  # type: ignore[assignment]
 
         try:
+            # isort: off
             from google.oauth2.credentials import (  # pylint: disable=import-outside-toplevel
                 Credentials as GoogleCredentials,
-            )  # pylint: disable=import-outside-toplevel
+            )
             from googleapiclient.discovery import (  # pylint: disable=import-outside-toplevel
                 build as google_build,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: on
         except ImportError:
             GoogleCredentials = None  # type: ignore[misc,assignment]
             google_build = None

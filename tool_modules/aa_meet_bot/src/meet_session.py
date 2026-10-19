@@ -43,7 +43,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
         try:
             from scripts.common.dbus_base import (  # pylint: disable=import-outside-toplevel,no-name-in-module
                 get_client,
-            )  # pylint: disable=import-outside-toplevel,no-name-in-module
+            )
 
             client = get_client("video")
             if not await client.connect():
@@ -174,7 +174,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
         try:
             from playwright.async_api import (  # pylint: disable=import-outside-toplevel
                 async_playwright,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             # Check DISPLAY is set (required for headless=False)
             display = os.environ.get("DISPLAY")
@@ -286,7 +286,8 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
 
             # Launch browser - use real PulseAudio devices from system
             # Device settings are saved in the persistent profile
-            # Use instance-specific profile to avoid lock conflicts, but copy cookies from main profile  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            # Use instance-specific profile to avoid lock conflicts, but copy cookies from main profile
             instance_profile_dir = profile_dir / f"instance-{self._instance_id}"
             instance_profile_dir.mkdir(parents=True, exist_ok=True)
             logger.info(
@@ -295,7 +296,8 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                 instance_profile_dir,
             )
 
-            # Copy cookies and login data from main profile if they exist and instance doesn't have them  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            # Copy cookies and login data from main profile if they exist and instance doesn't have them
             await self._copy_profile_data(profile_dir, instance_profile_dir)
 
             # ========== AUDIO PRE-ROUTING VIA ENVIRONMENT ==========
@@ -427,7 +429,8 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # Skip stealth scripts - they may break Google Meet UI
             # await self._inject_stealth_scripts()
 
-            # Don't navigate to meet.google.com here - it redirects to product page when not signed in  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            # Don't navigate to meet.google.com here - it redirects to product page when not signed in
             # The browser will navigate directly to the meeting URL when join_meeting is called
             # Audio devices will be initialized when we navigate to the actual meeting
 
@@ -437,7 +440,8 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             return True
 
         except ImportError as e:
-            error_msg = f"Playwright not installed: {e}. Run: uv add playwright && playwright install chromium"  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            error_msg = f"Playwright not installed: {e}. Run: uv add playwright && playwright install chromium"
             logger.error(error_msg)
             if self.state:
                 self.state.errors.append(error_msg)
@@ -480,8 +484,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
 
     async def _inject_stealth_scripts(self) -> None:
         """Inject scripts to avoid bot detection."""
-        await self.page.add_init_script(
-            """
+        await self.page.add_init_script("""
             // Override webdriver property
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
@@ -504,14 +507,13 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     Promise.resolve({ state: Notification.permission }) :
                     originalQuery(parameters)
             );
-        """
-        )
+        """)
 
     # pylint: disable=trailing-newlines
 
     async def take_screenshot(
         self,
-    ) -> Optional[Path]:  # pylint: disable=undefined-variable
+    ) -> Path | None:
         """
         Take a screenshot of the current meeting view.
 
@@ -545,7 +547,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             ):
                 logger.error("[%s] Browser was closed unexpectedly!", self._instance_id)
                 self._browser_closed = True
-                raise BrowserClosedError("Browser was closed") from e  # pylint: disable=undefined-variable
+                raise BrowserClosedError("Browser was closed") from e
             logger.warning("[%s] Failed to take screenshot: %s", self._instance_id, e)
             return None
 
@@ -612,7 +614,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     consecutive_failures = 0  # Reset on success
                 else:
                     consecutive_failures += 1
-            except BrowserClosedError:  # pylint: disable=undefined-variable
+            except BrowserClosedError:
                 logger.error(
                     "[%s] Browser closed - stopping screenshot loop", self._instance_id
                 )
@@ -638,7 +640,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
 
     def get_screenshot_path(
         self,
-    ) -> Optional[Path]:  # pylint: disable=undefined-variable
+    ) -> Path | None:
         """Get the path to the latest screenshot for this meeting."""
         if not self.state.meeting_id:
             return None

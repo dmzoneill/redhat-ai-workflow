@@ -214,7 +214,8 @@ class SprintSafetyGuard:
         if status["branch"].lower() in self.PROTECTED_BRANCHES:
             result["safe"] = False
             result["reason"] = (
-                f"Currently on protected branch '{status['branch']}'. Please create a feature branch first."  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                f"Currently on protected branch '{status['branch']}'. Please create a feature branch first."
             )
             return result
 
@@ -236,7 +237,8 @@ class SprintSafetyGuard:
             else:
                 result["safe"] = False
                 result["reason"] = (
-                    "Uncommitted changes detected. Please commit or stash them first, or enable auto_stash."  # pylint: disable=line-too-long
+                    # pylint: disable-next=line-too-long
+                    "Uncommitted changes detected. Please commit or stash them first, or enable auto_stash."
                 )
                 return result
 

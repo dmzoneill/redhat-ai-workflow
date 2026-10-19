@@ -173,15 +173,18 @@ async def _prometheus_pod_health_impl(
     queries = [
         (
             "CPU Usage",
-            f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",pod=~"{pod}.*"}}[5m]))',  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}",pod=~"{pod}.*"}}[5m]))',
         ),
         (
             "Memory (MB)",
-            f'sum(container_memory_usage_bytes{{namespace="{namespace}",pod=~"{pod}.*"}}) / 1024 / 1024',  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f'sum(container_memory_usage_bytes{{namespace="{namespace}",pod=~"{pod}.*"}}) / 1024 / 1024',
         ),
         (
             "Restarts",
-            f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}",pod=~"{pod}.*"}})',  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f'sum(kube_pod_container_status_restarts_total{{namespace="{namespace}",pod=~"{pod}.*"}})',
         ),
         (
             "Ready",
@@ -266,7 +269,9 @@ async def _prometheus_query_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _prometheus_query_range_impl(  # pylint: disable=too-many-arguments,too-many-branches,too-many-locals,too-many-positional-arguments
+# pylint: disable-next=line-too-long
+# pylint: disable-next=too-many-arguments,too-many-branches,too-many-locals,too-many-positional-arguments
+async def _prometheus_query_range_impl(
     query: str,
     environment: str = "stage",
     start: str = "",
@@ -442,7 +447,8 @@ async def _prometheus_check_health_impl(  # pylint: disable=too-many-locals
         return [
             TextContent(
                 type="text",
-                text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text=f"## ✅ {namespace} is healthy\n\nNo critical or warning alerts in {environment}.",
             )
         ]
 
@@ -573,12 +579,15 @@ async def _prometheus_namespace_metrics_impl(
 
     queries = {
         "CPU Usage": f'sum(rate(container_cpu_usage_seconds_total{{namespace="{namespace}"}}[5m]))',
-        "Memory (GB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) / 1024 / 1024 / 1024',  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        "Memory (GB)": f'sum(container_memory_usage_bytes{{namespace="{namespace}"}}) / 1024 / 1024 / 1024',
         "Network RX (MB/s)": (
-            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f'sum(rate(container_network_receive_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'
         ),
         "Network TX (MB/s)": (
-            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f'sum(rate(container_network_transmit_bytes_total{{namespace="{namespace}"}}[5m])) / 1024 / 1024'
         ),
     }
 
@@ -632,7 +641,8 @@ async def _prometheus_pre_deploy_check_impl(
         return [
             TextContent(
                 type="text",
-                text="⚠️ No namespace configured for pre-deploy check. Set 'prometheus.namespace' in config.json.",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text="⚠️ No namespace configured for pre-deploy check. Set 'prometheus.namespace' in config.json.",
             )
         ]
 

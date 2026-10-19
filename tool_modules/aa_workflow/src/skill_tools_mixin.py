@@ -24,7 +24,7 @@ class SkillToolMixin:  # pylint: disable=too-few-public-methods
         """Map tool name to module name using the discovery system."""
         from server.tool_discovery import (  # pylint: disable=import-outside-toplevel
             get_module_for_tool,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         return get_module_for_tool(tool_name)
 
@@ -114,7 +114,8 @@ class SkillToolMixin:  # pylint: disable=too-few-public-methods
         if not tools_file.exists():
             return {
                 "success": False,
-                "error": f"Module not found: {module} (checked {tool_modules_dir() / f'aa_{module}' / 'src'})",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                "error": f"Module not found: {module} (checked {tool_modules_dir() / f'aa_{module}' / 'src'})",
             }
 
         try:
@@ -271,7 +272,8 @@ class SkillToolMixin:  # pylint: disable=too-few-public-methods
                         except (
                             Exception  # pylint: disable=broad-exception-caught
                         ) as retry_e:  # pylint: disable=broad-exception-caught
-                            error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"  # pylint: disable=line-too-long
+                            # pylint: disable-next=line-too-long
+                            error_msg = f"{error_msg}\n\n(Retry after auto-fix also failed: {retry_e})"
 
                 if known_text:
                     error_msg = f"{error_msg}\n{known_text}"

@@ -76,9 +76,12 @@ class SlackSession(SlackSessionMessaging, SlackSessionQuery, SlackApiClient):
         enterprise_id = ""
 
         try:
+            # isort: off
             from server.config_manager import (  # pylint: disable=import-outside-toplevel
                 config as config_manager,
-            )  # pylint: disable=import-outside-toplevel
+            )
+
+            # isort: on
 
             slack_auth = (config_manager.get("slack") or {}).get("auth", {})
             xoxc_token = slack_auth.get("xoxc_token", "")
@@ -102,13 +105,15 @@ class SlackSession(SlackSessionMessaging, SlackSessionQuery, SlackApiClient):
 
         if not xoxc_token:
             raise ValueError(
-                "Slack xoxc_token not found. Run 'python scripts/get_slack_creds.py' to update config.json, "  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                "Slack xoxc_token not found. Run 'python scripts/get_slack_creds.py' to update config.json, "
                 "or set SLACK_XOXC_TOKEN environment variable."
             )
 
         if not d_cookie:
             raise ValueError(
-                "Slack d_cookie not found. Run 'python scripts/get_slack_creds.py' to update config.json, "  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                "Slack d_cookie not found. Run 'python scripts/get_slack_creds.py' to update config.json, "
                 "or set SLACK_D_COOKIE environment variable."
             )
 

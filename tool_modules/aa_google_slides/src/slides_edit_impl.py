@@ -31,14 +31,16 @@ from tool_modules.common import (  # noqa: E402  # pylint: disable=wrong-import-
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from server.tool_registry import (  # pylint: disable=wrong-import-position
+# pylint: disable-next=wrong-import-position
+from server.tool_registry import (  # noqa: E402
     ToolRegistry,
-)  # noqa: E402  # pylint: disable=wrong-import-position
+)
 
 if TYPE_CHECKING:
     pass
 
-from tool_modules.aa_google_slides.src.slides_tools_impl import (  # pylint: disable=ungrouped-imports,wrong-import-position
+# pylint: disable-next=ungrouped-imports,wrong-import-position
+from tool_modules.aa_google_slides.src.slides_tools_impl import (  # noqa: E402
     _google_slides_add_slide_impl,
     _google_slides_add_text_box_impl,
     _google_slides_build_from_outline_impl,
@@ -165,7 +167,8 @@ async def _google_slides_get_slide_impl(  # pylint: disable=too-many-branches,to
         return f"❌ Failed to get slide: {e}"
 
 
-async def _google_slides_add_image_impl(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments
+async def _google_slides_add_image_impl(
     presentation_id: str,
     slide_id: str,
     image_url: str,
@@ -244,7 +247,8 @@ async def _google_slides_add_image_impl(  # pylint: disable=too-many-arguments,t
         return f"❌ Failed to add image: {e}"
 
 
-async def _google_slides_add_image_from_drive_impl(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments
+async def _google_slides_add_image_from_drive_impl(
     presentation_id: str,
     slide_id: str,
     drive_file_id: str,
@@ -337,7 +341,8 @@ async def _google_slides_add_image_from_drive_impl(  # pylint: disable=too-many-
         return f"❌ Failed to add image from Drive: {e}"
 
 
-async def _google_slides_upload_image_impl(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments
+async def _google_slides_upload_image_impl(
     presentation_id: str,
     slide_id: str,
     local_path: str,
@@ -376,7 +381,7 @@ async def _google_slides_upload_image_impl(  # pylint: disable=too-many-argument
     try:
         from googleapiclient.http import (  # pylint: disable=import-outside-toplevel
             MediaFileUpload,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         # Upload to Drive first
         file_metadata = {

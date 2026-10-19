@@ -61,7 +61,7 @@ async def _query_via_dbus(method_name: str, *args) -> dict | None:
 
         from services.slack.dbus import (  # pylint: disable=import-outside-toplevel
             SlackAgentClient,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         client = SlackAgentClient()
         if await client.connect():

@@ -67,7 +67,8 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                 # Emit toast notification for auto-heal triggered
                 try:
-                    from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
+                    # pylint: disable-next=import-outside-toplevel
+                    from tool_modules.aa_workflow.src.notification_emitter import (
                         notify_auto_heal_triggered,
                     )
 
@@ -118,7 +119,8 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                     # Emit toast notification for auto-heal success
                     try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
+                        # pylint: disable-next=import-outside-toplevel
+                        from tool_modules.aa_workflow.src.notification_emitter import (
                             notify_auto_heal_succeeded,
                         )
 
@@ -162,7 +164,8 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                 # Emit toast notification for auto-heal failure
                 try:
-                    from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
+                    # pylint: disable-next=import-outside-toplevel
+                    from tool_modules.aa_workflow.src.notification_emitter import (
                         notify_auto_heal_failed,
                     )
 
@@ -263,7 +266,8 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
             # Emit toast notification for continue-mode failures (helps visibility)
             try:
-                from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
+                # pylint: disable-next=import-outside-toplevel
+                from tool_modules.aa_workflow.src.notification_emitter import (
                     notify_step_failed,
                 )
 
@@ -364,7 +368,8 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
         # Skip validation for args that use 'default' or 'or' in the template (these are optional)
         for key, raw_value in raw_args.items():
             if isinstance(raw_value, str) and "{{" in raw_value:
-                # Skip if template has a default/fallback (e.g., "{{ x | default('') }}" or "{{ x or '' }}")  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                # Skip if template has a default/fallback (e.g., "{{ x | default('') }}" or "{{ x or '' }}")
                 if "default(" in raw_value or " or " in raw_value:
                     continue
                 rendered_value = args.get(key, "")

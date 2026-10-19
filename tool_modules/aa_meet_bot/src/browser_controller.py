@@ -74,8 +74,7 @@ class GoogleMeetController(  # pylint: disable=too-few-public-methods
             'div[role="button"]:has-text("Ask to join")'
         ),
         "ask_to_join_button": (
-            'button:has-text("Ask to join"), '
-            'div[role="button"]:has-text("Ask to join")'
+            'button:has-text("Ask to join"), div[role="button"]:has-text("Ask to join")'
         ),
         "join_now_button": (
             'button:has-text("Join now"), div[role="button"]:has-text("Join now")'
@@ -109,8 +108,7 @@ class GoogleMeetController(  # pylint: disable=too-few-public-methods
         "name_input": 'input[aria-label="Your name"], input[placeholder*="name"]',
         # Controls
         "mute_button": (
-            '[data-is-muted], [aria-label*="microphone"], '
-            '[data-tooltip*="microphone"]'
+            '[data-is-muted], [aria-label*="microphone"], [data-tooltip*="microphone"]'
         ),
         "camera_button": '[aria-label*="camera"], [data-tooltip*="camera"]',
         "captions_button": (

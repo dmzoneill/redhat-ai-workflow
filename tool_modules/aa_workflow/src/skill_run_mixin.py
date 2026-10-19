@@ -15,9 +15,8 @@ logger = logging.getLogger(__name__)
 class SkillRunMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
 
-    async def execute(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
-        self,
-    ) -> str:  # noqa: C901  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
+    async def execute(self) -> str:  # noqa: C901
         """Execute all steps and return the result."""
         import time  # pylint: disable=import-outside-toplevel
 
@@ -230,7 +229,8 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
         fail_count = sum(1 for r in self.step_results if not r.get("success"))
 
         output_lines.append(
-            f"\n---\n⏱️ *Completed in {total_time:.2f}s* | ✅ {success_count} succeeded | ❌ {fail_count} failed"  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f"\n---\n⏱️ *Completed in {total_time:.2f}s* | ✅ {success_count} succeeded | ❌ {fail_count} failed"
         )
 
         # Emit skill complete event (file-based)
@@ -241,7 +241,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
             try:
                 from .skill_execution_events import (  # pylint: disable=import-outside-toplevel
                     set_emitter,
-                )  # pylint: disable=import-outside-toplevel
+                )
 
                 set_emitter(None)
             except Exception as exc:  # pylint: disable=broad-exception-caught

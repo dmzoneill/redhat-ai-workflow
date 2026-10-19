@@ -115,7 +115,7 @@ class SkillTemplateMixin:
             from jinja2 import (  # pylint: disable=import-outside-toplevel
                 ChainableUndefined,
                 Environment,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             # autoescape=False to preserve Slack link format <url|text>
             # Skills don't generate HTML, they generate plain text and Slack markdown

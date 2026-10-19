@@ -95,7 +95,9 @@ def _format_skill_plan(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _skill_run_impl(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-return-statements
+# pylint: disable-next=line-too-long
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-return-statements
+async def _skill_run_impl(
     skill_name: str,
     inputs: str,
     execute: bool,
@@ -131,7 +133,8 @@ async def _skill_run_impl(  # pylint: disable=too-many-arguments,too-many-locals
         return [
             TextContent(
                 type="text",
-                text=f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(available) or 'none'}",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text=f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(available) or 'none'}",
             )
         ]
 
@@ -172,7 +175,7 @@ async def _skill_run_impl(  # pylint: disable=too-many-arguments,too-many-locals
             try:
                 from server.workspace_state import (  # pylint: disable=import-outside-toplevel
                     WorkspaceRegistry,
-                )  # pylint: disable=import-outside-toplevel
+                )
 
                 workspace = await WorkspaceRegistry.get_for_ctx(ctx)
                 workspace_uri = workspace.workspace_uri

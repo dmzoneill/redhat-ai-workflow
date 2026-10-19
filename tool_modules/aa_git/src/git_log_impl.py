@@ -18,7 +18,8 @@ from server.utils import resolve_repo_path, truncate_output
 
 logger = logging.getLogger(__name__)
 
-from tool_modules.aa_git.src.git_tools_impl import (  # pylint: disable=ungrouped-imports,wrong-import-position
+# pylint: disable-next=ungrouped-imports,wrong-import-position
+from tool_modules.aa_git.src.git_tools_impl import (  # noqa: E402
     _build_log_args,
     _format_log_output,
     run_git,
@@ -225,7 +226,7 @@ async def _git_push_impl(  # pylint: disable=too-many-arguments,too-many-positio
             from scripts.common.lint_utils import (  # pylint: disable=import-outside-toplevel
                 format_lint_error,
                 run_lint_check,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             lint_result = run_lint_check(path)
             if not lint_result.passed:
@@ -297,7 +298,8 @@ async def _handle_rebase_conflicts(path: str) -> str:
     return "\n".join(lines)
 
 
-async def _git_rebase_impl(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-return-statements
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-return-statements
+async def _git_rebase_impl(
     repo: str,
     onto: str = "",
     abort: bool = False,

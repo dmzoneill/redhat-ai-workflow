@@ -9,20 +9,15 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional  # pylint: disable=unused-import
 
-from tool_modules.aa_meet_bot.src.meet_runtime import (  # pylint: disable=unused-import
-    BrowserClosedError,
-    MeetingState,
-)  # pylint: disable=unused-import
+from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
 
 logger = logging.getLogger(__name__)
 
 
 class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
-    async def sign_in_google(  # pylint: disable=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
-        self,
-    ) -> bool:  # noqa: C901  # pylint: disable=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
+    async def sign_in_google(self) -> bool:  # noqa: C901
         """
         Sign in to Google using Red Hat SSO.
 
@@ -38,7 +33,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         """
         from tool_modules.aa_meet_bot.src.config import (  # pylint: disable=import-outside-toplevel
             get_google_credentials,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         if not self.page:
             logger.error("Browser not initialized")
@@ -118,7 +113,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                     try:
                         from tool_modules.aa_sso.src.tools_basic import (  # pylint: disable=import-outside-toplevel
                             fill_sso_form,
-                        )  # pylint: disable=import-outside-toplevel
+                        )
 
                         await fill_sso_form(self.page, username, password)
                     except ImportError:
@@ -159,13 +154,18 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                                     "Google verification page detected, clicking Continue..."
                                 )
                                 try:
-                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text  # pylint: disable=line-too-long
+                                    # pylint: disable-next=line-too-long
+                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
                                     # Try multiple selectors to find the actual clickable button
                                     continue_selectors = [
-                                        'button:has(span:text-is("Continue"))',  # Button with span exact text  # pylint: disable=line-too-long
-                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class  # pylint: disable=line-too-long
-                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname  # pylint: disable=line-too-long
-                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)  # pylint: disable=line-too-long
+                                        # pylint: disable-next=line-too-long
+                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
+                                        # pylint: disable-next=line-too-long
+                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
+                                        # pylint: disable-next=line-too-long
+                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
+                                        # pylint: disable-next=line-too-long
+                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
                                     ]
 
                                     clicked = False
@@ -256,7 +256,8 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             self.state.errors.append(error_msg)
             return False
 
-    async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901  # pylint: disable=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
+    async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901
         """
         Join a Google Meet meeting.
 
@@ -321,7 +322,8 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         self.state.errors = old_errors
 
         try:  # pylint: disable=too-many-nested-blocks
-            # Navigate to meeting - use domcontentloaded instead of networkidle (faster, more reliable)  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            # Navigate to meeting - use domcontentloaded instead of networkidle (faster, more reliable)
             logger.info("[JOIN] Navigating to meeting URL...")
             await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
             logger.info("[JOIN] Navigation complete. Current URL: %s", self.page.url)
@@ -458,7 +460,8 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                         f'button:has-text("{btn_text}")',
                         f'div[role="button"]:has-text("{btn_text}")',
                         f'span:has-text("{btn_text}")',  # Sometimes the text is in a span
-                        f'[data-mdc-dialog-action]:has-text("{btn_text}")',  # Material dialog buttons  # pylint: disable=line-too-long
+                        # pylint: disable-next=line-too-long
+                        f'[data-mdc-dialog-action]:has-text("{btn_text}")',  # Material dialog buttons
                     ]
                     for selector in selectors:
                         locator = self.page.locator(selector)
@@ -855,7 +858,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         }
 
     @classmethod
-    def get_all_instances(cls) -> dict[str, "GoogleMeetController"]:
+    def get_all_instances(cls) -> dict[str, "GoogleMeetController"]:  # noqa: F821
         """Get all active controller instances."""
         return cls._instances.copy()
 

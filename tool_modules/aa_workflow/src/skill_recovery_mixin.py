@@ -118,14 +118,17 @@ class SkillRecoveryMixin:  # pylint: disable=too-few-public-methods
         try:
             from scripts.common.skill_error_recovery import (  # pylint: disable=import-outside-toplevel
                 SkillErrorRecovery,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             # Pass memory helpers if available
             memory_helper = None
             try:
+                # isort: off
                 from scripts.common import (  # pylint: disable=import-outside-toplevel
                     memory as memory_helpers,
-                )  # pylint: disable=import-outside-toplevel
+                )
+
+                # isort: on
 
                 memory_helper = memory_helpers
             except ImportError as exc:
@@ -137,7 +140,8 @@ class SkillRecoveryMixin:  # pylint: disable=too-few-public-methods
             self._debug(f"Could not load error recovery: {e}")
             return False
 
-    def _try_interactive_recovery(self, code: str, error_msg: str, step_name: str):  # pylint: disable=too-many-return-statements
+    # pylint: disable-next=too-many-return-statements
+    def _try_interactive_recovery(self, code: str, error_msg: str, step_name: str):
         """
         Attempt interactive recovery from compute error.
 

@@ -807,9 +807,8 @@ def _find_next_available_slot(service, now, attendee_email: str, duration_minute
     return None
 
 
-def _parse_and_validate_start_time(
-    start_time: str, now, duration_minutes: int
-):  # pylint: disable=unused-argument
+# pylint: disable-next=unused-argument
+def _parse_and_validate_start_time(start_time: str, now, duration_minutes: int):
     """Parse start time and validate it's within allowed window."""
     tz = ZoneInfo(TIMEZONE)
 
@@ -859,7 +858,9 @@ def _parse_and_validate_start_time(
     return start_dt, None
 
 
-async def _google_calendar_schedule_meeting_impl(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-return-statements
+# pylint: disable-next=line-too-long
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-return-statements
+async def _google_calendar_schedule_meeting_impl(
     title: str,
     attendee_email: str,
     start_time: str = "",

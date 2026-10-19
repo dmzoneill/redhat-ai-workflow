@@ -121,7 +121,8 @@ async def _shared__docker_compose_up_impl(
     success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
     if success:
-        return f"✅ docker-compose up completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"✅ docker-compose up completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"
     return f"❌ docker-compose up failed:\n{output}"
 
 
@@ -234,7 +235,8 @@ async def _docker_compose_down_impl(
     success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
     if success:
-        return f"✅ docker-compose down completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"✅ docker-compose down completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"
     return f"❌ docker-compose down failed:\n{output}"
 
 
@@ -270,7 +272,8 @@ async def _docker_compose_logs_impl(
     success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
     if success:
-        return f"## Docker Compose Logs\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"## Docker Compose Logs\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
     return f"❌ Failed to get logs:\n{output}"
 
 
@@ -300,7 +303,8 @@ async def _docker_compose_restart_impl(
     success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
 
     if success:
-        return f"✅ docker-compose restart completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"✅ docker-compose restart completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"
     return f"❌ docker-compose restart failed:\n{output}"
 
 
@@ -379,7 +383,8 @@ async def _docker_logs_impl(
     success, output = await run_cmd(cmd, timeout=30)
 
     if success:
-        return f"## Logs: {container}\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"## Logs: {container}\n\n```\n{truncate_output(output, max_length=5000, mode='tail')}\n```"
     return f"❌ Failed to get logs: {output}"
 
 

@@ -15,9 +15,13 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.auto_heal_decorator import auto_heal
 from server.utils import resolve_repo_path, run_cmd, truncate_output
+
+# isort: off
 from tool_modules.aa_docker.src.tools_basic import (  # pylint: disable=ungrouped-imports
     _docker_compose_status_impl as _docker_status_impl,
 )
+
+# isort: on
 from tool_modules.aa_docker.src.tools_basic import (
     _shared__docker_compose_up_impl,
     _shared__docker_cp_impl,
@@ -479,7 +483,7 @@ async def _git_commit_impl(  # pylint: disable=too-many-arguments,too-many-local
             from scripts.common.lint_utils import (  # pylint: disable=import-outside-toplevel
                 format_lint_error,
                 run_lint_check,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             lint_result = run_lint_check(path)
             if not lint_result.passed:

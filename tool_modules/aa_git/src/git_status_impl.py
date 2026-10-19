@@ -25,7 +25,8 @@ from tool_modules.aa_make.src.tools_basic import (  # pylint: disable=ungrouped-
 
 logger = logging.getLogger(__name__)
 
-from tool_modules.aa_git.src.git_log_impl import (  # pylint: disable=wrong-import-position
+# pylint: disable-next=wrong-import-position
+from tool_modules.aa_git.src.git_log_impl import (  # noqa: E402
     _format_status_sections,
     _git_blame_impl,
     _git_log_impl,
@@ -40,7 +41,9 @@ from tool_modules.aa_git.src.git_log_impl import (  # pylint: disable=wrong-impo
     _git_stash_impl,
     _parse_status_output,
 )
-from tool_modules.aa_git.src.git_tools_impl import (  # pylint: disable=wrong-import-position
+
+# pylint: disable-next=wrong-import-position
+from tool_modules.aa_git.src.git_tools_impl import (  # noqa: E402
     _code_format_impl,
     _code_lint_impl,
     _docker_compose_status_impl,

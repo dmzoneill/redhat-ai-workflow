@@ -74,7 +74,7 @@ async def _shared__send_via_dbus(
 
         from services.slack.dbus import (  # pylint: disable=import-outside-toplevel
             SlackAgentClient,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         client = SlackAgentClient()
         if await client.connect():
@@ -115,7 +115,7 @@ async def _shared_get_manager(*, logger):  # pylint: disable=redefined-outer-nam
                 import importlib.util  # pylint: disable=import-outside-toplevel
                 from pathlib import (  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
                     Path,
-                )  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
+                )
 
                 curr_dir = Path(__file__).parent.absolute()
                 listener_file = curr_dir / "listener.py"
@@ -136,11 +136,11 @@ async def _shared_get_manager(*, logger):  # pylint: disable=redefined-outer-nam
                 try:
                     from listener import (  # pylint: disable=import-outside-toplevel
                         SlackListenerManager,
-                    )  # pylint: disable=import-outside-toplevel
+                    )
                 except ImportError:
-                    from .listener import (
+                    from .listener import (  # pylint: disable=import-outside-toplevel
                         SlackListenerManager,
-                    )  # pylint: disable=import-outside-toplevel
+                    )
 
             _manager = SlackListenerManager()
         return _manager

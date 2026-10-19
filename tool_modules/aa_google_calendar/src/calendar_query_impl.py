@@ -37,7 +37,8 @@ from tool_modules.aa_google_slides.src.tools_basic import (  # pylint: disable=u
 
 logger = logging.getLogger(__name__)
 
-from tool_modules.aa_google_calendar.src.calendar_tools_impl import (  # pylint: disable=wrong-import-position
+# pylint: disable-next=wrong-import-position
+from tool_modules.aa_google_calendar.src.calendar_tools_impl import (  # noqa: E402
     MEETING_END_HOUR,
     MEETING_START_HOUR,
     TIMEZONE,
@@ -121,9 +122,8 @@ async def _google_calendar_status_impl() -> str:
     return "\n".join(lines)
 
 
-async def _google_calendar_list_calendars_impl() -> (
-    str
-):  # pylint: disable=too-many-branches
+# pylint: disable-next=too-many-branches
+async def _google_calendar_list_calendars_impl() -> str:
     """List all calendars accessible to your account."""
     service, error = get_calendar_service()
 
@@ -214,7 +214,8 @@ async def _google_calendar_list_calendars_impl() -> (
         return f"❌ Failed to list calendars: {e}"
 
 
-async def _google_calendar_list_events_from_impl(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
+async def _google_calendar_list_events_from_impl(
     calendar_id: str,
     days: int = 7,
     max_results: int = 25,
@@ -327,11 +328,13 @@ async def _google_calendar_list_events_from_impl(  # pylint: disable=too-many-br
     except Exception as e:  # pylint: disable=broad-exception-caught
         error_str = str(e)
         if "404" in error_str or "notFound" in error_str:
-            return f"❌ Calendar not found: `{calendar_id}`\n\nMake sure the calendar is shared with your account."  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            return f"❌ Calendar not found: `{calendar_id}`\n\nMake sure the calendar is shared with your account."
         return f"❌ Failed to list events: {e}"
 
 
-async def _google_calendar_get_events_with_meet_impl(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
+async def _google_calendar_get_events_with_meet_impl(
     calendar_id: str = "primary",
     days: int = 1,
 ) -> str:

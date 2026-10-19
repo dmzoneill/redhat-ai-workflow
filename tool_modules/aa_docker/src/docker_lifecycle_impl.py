@@ -52,7 +52,8 @@ from server.utils import run_cmd, truncate_output
 
 logger = logging.getLogger(__name__)
 
-from tool_modules.aa_docker.src.docker_tools_impl import (  # pylint: disable=ungrouped-imports,wrong-import-position
+# pylint: disable-next=ungrouped-imports,wrong-import-position
+from tool_modules.aa_docker.src.docker_tools_impl import (  # noqa: E402
     _docker_compose_down_impl,
     _docker_compose_logs_impl,
     _docker_compose_restart_impl,
@@ -293,7 +294,8 @@ async def _docker_inspect_impl(
     success, output = await run_cmd(cmd, timeout=30)
 
     if success:
-        return f"## Docker Inspect: {target}\n\n```json\n{truncate_output(output, max_length=5000, mode='head')}\n```"  # pylint: disable=line-too-long
+        # pylint: disable-next=line-too-long
+        return f"## Docker Inspect: {target}\n\n```json\n{truncate_output(output, max_length=5000, mode='head')}\n```"
     return f"❌ Failed to inspect: {output}"
 
 

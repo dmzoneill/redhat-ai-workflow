@@ -56,7 +56,8 @@ async def context_filter_impl(  # pylint: disable=too-many-branches,too-many-loc
         return [
             TextContent(
                 type="text",
-                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
             )
         ]
 
@@ -154,7 +155,8 @@ async def context_filter_impl(  # pylint: disable=too-many-branches,too-many-loc
         tools = result.get("tools", [])
         lines.append(f"### 📋 Recommended Tools ({len(tools)} tools)")
         lines.append(
-            f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms"  # pylint: disable=line-too-long
+            # pylint: disable-next=line-too-long
+            f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms"
         )
         lines.append("")
 
@@ -213,7 +215,8 @@ async def apply_tool_filter_impl(  # pylint: disable=too-many-branches,too-many-
         return [
             TextContent(
                 type="text",
-                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
             )
         ]
 
@@ -434,7 +437,7 @@ async def workspace_state_list_impl(  # pylint: disable=too-many-locals
     """
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     # Ensure current workspace is included
     current_state = await WorkspaceRegistry.get_for_ctx(ctx)
@@ -526,7 +529,7 @@ async def session_info_impl(  # pylint: disable=too-many-branches
 
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     workspace = await WorkspaceRegistry.get_for_ctx(ctx)
 
@@ -634,7 +637,7 @@ async def session_rename_impl(
     """
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     workspace = await WorkspaceRegistry.get_for_ctx(ctx)
 
@@ -685,7 +688,7 @@ async def session_list_impl(ctx: Context) -> list[TextContent]:
 
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     workspace = await WorkspaceRegistry.get_for_ctx(ctx)
     current_session = workspace.get_active_session()
@@ -762,7 +765,7 @@ async def session_sync_impl(ctx: Context) -> list[TextContent]:
     """
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
     from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
         export_workspace_state_async,
     )
@@ -816,7 +819,7 @@ async def session_switch_impl(ctx: Context, session_id: str) -> list[TextContent
     """
     from server.workspace_state import (  # pylint: disable=import-outside-toplevel
         WorkspaceRegistry,
-    )  # pylint: disable=import-outside-toplevel
+    )
 
     workspace = await WorkspaceRegistry.get_for_ctx(ctx)
 
@@ -827,7 +830,8 @@ async def session_switch_impl(ctx: Context, session_id: str) -> list[TextContent
         return [
             TextContent(
                 type="text",
-                text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}",  # pylint: disable=line-too-long
+                # pylint: disable-next=line-too-long
+                text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}",
             )
         ]
 
@@ -884,7 +888,7 @@ async def tool_gaps_list_impl(
     try:
         from tool_modules.aa_workflow.src.tool_gap_detector import (  # pylint: disable=import-outside-toplevel
             tool_gap,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         gaps = tool_gap.get_gaps(status=status, limit=limit)
 
@@ -942,14 +946,15 @@ async def tool_gap_update_impl(gap_id: str, status: str) -> list[TextContent]:
     try:
         from tool_modules.aa_workflow.src.tool_gap_detector import (  # pylint: disable=import-outside-toplevel
             tool_gap,
-        )  # pylint: disable=import-outside-toplevel
+        )
 
         valid_statuses = ["open", "in_progress", "implemented", "rejected"]
         if status not in valid_statuses:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}",  # pylint: disable=line-too-long
+                    # pylint: disable-next=line-too-long
+                    text=f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}",
                 )
             ]
 
