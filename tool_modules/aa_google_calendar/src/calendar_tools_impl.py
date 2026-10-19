@@ -331,7 +331,7 @@ def _parse_check_dates(
             return f"❌ Invalid date format: {date}. Use YYYY-MM-DD."
 
     # Check next N business days
-    check_dates = []
+    check_dates: list[datetime] = []
     current = now
     while len(check_dates) < days_ahead:
         current += timedelta(days=1)

@@ -259,10 +259,10 @@ class SkillRecoveryMixin:  # pylint: disable=too-few-public-methods
                     future = asyncio.run_coroutine_threadsafe(
                         nested_executor.execute(), loop
                     )
-                    outputs, _ = future.result(timeout=300)  # type: ignore[misc]
+                    outputs = future.result(timeout=300)
                 else:
                     # No running loop, can use asyncio.run directly
-                    outputs, _ = asyncio.run(nested_executor.execute())  # type: ignore[misc]
+                    outputs = asyncio.run(nested_executor.execute())
 
                 return {"success": True, "result": outputs}
 

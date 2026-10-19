@@ -57,8 +57,8 @@ class ControllerStateMixin:  # pylint: disable=too-many-instance-attributes
     """
 
     # Declared for mixins that read sibling state.
-    _instance_counter: ClassVar[Any]
-    _instances: ClassVar[Any]
+    _instance_counter: ClassVar[int]
+    _instances: ClassVar[dict[str, Any]]
 
     def __init__(self) -> None:
         self.config = get_config()
@@ -68,8 +68,8 @@ class ControllerStateMixin:  # pylint: disable=too-many-instance-attributes
         # Initialize state early so errors can be captured during initialization
         self.state: MeetingState = MeetingState(meeting_id="", meeting_url="")
         self._caption_callback: Optional[Callable[[CaptionEntry], None]] = None
-        self._caption_observer_running = False
-        self._caption_poll_task = None
+        self._caption_observer_running: bool = False
+        self._caption_poll_task: Optional[Any] = None
         self._playwright = None
         self._audio_sink_name: Optional[str] = None
 
@@ -85,7 +85,7 @@ class ControllerStateMixin:  # pylint: disable=too-many-instance-attributes
         self._device_manager: Optional[InstanceDeviceManager] = None
         self._devices: Optional[InstanceDevices] = None
         self._video_enabled = False
-        self._browser_closed = False
+        self._browser_closed: bool = False
 
         owner._instances[self._instance_id] = self
 

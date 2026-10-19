@@ -518,10 +518,10 @@ class SlackSession(SlackSessionMessaging, SlackSessionQuery, SlackApiClient):
 
         # Extract participants
         participants = set()
-        mentioned_users = set()
-        links = []
-        code_blocks = []
-        reactions_summary = {}
+        mentioned_users: set[str] = set()
+        links: list[str] = []
+        code_blocks: list[str] = []
+        reactions_summary: dict[str, int] = {}
 
         for msg in messages:
             # Track participants

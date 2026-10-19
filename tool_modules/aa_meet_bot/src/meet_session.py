@@ -10,11 +10,12 @@ import asyncio
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from tool_modules.aa_meet_bot.src.meet_runtime import BrowserClosedError
 from tool_modules.aa_meet_bot.src.virtual_devices import (
     InstanceDeviceManager,
+    InstanceDevices,
     cleanup_orphaned_meetbot_devices,
 )
 
@@ -31,6 +32,9 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
     _on_browser_close: Any
     _restore_user_default_source: Any
     _route_browser_audio_to_sink: Any
+    _audio_sink_name: Optional[str]
+    _device_manager: Optional[InstanceDeviceManager]
+    _devices: Optional[InstanceDevices]
     config: Any
     state: Any
     update_activity: Any
@@ -100,14 +104,17 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # Verify the device is now in capture mode
             import subprocess  # pylint: disable=import-outside-toplevel
 
-            result = subprocess.run(
+            device_info = subprocess.run(
                 ["v4l2-ctl", "--device", video_device, "--all"],
                 capture_output=True,
                 text=True,
                 timeout=5,
                 check=False,
             )
-            if "Video Capture" in result.stdout and "Video Output" not in result.stdout:
+            if (
+                "Video Capture" in device_info.stdout
+                and "Video Output" not in device_info.stdout
+            ):
                 logger.info(
                     "[%s] Device is in CAPTURE mode - Chrome will detect it",
                     self._instance_id,

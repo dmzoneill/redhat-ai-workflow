@@ -5,7 +5,7 @@ import json
 import logging
 import traceback
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from tool_modules.aa_meet_bot.src.audio_capture import RealtimeSTTPipeline
 from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry
@@ -192,7 +192,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
         try:
             # First, get sink ID to name mapping
-            sink_id_to_name = {}
+            sink_id_to_name: dict[Any, Any] = {}
             proc = await asyncio.create_subprocess_exec(
                 "pactl",
                 "list",
@@ -268,7 +268,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
             # Find the one connected to our target sink
             for idx, sink_name in chromium_candidates:
-                if target_sink and target_sink in sink_name:
+                if target_sink and sink_name and target_sink in sink_name:
                     logger.info(
                         "📺 Selected Chromium sink-input %s (connected to %s)",
                         idx,
@@ -496,7 +496,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 text=text.strip(),
                 timestamp=datetime.now(),
                 is_update=False,
-                caption_id=None,
+                caption_id=0,
             )
             # Feed to wake word manager via the normal caption handler
             self._process_caption_for_wake_word(mock_caption)

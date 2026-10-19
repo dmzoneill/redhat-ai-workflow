@@ -130,7 +130,7 @@ async def _find_channel_from_config(query: str) -> dict:
         if isinstance(info, dict):
             name = info.get("name", key)
             channel_id = info.get("id", "")
-            purpose = info.get("purpose", info.get("description", ""))
+            purpose = str(info.get("purpose", info.get("description", "")) or "")
         else:
             name = key
             channel_id = info

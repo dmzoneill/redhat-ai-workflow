@@ -12,7 +12,7 @@ import json
 import logging
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
 
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = ["path", "gitlab", "jira_project", "default_branch"]
 
 # Optional fields with defaults
-OPTIONAL_FIELDS = {
+OPTIONAL_FIELDS: dict[str, Any] = {
     "jira_component": "",
     "lint_command": "",
     "test_command": "",

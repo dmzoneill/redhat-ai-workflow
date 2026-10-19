@@ -32,6 +32,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
     skill: Any
     skill_id: Any
     source: Any
+    start_time: float | None
     step_results: Any
     ws_server: Any
 

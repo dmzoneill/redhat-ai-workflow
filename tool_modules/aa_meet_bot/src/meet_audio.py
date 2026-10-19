@@ -21,7 +21,10 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
 from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
-from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDevices
+from tool_modules.aa_meet_bot.src.virtual_devices import (
+    InstanceDeviceManager,
+    InstanceDevices,
+)
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
@@ -43,9 +46,10 @@ class AudioMixin:
     """PulseAudio routing methods shared by the controller and MeetAudio."""
 
     # Declared for mixins that read sibling state.
+    _audio_sink_name: Optional[str]
     _browser_pid: Any
-    _device_manager: Any
-    _devices: Any
+    _device_manager: Optional[InstanceDeviceManager]
+    _devices: Optional[InstanceDevices]
     _instance_id: Any
     state: Any
 
@@ -241,7 +245,7 @@ class AudioMixin:
 
     def _route_sink_input_listing(self, listing: str) -> int:
         """Parse pactl sink-input text and route matching Chrome streams."""
-        pending = {
+        pending: dict[str, Any] = {
             "input_id": None,
             "sink": None,
             "is_chrome": False,

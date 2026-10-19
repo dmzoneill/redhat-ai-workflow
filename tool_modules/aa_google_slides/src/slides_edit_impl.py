@@ -362,12 +362,12 @@ async def _google_slides_upload_image_impl(
     if not drive_service:
         return "❌ Google Drive service not available"
 
-    local_path = Path(local_path).expanduser()
-    if not local_path.exists():
-        return f"❌ File not found: {local_path}"
+    image_path = Path(local_path).expanduser()
+    if not image_path.exists():
+        return f"❌ File not found: {image_path}"
 
     # Determine MIME type
-    suffix = local_path.suffix.lower()
+    suffix = image_path.suffix.lower()
     mime_types = {
         ".png": "image/png",
         ".jpg": "image/jpeg",
@@ -385,11 +385,11 @@ async def _google_slides_upload_image_impl(
 
         # Upload to Drive first
         file_metadata = {
-            "name": local_path.name,
+            "name": image_path.name,
             "parents": [],  # Root folder
         }
 
-        media = MediaFileUpload(str(local_path), mimetype=mime_type, resumable=True)
+        media = MediaFileUpload(str(image_path), mimetype=mime_type, resumable=True)
 
         uploaded_file = (
             drive_service.files()
@@ -415,7 +415,7 @@ async def _google_slides_upload_image_impl(
         if result.startswith("✅"):
             return result.replace(
                 "**Image Added from Drive**",
-                f"**Image Uploaded & Added**\n\n**Uploaded:** `{local_path.name}` → Drive",
+                f"**Image Uploaded & Added**\n\n**Uploaded:** `{image_path.name}` → Drive",
             )
         return result
 

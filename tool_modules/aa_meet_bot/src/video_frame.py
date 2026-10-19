@@ -323,7 +323,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         attendee_data: dict,
         t: float = 0.0,
         frame_num: int = 0,
-        transcript_history: list = None,
+        transcript_history: list | None = None,
     ) -> np.ndarray:
         """
         Create base frame using full GPU pipeline (OpenGL text + shapes).
@@ -730,8 +730,8 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         findings: list[str],
         assessment: str,
         duration: float,
-        attendee_data: dict = None,
-        frame_buffer: np.ndarray = None,
+        attendee_data: dict | None = None,
+        frame_buffer: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         Generate a complete video frame using OpenCV (2-3x faster than PIL).

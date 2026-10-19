@@ -16,6 +16,7 @@ Audio Pre-Routing:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, ClassVar
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -125,8 +126,8 @@ class GoogleMeetController(  # pylint: disable=too-few-public-methods
     }
 
     # Class-level counter for unique instance IDs
-    _instance_counter = 0
-    _instances: dict[str, GoogleMeetController] = {}
+    _instance_counter: ClassVar[int] = 0
+    _instances: ClassVar[dict[str, Any]] = {}
 
     # Directory for storing meeting screenshots
     SCREENSHOT_DIR = MEETBOT_SCREENSHOTS_DIR

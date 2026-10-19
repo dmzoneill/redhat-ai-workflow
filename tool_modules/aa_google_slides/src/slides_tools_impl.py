@@ -19,7 +19,7 @@ Setup:
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +473,7 @@ async def _google_slides_add_slide_impl(  # pylint: disable=too-many-branches,to
 
         slide_id = f"slide_{uuid.uuid4().hex[:8]}"
 
-        requests = [
+        requests: list[dict[str, Any]] = [
             {
                 "createSlide": {
                     "objectId": slide_id,
@@ -571,7 +571,7 @@ async def _google_slides_update_text_impl(
         return "❌ Google Slides service not available"
 
     try:
-        requests = []
+        requests: list[dict[str, Any]] = []
 
         if replace_all:
             # Delete all existing text first
@@ -777,17 +777,17 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
             _, done = downloader.next_chunk()
 
         # Write to file
-        output_path = Path(output_path).expanduser()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path = Path(output_path).expanduser()
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, "wb") as f:
+        with open(pdf_path, "wb") as f:
             f.write(fh.getvalue())
 
         lines = [
             "✅ **PDF Exported**",
             "",
             f"**Presentation:** {title}",
-            f"**Output:** `{output_path}`",
+            f"**Output:** `{pdf_path}`",
             f"**Size:** {len(fh.getvalue()) / 1024:.1f} KB",
         ]
 

@@ -24,12 +24,14 @@ except ImportError:  # optional; retry defaults fall back to hardcoded values
 from server.config_manager import config as config_manager
 
 try:
-    from server.paths import CRON_HISTORY_FILE
+    from server.paths import CRON_HISTORY_FILE as _cron_history_file
 except ImportError:
-    CRON_HISTORY_FILE = None
+    _cron_history_file = None  # type: ignore[assignment]
 
 from server.state_manager import state as state_manager
 from tool_modules.common import PROJECT_ROOT
+
+CRON_HISTORY_FILE: Path | None = _cron_history_file
 
 logger = logging.getLogger(__name__)
 

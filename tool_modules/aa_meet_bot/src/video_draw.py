@@ -296,7 +296,7 @@ class RealtimeDrawMixin(DynamicFields):  # pylint: disable=too-few-public-method
         return self.__dict__["_fft_bar_heights"]
 
     def _generate_waveform_frame_from_audio(
-        self, bar_heights: np.ndarray, out: np.ndarray = None
+        self, bar_heights: np.ndarray, out: np.ndarray | None = None
     ) -> np.ndarray:
         """Generate waveform frame from audio-derived bar heights.
 
@@ -342,7 +342,9 @@ class RealtimeDrawMixin(DynamicFields):  # pylint: disable=too-few-public-method
 
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-locals
-    def _generate_waveform_frame(self, t: float, out: np.ndarray = None) -> np.ndarray:
+    def _generate_waveform_frame(
+        self, t: float, out: np.ndarray | None = None
+    ) -> np.ndarray:
         """Generate a single waveform frame at time t using numpy (fast).
 
         Args:
@@ -401,7 +403,7 @@ class RealtimeDrawMixin(DynamicFields):  # pylint: disable=too-few-public-method
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-locals
     def _generate_npu_frame(
-        self, t: float, frame_num: int, out: np.ndarray = None
+        self, t: float, frame_num: int, out: np.ndarray | None = None
     ) -> np.ndarray:
         """Generate a single NPU panel frame using OpenCV (much faster than PIL).
 

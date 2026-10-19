@@ -155,7 +155,7 @@ async def _find_namespace_files(namespace: str, repo_path: str) -> list[str]:
 
 def _resource_names(content: str) -> list[str]:
     """List resource names from a namespace YAML document."""
-    names = []
+    names: list[str] = []
     try:
         docs = list(yaml.safe_load_all(content))
     except yaml.YAMLError:
@@ -172,7 +172,7 @@ def _resource_names(content: str) -> list[str]:
 
 def _extract_namespace_resources(filepath: str) -> list[str]:
     """Extract resources from a namespace YAML file."""
-    lines = []
+    lines: list[str] = []
     if "namespace" not in filepath.lower():
         return lines
 

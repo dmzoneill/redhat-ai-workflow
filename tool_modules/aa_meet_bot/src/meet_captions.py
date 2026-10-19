@@ -32,6 +32,10 @@ class CaptionMixin:
     """Caption capture methods shared by the controller and MeetCaptions."""
 
     # Declared for mixins that read sibling state.
+    _browser_closed: bool
+    _caption_callback: Callable[[CaptionEntry], None] | None
+    _caption_observer_running: bool
+    _caption_poll_task: Any
     _video_enabled: Any
     page: Any
     state: Any
@@ -302,14 +306,14 @@ class CaptionMixin:
                                 "Caption UPDATE [%s] %s...", speaker, text[:50]
                             )
                         # Also notify callback with updated entry (for live display)
-                        if self._caption_callback:
+                        if self._caption_callback is not None:
                             self._caption_callback(entry)
                     else:
                         # NEW caption entry
                         if self.state:
                             caption_id_to_index[cap_id] = len(self.state.caption_buffer)
                             self.state.caption_buffer.append(entry)
-                        if self._caption_callback:
+                        if self._caption_callback is not None:
                             self._caption_callback(entry)
                         logger.debug("Caption NEW [%s] %s...", speaker, text[:50])
 

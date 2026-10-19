@@ -831,7 +831,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             user_data = data.get("user", {})
             sections = user_data.get("profileSections", [])
 
-            profile = {
+            profile: dict[str, Any] = {
                 "user_id": user_id,
                 "sections": {},
             }

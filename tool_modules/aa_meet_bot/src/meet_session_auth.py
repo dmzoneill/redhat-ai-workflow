@@ -9,7 +9,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Optional
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
 
@@ -40,7 +40,8 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     config: Any
     enable_captions: Any
     initialize: Any
-    _device_manager: Any
+    _device_manager: Optional[Any]
+    _devices: Optional[Any]
     _playwright: Any
     browser: Any
     page: Any

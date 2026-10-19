@@ -14,7 +14,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from tool_modules.aa_meet_bot.src.notes_interactive import NotesInteractiveMixin
 from tool_modules.aa_meet_bot.src.notes_lifecycle import NotesLifecycleMixin
@@ -152,7 +152,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         Returns:
             Cleanup results dict
         """
-        results = {
+        results: dict[str, Any] = {
             "audio_captures_killed": 0,
             "modules_removed": 0,
             "processes_killed": 0,
@@ -250,7 +250,8 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
             self._controller = None
             return False
 
-    # pylint: disable=too-many-arguments,too-many-branches,too-many-positional-arguments,too-many-statements
+    # pylint: disable=too-many-arguments,too-many-branches,too-many-positional-arguments
+    # pylint: disable=too-many-statements,too-many-locals
     async def join_meeting(
         self,
         meet_url: str,
@@ -354,13 +355,19 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 asyncio.create_task(self._setup_npu_stt())
 
             # Join the meeting (this does UI automation - can take 10+ seconds)
-            success = await self._controller.join_meeting(meet_url)
+            controller = self._controller
+            if controller is None:
+                self.state.status = "error"
+                self.state.errors.append("Browser controller is not initialized")
+                return False
+
+            success = await controller.join_meeting(meet_url)
 
             if not success:
                 self.state.status = "error"
                 # Get errors from controller state if available
-                if self._controller.state and self._controller.state.errors:
-                    self.state.errors.extend(self._controller.state.errors)
+                if controller.state and controller.state.errors:
+                    self.state.errors.extend(controller.state.errors)
                 else:
                     self.state.errors.append(
                         "Failed to join meeting - check browser controller logs"
@@ -368,7 +375,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 return False
 
             # Start caption capture
-            await self._controller.start_caption_capture(self._on_caption)
+            await controller.start_caption_capture(self._on_caption)
 
             self.state.status = "capturing"
             self.state.joined_at = datetime.now()
@@ -390,7 +397,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
 
             # Start screenshot capture loop (every 10 seconds)
             self._screenshot_task = asyncio.create_task(
-                self._controller.start_screenshot_loop(interval_seconds=10)
+                controller.start_screenshot_loop(interval_seconds=10)
             )
 
             # Start browser health monitor (checks if browser was closed)
@@ -564,7 +571,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
 
     async def get_status(self) -> dict:
         """Get current bot status."""
-        status = {
+        status: dict[str, Any] = {
             "status": self.state.status,
             "meeting_id": self.state.meeting_id,
             "title": self.state.title,
