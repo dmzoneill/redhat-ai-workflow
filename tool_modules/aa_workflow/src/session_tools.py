@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,cyclic-import,import-outside-toplevel,too-many-lines
 """Session Tools - Bootstrap and manage work sessions.
 
 Provides tools for:
@@ -11,12 +12,11 @@ per-workspace state (project, persona, issue, branch).
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from fastmcp import Context
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 
@@ -32,13 +32,14 @@ except ImportError:
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
+    from server.workspace_state import ChatSession
 
 logger = logging.getLogger(__name__)
 
 
 async def _resolve_session(
-    ctx, session_id: str = ""
-) -> tuple[object, object | None, list[TextContent] | None]:
+    ctx: Any, session_id: str = ""
+) -> "tuple[Any, ChatSession | None, list[TextContent] | None]":
     """Resolve a session from session_id or active session.
 
     Returns:
@@ -57,7 +58,8 @@ async def _resolve_session(
                 TextContent(
                     type="text",
                     text="# No Active Session\n\n"
-                    "No active session found. Call `session_start()` first or provide a session_id.",
+                    "No active session found. Call `session_start()` first "
+                    "or provide a session_id.",
                 )
             ],
         )
@@ -83,9 +85,10 @@ async def _resolve_session(
 # ==================== BOOTSTRAP CONTEXT ====================
 
 
-async def _get_bootstrap_context(
+async def _get_bootstrap_context(  # pylint: disable=too-many-branches,too-many-locals
     project: str | None, session_name: str | None
 ) -> dict | None:
+    # pylint: disable=too-many-nested-blocks
     """Get bootstrap context using the memory abstraction layer.
 
     Queries memory to get:
@@ -125,7 +128,7 @@ async def _get_bootstrap_context(
         # Slow sources (external APIs like inscope, jira, gitlab, gmail, gdrive, calendar)
         # are available via memory_query but not included in bootstrap to keep startup fast
         # Fast sources: yaml (local files), code (local vector), slack (local vector)
-        fast_sources = ["yaml", "code", "slack"]
+        fast_sources: list[Any] = ["yaml", "code", "slack"]
 
         result = await memory.query(
             question=query,
@@ -134,7 +137,7 @@ async def _get_bootstrap_context(
 
         # Extract bootstrap context from result
         # Note: slow_sources_available tells the AI what additional sources can be queried
-        bootstrap = {
+        bootstrap: dict[str, Any] = {
             "intent": result.intent.to_dict(),
             "current_work": {},
             "suggested_persona": None,
@@ -314,31 +317,37 @@ async def _get_bootstrap_context(
 
         return bootstrap
 
-    except Exception as e:
-        logger.warning(f"Failed to get bootstrap context: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to get bootstrap context: %s", e)
         return None
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
 
 
-def _load_current_work(lines: list[str], project: str | None = None) -> None:
+def _load_current_work(  # pylint: disable=too-many-branches,too-many-locals
+    lines: list[str], project: str | None = None
+) -> None:
     """Load and append current work status for the specified project.
 
     Args:
         lines: List to append output lines to
         project: Project name. If None, uses current chat project.
     """
-    # Import here to avoid circular imports
+    # Import here to avoid circular imports. One binding of the helper name.
     try:
         from tool_modules.aa_workflow.src.chat_context import (
             get_project_work_state_path,
         )
     except ImportError:
+        import importlib
+
         try:
-            from .chat_context import get_project_work_state_path
+            _chat_mod = importlib.import_module(".chat_context", __package__)
         except ImportError:
-            from chat_context import get_project_work_state_path
+            _chat_mod = importlib.import_module("chat_context")
+        get_project_work_state_path = _chat_mod.get_project_work_state_path
 
     current_work_file = get_project_work_state_path(project)
     if not current_work_file.exists():
@@ -365,7 +374,8 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
                         f"- **{issue.get('key', '?')}**: {issue.get('summary', 'No summary')}"
                     )
                     lines.append(
-                        f"  Status: {issue.get('status', '?')} | Branch: `{issue.get('branch', '?')}`"
+                        f"  Status: {issue.get('status', '?')} | "
+                        f"Branch: `{issue.get('branch', '?')}`"
                     )
                 lines.append("")
 
@@ -382,11 +392,12 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
                 lines.append("### Follow-ups")
                 for fu in followups[:5]:
                     priority = fu.get("priority", "normal")
-                    emoji = (
-                        "🔴"
-                        if priority == "high"
-                        else "🟡" if priority == "medium" else "⚪"
-                    )
+                    if priority == "high":
+                        emoji = "🔴"
+                    elif priority == "medium":
+                        emoji = "🟡"
+                    else:
+                        emoji = "⚪"
                     lines.append(f"- {emoji} {fu.get('task', '?')}")
                 if len(followups) > 5:
                     lines.append(f"*...and {len(followups) - 5} more*")
@@ -396,7 +407,8 @@ def _load_current_work(lines: list[str], project: str | None = None) -> None:
                 "*No active work tracked for this project. Use `start_work` skill to begin.*\n"
             )
 
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         lines.append(f"*Could not load work state: {e}*\n")
 
 
@@ -435,8 +447,9 @@ def _load_environment_status(lines: list[str]) -> None:
                 lines.append(f"- {item}")
             lines.append("")
 
-    except Exception as e:
-        logger.debug(f"Suppressed error in _load_environment_status: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in _load_environment_status: %s", e)
 
 
 def _load_session_history(lines: list[str]) -> None:
@@ -455,8 +468,9 @@ def _load_session_history(lines: list[str]) -> None:
             for entry in entries[-5:]:
                 lines.append(f"- [{entry.get('time', '?')}] {entry.get('action', '?')}")
             lines.append("")
-    except Exception as e:
-        logger.debug(f"Suppressed error in _load_session_history: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in _load_session_history: %s", e)
 
 
 def _load_persona_info(lines: list[str], agent: str) -> None:
@@ -470,8 +484,9 @@ def _load_persona_info(lines: list[str], agent: str) -> None:
         if loader:
             current_persona = loader.current_persona
             loaded_modules = list(loader.loaded_modules)
-    except Exception as e:
-        logger.debug(f"Suppressed error in _load_persona_info: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in _load_persona_info: %s", e)
 
     if agent:
         agent_file = PERSONAS_DIR / f"{agent}.md"
@@ -550,8 +565,9 @@ def _load_learned_patterns(lines: list[str]) -> None:
             lines.append("*Use `memory_read('learned/patterns')` for details*")
             lines.append("")
 
-    except Exception as e:
-        logger.debug(f"Suppressed error in _load_learned_patterns: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in _load_learned_patterns: %s", e)
 
 
 def _detect_project_from_cwd() -> str | None:
@@ -562,7 +578,10 @@ def _detect_project_from_cwd() -> str | None:
     try:
         from .chat_context import _detect_project_from_cwd as _detect
     except ImportError:
-        from chat_context import _detect_project_from_cwd as _detect
+        import chat_context as _chat_context
+
+        # pylint: disable-next=protected-access
+        _detect = _chat_context._detect_project_from_cwd
     return _detect()
 
 
@@ -574,11 +593,13 @@ def _get_current_persona() -> str | None:
         loader = get_loader()
         if loader:
             return loader.current_persona
-    except Exception as e:
-        logger.debug(f"Suppressed error in _get_current_persona: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in _get_current_persona: %s", e)
     return None
 
 
+# pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
 def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
     """Load and append project knowledge if available.
 
@@ -651,8 +672,9 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
 
             return project
 
-        except Exception as e:
-            logger.warning(f"Failed to load knowledge: {e}")
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to load knowledge: %s", e)
             return project
 
     else:
@@ -686,8 +708,9 @@ def _load_project_knowledge(lines: list[str], agent: str) -> str | None:
                 lines.append("*Knowledge will improve as you complete tasks.*")
                 lines.append("")
 
-        except Exception as e:
-            logger.warning(f"Failed to auto-scan project: {e}")
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to auto-scan project: %s", e)
             lines.append(f"*Auto-scan failed: {e}. Run `knowledge_scan()` manually.*")
             lines.append("")
 
@@ -699,7 +722,9 @@ def _load_chat_context(lines: list[str]) -> str:
     try:
         from .chat_context import get_chat_state
     except ImportError:
-        from chat_context import get_chat_state
+        import chat_context as _chat_context
+
+        get_chat_state = _chat_context.get_chat_state
 
     state = get_chat_state()
     project = state["project"]
@@ -762,17 +787,13 @@ async def _load_chat_context_async(ctx: "Context", lines: list[str]) -> str:
     return project
 
 
-async def _detect_project_from_mcp_roots(ctx) -> str | None:
+async def _detect_project_from_mcp_roots(ctx: Any) -> str | None:
     """Try to detect project from MCP workspace roots.
 
     Cursor may provide workspace roots via the MCP protocol.
     This is more reliable than cwd detection since it reflects
     the actual workspace open in the editor.
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
     if ctx is None:
         logger.debug("No context provided for MCP roots detection")
         return None
@@ -786,9 +807,9 @@ async def _detect_project_from_mcp_roots(ctx) -> str | None:
             logger.debug("No roots returned by client")
             return None
 
-        logger.info(f"Client returned {len(roots_result.roots)} workspace root(s)")
+        logger.info("Client returned %s workspace root(s)", len(roots_result.roots))
         for root in roots_result.roots:
-            logger.debug(f"  Root: {root.name or '(unnamed)'} -> {root.uri}")
+            logger.debug("  Root: %s -> %s", root.name or "(unnamed)", root.uri)
 
         # Load config to match roots against known projects
         from server.utils import load_config
@@ -813,15 +834,18 @@ async def _detect_project_from_mcp_roots(ctx) -> str | None:
                 project_path = project_config.get("path", "")
                 if project_path and root_path.rstrip("/") == project_path.rstrip("/"):
                     logger.info(
-                        f"Detected project '{project_name}' from MCP root: {root_path}"
+                        "Detected project '%s' from MCP root: %s",
+                        project_name,
+                        root_path,
                     )
                     return project_name
 
         logger.debug("No matching project found for any root")
         return None
-    except Exception as e:
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         # MCP roots not available or error - fall back to other detection
-        logger.debug(f"MCP roots detection failed: {e}")
+        logger.debug("MCP roots detection failed: %s", e)
         return None
 
 
@@ -862,15 +886,16 @@ async def _resume_session(
             chat_session.name = name
 
         chat_session.touch()
-        logger.info(f"Resumed session {session_id}")
+        logger.info("Resumed session %s", session_id)
 
         # Emit notification for session resume
         try:
             from .notification_emitter import notify_session_resumed
 
             notify_session_resumed(session_id, name or chat_session.name)
-        except Exception as e:
-            logger.debug(f"Suppressed error in notify_session_resumed: {e}")
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error in notify_session_resumed: %s", e)
 
         # For resumed sessions, update project if explicitly provided
         if project:
@@ -879,22 +904,24 @@ async def _resume_session(
             # Persist the project change to disk
             WorkspaceRegistry.save_to_disk()
             logger.info(
-                f"Updated and persisted project '{project}' for resumed session {session_id}"
+                "Updated and persisted project '%s' for resumed session %s",
+                project,
+                session_id,
             )
 
         lines: list[str] = []  # Will be rebuilt in _build_session_output
         return lines, session_id, chat_session, True
-    else:
-        # Session not found - list available sessions
-        available = list(workspace.sessions.keys())
-        lines = [
-            "# \u26a0\ufe0f Session Not Found\n",
-            f"Session `{resume_session_id}` does not exist.\n",
-            f"**Available sessions:** {', '.join(f'`{s}`' for s in available) or 'none'}\n",
-            "Creating a new session instead...\n",
-            "---\n",
-        ]
-        return lines, None, None, False
+
+    # Session not found - list available sessions
+    available = list(workspace.sessions.keys())
+    lines = [
+        "# \u26a0\ufe0f Session Not Found\n",
+        f"Session `{resume_session_id}` does not exist.\n",
+        f"**Available sessions:** {', '.join(f'`{s}`' for s in available) or 'none'}\n",
+        "Creating a new session instead...\n",
+        "---\n",
+    ]
+    return lines, None, None, False
 
 
 async def _create_new_session(workspace, agent: str, project: str, name: str):
@@ -940,19 +967,20 @@ async def _create_new_session(workspace, agent: str, project: str, name: str):
         from .notification_emitter import notify_session_created
 
         notify_session_created(session_id, name or None)
-    except Exception as e:
-        logger.debug(f"Suppressed error in notify_session_created: {e}")
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error in notify_session_created: %s", e)
 
     return lines, session_id, chat_session
 
 
-def _build_session_output(
+def _build_session_output(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     lines: list[str],
     session_id: str | None,
-    chat_session,
-    workspace,
+    chat_session: Any,
+    workspace: Any,
     is_resumed: bool,
-    project: str,
+    _project: str,
     name: str,
 ) -> list[str]:
     """Build the session header output lines with session ID and project info.
@@ -963,7 +991,7 @@ def _build_session_output(
         chat_session: The ChatSession object (may be None for no-ctx path).
         workspace: The WorkspaceState (may be None for no-ctx path).
         is_resumed: Whether this is a resumed session.
-        project: The project name for display.
+        _project: The project name for display. Retained for callers.
         name: Optional session name.
 
     Returns:
@@ -1018,6 +1046,8 @@ def _build_session_output(
     return lines
 
 
+# pylint: disable=too-many-arguments,too-many-positional-arguments
+# pylint: disable=too-many-branches,too-many-locals,too-many-statements
 async def _session_start_impl(  # noqa: C901
     ctx: "Context | None" = None,
     agent: str = "",
@@ -1026,6 +1056,7 @@ async def _session_start_impl(  # noqa: C901
     memory_session_log_fn=None,
     resume_session_id: str = "",
 ) -> list[TextContent]:
+    # pylint: disable=too-many-nested-blocks
     """Implementation of session_start tool.
 
     Uses WorkspaceRegistry for per-workspace state management.
@@ -1045,6 +1076,7 @@ async def _session_start_impl(  # noqa: C901
     session_id = None
     chat_session = None
     workspace = None
+    lines: list[str] = []
 
     # Use workspace-aware context if ctx is available
     if ctx:
@@ -1071,6 +1103,13 @@ async def _session_start_impl(  # noqa: C901
                 lines = new_lines
 
         # Use the session's project (not workspace's) for the rest of the function
+        if chat_session is None:
+            return [
+                TextContent(
+                    type="text",
+                    text="# Session Error\n\nCould not create or resume a session.",
+                )
+            ]
         project = chat_session.project
 
         # Load chat context using async version
@@ -1098,7 +1137,9 @@ async def _session_start_impl(  # noqa: C901
             try:
                 from .chat_context import set_chat_project
             except ImportError:
-                from chat_context import set_chat_project
+                import chat_context as _chat_context
+
+                set_chat_project = _chat_context.set_chat_project
             set_chat_project(project)
 
         # Load chat context using sync version
@@ -1167,20 +1208,27 @@ async def _session_start_impl(  # noqa: C901
             if confidence >= 0.8:
                 # Auto-load the suggested persona
                 lines.append(
-                    f"**Auto-loading Persona:** {suggested_persona} (confidence: {int(confidence * 100)}%)"
+                    f"**Auto-loading Persona:** {suggested_persona} "
+                    f"(confidence: {int(confidence * 100)}%)"
                 )
                 try:
                     from server.persona_loader import get_loader
 
                     loader = get_loader()
                     if loader:
-                        await loader.switch_persona(suggested_persona)
+                        if ctx is None:
+                            raise TypeError(
+                                "switch_persona() missing 1 required "
+                                "positional argument: 'ctx'"
+                            )
+                        await loader.switch_persona(suggested_persona, ctx)
                         if chat_session:
                             chat_session.persona = suggested_persona
                         lines.append(
                             f"  \u2705 Switched from {current_persona} to {suggested_persona}"
                         )
-                except Exception as e:
+                # Intentional: optional step must not abort the caller.
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     lines.append(f"  \u26a0\ufe0f Failed to auto-load: {e}")
             else:
                 conf_pct = int(confidence * 100)
@@ -1257,17 +1305,18 @@ async def _session_start_impl(  # noqa: C901
 
         logger.info("session_start: About to export workspace state")
         result = await export_workspace_state_async(ctx)
-        logger.info(f"session_start: Export result: {result}")
-    except Exception as e:
-        logger.warning(f"Failed to export workspace state: {e}")
+        logger.info("session_start: Export result: %s", result)
+    # Intentional: optional step must not abort the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to export workspace state: %s", e)
         import traceback
 
-        logger.warning(f"Traceback: {traceback.format_exc()}")
+        logger.warning("Traceback: %s", traceback.format_exc())
 
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-def register_session_tools(  # noqa: C901
+def register_session_tools(  # noqa: C901  # pylint: disable=too-many-statements
     server: "FastMCP", memory_session_log_fn=None
 ) -> int:
     """Register session tools with the MCP server.
@@ -1276,12 +1325,12 @@ def register_session_tools(  # noqa: C901
         server: The FastMCP server instance
         memory_session_log_fn: Optional function to log session actions
     """
-    from fastmcp import Context
-
     registry = ToolRegistry(server)
 
     @registry.tool()
+    # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     async def debug_mcp_roots(ctx: Context) -> list[TextContent]:
+        # pylint: disable=too-many-nested-blocks
         """Debug tool to inspect MCP workspace roots and session info from Cursor.
 
         Use this to see what workspace and session information Cursor provides.
@@ -1370,7 +1419,8 @@ def register_session_tools(  # noqa: C901
                         lines.append("❌ No matching project found in config.json")
                 else:
                     lines.append("*No roots returned by client*")
-            except Exception as e:
+            # Intentional: optional step must not abort the caller.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 lines.append(f"*Error listing roots: {e}*")
 
             # Check for any other interesting session methods
@@ -1397,9 +1447,11 @@ def register_session_tools(  # noqa: C901
                             val = getattr(rc.meta, attr)
                             if not callable(val):
                                 lines.append(f"**meta.{attr}:** `{val}`")
-                        except Exception as e:
+                        # Intentional: optional step must not abort the caller.
+                        except Exception as e:  # pylint: disable=broad-exception-caught
                             logger.debug(
-                                f"Suppressed error in debug_mcp_roots meta attr: {e}"
+                                "Suppressed error in debug_mcp_roots meta attr: %s",
+                                e,
                             )
                 if hasattr(rc, "request") and rc.request:
                     lines.append(f"**request type:** `{type(rc.request).__name__}`")
@@ -1411,7 +1463,8 @@ def register_session_tools(  # noqa: C901
             lines.append(f"**ctx.request_id:** `{ctx.request_id}`")
             lines.append(f"**ctx.client_id:** `{ctx.client_id}`")
 
-        except Exception as e:
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             import traceback
 
             lines.append(f"**Error:** {e}")
@@ -1467,13 +1520,14 @@ def register_session_tools(  # noqa: C901
 
     @auto_heal()
     @registry.tool()
-    async def session_set_project(
+    async def session_set_project(  # pylint: disable=too-many-locals
         ctx: Context, project: str, session_id: str = ""
     ) -> list[TextContent]:
         """Set the project for the current or specified session.
 
         CRITICAL: Claude should call this when it determines which project the user is working on.
-        The workspace may be redhat-ai-workflow, but the user might be working on a different project.
+        The workspace may be redhat-ai-workflow, but the user might be working
+        on a different project.
 
         Project detection signals (in priority order):
         1. Repository name mentioned (automation-analytics-backend, pdf-generator, app-interface)
@@ -1482,7 +1536,8 @@ def register_session_tools(  # noqa: C901
         4. Issue key context - if discussing AAP issues, likely automation-analytics-backend
 
         Args:
-            project: Project name from config.json (e.g., "automation-analytics-backend", "pdf-generator")
+            project: Project name from config.json
+                (e.g., "automation-analytics-backend", "pdf-generator")
             session_id: Optional session ID. If empty, uses active session.
 
         Returns:
@@ -1514,9 +1569,15 @@ def register_session_tools(  # noqa: C901
                 ]
 
             # Get workspace state and resolve session
-            workspace, session, err = await _resolve_session(ctx, session_id)
-            if err:
-                return err
+            _workspace, session, err = await _resolve_session(ctx, session_id)
+            if err or session is None:
+                return err or [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "Call `session_start()` first or provide a session_id.",
+                    )
+                ]
 
             target_session_id = session.session_id
 
@@ -1549,7 +1610,10 @@ def register_session_tools(  # noqa: C901
                 lines.append(f"**Jira Project:** `{repo_config['jira_project']}`\n")
 
             logger.info(
-                f"Updated session {target_session_id} project: {old_project} -> {project}"
+                "Updated session %s project: %s -> %s",
+                target_session_id,
+                old_project,
+                project,
             )
 
             # Emit notification for toast
@@ -1559,8 +1623,9 @@ def register_session_tools(  # noqa: C901
                 notify_session_updated(
                     target_session_id, f"Project changed to {project}"
                 )
-            except Exception as e:
-                logger.debug(f"Suppressed error in notify_session_updated: {e}")
+            # Intentional: optional step must not abort the caller.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.debug("Suppressed error in notify_session_updated: %s", e)
 
             # Trigger session daemon to reload from disk so UI updates
             try:
@@ -1571,10 +1636,12 @@ def register_session_tools(  # noqa: C901
                 await client.call_method("refresh_now", [])
                 await client.disconnect()
                 logger.debug("Triggered session daemon refresh after project update")
-            except Exception as e:
-                logger.debug(f"Could not trigger session daemon refresh: {e}")
+            # Intentional: optional step must not abort the caller.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.debug("Could not trigger session daemon refresh: %s", e)
 
-        except Exception as e:
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             import traceback
 
             lines.append(f"# Error\n\n**Error:** {e}\n")
@@ -1583,7 +1650,7 @@ def register_session_tools(  # noqa: C901
         return [TextContent(type="text", text="\n".join(lines))]
 
     @registry.tool()
-    async def jira_attach_session(
+    async def jira_attach_session(  # pylint: disable=too-many-locals
         ctx: Context,
         issue_key: str,
         session_id: str = "",
@@ -1640,9 +1707,15 @@ def register_session_tools(  # noqa: C901
             issue_key = issue_key.upper()
 
             # Get workspace and session
-            workspace, session, err = await _resolve_session(ctx, session_id)
-            if err:
-                return err
+            _workspace, session, err = await _resolve_session(ctx, session_id)
+            if err or session is None:
+                return err or [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "Call `session_start()` first or provide a session_id.",
+                    )
+                ]
             target_session_id = session.session_id
 
             # Extract chat content from Cursor DB
@@ -1701,9 +1774,11 @@ def register_session_tools(  # noqa: C901
                             f"Messages: {chat_content['message_count']}, "
                             f"Tool calls: {chat_content['summary']['tool_calls']}",
                         )
-                    except Exception as e:
+                    # Intentional: optional step must not abort the caller.
+                    except Exception as e:  # pylint: disable=broad-exception-caught
                         logger.debug(
-                            f"Suppressed error in jira_attach_session logging: {e}"
+                            "Suppressed error in jira_attach_session logging: %s",
+                            e,
                         )
 
             except ImportError as e:
@@ -1712,7 +1787,8 @@ def register_session_tools(  # noqa: C901
                     "\nMake sure the `developer` or `devops` persona is loaded."
                 )
 
-        except Exception as e:
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             import traceback
 
             lines.append(f"# Error\n\n**Error:** {e}\n")
@@ -1721,7 +1797,7 @@ def register_session_tools(  # noqa: C901
         return [TextContent(type="text", text="\n".join(lines))]
 
     @registry.tool()
-    async def session_export_context(
+    async def session_export_context(  # pylint: disable=redefined-builtin,too-many-locals
         ctx: Context,
         session_id: str = "",
         format: str = "markdown",
@@ -1750,9 +1826,15 @@ def register_session_tools(  # noqa: C901
 
         try:
             # Get workspace and session
-            workspace, session, err = await _resolve_session(ctx, session_id)
-            if err:
-                return err
+            _workspace, session, err = await _resolve_session(ctx, session_id)
+            if err or session is None:
+                return err or [
+                    TextContent(
+                        type="text",
+                        text="# No Active Session\n\n"
+                        "Call `session_start()` first or provide a session_id.",
+                    )
+                ]
             target_session_id = session.session_id
 
             # Extract chat content
@@ -1834,11 +1916,12 @@ def register_session_tools(  # noqa: C901
                         msg.get("timestamp", "")[:16] if msg.get("timestamp") else ""
                     )
 
-                    role_emoji = (
-                        "👤"
-                        if role == "user"
-                        else "🤖" if role == "assistant" else "⚙️"
-                    )
+                    if role == "user":
+                        role_emoji = "👤"
+                    elif role == "assistant":
+                        role_emoji = "🤖"
+                    else:
+                        role_emoji = "⚙️"
                     lines.append(
                         f"### {role_emoji} {role.title()} {f'({timestamp})' if timestamp else ''}\n"
                     )
@@ -1850,7 +1933,8 @@ def register_session_tools(  # noqa: C901
 
             return [TextContent(type="text", text="\n".join(lines))]
 
-        except Exception as e:
+        # Intentional: optional step must not abort the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             import traceback
 
             return [
@@ -1903,7 +1987,8 @@ After loading context, ask what the user wants to work on today."""
             ns_cfg = cfg.get("namespaces", {}).get("production", {})
             prod_ns = ns_cfg.get("main", "tower-analytics-prod")
             prod_billing_ns = ns_cfg.get("billing", "tower-analytics-prod-billing")
-        except Exception:
+        # Intentional: optional step must not abort the caller.
+        except Exception:  # pylint: disable=broad-exception-caught
             prod_ns = "tower-analytics-prod"
             prod_billing_ns = "tower-analytics-prod-billing"
 

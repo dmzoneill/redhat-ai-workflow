@@ -49,6 +49,7 @@ class SkillState:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class PendingConfirmation:
     """Track a pending confirmation request."""
 
@@ -69,6 +70,7 @@ MAX_RUNNING_SKILLS = 100
 MAX_SKILL_AGE_SECONDS = 3600
 
 
+# pylint: disable-next=too-many-instance-attributes
 class SkillWebSocketServer:
     """WebSocket server for real-time skill updates."""
 
@@ -99,14 +101,15 @@ class SkillWebSocketServer:
         try:
             self._server = await serve(self._handler, self.host, self.port)
             self._started = True
-            logger.info(f"WebSocket server started on ws://{self.host}:{self.port}")
+            logger.info("WebSocket server started on ws://%s:%s", self.host, self.port)
         except OSError as e:
             if "Address already in use" in str(e):
                 logger.warning(
-                    f"WebSocket port {self.port} already in use - another instance running?"
+                    "WebSocket port %s already in use - another instance running?",
+                    self.port,
                 )
             else:
-                logger.error(f"Failed to start WebSocket server: {e}")
+                logger.error("Failed to start WebSocket server: %s", e)
 
     async def stop(self):
         """Stop the WebSocket server."""
@@ -126,7 +129,7 @@ class SkillWebSocketServer:
         async with self._clients_lock:
             self.clients.add(websocket)
             client_count = len(self.clients)
-        logger.info(f"WebSocket client connected ({client_count} total)")
+        logger.info("WebSocket client connected (%s total)", client_count)
 
         try:
             # Send connection confirmation with current state
@@ -174,7 +177,7 @@ class SkillWebSocketServer:
             async with self._clients_lock:
                 self.clients.discard(websocket)
                 remaining = len(self.clients)
-            logger.info(f"WebSocket client disconnected ({remaining} total)")
+            logger.info("WebSocket client disconnected (%s total)", remaining)
 
     async def _handle_message(self, websocket: WebSocketServerProtocol, message: str):
         """Handle incoming message from client."""
@@ -194,7 +197,9 @@ class SkillWebSocketServer:
                                 "remember": data.get("remember", "none"),
                             }
                         )
-                    logger.info(f"Confirmation {conf_id} responded: {data['response']}")
+                    logger.info(
+                        "Confirmation %s responded: %s", conf_id, data["response"]
+                    )
 
             elif msg_type == "heartbeat":
                 await websocket.send(json.dumps({"type": "heartbeat_ack"}))
@@ -209,9 +214,11 @@ class SkillWebSocketServer:
                 pass
 
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON message: {e}")
+            logger.error("Invalid JSON message: %s", e)
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Error handling WebSocket message: {e}")
+            logger.error("Error handling WebSocket message: %s", e)
 
     async def broadcast(self, event: dict):
         """Broadcast event to all connected clients."""
@@ -230,7 +237,7 @@ class SkillWebSocketServer:
         # Log any errors
         for _i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.debug(f"Failed to send to client: {result}")
+                logger.debug("Failed to send to client: %s", result)
 
     # ==================== Skill Lifecycle Events ====================
 
@@ -253,7 +260,7 @@ class SkillWebSocketServer:
 
             for skill_id in stale_ids:
                 del self.running_skills[skill_id]
-                logger.warning(f"Removed stale skill {skill_id} (exceeded max age)")
+                logger.warning("Removed stale skill %s (exceeded max age)", skill_id)
 
             # Also enforce max count by removing oldest if over limit
             while len(self.running_skills) > MAX_RUNNING_SKILLS:
@@ -262,7 +269,9 @@ class SkillWebSocketServer:
                     key=lambda k: self.running_skills[k].started_at,
                 )
                 del self.running_skills[oldest_id]
-                logger.warning(f"Removed oldest skill {oldest_id} (exceeded max count)")
+                logger.warning(
+                    "Removed oldest skill %s (exceeded max count)", oldest_id
+                )
                 stale_ids.append(oldest_id)
 
         return len(stale_ids)
@@ -298,7 +307,7 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Skill started: {skill_name} ({skill_id}) source={source}")
+        logger.debug("Skill started: %s (%s) source=%s", skill_name, skill_id, source)
 
     async def skill_completed(
         self, skill_id: str, total_duration_ms: int | None = None
@@ -316,7 +325,7 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Skill completed: {skill_id}")
+        logger.debug("Skill completed: %s", skill_id)
 
         # Remove from running skills after a delay
         asyncio.create_task(self._remove_skill_delayed(skill_id, delay=5.0))
@@ -338,7 +347,7 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Skill failed: {skill_id} - {error}")
+        logger.debug("Skill failed: %s - %s", skill_id, error)
 
         # Remove from running skills after a delay
         asyncio.create_task(self._remove_skill_delayed(skill_id, delay=10.0))
@@ -369,7 +378,7 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Step started: {skill_id} [{step_index}] {step_name}")
+        logger.debug("Step started: %s [%s] %s", skill_id, step_index, step_name)
 
     async def step_completed(
         self, skill_id: str, step_index: int, step_name: str, duration_ms: int
@@ -386,7 +395,11 @@ class SkillWebSocketServer:
             }
         )
         logger.debug(
-            f"Step completed: {skill_id} [{step_index}] {step_name} ({duration_ms}ms)"
+            "Step completed: %s [%s] %s (%sms)",
+            skill_id,
+            step_index,
+            step_name,
+            duration_ms,
         )
 
     async def step_failed(
@@ -403,7 +416,9 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Step failed: {skill_id} [{step_index}] {step_name} - {error}")
+        logger.debug(
+            "Step failed: %s [%s] %s - %s", skill_id, step_index, step_name, error
+        )
 
     # ==================== Auto-Heal Events ====================
 
@@ -428,7 +443,11 @@ class SkillWebSocketServer:
             }
         )
         logger.debug(
-            f"Auto-heal triggered: {skill_id} [{step_index}] {error_type} -> {fix_action}"
+            "Auto-heal triggered: %s [%s] %s -> %s",
+            skill_id,
+            step_index,
+            error_type,
+            fix_action,
         )
 
     async def auto_heal_completed(
@@ -446,11 +465,16 @@ class SkillWebSocketServer:
             }
         )
         logger.debug(
-            f"Auto-heal completed: {skill_id} [{step_index}] {fix_action} success={success}"
+            "Auto-heal completed: %s [%s] %s success=%s",
+            skill_id,
+            step_index,
+            fix_action,
+            success,
         )
 
     # ==================== Confirmation System ====================
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def request_confirmation(
         self,
         skill_id: str,
@@ -502,7 +526,7 @@ class SkillWebSocketServer:
             }
         )
 
-        logger.info(f"Confirmation requested: {conf_id} - {prompt[:50]}...")
+        logger.info("Confirmation requested: %s - %s...", conf_id, prompt[:50])
 
         # Wait for response with timeout
         try:
@@ -520,7 +544,7 @@ class SkillWebSocketServer:
                 }
             )
 
-            logger.info(f"Confirmation {conf_id} answered: {result['response']}")
+            logger.info("Confirmation %s answered: %s", conf_id, result["response"])
             return result
 
         except asyncio.TimeoutError:
@@ -532,7 +556,7 @@ class SkillWebSocketServer:
                 }
             )
 
-            logger.info(f"Confirmation {conf_id} expired - defaulting to let_claude")
+            logger.info("Confirmation %s expired - defaulting to let_claude", conf_id)
 
             # Try Zenity fallback if no clients connected
             if not self.clients:
@@ -635,17 +659,18 @@ class SkillWebSocketServer:
 
             if process.returncode == 0:
                 return {"response": "retry_with_fix", "remember": "none"}
-            else:
-                return {"response": "abort", "remember": "none"}
+            return {"response": "abort", "remember": "none"}
 
         except FileNotFoundError:
             logger.debug("Zenity not available for fallback")
             return None
-        except asyncio.TimeoutExpired:
+        except TimeoutError:
             logger.debug("Zenity dialog timed out")
             return None
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Zenity fallback failed: {e}")
+            logger.debug("Zenity fallback failed: %s", e)
             return None
 
     # ==================== Memory Query Events ====================
@@ -666,7 +691,7 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Memory query started: {query_id} - {query[:50]}...")
+        logger.debug("Memory query started: %s - %s...", query_id, query[:50])
 
     async def memory_query_completed(
         self,
@@ -689,7 +714,10 @@ class SkillWebSocketServer:
             }
         )
         logger.debug(
-            f"Memory query completed: {query_id} - {result_count} results in {latency_ms:.0f}ms"
+            "Memory query completed: %s - %s results in %.0fms",
+            query_id,
+            result_count,
+            latency_ms,
         )
 
     async def intent_classified(
@@ -712,16 +740,23 @@ class SkillWebSocketServer:
                 "timestamp": datetime.now().isoformat(),
             }
         )
-        logger.debug(f"Intent classified: {query_id} - {intent} ({confidence:.0%})")
+        logger.debug(
+            "Intent classified: %s - %s (%s)",
+            query_id,
+            intent,
+            format(confidence, ".0%"),
+        )
 
 
 # ==================== Global Instance ====================
 
+# pylint: disable-next=invalid-name
 _ws_server: Optional[SkillWebSocketServer] = None
 
 
 def get_websocket_server() -> SkillWebSocketServer:
     """Get or create the global WebSocket server instance."""
+    # pylint: disable-next=global-statement
     global _ws_server
     if _ws_server is None:
         _ws_server = SkillWebSocketServer()
@@ -737,6 +772,7 @@ async def start_websocket_server():
 
 async def stop_websocket_server():
     """Stop the global WebSocket server."""
+    # pylint: disable-next=global-statement
     global _ws_server
     if _ws_server:
         await _ws_server.stop()

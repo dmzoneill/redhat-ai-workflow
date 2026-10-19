@@ -17,7 +17,7 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import AsyncIterator, List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -93,6 +93,7 @@ class LLMResponse:
     error: Optional[str] = None
 
 
+# pylint: disable-next=too-many-instance-attributes
 class LLMResponder:
     """
     LLM-based response generator for meeting interactions.
@@ -131,14 +132,18 @@ class LLMResponder:
         self.meeting_start = datetime.now()
 
         # Hotloaded Gemini instance (maintains conversation context internally)
-        self._gemini_hotload = None
+        self._gemini_hotload: Any = None
         self._use_hotload = use_hotload and backend == "gemini"
 
         logger.info(
-            f"LLM Responder initialized for meeting: {self.meeting_id} (hotload={self._use_hotload})"
+            "LLM Responder initialized for meeting: %s (hotload=%s)",
+            self.meeting_id,
+            self._use_hotload,
         )
 
         # System prompt for meeting assistant - persona is David
+        # Prompt text is kept on one line.
+        # pylint: disable-next=line-too-long
         self.system_prompt = """You are David, a 43-year-old software engineer at Red Hat based in Ireland.
 
 You are in a video meeting. Someone will ask you a QUESTION. Answer it directly.
@@ -165,10 +170,11 @@ The user message contains a QUESTION. Answer it."""
         self.meeting_title = title
         self.meeting_start = datetime.now()
         self.conversation_history = []  # Reset history for new meeting
-        logger.info(f"Meeting context set: {meeting_id} - {title}")
+        logger.info("Meeting context set: %s - %s", meeting_id, title)
 
     async def initialize(self) -> bool:
         """Check LLM backend is available and initialize hotload if enabled."""
+        # pylint: disable-next=no-else-return
         if self.backend == "ollama":
             # Try Ollama first (fastest - ~2s on iGPU)
             if await self._check_ollama():
@@ -187,6 +193,7 @@ The user message contains a QUESTION. Answer it."""
     async def _init_gemini_hotload(self) -> bool:
         """Initialize the hotloaded Gemini instance."""
         try:
+            # pylint: disable-next=import-outside-toplevel
             from tool_modules.aa_meet_bot.src.gemini_hotload import GeminiHotload
 
             self._gemini_hotload = GeminiHotload(
@@ -196,6 +203,7 @@ The user message contains a QUESTION. Answer it."""
                 max_history=self.max_history,
             )
 
+            # pylint: disable-next=no-else-return
             if await self._gemini_hotload.start():
                 logger.info(
                     "Gemini hotload initialized - conversation context will be maintained"
@@ -208,7 +216,7 @@ The user message contains a QUESTION. Answer it."""
                 return await self._check_gemini_cli()
 
         except ImportError as e:
-            logger.warning(f"Gemini hotload not available: {e}")
+            logger.warning("Gemini hotload not available: %s", e)
             self._use_hotload = False
             return await self._check_gemini_cli()
 
@@ -222,13 +230,14 @@ The user message contains a QUESTION. Answer it."""
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+            _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
 
+            # pylint: disable-next=no-else-return
             if proc.returncode == 0:
-                logger.info(f"Gemini CLI available, using model {GEMINI_MODEL}")
+                logger.info("Gemini CLI available, using model %s", GEMINI_MODEL)
                 return True
             else:
-                logger.warning(f"Gemini CLI check failed: {stderr.decode()}")
+                logger.warning("Gemini CLI check failed: %s", stderr.decode())
                 # Fall back to Ollama
                 self.backend = "ollama"
                 return await self._check_ollama()
@@ -237,8 +246,10 @@ The user message contains a QUESTION. Answer it."""
             logger.warning("Gemini CLI not found, falling back to Ollama")
             self.backend = "ollama"
             return await self._check_ollama()
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Gemini CLI error: {e}, falling back to Ollama")
+            logger.warning("Gemini CLI error: %s, falling back to Ollama", e)
             self.backend = "ollama"
             return await self._check_ollama()
 
@@ -250,29 +261,33 @@ The user message contains a QUESTION. Answer it."""
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
 
             if result.returncode == 0:
                 data = json.loads(result.stdout)
                 models = [m["name"] for m in data.get("models", [])]
 
+                # pylint: disable-next=no-else-return
                 if OLLAMA_MODEL in models or any(
-                    OLLAMA_MODEL.split(":")[0] in m for m in models
+                    OLLAMA_MODEL.split(":", maxsplit=1)[0] in m for m in models
                 ):
-                    logger.info(f"Ollama ready with model {OLLAMA_MODEL}")
+                    logger.info("Ollama ready with model %s", OLLAMA_MODEL)
                     return True
                 else:
                     logger.warning(
-                        f"Model {OLLAMA_MODEL} not found. Available: {models}"
+                        "Model %s not found. Available: %s", OLLAMA_MODEL, models
                     )
-                    logger.info(f"Run: ollama pull {OLLAMA_MODEL}")
+                    logger.info("Run: ollama pull %s", OLLAMA_MODEL)
                     return False
             else:
                 logger.error("Ollama not responding")
                 return False
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to connect to Ollama: {e}")
+            logger.error("Failed to connect to Ollama: %s", e)
             return False
 
     async def load_jira_context(self, project: str = "AAP") -> bool:
@@ -284,7 +299,7 @@ The user message contains a QUESTION. Answer it."""
         try:
             # Use the existing Jira MCP tools
             # For now, we'll create a placeholder that can be filled by the MCP tools
-            logger.info(f"Loading Jira context for project {project}...")
+            logger.info("Loading Jira context for project %s...", project)
 
             # This would normally call jira_my_issues and jira_search
             # For now, set up the structure
@@ -298,18 +313,22 @@ The user message contains a QUESTION. Answer it."""
 
             return True
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to load Jira context: {e}")
+            logger.error("Failed to load Jira context: %s", e)
             return False
 
-    def update_jira_context(self, issues: List[dict], my_issues: List[dict] = None):
+    def update_jira_context(
+        self, issues: List[dict], my_issues: Optional[List[dict]] = None
+    ):
         """Update Jira context with fresh data."""
         self.jira_context.issues = issues
         self.jira_context.my_issues = my_issues or []
         self.jira_context.last_updated = datetime.now()
 
     def _build_messages(
-        self, command: str, speaker: str, context_before: List[str] = None
+        self, command: str, speaker: str, context_before: Optional[List[str]] = None
     ) -> List[dict]:
         """Build messages list for Ollama chat API.
 
@@ -335,11 +354,12 @@ The user message contains a QUESTION. Answer it."""
 
         return messages
 
+    # pylint: disable-next=too-many-branches
     async def generate_response(
         self,
         command: str,
         speaker: str = "Someone",
-        context_before: List[str] = None,
+        context_before: Optional[List[str]] = None,
     ) -> LLMResponse:
         """
         Generate a response to a command/question.
@@ -375,7 +395,8 @@ The user message contains a QUESTION. Answer it."""
             # Add FULL conversation history with David (this is the key for context)
             if self.conversation_history:
                 prompt_parts.append(
-                    f"\n## Our conversation so far in this meeting ({len(self.conversation_history)} exchanges):"
+                    "\n## Our conversation so far in this meeting "
+                    f"({len(self.conversation_history)} exchanges):"
                 )
                 for msg in self.conversation_history:
                     role = "David" if msg["role"] == "user" else "You"
@@ -395,7 +416,9 @@ The user message contains a QUESTION. Answer it."""
             full_prompt = "\n".join(prompt_parts)
 
             logger.debug(
-                f"Prompt length: {len(full_prompt)} chars, history: {len(self.conversation_history)} exchanges"
+                "Prompt length: %s chars, history: %s exchanges",
+                len(full_prompt),
+                len(self.conversation_history),
             )
 
             # Call appropriate backend
@@ -405,7 +428,7 @@ The user message contains a QUESTION. Answer it."""
                 response = await self._gemini_hotload.send(f"{speaker}: {command}")
                 response_text = response.text if not response.error else None
                 if response.error:
-                    logger.warning(f"Gemini hotload error: {response.error}")
+                    logger.warning("Gemini hotload error: %s", response.error)
             elif self.backend == "gemini":
                 response_text = await self._call_gemini_cli(full_prompt)
             else:
@@ -416,6 +439,7 @@ The user message contains a QUESTION. Answer it."""
                 ]
                 response_text = await self._call_ollama(messages)
 
+            # pylint: disable-next=no-else-return
             if response_text:
                 # Add to history
                 self.conversation_history.append(
@@ -435,8 +459,10 @@ The user message contains a QUESTION. Answer it."""
             else:
                 return LLMResponse(text="", success=False, error="No response from LLM")
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"LLM response failed: {e}")
+            logger.error("LLM response failed: %s", e)
             return LLMResponse(text="", success=False, error=str(e))
 
     async def _call_gemini_cli(
@@ -457,6 +483,7 @@ The user message contains a QUESTION. Answer it."""
         Returns:
             Response text or None on error
         """
+        # pylint: disable-next=import-outside-toplevel
         import os
 
         try:
@@ -491,20 +518,23 @@ The user message contains a QUESTION. Answer it."""
                 proc.communicate(prompt.encode()), timeout=30
             )  # 30 second timeout
 
+            # pylint: disable-next=no-else-return
             if proc.returncode == 0:
                 response = stdout.decode().strip()
-                logger.info(f"Gemini response: {response[:100]}...")
+                logger.info("Gemini response: %s...", response[:100])
                 return response
             else:
                 error = stderr.decode()
-                logger.error(f"Gemini CLI error: {error}")
+                logger.error("Gemini CLI error: %s", error)
                 return None
 
         except asyncio.TimeoutError:
             logger.error("Gemini CLI timed out")
             return None
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Gemini CLI call error: {e}")
+            logger.error("Gemini CLI call error: %s", e)
             return None
 
     async def stream_gemini_response(
@@ -537,12 +567,17 @@ The user message contains a QUESTION. Answer it."""
             )
 
             # Write prompt and close stdin
-            proc.stdin.write(prompt.encode())
-            await proc.stdin.drain()
-            proc.stdin.close()
+            stdin = proc.stdin
+            stdout = proc.stdout
+            if stdin is None or stdout is None:
+                logger.error("Gemini streaming pipes were not created")
+                return
+            stdin.write(prompt.encode())
+            await stdin.drain()
+            stdin.close()
 
             # Read streaming JSON chunks
-            async for line in proc.stdout:
+            async for line in stdout:
                 try:
                     chunk = json.loads(line.decode())
                     if "text" in chunk:
@@ -555,8 +590,10 @@ The user message contains a QUESTION. Answer it."""
 
             await proc.wait()
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Gemini streaming error: {e}")
+            logger.error("Gemini streaming error: %s", e)
 
     async def _call_ollama(self, messages: List[dict]) -> Optional[str]:
         """Call Ollama API (non-streaming, for compatibility)."""
@@ -567,6 +604,7 @@ The user message contains a QUESTION. Answer it."""
 
     async def _stream_ollama(self, messages: List[dict]) -> AsyncIterator[str]:
         """Stream response from Ollama API token by token."""
+        # pylint: disable-next=import-outside-toplevel
         import aiohttp
 
         payload = {
@@ -596,8 +634,10 @@ The user message contains a QUESTION. Answer it."""
                                     yield content
                             except json.JSONDecodeError:
                                 continue
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Ollama streaming error: {e}")
+            logger.error("Ollama streaming error: %s", e)
 
     async def stream_ollama_sentences(self, messages: List[dict]) -> AsyncIterator[str]:
         """Stream complete sentences from Ollama for TTS.
@@ -615,6 +655,7 @@ The user message contains a QUESTION. Answer it."""
             for i, char in enumerate(buffer):
                 if char in sentence_endings:
                     # Check it's not an abbreviation (e.g., "Dr.", "Mr.")
+                    # pylint: disable-next=no-else-break
                     if i + 1 < len(buffer) and buffer[i + 1] == " ":
                         sentence = buffer[: i + 1].strip()
                         buffer = buffer[i + 2 :]  # Skip the space after punctuation
@@ -639,6 +680,7 @@ The user message contains a QUESTION. Answer it."""
 
 
 # Global instance
+# pylint: disable-next=invalid-name
 _llm_responder: Optional[LLMResponder] = None
 
 
@@ -649,6 +691,7 @@ def get_llm_responder(backend: str = "gemini") -> LLMResponder:
     Args:
         backend: "gemini" (default, fastest) or "ollama" (local)
     """
+    # pylint: disable-next=global-statement
     global _llm_responder
     if _llm_responder is None:
         _llm_responder = LLMResponder(backend=backend)
@@ -656,7 +699,9 @@ def get_llm_responder(backend: str = "gemini") -> LLMResponder:
 
 
 async def generate_meeting_response(
-    command: str, speaker: str = "Someone", context: List[str] = None
+    command: str,
+    speaker: str = "Someone",
+    context: Optional[List[str]] = None,
 ) -> LLMResponse:
     """
     Convenience function to generate a meeting response.

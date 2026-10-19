@@ -77,7 +77,7 @@ class ToolManifest:
     def register(self, info: ToolInfo) -> None:
         """Register a tool in the manifest."""
         if self._frozen:
-            logger.warning(f"Manifest frozen, cannot register: {info.name}")
+            logger.warning("Manifest frozen, cannot register: %s", info.name)
             return
 
         self.tools[info.name] = info
@@ -89,7 +89,10 @@ class ToolManifest:
             self.modules[info.module].append(info.name)
 
         logger.debug(
-            f"Registered tool: {info.name} (module={info.module}, tier={info.tier})"
+            "Registered tool: %s (module=%s, tier=%s)",
+            info.name,
+            info.module,
+            info.tier,
         )
 
     def get_module_tools(self, module: str, tier: ToolTier | None = None) -> list[str]:
@@ -150,6 +153,7 @@ def register_tool(
     tier_enum = ToolTier(tier) if isinstance(tier, str) else tier
 
     def decorator(func: Callable) -> Callable:
+        # pylint: disable-next=import-outside-toplevel
         import inspect
 
         # Get source info
@@ -252,6 +256,7 @@ def list_modules() -> list[str]:
 # ============== Fallback Discovery ==============
 
 
+# pylint: disable-next=too-many-branches
 def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
     """Scan a Python file for tool registrations (fallback method).
 
@@ -265,6 +270,7 @@ def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
     Returns:
         List of discovered ToolInfo objects
     """
+    # pylint: disable-next=import-outside-toplevel
     import ast
 
     if not filepath.exists():
@@ -275,7 +281,7 @@ def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
             source = f.read()
         tree = ast.parse(source)
     except (SyntaxError, OSError) as e:
-        logger.warning(f"Could not parse {filepath}: {e}")
+        logger.warning("Could not parse %s: %s", filepath, e)
         return []
 
     tools = []
@@ -322,6 +328,7 @@ def discover_tools_from_file(filepath: Path, module: str) -> list[ToolInfo]:
     return tools
 
 
+# pylint: disable-next=too-many-branches
 def discover_module_tools(module: str) -> dict[str, list[str]]:
     """Discover all tools in a module by scanning files.
 
@@ -336,7 +343,7 @@ def discover_module_tools(module: str) -> dict[str, list[str]]:
     base_name = module.replace("_core", "").replace("_basic", "").replace("_extra", "")
     module_dir = TOOL_MODULES_DIR / f"aa_{base_name}" / "src"
 
-    result = {"core": [], "basic": [], "extra": []}
+    result: dict[str, list[str]] = {"core": [], "basic": [], "extra": []}
 
     # Scan core tools (highest priority, smallest set)
     core_file = module_dir / "tools_core.py"
@@ -467,6 +474,7 @@ def get_module_for_tool(tool_name: str) -> str | None:
     Returns:
         Module name or None
     """
+    # pylint: disable-next=global-statement
     global _MODULE_PREFIXES
 
     # First check the manifest (tools that have been loaded)

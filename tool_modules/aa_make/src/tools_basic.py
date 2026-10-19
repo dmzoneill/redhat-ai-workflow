@@ -7,7 +7,6 @@ Provides:
 import logging
 
 from fastmcp import FastMCP
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -19,12 +18,7 @@ from server.utils import resolve_repo_path, run_cmd, truncate_output
 logger = logging.getLogger(__name__)
 
 
-@auto_heal()
-async def _make_target_impl(
-    repo: str,
-    target: str,
-    timeout: int = 120,
-) -> str:
+async def _shared__make_target_impl(repo: str, target: str, timeout: int = 120) -> str:
     """
     Run a make target in the repository.
 
@@ -44,6 +38,14 @@ async def _make_target_impl(
     if success:
         return f"✅ make {target} completed\n\n{truncate_output(output, 2000, mode='tail')}"
     return f"❌ make {target} failed:\n{truncate_output(output, 2000, mode='tail')}"
+
+
+@auto_heal()
+async def _make_target_impl(repo: str, target: str, timeout: int = 120) -> str:
+    return await _shared__make_target_impl(repo, target, timeout)
+
+
+_make_target_impl.__doc__ = _shared__make_target_impl.__doc__
 
 
 def register_tools(server: FastMCP) -> int:
