@@ -7,22 +7,18 @@ import logging
 import os
 from pathlib import Path
 
+import yaml
 from fastmcp import FastMCP
-
-# Setup project path for server imports (must be before server imports)
-from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
-
-__project_root__ = PROJECT_ROOT  # Module initialization
-
 from mcp.types import TextContent
+
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 from server.utils import run_cmd_full as run_cmd
 from server.utils import truncate_output
+from tool_modules.common import PROJECT_ROOT
 
-# Setup project path for server imports
-
+__project_root__ = PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +74,14 @@ find_app_interface_path.__doc__ = _shared_find_app_interface_path.__doc__
 APP_INTERFACE_PATH = find_app_interface_path()
 
 
+def _missing_repo(path: str, message: str = "❌ app-interface not found"):
+    """Return ``(repo_path, None)`` or ``("", error_content)``."""
+    repo_path = path or APP_INTERFACE_PATH
+    if repo_path and os.path.isdir(repo_path):
+        return repo_path, None
+    return "", [TextContent(type="text", text=message)]
+
+
 # ==================== TOOLS ====================
 
 
@@ -101,7 +105,7 @@ async def _grep_saas_files(
     saas_dir: Path, service_name: str, repo_path: str
 ) -> list[Path]:
     """Use grep to find SaaS files."""
-    success, stdout, stderr = await run_cmd(
+    success, stdout, _stderr = await run_cmd(
         ["grep", "-rl", service_name, str(saas_dir), "--include=*.yml"], cwd=repo_path
     )
     matches = []
@@ -126,27 +130,44 @@ def _format_saas_match(match: Path, repo_path: str) -> list[str]:
         lines.append("```yaml")
         lines.append(truncate_output(content, max_length=2000))
         lines.append("```")
-    except Exception as e:
-        lines.append(f"❌ Could not read: {e}")
+    except (OSError, UnicodeError) as exc:
+        lines.append(f"❌ Could not read: {exc}")
     lines.append("")
     return lines
 
 
 async def _find_namespace_files(namespace: str, repo_path: str) -> list[str]:
     """Find YAML files mentioning namespace."""
-    success, stdout, stderr = await run_cmd(
+    success, stdout, _stderr = await run_cmd(
         ["grep", "-rl", f"name: {namespace}", repo_path, "--include=*.yml"],
         cwd=repo_path,
     )
 
     if not success or not stdout.strip():
-        success, stdout, stderr = await run_cmd(
+        success, stdout, _stderr = await run_cmd(
             ["grep", "-rl", namespace, repo_path, "--include=*.yml"], cwd=repo_path
         )
 
     if success and stdout.strip():
         return stdout.strip().split("\n")[:10]
     return []
+
+
+def _resource_names(content: str) -> list[str]:
+    """List resource names from a namespace YAML document."""
+    names = []
+    try:
+        docs = list(yaml.safe_load_all(content))
+    except yaml.YAMLError:
+        return names
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        resources = doc.get("resourceTemplates", []) or doc.get("resources", [])
+        for resource in resources[:10]:
+            if isinstance(resource, dict):
+                names.append(f"  - `{resource.get('name', 'unnamed')}`")
+    return names
 
 
 def _extract_namespace_resources(filepath: str) -> list[str]:
@@ -162,22 +183,7 @@ def _extract_namespace_resources(filepath: str) -> list[str]:
             return lines
 
         lines.append(f"\n### Resources from `{Path(filepath).name}`")
-
-        import yaml
-
-        try:
-            docs = list(yaml.safe_load_all(content))
-            for doc in docs:
-                if isinstance(doc, dict):
-                    resources = doc.get("resourceTemplates", []) or doc.get(
-                        "resources", []
-                    )
-                    for r in resources[:10]:
-                        if isinstance(r, dict):
-                            name = r.get("name", "unnamed")
-                            lines.append(f"  - `{name}`")
-        except (yaml.YAMLError, KeyError, TypeError):
-            pass
+        lines.extend(_resource_names(content))
     except OSError:
         pass
 
@@ -186,13 +192,13 @@ def _extract_namespace_resources(filepath: str) -> list[str]:
 
 async def _appinterface_diff_impl(path: str) -> list[TextContent]:
     """Implementation of appinterface_diff tool."""
-    repo_path = path or APP_INTERFACE_PATH
-    if not repo_path or not os.path.isdir(repo_path):
-        return [TextContent(type="text", text="❌ app-interface not found")]
+    repo_path, missing = _missing_repo(path)
+    if missing:
+        return missing
 
     lines = ["## App-Interface Changes", ""]
 
-    success, stdout, stderr = await run_cmd(["git", "diff", "--stat"], cwd=repo_path)
+    success, stdout, _stderr = await run_cmd(["git", "diff", "--stat"], cwd=repo_path)
 
     if success and stdout.strip():
         lines.append("### Modified Files")
@@ -203,7 +209,7 @@ async def _appinterface_diff_impl(path: str) -> list[TextContent]:
         lines.append("No uncommitted changes")
         return [TextContent(type="text", text="\n".join(lines))]
 
-    success, stdout, stderr = await run_cmd(
+    success, stdout, _stderr = await run_cmd(
         ["git", "diff", "--", "*.yml", "*.yaml"], cwd=repo_path
     )
 
@@ -220,9 +226,9 @@ async def _appinterface_get_saas_impl(
     service_name: str, path: str
 ) -> list[TextContent]:
     """Implementation of appinterface_get_saas tool."""
-    repo_path = path or APP_INTERFACE_PATH
-    if not repo_path or not os.path.isdir(repo_path):
-        return [TextContent(type="text", text="❌ app-interface not found")]
+    repo_path, missing = _missing_repo(path)
+    if missing:
+        return missing
 
     lines = [f"## SaasFile: `{service_name}`", ""]
 
@@ -252,9 +258,9 @@ async def _appinterface_get_saas_impl(
 
 async def _appinterface_resources_impl(namespace: str, path: str) -> list[TextContent]:
     """Implementation of appinterface_resources tool."""
-    repo_path = path or APP_INTERFACE_PATH
-    if not repo_path or not os.path.isdir(repo_path):
-        return [TextContent(type="text", text="❌ app-interface not found")]
+    repo_path, missing = _missing_repo(path)
+    if missing:
+        return missing
 
     lines = [f"## Resources for `{namespace}`", ""]
 
@@ -287,10 +293,11 @@ async def _appinterface_resources_impl(namespace: str, path: str) -> list[TextCo
 async def _appinterface_validate_impl(path: str) -> list[TextContent]:
     """Implementation of appinterface_validate tool."""
     repo_path = path or APP_INTERFACE_PATH
-    if not repo_path or not os.path.isdir(repo_path):
-        return [
-            TextContent(type="text", text=f"❌ app-interface not found at {repo_path}")
-        ]
+    repo_path, missing = _missing_repo(
+        path, f"❌ app-interface not found at {repo_path}"
+    )
+    if missing:
+        return missing
 
     lines = ["## App-Interface Validation", ""]
 
