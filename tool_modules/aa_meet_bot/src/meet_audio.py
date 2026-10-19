@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
+from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
 from tool_modules.aa_meet_bot.src.virtual_devices import InstanceDevices
 
 if TYPE_CHECKING:
@@ -605,14 +606,7 @@ class AudioMixin:
             if user_source:
                 # Use pw-metadata for persistent default (pactl gets overridden by PipeWire)
                 subprocess.run(
-                    [
-                        "pw-metadata",
-                        "-n",
-                        "default",
-                        "0",
-                        "default.audio.source",
-                        f'{{"name":"{user_source}"}}',
-                    ],
+                    default_source_metadata_args(user_source),
                     capture_output=True,
                     check=False,
                 )
