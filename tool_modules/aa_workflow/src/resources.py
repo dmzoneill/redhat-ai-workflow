@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 """Resource Handlers - Data sources the AI can read.
 
 Provides MCP resources for:
@@ -29,21 +30,28 @@ if TYPE_CHECKING:
 
 async def _get_current_work() -> str:
     """Get current work state resource for the current project."""
-    # Import here to avoid circular imports
+    # Import here to avoid circular imports. One name binding for mypy.
     try:
+        # pylint: disable-next=import-outside-toplevel
         from tool_modules.aa_workflow.src.chat_context import (
             get_project_work_state_path,
         )
     except ImportError:
+        import importlib  # pylint: disable=import-outside-toplevel
+
         try:
-            from .chat_context import get_project_work_state_path
+            _chat_mod = importlib.import_module(".chat_context", __package__)
         except ImportError:
-            from chat_context import get_project_work_state_path
+            _chat_mod = importlib.import_module("chat_context")
+        get_project_work_state_path = _chat_mod.get_project_work_state_path
 
     work_file = get_project_work_state_path()
     if work_file.exists():
         return work_file.read_text()
-    return "# No current work tracked for this project\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
+    return (
+        "# No current work tracked for this project\n"
+        "active_issues: []\nopen_mrs: []\nfollow_ups: []"
+    )
 
 
 async def _get_patterns() -> str:
@@ -94,7 +102,8 @@ async def _get_personas() -> str:
                         "skills": data.get("skills", []),
                     }
                 )
-            except Exception as exc:
+            # One bad persona file should not hide the rest of the catalog.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.debug("Suppressed error: %s", exc)
     return yaml.dump({"personas": personas}, default_flow_style=False)
 
@@ -114,7 +123,8 @@ async def _get_skills() -> str:
                         "inputs": [i.get("name") for i in data.get("inputs", [])],
                     }
                 )
-            except Exception as exc:
+            # One bad skill file should not hide the rest of the catalog.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.debug("Suppressed error: %s", exc)
     return yaml.dump({"skills": skills}, default_flow_style=False)
 
