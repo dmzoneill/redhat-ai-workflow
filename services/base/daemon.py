@@ -51,7 +51,7 @@ import socket
 import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +86,9 @@ def sd_notify(state: str) -> bool:
             return True
         finally:
             sock.close()
-    except Exception as e:
-        logger.warning(f"Failed to send sd_notify({state}): {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Notify boundary: a broken NOTIFY_SOCKET must not stop the daemon.
+        logger.warning("Failed to send sd_notify(%s): %s", state, e)
         return False
 
 
@@ -125,7 +126,7 @@ class SingleInstance:
     def __init__(self, name: str, lock_dir: str = "/tmp"):
         self.name = name
         self.lock_dir = Path(lock_dir)
-        self._lock_file = None
+        self._lock_file: TextIO | None = None
         self._acquired = False
 
     @property
@@ -146,8 +147,12 @@ class SingleInstance:
             True if lock acquired, False if another instance is running.
         """
         try:
-            self._lock_file = open(self.lock_path, "w", encoding="utf-8")
-            fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # The flock is held only while this handle stays open.
+            lock_file = open(  # pylint: disable=consider-using-with
+                self.lock_path, "w", encoding="utf-8"
+            )
+            self._lock_file = lock_file
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Write PID for external status checks
             self.pid_path.write_text(str(os.getpid()))
             self._acquired = True
@@ -161,12 +166,14 @@ class SingleInstance:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
                 self._lock_file.close()
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                # Cleanup boundary: unlocking must not raise out of release.
                 logger.debug("Suppressed error: %s", exc)
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
-            except Exception as exc:
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                # Cleanup boundary: removing the pid file must not raise.
                 logger.debug("Suppressed error: %s", exc)
         self._acquired = False
 
@@ -263,7 +270,6 @@ class BaseDaemon(ABC):
         Use `await self._shutdown_event.wait()` or check
         `self._shutdown_event.is_set()` in loops.
         """
-        pass
 
     async def startup(self):
         """
@@ -272,6 +278,8 @@ class BaseDaemon(ABC):
         Default implementation starts D-Bus if enabled.
         """
         if self.enable_dbus and hasattr(self, "start_dbus"):
+            # start_dbus is provided by DaemonDBusBase, not BaseDaemon.
+            # pylint: disable-next=no-member
             await self.start_dbus()
 
     async def shutdown(self):
@@ -281,11 +289,13 @@ class BaseDaemon(ABC):
         Default implementation stops D-Bus if enabled.
         """
         if self.enable_dbus and hasattr(self, "stop_dbus"):
+            # stop_dbus is provided by DaemonDBusBase, not BaseDaemon.
+            # pylint: disable-next=no-member
             await self.stop_dbus()
 
     def request_shutdown(self):
         """Request graceful shutdown of the daemon."""
-        logger.info(f"Shutdown requested for {self.name}")
+        logger.info("Shutdown requested for %s", self.name)
         self._shutdown_event.set()
 
     def _setup_signal_handlers(self):
@@ -293,7 +303,7 @@ class BaseDaemon(ABC):
         loop = asyncio.get_running_loop()
 
         def signal_handler(sig):
-            logger.info(f"Received signal {sig.name}")
+            logger.info("Received signal %s", sig.name)
             self.request_shutdown()
 
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -316,7 +326,7 @@ class BaseDaemon(ABC):
             logger.debug("Watchdog not enabled (WATCHDOG_USEC not set)")
             return
 
-        logger.info(f"Watchdog enabled, pinging every {interval:.1f}s")
+        logger.info("Watchdog enabled, pinging every %.1fs", interval)
 
         while not self._shutdown_event.is_set():
             try:
@@ -333,8 +343,9 @@ class BaseDaemon(ABC):
                     self._watchdog_healthy = False
                     # Don't send watchdog ping - systemd will restart us
 
-            except Exception as e:
-                logger.error(f"Watchdog loop error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # Watchdog boundary: health failures are contained here.
+                logger.error("Watchdog loop error: %s", e)
                 self._watchdog_healthy = False
 
             # Wait for next interval or shutdown
@@ -351,18 +362,22 @@ class BaseDaemon(ABC):
         Returns:
             True if healthy, False otherwise
         """
-        # Check 1: Verify D-Bus interface is responding (if enabled)
+        # Check 1: Verify D-Bus interface is responding (if enabled).
+        # _bus and _dbus_interface come from DaemonDBusBase, not BaseDaemon.
+        # pylint: disable-next=no-member
         if self.enable_dbus and hasattr(self, "_bus") and self._bus:
             try:
                 # Try to call our own Ping method via D-Bus to verify the interface works
+                # pylint: disable-next=no-member
                 if hasattr(self, "_dbus_interface") and self._dbus_interface:
                     # The interface exists, D-Bus is working
                     pass
                 else:
                     logger.warning("Watchdog: D-Bus interface not initialized")
                     return False
-            except Exception as e:
-                logger.warning(f"Watchdog: D-Bus check failed: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # Watchdog boundary: health failures are contained here.
+                logger.warning("Watchdog: D-Bus check failed: %s", e)
                 return False
 
         # Check 2: Call daemon's health_check() if available
@@ -371,11 +386,13 @@ class BaseDaemon(ABC):
                 result = await self.health_check()
                 if isinstance(result, dict) and not result.get("healthy", True):
                     logger.warning(
-                        f"Watchdog: Health check failed: {result.get('message', 'unknown')}"
+                        "Watchdog: Health check failed: %s",
+                        result.get("message", "unknown"),
                     )
                     return False
-            except Exception as e:
-                logger.warning(f"Watchdog: health_check() raised exception: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # Watchdog boundary: health failures are contained here.
+                logger.warning("Watchdog: health_check() raised exception: %s", e)
                 return False
 
         return True
@@ -390,7 +407,7 @@ class BaseDaemon(ABC):
             # Notify systemd we're ready (for Type=notify services)
             sd_notify("READY=1")
             sd_notify(f"STATUS=Running: {self.description or self.name}")
-            logger.info(f"Daemon ready: {self.name}")
+            logger.info("Daemon ready: %s", self.name)
 
             # Start watchdog loop in background
             self._watchdog_task = asyncio.create_task(self._watchdog_loop())
@@ -398,8 +415,9 @@ class BaseDaemon(ABC):
             await self.run_daemon()
         except asyncio.CancelledError:
             logger.info("Daemon cancelled")
-        except Exception as e:
-            logger.exception(f"Daemon error: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Lifecycle boundary: log the failure, then propagate it.
+            logger.exception("Daemon error: %s", e)
             sd_notify(f"STATUS=Error: {e}")
             raise
         finally:
@@ -492,9 +510,8 @@ class BaseDaemon(ABC):
         if pid:
             print(f"{cls.name} is running (PID: {pid})")
             return 0
-        else:
-            print(f"{cls.name} is not running")
-            return 1
+        print(f"{cls.name} is not running")
+        return 1
 
     @classmethod
     def handle_stop(cls) -> int:
