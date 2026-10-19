@@ -12,15 +12,16 @@ The bot runs as a cron job during working hours and creates one chat per issue.
 Each chat is named with the issue key for easy identification.
 """
 
+import importlib
 import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# Support both package import and direct loading
-try:
+# One import for the type checker. Runtime keeps the package and script fallbacks.
+if TYPE_CHECKING:
     from .sprint_history import (
         SprintIssue,
         SprintState,
@@ -32,18 +33,32 @@ try:
         update_issue_status,
     )
     from .sprint_prioritizer import prioritize_issues, to_sprint_issue_format
-except ImportError:
-    from sprint_history import (
-        SprintIssue,
-        SprintState,
-        TimelineEvent,
-        add_timeline_event,
-        get_next_issue_to_process,
-        load_sprint_state,
-        save_sprint_state,
-        update_issue_status,
-    )
-    from sprint_prioritizer import prioritize_issues, to_sprint_issue_format
+else:
+    try:
+        from .sprint_history import (
+            SprintIssue,
+            SprintState,
+            TimelineEvent,
+            add_timeline_event,
+            get_next_issue_to_process,
+            load_sprint_state,
+            save_sprint_state,
+            update_issue_status,
+        )
+        from .sprint_prioritizer import prioritize_issues, to_sprint_issue_format
+    except ImportError:
+        _sprint_history = importlib.import_module("sprint_history")
+        SprintIssue = _sprint_history.SprintIssue
+        SprintState = _sprint_history.SprintState
+        TimelineEvent = _sprint_history.TimelineEvent
+        add_timeline_event = _sprint_history.add_timeline_event
+        get_next_issue_to_process = _sprint_history.get_next_issue_to_process
+        load_sprint_state = _sprint_history.load_sprint_state
+        save_sprint_state = _sprint_history.save_sprint_state
+        update_issue_status = _sprint_history.update_issue_status
+        _sprint_prioritizer = importlib.import_module("sprint_prioritizer")
+        prioritize_issues = _sprint_prioritizer.prioritize_issues
+        to_sprint_issue_format = _sprint_prioritizer.to_sprint_issue_format
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +100,7 @@ def is_within_working_hours(config: WorkingHours) -> bool:
         True if within working hours
     """
     try:
+        # pylint: disable-next=import-outside-toplevel
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(config.timezone)
@@ -152,7 +168,9 @@ async def fetch_sprint_issues(config: SprintBotConfig) -> list[dict[str, Any]]:
     """
     # Import Jira tools - these are MCP tools so we call them via tool_exec
     # For now, we'll use a direct import approach
+    issues: list[dict[str, Any]] = []
     try:
+        # pylint: disable-next=import-outside-toplevel
         from tool_modules.aa_jira.src.tools_basic import (
             jira_get_active_sprint,
             jira_get_sprint_issues,
@@ -161,33 +179,26 @@ async def fetch_sprint_issues(config: SprintBotConfig) -> list[dict[str, Any]]:
         # Get active sprint
         sprint_result = await jira_get_active_sprint(project=config.jira_project)
         if not sprint_result or "error" in str(sprint_result).lower():
-            logger.error(f"Failed to get active sprint: {sprint_result}")
-            return []
-
-        # Extract sprint ID
-        sprint_id = None
-        if isinstance(sprint_result, dict):
-            sprint_id = sprint_result.get("id")
-
-        if not sprint_id:
-            logger.error("No active sprint found")
-            return []
-
-        # Get sprint issues
-        issues_result = await jira_get_sprint_issues(sprint_id=sprint_id)
-        if isinstance(issues_result, list):
-            return issues_result
-        elif isinstance(issues_result, dict) and "issues" in issues_result:
-            return issues_result["issues"]
-
-        return []
+            logger.error("Failed to get active sprint: %s", sprint_result)
+        else:
+            sprint_id = (
+                sprint_result.get("id") if isinstance(sprint_result, dict) else None
+            )
+            if not sprint_id:
+                logger.error("No active sprint found")
+            else:
+                issues_result = await jira_get_sprint_issues(sprint_id=sprint_id)
+                if isinstance(issues_result, list):
+                    issues = issues_result
+                elif isinstance(issues_result, dict) and "issues" in issues_result:
+                    issues = issues_result["issues"]
 
     except ImportError:
         logger.warning("Jira tools not available, using mock data")
-        return []
-    except Exception as e:
-        logger.error(f"Error fetching sprint issues: {e}")
-        return []
+    # Jira client errors are varied; return an empty list instead of crashing.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Error fetching sprint issues: %s", e)
+    return issues
 
 
 def load_sprint_issues_from_jira_sync(config: SprintBotConfig) -> list[dict[str, Any]]:
@@ -195,7 +206,7 @@ def load_sprint_issues_from_jira_sync(config: SprintBotConfig) -> list[dict[str,
 
     Uses existing MCP tool infrastructure.
     """
-    import asyncio
+    import asyncio  # pylint: disable=import-outside-toplevel
 
     try:
         loop = asyncio.get_event_loop()
@@ -206,7 +217,9 @@ def load_sprint_issues_from_jira_sync(config: SprintBotConfig) -> list[dict[str,
     return loop.run_until_complete(fetch_sprint_issues(config))
 
 
-def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
+def refresh_sprint_state(  # pylint: disable=too-many-locals
+    config: SprintBotConfig,
+) -> SprintState:
     """Refresh sprint state from Jira and prioritize issues.
 
     Args:
@@ -227,6 +240,7 @@ def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
 
     # Filter to only show issues assigned to current user
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import load_config
 
         user_config = load_config()
@@ -243,10 +257,14 @@ def refresh_sprint_state(config: SprintBotConfig) -> SprintState:
                 if issue.get("assignee", "").lower() in match_values
             ]
             logger.info(
-                f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
+                "Filtered to %s/%s issues assigned to %s",
+                len(jira_issues),
+                original_count,
+                jira_username or full_name,
             )
-    except Exception as e:
-        logger.warning(f"Could not filter by assignee: {e}")
+    # Config or assignee fields may be missing; keep the unfiltered list.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Could not filter by assignee: %s", e)
 
     if not jira_issues:
         logger.info("No issues assigned to current user")
@@ -327,8 +345,10 @@ async def launch_issue_chat(issue: SprintIssue) -> str | None:
     """
     try:
         # Try D-Bus first (preferred method)
-        import dbus
-        from dbus.mainloop.glib import DBusGMainLoop
+        import dbus  # pylint: disable=import-outside-toplevel
+        from dbus.mainloop.glib import (  # pylint: disable=import-outside-toplevel
+            DBusGMainLoop,
+        )
 
         DBusGMainLoop(set_as_default=True)
         bus = dbus.SessionBus()
@@ -353,20 +373,25 @@ async def launch_issue_chat(issue: SprintIssue) -> str | None:
 
         return None
 
-    except Exception as e:
-        logger.error(f"Failed to launch chat via D-Bus: {e}")
+    # D-Bus is optional and can fail in many ways; fall back to a manual log.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to launch chat via D-Bus: %s", e)
 
         # Fallback: Log the action for manual execution
-        logger.info(f"Manual action required: Create chat for {issue.key}")
-        logger.info(f"  Summary: {issue.summary}")
+        logger.info("Manual action required: Create chat for %s", issue.key)
+        logger.info("  Summary: %s", issue.summary)
         logger.info(
-            f"  Command: skill_run('sprint_autopilot', '{{\"issue_key\": \"{issue.key}\"}}')"
+            "  Command: skill_run('sprint_autopilot', '{\"issue_key\": \"%s\"}')",
+            issue.key,
         )
 
         return None
 
 
-def process_next_issue(state: SprintState, config: SprintBotConfig) -> bool:
+# config is unused but kept so callers can pass SprintBotConfig.
+def process_next_issue(  # pylint: disable=unused-argument
+    state: SprintState, config: SprintBotConfig
+) -> bool:
     """Process the next available issue.
 
     Args:
@@ -376,7 +401,7 @@ def process_next_issue(state: SprintState, config: SprintBotConfig) -> bool:
     Returns:
         True if an issue was processed, False if none available
     """
-    import asyncio
+    import asyncio  # pylint: disable=import-outside-toplevel
 
     # Get next issue to process
     issue = get_next_issue_to_process(state)
@@ -385,7 +410,7 @@ def process_next_issue(state: SprintState, config: SprintBotConfig) -> bool:
         logger.info("No issues available to process")
         return False
 
-    logger.info(f"Processing issue: {issue.key} - {issue.summary}")
+    logger.info("Processing issue: %s - %s", issue.key, issue.summary)
 
     # Update status to in_progress
     update_issue_status(issue.key, "in_progress")
@@ -423,9 +448,9 @@ def process_next_issue(state: SprintState, config: SprintBotConfig) -> bool:
                 chat_link=chat_id,
             ),
         )
-        logger.info(f"Chat created for {issue.key}: {chat_id}")
+        logger.info("Chat created for %s: %s", issue.key, chat_id)
     else:
-        logger.warning(f"Could not create chat for {issue.key}")
+        logger.warning("Could not create chat for %s", issue.key)
 
     return True
 
@@ -498,8 +523,9 @@ def run_sprint_bot(config: SprintBotConfig | None = None) -> dict[str, Any]:
 
         return result
 
-    except Exception as e:
-        logger.exception(f"Sprint bot error: {e}")
+    # The bot must report failures instead of killing the cron process.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Sprint bot error: %s", e)
         result["message"] = f"Error: {str(e)}"
         return result
 
@@ -564,11 +590,12 @@ def approve_issue(issue_key: str) -> dict[str, Any]:
             "message": f"Issue {issue_key} not found",
         }
 
-    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_bot)
+    # Lazy import to avoid circular dependency (sprint_tools imports from sprint_bot).
     try:
+        # pylint: disable-next=import-outside-toplevel
         from .sprint_tools import is_actionable
     except ImportError:
-        from sprint_tools import is_actionable
+        is_actionable = importlib.import_module("sprint_tools").is_actionable
 
     if not is_actionable(issue):
         return {
@@ -636,7 +663,7 @@ def get_sprint_status() -> dict[str, Any]:
     state = load_sprint_state()
 
     # Count issues by status
-    status_counts = {}
+    status_counts: dict[str, int] = {}
     for issue in state.issues:
         status = issue.approval_status
         status_counts[status] = status_counts.get(status, 0) + 1
