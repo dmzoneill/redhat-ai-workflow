@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from tool_modules.aa_meet_bot.src.meet_runtime import BrowserClosedError
 from tool_modules.aa_meet_bot.src.virtual_devices import (
@@ -22,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     """Join, sign-in, and teardown methods for GoogleMeetController."""
+
+    # Declared for mixins that read sibling state.
+    SCREENSHOT_DIR: Any
+    _create_virtual_audio_sink: Any
+    _instance_id: Any
+    _on_browser_close: Any
+    _restore_user_default_source: Any
+    _route_browser_audio_to_sink: Any
+    config: Any
+    state: Any
+    update_activity: Any
 
     async def _start_video_stream(
         self, video_device: str, video_enabled: bool = False

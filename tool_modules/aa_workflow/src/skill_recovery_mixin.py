@@ -14,6 +14,17 @@ logger = logging.getLogger(__name__)
 class SkillRecoveryMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
 
+    # Declared for mixins that read sibling state.
+    _debug: Any
+    _exec_compute_internal: Any
+    ask_question_fn: Any
+    create_issue_fn: Any
+    ctx: Any
+    debug: Any
+    server: Any
+    skill: Any
+    workspace_uri: Any
+
     def _handle_auto_fix_action(self, error_info: dict, step_name: str):
         """Handle auto_fix action for interactive recovery."""
         fix_code = error_info.get("fix_code")

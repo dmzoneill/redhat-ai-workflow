@@ -2,12 +2,17 @@
 """Split from skill_engine.py so the public module stays importable."""
 
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class SkillTemplateMixin:
     """SkillExecutor behavior split out of skill_engine."""
+
+    # Declared for mixins that read sibling state.
+    _debug: Any
+    context: Any
 
     def _linkify_jira_keys(self, text):
         """Convert Jira keys to clickable links (Slack or Markdown format)."""

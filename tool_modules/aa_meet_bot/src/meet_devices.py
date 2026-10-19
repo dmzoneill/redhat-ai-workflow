@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
 
@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 class DeviceMixin:
     """Device-selection methods shared by the controller and MeetDevices."""
+
+    # Declared for mixins that read sibling state.
+    SELECTORS: Any
+    _devices: Any
+    page: Any
+    state: Any
 
     async def _select_audio_device(
         self,

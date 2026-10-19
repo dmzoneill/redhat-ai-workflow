@@ -17,7 +17,7 @@ import asyncio
 import logging
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
 from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
@@ -41,6 +41,13 @@ _PACTL_ERRORS = (
 
 class AudioMixin:
     """PulseAudio routing methods shared by the controller and MeetAudio."""
+
+    # Declared for mixins that read sibling state.
+    _browser_pid: Any
+    _device_manager: Any
+    _devices: Any
+    _instance_id: Any
+    state: Any
 
     async def _create_virtual_audio_sink(self) -> bool:
         """Create a virtual PulseAudio sink for meeting audio output.

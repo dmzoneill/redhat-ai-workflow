@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Any, Callable, ClassVar, Optional
 
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.virtual_devices import (
@@ -55,6 +55,10 @@ class ControllerStateMixin:  # pylint: disable=too-many-instance-attributes
 
     Subclasses must define ``_instance_counter`` and ``_instances``.
     """
+
+    # Declared for mixins that read sibling state.
+    _instance_counter: ClassVar[Any]
+    _instances: ClassVar[Any]
 
     def __init__(self) -> None:
         self.config = get_config()

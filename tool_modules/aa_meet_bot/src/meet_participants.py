@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
 
@@ -192,6 +192,11 @@ def _clean_participant_name(name: str) -> str:
 
 class ParticipantMixin:
     """Participant scraping methods shared by the controller and MeetParticipants."""
+
+    # Declared for mixins that read sibling state.
+    _instance_id: Any
+    page: Any
+    state: Any
 
     async def _count_on_element(self, element) -> int | None:
         """Read a participant count from one Meet badge."""

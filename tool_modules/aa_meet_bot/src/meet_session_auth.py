@@ -9,6 +9,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any, ClassVar
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
 
@@ -16,6 +17,29 @@ logger = logging.getLogger(__name__)
 
 
 class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
+    # Declared for mixins that read sibling state.
+    SELECTORS: Any
+    _browser_pid: Any
+    _created_at: Any
+    _dismiss_chrome_sync_dialog: Any
+    _dismiss_info_popups: Any
+    _handle_permissions_dialog: Any
+    _instance_id: Any
+    _instances: ClassVar[Any]
+    _remove_virtual_audio_sink: Any
+    _select_camera_in_meeting: Any
+    _select_meetbot_camera: Any
+    _select_meetbot_devices: Any
+    _set_devices_via_js: Any
+    _toggle_camera: Any
+    _toggle_mute: Any
+    _video_enabled: Any
+    config: Any
+    enable_captions: Any
+    initialize: Any
+    page: Any
+    stop_caption_capture: Any
+
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
     async def sign_in_google(self) -> bool:  # noqa: C901
         """

@@ -4,6 +4,7 @@
 import json
 import logging
 import sys
+from typing import Any
 
 from fastmcp import FastMCP
 
@@ -19,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 class SkillToolMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
+
+    # Declared for mixins that read sibling state.
+    _debug: Any
+    _determine_fix_type: Any
+    _try_auto_fix: Any
+    event_emitter: Any
+    server: Any
 
     def _get_module_for_tool(self, tool_name: str) -> str | None:
         """Map tool name to module name using the discovery system."""

@@ -10,6 +10,28 @@ logger = logging.getLogger(__name__)
 class SkillStepMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
 
+    # Declared for mixins that read sibling state.
+    _attempt_auto_heal: Any
+    _check_error_patterns: Any
+    _debug: Any
+    _detect_auto_heal_type: Any
+    _exec_compute: Any
+    _exec_tool: Any
+    _learn_from_error: Any
+    _log_auto_heal_to_memory: Any
+    _template: Any
+    _template_dict: Any
+    context: Any
+    create_issue_fn: Any
+    debug: Any
+    event_emitter: Any
+    log: Any
+    skill: Any
+    skill_id: Any
+    start_time: Any
+    step_results: Any
+    ws_server: Any
+
     async def _handle_tool_error(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
         self,
         tool: str,

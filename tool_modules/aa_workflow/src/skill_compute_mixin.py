@@ -3,6 +3,7 @@
 
 import logging
 import sys
+from typing import Any
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -15,6 +16,17 @@ logger = logging.getLogger(__name__)
 
 class SkillComputeMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
+
+    # Declared for mixins that read sibling state.
+    _create_nested_skill_runner: Any
+    _debug: Any
+    _template: Any
+    _try_interactive_recovery: Any
+    ask_question_fn: Any
+    config: Any
+    context: Any
+    enable_interactive_recovery: Any
+    inputs: Any
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     def _exec_compute_internal(self, code: str, output_name: str):

@@ -4,6 +4,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Any
 
 import yaml
 
@@ -14,6 +15,12 @@ logger = logging.getLogger(__name__)
 
 class SkillHealMixin:
     """SkillExecutor behavior split out of skill_engine."""
+
+    # Declared for mixins that read sibling state.
+    _debug: Any
+    _exec_tool: Any
+    _template_dict: Any
+    event_emitter: Any
 
     def _find_matched_pattern(self, error_lower: str) -> tuple[dict | None, str | None]:
         """Find a matching pattern from memory based on error text.

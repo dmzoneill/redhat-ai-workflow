@@ -30,6 +30,17 @@ logger = logging.getLogger("tool_modules.aa_slack.src.slack_session")
 class SlackSessionQuery:  # pylint: disable=no-member
     """Slack search, membership, and profile methods."""
 
+    # Declared for mixins that read sibling state.
+    SLACK_HOST: Any
+    USER_AGENT: Any
+    _extract_enterprise_id: Any
+    enterprise_id: Any
+    extract_avatar_hash: Any
+    get_avatar_url: Any
+    get_client: Any
+    workspace_id: Any
+    xoxc_token: Any
+
     async def search_users(
         self,
         query: str,

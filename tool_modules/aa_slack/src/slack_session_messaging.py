@@ -28,6 +28,15 @@ logger = logging.getLogger("tool_modules.aa_slack.src.slack_session")
 class SlackSessionMessaging:  # pylint: disable=no-member
     """Send, react, and search helpers for a Slack web session."""
 
+    # Declared for mixins that read sibling state.
+    SLACK_HOST: Any
+    _extract_enterprise_id: Any
+    _request: Any
+    enterprise_id: Any
+    get_client: Any
+    workspace_id: Any
+    xoxc_token: Any
+
     async def send_message(
         self,
         channel_id: str,

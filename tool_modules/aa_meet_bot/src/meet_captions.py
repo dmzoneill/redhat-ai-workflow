@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from tool_modules.aa_meet_bot.src.meet_runtime import (
     CaptionEntry,
@@ -30,6 +30,11 @@ logger = logging.getLogger(__name__)
 
 class CaptionMixin:
     """Caption capture methods shared by the controller and MeetCaptions."""
+
+    # Declared for mixins that read sibling state.
+    _video_enabled: Any
+    page: Any
+    state: Any
 
     async def start_caption_capture(self, callback: Callable[..., None]) -> None:
         """

@@ -4,6 +4,7 @@
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from .skill_support import (
     _get_agent_stats_module,
@@ -14,6 +15,25 @@ logger = logging.getLogger(__name__)
 
 class SkillRunMixin:  # pylint: disable=too-few-public-methods
     """SkillExecutor behavior split out of skill_engine."""
+
+    # Declared for mixins that read sibling state.
+    _debug: Any
+    _eval_condition: Any
+    _exec_compute: Any
+    _format_skill_outputs: Any
+    _process_then_block: Any
+    _process_tool_step: Any
+    _template: Any
+    context: Any
+    debug: Any
+    event_emitter: Any
+    inputs: Any
+    log: Any
+    skill: Any
+    skill_id: Any
+    source: Any
+    step_results: Any
+    ws_server: Any
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
     async def execute(self) -> str:  # noqa: C901
