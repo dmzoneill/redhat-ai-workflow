@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-
 from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
 from tool_modules.aa_meet_bot.src.dynamic_fields import DynamicFields
 from tool_modules.aa_meet_bot.src.stt_engine import NPUWhisperSTT

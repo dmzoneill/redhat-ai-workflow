@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 import yaml
-
 from tool_modules.aa_workflow.src.notification_emitter import (
     notify_cron_job_completed,
     notify_cron_job_failed,

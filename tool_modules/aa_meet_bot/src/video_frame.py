@@ -7,7 +7,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from tool_modules.aa_meet_bot.src.dynamic_fields import DynamicFields
 from tool_modules.aa_meet_bot.src.video_config import Attendee
 from tool_modules.aa_meet_bot.src.video_theme import (

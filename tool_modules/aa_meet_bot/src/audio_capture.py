@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 import numpy as np
-
 from tool_modules.aa_meet_bot.src.pulse_defaults import read_pactl_sources_short
 
 logger = logging.getLogger(__name__)

@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from tool_modules.aa_meet_bot.src.gpu_text import GPUTextRenderer, gpu_libraries, logger
 
 _gpu = gpu_libraries()

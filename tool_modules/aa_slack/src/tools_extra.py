@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import cast
 
 from fastmcp import FastMCP
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config

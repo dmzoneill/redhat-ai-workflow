@@ -11,7 +11,6 @@ from pathlib import Path
 import yaml
 from fastmcp import FastMCP
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config

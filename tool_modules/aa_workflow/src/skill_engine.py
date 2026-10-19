@@ -16,6 +16,8 @@ imports keep working. ``SKILLS_DIR`` stays here because tests patch it.
 import logging
 from pathlib import Path
 
+from tool_modules.common import PROJECT_ROOT
+
 try:
     from .constants import SKILLS_DIR, TOOL_MODULES_DIR
 except ImportError:
@@ -46,6 +48,7 @@ _shared__format_known_issues = _format_known_issues
 
 __all__ = [
     "AttrDict",
+    "PROJECT_ROOT",
     "SKILLS_DIR",
     "TOOL_MODULES_DIR",
     "SkillExecutor",

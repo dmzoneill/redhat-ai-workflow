@@ -39,7 +39,6 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from fastmcp import Context
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 

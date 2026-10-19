@@ -24,7 +24,6 @@ import json
 import sys
 
 from fastmcp import FastMCP
-
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT

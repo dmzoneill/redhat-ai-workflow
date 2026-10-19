@@ -7,7 +7,6 @@ import logging
 
 from fastmcp import FastMCP
 from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal_stage
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_prometheus.src.prometheus_impl import (

@@ -70,6 +70,7 @@ def _check_known_issues_sync(  # pylint: disable=too-many-locals
     tool_lower = tool_name.lower() if tool_name else ""
 
     try:
+        # skills_dir() follows a patched skill_engine.SKILLS_DIR.
         patterns_file = skills_dir().parent / "memory" / "learned" / "patterns.yaml"
         if patterns_file.exists():
             with open(patterns_file, encoding="utf-8") as f:

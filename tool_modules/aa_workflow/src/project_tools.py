@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from mcp.types import TextContent
-
 from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
@@ -59,7 +58,8 @@ def _save_config(config: dict) -> bool:
             config_manager.update_section(section, data, merge=False)
         config_manager.flush()
         return True
-    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+    # ConfigManager can raise any Exception; callers expect False, not a crash.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.error("Failed to save config: %s", exc)
         return False
 

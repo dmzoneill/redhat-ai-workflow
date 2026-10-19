@@ -4,7 +4,6 @@ import logging
 from typing import Optional
 
 import numpy as np
-
 import tool_modules.aa_meet_bot.src.video_gl_env  # noqa: F401  # pylint: disable=unused-import
 from tool_modules.aa_meet_bot.src.video_config import Attendee, VideoConfig
 from tool_modules.aa_meet_bot.src.video_draw import RealtimeDrawMixin

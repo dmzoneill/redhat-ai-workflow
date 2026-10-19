@@ -1664,7 +1664,6 @@ def register_tools(server: "FastMCP") -> int:
         Number of tools registered
     """
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
-
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )
@@ -1781,12 +1780,12 @@ def register_tools(server: "FastMCP") -> int:
                 )
             ]
 
-        strat = KNOWN_STRATEGIES[strategy]
+        strategy_config = KNOWN_STRATEGIES[strategy]
         output = f"## Session Status: {strategy}\n\n"
 
         # Check JWT cache
-        if strat.jwt_cache_path:
-            cache_path = Path(strat.jwt_cache_path).expanduser()
+        if strategy_config.jwt_cache_path:
+            cache_path = Path(strategy_config.jwt_cache_path).expanduser()
             if cache_path.exists():
                 try:
                     content = cache_path.read_text(encoding="utf-8").strip()
@@ -1819,8 +1818,8 @@ def register_tools(server: "FastMCP") -> int:
             output += "ℹ️ This strategy does not cache tokens\n"
 
         # Check cookie cache
-        if strat.cookie_cache_path:
-            cache_path = Path(strat.cookie_cache_path).expanduser()
+        if strategy_config.cookie_cache_path:
+            cache_path = Path(strategy_config.cookie_cache_path).expanduser()
             if cache_path.exists():
                 output += f"\n✅ **Cookies:** Cached at {cache_path}\n"
             else:
@@ -1838,7 +1837,6 @@ def register_tools(server: "FastMCP") -> int:
 def _register_http_session_tools(registry) -> None:  # noqa: C901
     """Register HTTP session management tools."""
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
-
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )
@@ -2125,7 +2123,6 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
 def _register_browser_tools(registry) -> None:  # noqa: C901
     """Register browser automation tools."""
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
-
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )

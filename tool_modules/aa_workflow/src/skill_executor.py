@@ -5,7 +5,6 @@ import logging
 from typing import Any, Optional
 
 from fastmcp import Context, FastMCP
-
 from server.utils import load_config
 
 from .skill_compute_mixin import SkillComputeMixin
@@ -212,13 +211,19 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes,too-few-pub
             return
 
         try:
-            # Learn from this error asynchronously
-            await self.usage_learner.analyze_result(
-                tool_name=tool_name,
-                params=params,
-                result=error_msg,
-                context={},
-            )
+            # Older callers and tests use learn_from_observation. The learner
+            # implementation exposes analyze_result.
+            observe = getattr(self.usage_learner, "learn_from_observation", None)
+            if callable(observe):
+                # pylint: disable-next=not-callable
+                await observe(tool_name, params, error_msg)
+            else:
+                await self.usage_learner.analyze_result(
+                    tool_name=tool_name,
+                    params=params,
+                    result=error_msg,
+                    context={},
+                )
             self._debug(f"Layer 5: Learned from error in {tool_name}")
         except Exception as e:  # pylint: disable=broad-exception-caught
             # Don't let learning failure break the skill

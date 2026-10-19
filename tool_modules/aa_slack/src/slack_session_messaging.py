@@ -10,7 +10,6 @@ import uuid
 from typing import Any
 
 import httpx
-
 from tool_modules.aa_slack.src.slack_message_builder import (
     extract_avatar_hash as avatar_hash_from_profile,
 )

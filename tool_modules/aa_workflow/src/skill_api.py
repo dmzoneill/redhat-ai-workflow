@@ -8,7 +8,6 @@ from typing import Optional
 import yaml
 from fastmcp import Context, FastMCP
 from mcp.types import TextContent
-
 from server.tool_registry import ToolRegistry
 
 from .skill_paths import skills_dir

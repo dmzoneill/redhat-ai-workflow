@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from mcp.types import TextContent
-
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 

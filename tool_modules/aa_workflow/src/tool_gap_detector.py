@@ -32,7 +32,6 @@ from datetime import datetime
 from typing import Any, Callable
 
 import yaml
-
 from tool_modules.common import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
@@ -234,8 +233,13 @@ class ToolGapDetector:
         tool_exists = False
         try:
             # server.main may not expose get_tool_registry; getattr keeps mypy quiet.
-            # pylint: disable-next=import-outside-toplevel
-            import server.main as server_main
+            # Prefer sys.modules so a test patch is visible after the real module loaded.
+            import sys as _sys  # pylint: disable=import-outside-toplevel
+
+            server_main = _sys.modules.get("server.main")
+            if server_main is None:
+                # pylint: disable-next=import-outside-toplevel
+                import server.main as server_main
 
             get_tool_registry = getattr(server_main, "get_tool_registry", None)
             if not callable(get_tool_registry):

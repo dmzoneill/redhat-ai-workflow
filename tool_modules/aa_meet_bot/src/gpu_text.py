@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-
 from tool_modules.aa_meet_bot.src import gpu_shaders as _shaders
 
 # Set before the optional OpenGL import in _ensure_imports.

@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-
 from services.slack.message_fields import SlackMessageFields
 
 logger = logging.getLogger(__name__)

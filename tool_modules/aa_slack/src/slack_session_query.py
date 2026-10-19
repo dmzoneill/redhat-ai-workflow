@@ -12,7 +12,6 @@ import uuid
 from typing import Any
 
 import httpx
-
 from tool_modules.aa_slack.src.slack_message_builder import (
     _shared_get_app_commands_summary,
     extract_from_block_element,

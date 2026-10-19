@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Callable
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from croniter import croniter
-
 from server.config_manager import CONFIG_FILE
 from server.config_manager import config as config_manager
 from server.state_manager import state as state_manager

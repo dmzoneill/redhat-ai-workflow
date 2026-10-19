@@ -26,7 +26,6 @@ from typing import Any
 
 import httpx
 from fastmcp import FastMCP
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT

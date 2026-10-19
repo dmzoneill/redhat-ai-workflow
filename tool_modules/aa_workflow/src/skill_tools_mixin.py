@@ -10,8 +10,6 @@ from fastmcp import FastMCP
 
 from .skill_paths import tool_modules_dir
 from .skill_support import (
-    _check_known_issues_sync,
-    _format_known_issues,
     _get_agent_stats_module,
 )
 
@@ -230,11 +228,19 @@ class SkillToolMixin:  # pylint: disable=too-few-public-methods
             if temp_server:
                 self._debug(f"  → Error: {error_msg}")
 
-                # Check for known issues and attempt auto-fix
-                matches = _check_known_issues_sync(
+                # Look up through skill_engine so tests can patch those names.
+                # isort: off
+                from tool_modules.aa_workflow.src import (  # pylint: disable=import-outside-toplevel
+                    skill_engine as engine,
+                )
+
+                # isort: on
+                # pylint: disable-next=protected-access
+                matches = engine._check_known_issues_sync(
                     tool_name=tool_name, error_text=error_msg
                 )
-                known_text = _format_known_issues(matches)
+                # pylint: disable-next=protected-access
+                known_text = engine._format_known_issues(matches)
 
                 if matches:
                     self._debug(

@@ -344,7 +344,7 @@ SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
     "investigate_slack_alert": [
         re.compile(r"investigate.*alert", re.I),
         re.compile(r"look.*into.*alert", re.I),
-        re.compile(r"whats.*firing", re.I),
+        re.compile(r"whats.*firing", re.I),  # codespell:ignore
         re.compile(r"what.*alerts", re.I),
     ],
     "create_mr": [
