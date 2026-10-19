@@ -1,31 +1,44 @@
+# pylint: disable=duplicate-code,cyclic-import
 """Scheduler configuration and execution log.
 
-Extracted from scheduler.py to reduce class size.
-
-Provides:
-- RetryConfig: Configuration for job retry behavior with exponential backoff
-- SchedulerConfig: Configuration loaded from config.json and state.json
-- JobExecutionLog: Track job execution history with file persistence
-- DEFAULT_RETRY_CONFIG: Default retry configuration dict
+Single implementation of retry settings, schedule config, and job history.
+``scheduler`` re-exports these classes. Methods resolve ``state_manager`` and
+``config_manager`` through the scheduler module when it is loaded so tests that
+patch those names keep working.
 """
 
 import json
 import logging
+import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-logger = logging.getLogger(__name__)
+try:
+    from scripts.common.config_loader import load_config
+except ImportError:  # optional; retry defaults fall back to hardcoded values
+    load_config = None  # type: ignore[assignment]
 
-# Cron history file path - centralized in server.paths
+from server.config_manager import config as config_manager
+
 try:
     from server.paths import CRON_HISTORY_FILE
-
-    _CRON_HISTORY_FILE = CRON_HISTORY_FILE
 except ImportError:
-    _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
+    CRON_HISTORY_FILE = None
 
+from server.state_manager import state as state_manager
+from tool_modules.common import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
+
+if CRON_HISTORY_FILE is None:
+    _CRON_HISTORY_FILE = Path.home() / ".config" / "aa-workflow" / "cron_history.json"
+else:
+    _CRON_HISTORY_FILE = CRON_HISTORY_FILE
+
+SKILLS_DIR = PROJECT_ROOT / "skills"
 
 # Hardcoded fallback retry configuration (used only if config.json lacks schedules.default_retry)
 _FALLBACK_RETRY_CONFIG = {
@@ -37,95 +50,38 @@ _FALLBACK_RETRY_CONFIG = {
 }
 
 
+_FALLBACKS = {
+    "config_manager": config_manager,
+    "state_manager": state_manager,
+}
+
+
+def _runtime(name: str):
+    """Return a scheduler-module binding when that module is already loaded."""
+    scheduler_mod = sys.modules.get("tool_modules.aa_workflow.src.scheduler")
+    if scheduler_mod is not None and hasattr(scheduler_mod, name):
+        return getattr(scheduler_mod, name)
+    return _FALLBACKS[name]
+
+
+def expand_vpn_script(configured: str | None) -> str:
+    """Expand a configured VPN script path, or the default script location."""
+    script = configured or "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+    return os.path.expanduser(script)
+
+
 def _load_default_retry_config() -> dict:
     """Load default retry config from config.json, falling back to hardcoded defaults."""
-    try:
-        from scripts.common.config_loader import load_config
-
-        config = load_config()
-        cfg_retry = config.get("schedules", {}).get("default_retry")
-        if isinstance(cfg_retry, dict) and cfg_retry:
-            return cfg_retry
-    except ImportError:
-        pass
+    if load_config is None:
+        return dict(_FALLBACK_RETRY_CONFIG)
+    config = load_config()
+    cfg_retry = config.get("schedules", {}).get("default_retry")
+    if isinstance(cfg_retry, dict) and cfg_retry:
+        return cfg_retry
     return dict(_FALLBACK_RETRY_CONFIG)
 
 
 DEFAULT_RETRY_CONFIG = _load_default_retry_config()
-
-
-def _shared_RetryConfig_from_config(
-    cls, job_config: dict, default_config: dict | None = None
-) -> "RetryConfig":
-    """Create RetryConfig from job configuration.
-
-    Args:
-        job_config: The job's configuration dict
-        default_config: Default retry config from schedules section
-
-    Returns:
-        RetryConfig instance
-    """
-    # Check if retry is explicitly disabled
-    retry_setting = job_config.get("retry")
-    if retry_setting is False:
-        return cls(enabled=False)
-
-    # Start with global defaults
-    defaults = default_config or DEFAULT_RETRY_CONFIG
-
-    # If retry is a dict, merge with defaults
-    if isinstance(retry_setting, dict):
-        config = {**defaults, **retry_setting}
-    else:
-        config = defaults
-
-    return cls(
-        enabled=True,
-        max_attempts=config.get("max_attempts", 2),
-        backoff=config.get("backoff", "exponential"),
-        initial_delay_seconds=config.get("initial_delay_seconds", 30),
-        max_delay_seconds=config.get("max_delay_seconds", 300),
-        retry_on=config.get("retry_on", ["auth", "network"]),
-    )
-
-
-def _shared_RetryConfig_calculate_delay(self, attempt: int) -> int:
-    """Calculate delay before retry based on backoff strategy.
-
-    Args:
-        attempt: Current attempt number (0-indexed)
-
-    Returns:
-        Delay in seconds
-    """
-    if self.backoff == "exponential":
-        # Exponential: initial * 2^attempt
-        delay = self.initial_delay_seconds * (2**attempt)
-    else:
-        # Linear: initial * (attempt + 1)
-        delay = self.initial_delay_seconds * (attempt + 1)
-
-    return min(delay, self.max_delay_seconds)
-
-
-def _shared_RetryConfig_should_retry(self, failure_type: str, attempt: int) -> bool:
-    """Determine if we should retry based on failure type and attempt count.
-
-    Args:
-        failure_type: Type of failure (auth, network, timeout, unknown)
-        attempt: Current attempt number (0-indexed)
-
-    Returns:
-        True if should retry
-    """
-    if not self.enabled:
-        return False
-    if attempt >= self.max_attempts:
-        return False
-    if failure_type not in self.retry_on:
-        return False
-    return True
 
 
 @dataclass
@@ -152,84 +108,64 @@ class RetryConfig:
     def from_config(
         cls, job_config: dict, default_config: dict | None = None
     ) -> "RetryConfig":
-        "From config."
-        return _shared_RetryConfig_from_config(cls, job_config, default_config)
+        """Create RetryConfig from job configuration.
+
+        Args:
+            job_config: The job's configuration dict
+            default_config: Default retry config from schedules section
+
+        Returns:
+            RetryConfig instance
+        """
+        retry_setting = job_config.get("retry")
+        if retry_setting is False:
+            return cls(enabled=False)
+
+        defaults = default_config or DEFAULT_RETRY_CONFIG
+        if isinstance(retry_setting, dict):
+            config = {**defaults, **retry_setting}
+        else:
+            config = defaults
+
+        return cls(
+            enabled=True,
+            max_attempts=config.get("max_attempts", 2),
+            backoff=config.get("backoff", "exponential"),
+            initial_delay_seconds=config.get("initial_delay_seconds", 30),
+            max_delay_seconds=config.get("max_delay_seconds", 300),
+            retry_on=config.get("retry_on", ["auth", "network"]),
+        )
 
     def calculate_delay(self, attempt: int) -> int:
-        "Calculate delay."
-        return _shared_RetryConfig_calculate_delay(self, attempt)
+        """Calculate delay before retry based on backoff strategy.
 
-    calculate_delay.__doc__ = _shared_RetryConfig_calculate_delay.__doc__
+        Args:
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Delay in seconds
+        """
+        if self.backoff == "exponential":
+            delay = self.initial_delay_seconds * (2**attempt)
+        else:
+            delay = self.initial_delay_seconds * (attempt + 1)
+        return min(delay, self.max_delay_seconds)
 
     def should_retry(self, failure_type: str, attempt: int) -> bool:
-        "Should retry."
-        return _shared_RetryConfig_should_retry(self, failure_type, attempt)
+        """Determine if we should retry based on failure type and attempt count.
 
-    should_retry.__doc__ = _shared_RetryConfig_should_retry.__doc__
+        Args:
+            failure_type: Type of failure (auth, network, timeout, unknown)
+            attempt: Current attempt number (0-indexed)
 
-
-# Project paths - use common module for consistency
-from tool_modules.common import PROJECT_ROOT  # noqa: E402
-
-SKILLS_DIR = PROJECT_ROOT / "skills"
-
-# Import ConfigManager for thread-safe config access
-from server.config_manager import config as config_manager  # noqa: E402
-from server.state_manager import state as state_manager  # noqa: E402
-
-
-def _shared_SchedulerConfig___init__(
-    self, config_data: dict | None = None, *, state_manager
-):
-    """Initialize scheduler config from config data or load from file."""
-    if config_data is None:
-        config_data = self._load_config()
-
-    schedules = config_data.get("schedules", {})
-    # Enabled state: config.json is the source of truth, state.json can override
-    config_enabled = schedules.get("enabled", False)
-    state_override = state_manager.get("services", "scheduler", {})
-    if isinstance(state_override, dict) and "enabled" in state_override:
-        self.enabled = state_override["enabled"]  # runtime override wins
-    else:
-        self.enabled = config_enabled  # config.json default
-    self.timezone = schedules.get("timezone", "UTC")
-    self.jobs = schedules.get("jobs", [])
-    self.poll_sources = schedules.get("poll_sources", {})
-    # Execution mode: "claude_cli" (default) or "direct"
-    self.execution_mode = schedules.get("execution_mode", "claude_cli")
-    # Default retry configuration for all jobs
-    self.default_retry = schedules.get("default_retry", DEFAULT_RETRY_CONFIG)
-
-
-def _shared_SchedulerConfig__is_job_enabled(
-    self, job_config: dict, *, state_manager
-) -> bool:
-    """Resolve job enabled state: config.json first, state.json override.
-
-    Args:
-        job_config: The job configuration dict from config.json
-
-    Returns:
-        True if the job is enabled
-    """
-    job_name = job_config.get("name", "")
-    config_enabled = job_config.get("enabled", True)  # config.json per-job field
-    state_override = state_manager.get("jobs", job_name, {})
-    if isinstance(state_override, dict) and "enabled" in state_override:
-        return state_override["enabled"]  # runtime override wins
-    return config_enabled  # config.json default
-
-
-def _shared_SchedulerConfig_get_poll_jobs(self) -> list[dict]:
-    """Get jobs that use poll triggers and are enabled.
-
-    Enabled resolution: config.json per-job 'enabled' field first,
-    then state.json runtime override if present.
-    """
-    return [
-        j for j in self.jobs if j.get("trigger") == "poll" and self._is_job_enabled(j)
-    ]
+        Returns:
+            True if should retry
+        """
+        if not self.enabled:
+            return False
+        if attempt >= self.max_attempts:
+            return False
+        return failure_type in self.retry_on
 
 
 class SchedulerConfig:
@@ -243,20 +179,46 @@ class SchedulerConfig:
     default_retry: dict
 
     def __init__(self, config_data: dict | None = None):
-        _shared_SchedulerConfig___init__(self, config_data, state_manager=state_manager)
+        """Initialize scheduler config from config data or load from file."""
+        if config_data is None:
+            config_data = self._load_config()
 
-    __init__.__doc__ = _shared_SchedulerConfig___init__.__doc__
+        schedules = config_data.get("schedules", {})
+        config_enabled = schedules.get("enabled", False)
+        state_override = _runtime("state_manager").get("services", "scheduler", {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            self.enabled = state_override["enabled"]
+        else:
+            self.enabled = config_enabled
+        self.timezone = schedules.get("timezone", "UTC")
+        self.jobs = schedules.get("jobs", [])
+        self.poll_sources = schedules.get("poll_sources", {})
+        self.execution_mode = schedules.get("execution_mode", "claude_cli")
+        self.default_retry = schedules.get("default_retry", DEFAULT_RETRY_CONFIG)
 
     def _load_config(self) -> dict:
         """Load config using ConfigManager (auto-reloads if file changed)."""
-        return config_manager.get_all()
+        return _runtime("config_manager").get_all()
 
     def _is_job_enabled(self, job_config: dict) -> bool:
-        return _shared_SchedulerConfig__is_job_enabled(
-            self, job_config, state_manager=state_manager
-        )
+        """Resolve job enabled state: config.json first, state.json override.
 
-    _is_job_enabled.__doc__ = _shared_SchedulerConfig__is_job_enabled.__doc__
+        Args:
+            job_config: The job configuration dict from config.json
+
+        Returns:
+            True if the job is enabled
+        """
+        job_name = job_config.get("name", "")
+        config_enabled = job_config.get("enabled", True)
+        state_override = _runtime("state_manager").get("jobs", job_name, {})
+        if isinstance(state_override, dict) and "enabled" in state_override:
+            return state_override["enabled"]
+        return config_enabled
+
+    def job_is_enabled(self, job_config: dict) -> bool:
+        """Public wrapper so other classes can check a job without protected access."""
+        return self._is_job_enabled(job_config)
 
     def get_cron_jobs(self) -> list[dict]:
         """Get jobs that use cron triggers (not poll triggers) and are enabled.
@@ -267,10 +229,16 @@ class SchedulerConfig:
         return [j for j in self.jobs if j.get("cron") and self._is_job_enabled(j)]
 
     def get_poll_jobs(self) -> list[dict]:
-        "Get poll jobs."
-        return _shared_SchedulerConfig_get_poll_jobs(self)
+        """Get jobs that use poll triggers and are enabled.
 
-    get_poll_jobs.__doc__ = _shared_SchedulerConfig_get_poll_jobs.__doc__
+        Enabled resolution: config.json per-job 'enabled' field first,
+        then state.json runtime override if present.
+        """
+        return [
+            j
+            for j in self.jobs
+            if j.get("trigger") == "poll" and self._is_job_enabled(j)
+        ]
 
     def get_retry_config(self, job_config: dict) -> RetryConfig:
         """Get the retry configuration for a specific job.
@@ -284,69 +252,9 @@ class SchedulerConfig:
         return RetryConfig.from_config(job_config, self.default_retry)
 
 
-def _shared_JobExecutionLog_log_execution(
-    self,
-    job_name: str,
-    skill: str,
-    success: bool,
-    duration_ms: int,
-    error: str | None = None,
-    output_preview: str | None = None,
-    session_name: str | None = None,
-    retry_info: dict | None = None,
-):
-    """Log a job execution.
-
-    Args:
-        job_name: Name of the cron job
-        skill: Skill that was executed
-        success: Whether the execution succeeded
-        duration_ms: Total execution duration in milliseconds
-        error: Error message if failed
-        output_preview: Preview of output (truncated to 500 chars)
-        session_name: Session name for logging
-        retry_info: Optional retry information dict with:
-            - attempts: Total attempts made (including initial)
-            - retried: Whether any retries occurred
-            - failure_type: Type of failure that triggered retry
-            - remediation_applied: What fix was applied (kube_login, vpn_connect)
-            - remediation_success: Whether the fix worked
-    """
-    entry = {
-        "job_name": job_name,
-        "skill": skill,
-        "timestamp": datetime.now().isoformat(),
-        "success": success,
-        "duration_ms": duration_ms,
-        "error": error,
-        "output_preview": output_preview[:500] if output_preview else None,
-        "session_name": session_name,
-    }
-
-    # Add retry information if present
-    if retry_info:
-        entry["retry"] = {
-            "attempts": retry_info.get("attempts", 1),
-            "retried": retry_info.get("retried", False),
-            "failure_type": retry_info.get("failure_type"),
-            "remediation_applied": retry_info.get("remediation_applied"),
-            "remediation_success": retry_info.get("remediation_success"),
-        }
-
-    self.entries.append(entry)
-
-    # Trim to max entries
-    if len(self.entries) > self.max_entries:
-        self.entries = self.entries[-self.max_entries :]
-
-    # Persist to file
-    self._save_to_file()
-
-
 class JobExecutionLog:
     """Track job execution history with file persistence."""
 
-    # File path - centralized in server.paths (set at module level)
     HISTORY_FILE = _CRON_HISTORY_FILE
 
     def __init__(self, max_entries: int = 100):
@@ -358,24 +266,23 @@ class JobExecutionLog:
         """Load execution history from file."""
         try:
             if self.HISTORY_FILE.exists():
-                with open(self.HISTORY_FILE, encoding="utf-8") as f:
-                    data = json.load(f)
+                with open(self.HISTORY_FILE, encoding="utf-8") as handle:
+                    data = json.load(handle)
                     self.entries = data.get("executions", [])[-self.max_entries :]
-        except Exception as e:
-            logger.warning("Failed to load cron history: %s", e)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to load cron history: %s", exc)
             self.entries = []
 
     def _save_to_file(self):
         """Save execution history to file."""
         try:
-            # Ensure directory exists
             self.HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
-                json.dump({"executions": self.entries}, f, indent=2)
-        except Exception as e:
-            logger.warning("Failed to save cron history: %s", e)
+            with open(self.HISTORY_FILE, "w", encoding="utf-8") as handle:
+                json.dump({"executions": self.entries}, handle, indent=2)
+        except OSError as exc:
+            logger.warning("Failed to save cron history: %s", exc)
 
-    def log_execution(
+    def log_execution(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         job_name: str,
         skill: str,
@@ -386,20 +293,42 @@ class JobExecutionLog:
         session_name: str | None = None,
         retry_info: dict | None = None,
     ):
-        "Log execution."
-        return _shared_JobExecutionLog_log_execution(
-            self,
-            job_name,
-            skill,
-            success,
-            duration_ms,
-            error,
-            output_preview,
-            session_name,
-            retry_info,
-        )
+        """Log a job execution.
 
-    log_execution.__doc__ = _shared_JobExecutionLog_log_execution.__doc__
+        The parameter list is the public job-history API used by cron jobs and tests.
+
+        Args:
+            job_name: Name of the cron job
+            skill: Skill that was executed
+            success: Whether the execution succeeded
+            duration_ms: Total execution duration in milliseconds
+            error: Error message if failed
+            output_preview: Preview of output (truncated to 500 chars)
+            session_name: Session name for logging
+            retry_info: Optional retry information dict
+        """
+        entry = {
+            "job_name": job_name,
+            "skill": skill,
+            "timestamp": datetime.now().isoformat(),
+            "success": success,
+            "duration_ms": duration_ms,
+            "error": error,
+            "output_preview": output_preview[:500] if output_preview else None,
+            "session_name": session_name,
+        }
+        if retry_info:
+            entry["retry"] = {
+                "attempts": retry_info.get("attempts", 1),
+                "retried": retry_info.get("retried", False),
+                "failure_type": retry_info.get("failure_type"),
+                "remediation_applied": retry_info.get("remediation_applied"),
+                "remediation_success": retry_info.get("remediation_success"),
+            }
+        self.entries.append(entry)
+        if len(self.entries) > self.max_entries:
+            self.entries = self.entries[-self.max_entries :]
+        self._save_to_file()
 
     def get_recent(self, limit: int = 10) -> list[dict]:
         """Get recent execution entries."""
@@ -407,5 +336,5 @@ class JobExecutionLog:
 
     def get_for_job(self, job_name: str, limit: int = 5) -> list[dict]:
         """Get recent executions for a specific job."""
-        job_entries = [e for e in self.entries if e["job_name"] == job_name]
+        job_entries = [entry for entry in self.entries if entry["job_name"] == job_name]
         return job_entries[-limit:]
