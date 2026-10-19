@@ -1,0 +1,3 @@
+# Vendored dependency trees. jscpd 5 reads this file even when CI overwrites
+# .github/linters/.jscpd.json and does not pass an ignore list for node_modules.
+node_modules/
