@@ -11,8 +11,9 @@ import time
 from dataclasses import asdict, dataclass
 
 
+# Every field is part of the history payload returned over D-Bus.
 @dataclass
-class MessageRecord:
+class MessageRecord:  # pylint: disable=too-many-instance-attributes
     """Record of a processed message."""
 
     id: str
@@ -31,9 +32,11 @@ class MessageRecord:
     thread_ts: str | None = None  # Thread timestamp for replies
 
     def to_dict(self) -> dict:
+        """Return the record as a plain dictionary."""
         return asdict(self)
 
     def to_json(self) -> str:
+        """Return the record as a JSON string."""
         return json.dumps(self.to_dict())
 
 
@@ -103,9 +106,9 @@ class MessageHistory:
     def get_stats(self) -> dict:
         """Get message statistics."""
         total = len(self.messages)
-        by_status = {}
-        by_classification = {}
-        by_intent = {}
+        by_status: dict[str, int] = {}
+        by_classification: dict[str, int] = {}
+        by_intent: dict[str, int] = {}
 
         for m in self.messages:
             by_status[m.status] = by_status.get(m.status, 0) + 1

@@ -11,6 +11,7 @@ dicts. The D-Bus @method() wrappers in dbus.py delegate here.
 import asyncio
 import logging
 import time
+from typing import Any
 
 from services.slack.dbus_formatters import (
     check_search_rate_limit,
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def handle_get_status(daemon) -> dict:
     """Get daemon status as JSON dict."""
-    listener_stats = {}
+    listener_stats: dict[str, Any] = {}
     if hasattr(daemon, "listener") and daemon.listener:
         listener_stats = getattr(daemon.listener, "stats", {})
 
@@ -51,15 +52,17 @@ def handle_get_pending(daemon) -> list[dict]:
 
 def handle_approve_message(daemon, message_id: str) -> dict:
     """Approve a pending message and send it (sync, blocks D-Bus thread)."""
-    loop = daemon._event_loop
+    # Handlers were split out of the daemon and still share its loop.
+    loop = daemon._event_loop  # pylint: disable=protected-access
     future = asyncio.run_coroutine_threadsafe(daemon.approve_message(message_id), loop)
     try:
         result = future.result(timeout=30)
     except TimeoutError:
-        logger.error(f"ApproveMessage timed out after 30s for message_id={message_id}")
+        logger.error("ApproveMessage timed out after 30s for message_id=%s", message_id)
         return {"success": False, "error": "Approval timed out after 30 seconds"}
-    except Exception as e:
-        logger.error(f"ApproveMessage failed for message_id={message_id}: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("ApproveMessage failed for message_id=%s: %s", message_id, e)
         return {"success": False, "error": str(e)}
     return result
 
@@ -74,15 +77,17 @@ def handle_reject_message(daemon, message_id: str) -> dict:
 
 def handle_approve_all(daemon) -> dict:
     """Approve all pending messages (sync, blocks D-Bus thread)."""
-    loop = daemon._event_loop
+    # Handlers were split out of the daemon and still share its loop.
+    loop = daemon._event_loop  # pylint: disable=protected-access
     future = asyncio.run_coroutine_threadsafe(daemon.approve_all_pending(), loop)
     try:
         result = future.result(timeout=60)
     except TimeoutError:
         logger.error("ApproveAll timed out after 60s")
         return {"success": False, "error": "Approval timed out after 60 seconds"}
-    except Exception as e:
-        logger.error(f"ApproveAll failed: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("ApproveAll failed: %s", e)
         return {"success": False, "error": str(e)}
     return result
 
@@ -108,7 +113,8 @@ def handle_get_history(
 
 def handle_send_message(daemon, channel_id: str, text: str, thread_ts: str) -> dict:
     """Send a message to Slack (fire-and-forget)."""
-    loop = daemon._event_loop
+    # Handlers were split out of the daemon and still share its loop.
+    loop = daemon._event_loop  # pylint: disable=protected-access
     if not loop or not daemon.session:
         return {"success": False, "error": "Session not available"}
 
@@ -121,11 +127,13 @@ def handle_send_message(daemon, channel_id: str, text: str, thread_ts: str) -> d
                 typing_delay=True,
             )
             logger.info(
-                f"D-Bus SendMessage completed: ts={result.get('ts', 'unknown')}"
+                "D-Bus SendMessage completed: ts=%s",
+                result.get("ts", "unknown"),
             )
             return result
-        except Exception as e:
-            logger.error(f"D-Bus SendMessage failed: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # IPC boundary: report the failure instead of crashing the caller.
+            logger.error("D-Bus SendMessage failed: %s", e)
             return {"success": False, "error": str(e)}
 
     future = asyncio.run_coroutine_threadsafe(do_send(), loop)
@@ -133,7 +141,7 @@ def handle_send_message(daemon, channel_id: str, text: str, thread_ts: str) -> d
     def _on_send_done(fut):
         exc = fut.exception()
         if exc is not None:
-            logger.error(f"D-Bus SendMessage background task failed: {exc}")
+            logger.error("D-Bus SendMessage background task failed: %s", exc)
 
     future.add_done_callback(_on_send_done)
 
@@ -163,13 +171,13 @@ async def handle_send_message_rich(
                 "ts": result.get("ts", ""),
                 "message": result.get("message", {}),
             }
-        else:
-            return {
-                "success": False,
-                "error": result.get("error", "Unknown error"),
-            }
-    except Exception as e:
-        logger.error(f"SendMessageRich error: {e}")
+        return {
+            "success": False,
+            "error": result.get("error", "Unknown error"),
+        }
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("SendMessageRich error: %s", e)
         return {"success": False, "error": str(e)}
 
 
@@ -185,13 +193,13 @@ async def handle_search_messages(daemon, query: str, max_results: int) -> dict:
 
     try:
         if not hasattr(daemon, "_search_rate_limit"):
-            daemon._search_rate_limit = {
+            daemon._search_rate_limit = {  # pylint: disable=protected-access
                 "last_search": 0,
                 "daily_count": 0,
                 "daily_reset": time.time(),
             }
 
-        rl = daemon._search_rate_limit
+        rl = daemon._search_rate_limit  # pylint: disable=protected-access
 
         rate_limit_error = check_search_rate_limit(rl)
         if rate_limit_error:
@@ -205,8 +213,9 @@ async def handle_search_messages(daemon, query: str, max_results: int) -> dict:
         )
 
         return format_search_results(query, results, rl["daily_count"])
-    except Exception as e:
-        logger.error(f"SearchMessages error: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("SearchMessages error: %s", e)
         return {"success": False, "error": str(e), "messages": []}
 
 
@@ -241,8 +250,9 @@ async def handle_get_thread_replies(
             "has_more": result.get("has_more", False),
             "messages": result.get("messages", []),
         }
-    except Exception as e:
-        logger.error(f"GetThreadReplies error: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("GetThreadReplies error: %s", e)
         return {"success": False, "error": str(e), "messages": []}
 
 
@@ -261,14 +271,17 @@ async def handle_get_thread_context(daemon, channel_id: str, thread_ts: str) -> 
             }
 
         return {"success": True, **result}
-    except Exception as e:
-        logger.error(f"GetThreadContext error: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("GetThreadContext error: %s", e)
         return {"success": False, "error": str(e)}
 
 
 # ==================== Channel History ====================
 
 
+# D-Bus GetChannelHistory passes every filter as its own argument.
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def handle_get_channel_history(
     daemon,
     channel_id: str,
@@ -300,12 +313,12 @@ async def handle_get_channel_history(
         if simplify:
             simplified = daemon.session.simplify_channel_history(result)
             return {"success": True, **simplified}
-        else:
-            return {
-                "success": True,
-                "messages": result.get("messages", []),
-                "has_more": result.get("has_more", False),
-            }
-    except Exception as e:
-        logger.error(f"GetChannelHistory error: {e}")
+        return {
+            "success": True,
+            "messages": result.get("messages", []),
+            "has_more": result.get("has_more", False),
+        }
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # IPC boundary: report the failure instead of crashing the caller.
+        logger.error("GetChannelHistory error: %s", e)
         return {"success": False, "error": str(e)}
