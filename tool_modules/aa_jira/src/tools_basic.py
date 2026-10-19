@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """AA Jira MCP Server - Jira issue tracking operations.
 
 Uses the rh-issue CLI for Red Hat Jira operations.
@@ -5,7 +6,7 @@ Authentication: JIRA_JPAT environment variable.
 """
 
 import logging
-from typing import cast
+from typing import Any, cast
 
 from fastmcp import FastMCP
 
@@ -82,12 +83,14 @@ def _get_markdown_converter(convert_markdown: bool):
         return None
 
     try:
-        import sys
+        import sys  # pylint: disable=import-outside-toplevel
 
         scripts_path = str(get_project_root() / "scripts")
         if scripts_path not in sys.path:
             sys.path.insert(0, scripts_path)
-        from common.jira_utils import markdown_to_jira
+        from common.jira_utils import (  # pylint: disable=import-outside-toplevel
+            markdown_to_jira,
+        )
 
         return markdown_to_jira
     except ImportError:
@@ -98,6 +101,7 @@ def _get_markdown_converter(convert_markdown: bool):
         return basic_converter
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def _build_story_yaml_fields(
     summary: str,
     user_story: str,
@@ -129,6 +133,7 @@ def _build_story_yaml_fields(
     }
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-branches
 def _build_yaml_data_for_jira(
     issue_type_normalized: str,
     summary: str,
@@ -199,7 +204,7 @@ def _build_yaml_data_for_jira(
 
 def _parse_create_issue_result(success: bool, output: str) -> str:
     """Parse the result of jira create-issue command."""
-    import re
+    import re  # pylint: disable=import-outside-toplevel
 
     if not success:
         return f"❌ Failed to create issue: {output}"
@@ -214,6 +219,7 @@ def _parse_create_issue_result(success: bool, output: str) -> str:
     return f"✅ Issue created\n\n{output}"
 
 
+# pylint: disable-next=unused-argument
 async def _jira_get_active_sprint_impl(project: str = "AAP") -> dict:
     """
     Get the active sprint for a project.
@@ -224,7 +230,7 @@ async def _jira_get_active_sprint_impl(project: str = "AAP") -> dict:
     Returns:
         Dict with sprint info: {id, name, state, startDate, endDate} or {error: ...}
     """
-    import re
+    import re  # pylint: disable=import-outside-toplevel
 
     success, output = await run_rh_issue(["get-sprint"], timeout=30)
 
@@ -283,7 +289,7 @@ async def _jira_get_sprint_issues_impl(
     Returns:
         List of issue dicts with key, summary, status, priority, storyPoints, assignee, issueType
     """
-    import re
+    import re  # pylint: disable=import-outside-toplevel
 
     jql = f"sprint = {sprint_id}"
     success, output = await run_rh_issue(
@@ -291,11 +297,12 @@ async def _jira_get_sprint_issues_impl(
     )
 
     if not success:
-        logger.error(f"Failed to get sprint issues: {output}")
+        logger.error("Failed to get sprint issues: %s", output)
         return []
 
     # Parse tabular output
-    # Key       | Issuetype | Status      | Priority | Summary | Assignee | Reporter | Sprint | Story Points | Blocked
+    # Key | Issuetype | Status | Priority | Summary | Assignee | Reporter |
+    # Sprint | Story Points | Blocked
     issues = []
     lines = output.strip().split("\n")
 
@@ -313,7 +320,7 @@ async def _jira_get_sprint_issues_impl(
             if not re.match(r"^[A-Z]+-\d+$", key):
                 continue  # Skip non-issue lines
 
-            issue = {
+            issue: dict[str, Any] = {
                 "key": key,
                 "issueType": parts[1] if len(parts) > 1 else "",
                 "jiraStatus": parts[2] if len(parts) > 2 else "",
@@ -343,6 +350,7 @@ async def jira_get_active_sprint(project: str = "AAP") -> dict:
     return await _jira_get_active_sprint_impl(project)
 
 
+# pylint: disable-next=unused-argument
 async def jira_get_sprint_issues(sprint_id: int, max_results: int = 100) -> list[dict]:
     """Get all issues in a sprint (for internal use by sprint_bot)."""
     return await _jira_get_sprint_issues_impl(sprint_id)
@@ -441,6 +449,7 @@ async def _jira_clone_issue_impl(issue_key: str, new_summary: str = "") -> str:
 
 
 @auto_heal()
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 async def _jira_create_issue_impl(
     issue_type: str,
     summary: str,
@@ -497,10 +506,10 @@ async def _jira_create_issue_impl(
             priority="major"
         )
     """
-    import tempfile
-    from pathlib import Path
+    import tempfile  # pylint: disable=import-outside-toplevel
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
 
-    import yaml
+    import yaml  # pylint: disable=import-outside-toplevel
 
     # Normalize issue type to lowercase
     valid_types = {"bug", "story", "task", "epic", "spike", "subtask"}
@@ -567,7 +576,7 @@ async def _jira_create_issue_impl(
 
     # If creation succeeded and priority was specified, set it
     if success and priority:
-        import re
+        import re  # pylint: disable=import-outside-toplevel
 
         priority_normalized = priority.lower().strip()
 
@@ -602,7 +611,10 @@ async def _jira_create_issue_impl(
                 else:
                     output += f"\n\n⚠️ Issue created but failed to set priority: {priority_output}"
         else:
-            valid_options = "blocker, critical, major, normal, minor (or: highest, high, medium, low, lowest)"
+            valid_options = (
+                "blocker, critical, major, normal, minor "
+                "(or: highest, high, medium, low, lowest)"
+            )
             output += (
                 f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
             )
@@ -859,8 +871,8 @@ async def _jira_view_issue_json_impl(issue_key: str) -> str:
         return f"❌ Failed to get issue: {output}"
 
     # Parse the output into a dict-like structure
-    import json
-    import re
+    import json  # pylint: disable=import-outside-toplevel
+    import re  # pylint: disable=import-outside-toplevel
 
     data = {"raw": output}
 
@@ -953,6 +965,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
 
     @auto_heal()
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def jira_create_issue(
         issue_type: str,
         summary: str,

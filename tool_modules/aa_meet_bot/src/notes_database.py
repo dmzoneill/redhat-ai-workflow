@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import aiosqlite
 
@@ -43,6 +43,7 @@ class TranscriptEntry:
     meeting_id: Optional[int] = None
 
     def to_dict(self) -> dict:
+        """Return a JSON-serializable transcript entry."""
         return {
             "id": self.id,
             "meeting_id": self.meeting_id,
@@ -53,6 +54,7 @@ class TranscriptEntry:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class MeetingNote:
     """A meeting with its metadata and notes."""
 
@@ -89,6 +91,7 @@ class MeetingNote:
     updated_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
+        """Return a JSON-serializable meeting record."""
         return {
             "id": self.id,
             "title": self.title,
@@ -121,6 +124,7 @@ class MeetingNote:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class MonitoredCalendar:
     """A calendar being monitored for meetings."""
 
@@ -136,6 +140,7 @@ class MonitoredCalendar:
     added_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
+        """Return a JSON-serializable calendar record."""
         return {
             "id": self.id,
             "calendar_id": self.calendar_id,
@@ -184,7 +189,7 @@ class MeetingNotesDB:
             await self._db.execute("PRAGMA journal_mode=WAL")
             await self._db.execute("PRAGMA busy_timeout=30000")
             await self._create_tables()
-            logger.info(f"Connected to meetings database: {self.db_path}")
+            logger.info("Connected to meetings database: %s", self.db_path)
 
     async def close(self) -> None:
         """Close database connection."""
@@ -308,7 +313,8 @@ class MeetingNotesDB:
             cursor = await self._db.execute(
                 """
                 INSERT OR REPLACE INTO calendars
-                (calendar_id, name, description, color, is_primary, auto_join, bot_mode, enabled, added_at)
+                (calendar_id, name, description, color, is_primary,
+                 auto_join, bot_mode, enabled, added_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
@@ -383,7 +389,7 @@ class MeetingNotesDB:
 
             # Build update query
             set_parts = []
-            values = []
+            values: list[Any] = []
             for key, value in updates.items():
                 if key in ("auto_join", "enabled", "is_primary"):
                     set_parts.append(f"{key} = ?")
@@ -410,6 +416,7 @@ class MeetingNotesDB:
         If a meeting with the same event_id and calendar_id already exists,
         returns the existing meeting's ID instead of failing.
         """
+        # pylint: disable-next=import-outside-toplevel
         import uuid
 
         async with self._lock:
@@ -442,7 +449,7 @@ class MeetingNotesDB:
                 )
                 await self._db.commit()
                 logger.info(
-                    f"Meeting already exists (id={existing[0]}), reusing record"
+                    "Meeting already exists (id=%s), reusing record", existing[0]
                 )
                 return existing[0]
 
@@ -547,7 +554,7 @@ class MeetingNotesDB:
                 return []
 
             conditions = []
-            params = []
+            params: list[Any] = []
 
             if calendar_id:
                 conditions.append("calendar_id = ?")
@@ -581,7 +588,8 @@ class MeetingNotesDB:
     ) -> list[dict]:
         """Get recent meetings as simple dicts with transcript counts.
 
-        This is optimized for UI display - returns lightweight dicts instead of full MeetingNote objects.
+        This is optimized for UI display - returns lightweight dicts
+        instead of full MeetingNote objects.
         """
         async with self._lock:
             await self._connect_internal()
@@ -632,7 +640,7 @@ class MeetingNotesDB:
 
             # Build update query
             set_parts = ["updated_at = ?"]
-            values = [datetime.now().isoformat()]
+            values: list[Any] = [datetime.now().isoformat()]
 
             for key, value in updates.items():
                 if key in (
@@ -859,6 +867,7 @@ class MeetingNotesDB:
             if not self._db:
                 return []
 
+            params: tuple[Any, ...]
             if meeting_id:
                 # Search within a specific meeting
                 sql = """
@@ -908,7 +917,7 @@ class MeetingNotesDB:
             if not self._db:
                 return {}
 
-            stats = {}
+            stats: dict[str, Any] = {}
 
             # Calendar count
             cursor = await self._db.execute(
@@ -941,11 +950,13 @@ class MeetingNotesDB:
 
 
 # Global instance
+# pylint: disable-next=invalid-name
 _db: Optional[MeetingNotesDB] = None
 
 
 def get_notes_db() -> MeetingNotesDB:
     """Get the global database instance."""
+    # pylint: disable-next=global-statement
     global _db
     if _db is None:
         _db = MeetingNotesDB()

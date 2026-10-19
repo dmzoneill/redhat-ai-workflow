@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 
@@ -53,7 +53,7 @@ def _load_persona_config(persona_name: str) -> dict:
 
     persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
     if not persona_file.exists():
-        logger.warning(f"Persona file not found: {persona_file}")
+        logger.warning("Persona file not found: %s", persona_file)
         return {}
 
     try:
@@ -61,8 +61,9 @@ def _load_persona_config(persona_name: str) -> dict:
             config = yaml.safe_load(f) or {}
             _persona_cache[persona_name] = config
             return config
-    except Exception as e:
-        logger.error(f"Failed to load persona config {persona_name}: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Failed to load persona config %s: %s", persona_name, e)
         return {}
 
 
@@ -84,6 +85,7 @@ def clear_persona_cache() -> None:
     _persona_cache.clear()
 
 
+# pylint: disable-next=too-many-instance-attributes
 class HybridToolFilter:
     """4-layer tool filtering with graceful degradation.
 
@@ -176,14 +178,17 @@ class HybridToolFilter:
             "fallback_strategy", "keyword_match"
         )
 
+    # pylint: disable-next=unused-argument
     def _load_config(self, path: Optional[Path] = None) -> dict:
         """Load config via ConfigManager."""
         try:
+            # pylint: disable-next=import-outside-toplevel
             from server.config_manager import config as config_manager
 
             return config_manager.get_all()
-        except Exception as e:
-            logger.warning(f"Failed to load config: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to load config: %s", e)
         return {}
 
     def _init_inference_client(self) -> None:
@@ -199,7 +204,7 @@ class HybridToolFilter:
         )
 
         if self.inference_client:
-            logger.info(f"Inference client initialized: {self.inference_client.name}")
+            logger.info("Inference client initialized: %s", self.inference_client.name)
             # Warm up the model to avoid cold start latency
             if npu_config.get("warmup", True):
                 warmup_model(self.inference_client.name)
@@ -221,11 +226,14 @@ class HybridToolFilter:
         modules = _get_persona_tool_modules(persona)
         if modules:
             logger.debug(
-                f"Loaded {len(modules)} tool modules for persona '{persona}': {modules}"
+                "Loaded %s tool modules for persona '%s': %s",
+                len(modules),
+                persona,
+                modules,
             )
         else:
             logger.warning(
-                f"No tool modules found for persona '{persona}', using empty baseline"
+                "No tool modules found for persona '%s', using empty baseline", persona
             )
         return modules
 
@@ -309,7 +317,7 @@ class HybridToolFilter:
 
         # Build prompt excluding already-included categories
         available_categories = [
-            cat for cat in TOOL_CATEGORIES.keys() if cat not in already_included
+            cat for cat in TOOL_CATEGORIES if cat not in already_included
         ]
 
         npu_config = self.config.get("tool_filtering", {}).get("npu", {})
@@ -320,14 +328,15 @@ class HybridToolFilter:
 
         prompt = f"""What additional tool categories are needed for this request?
 
-Already included: {', '.join(already_included)}
+Already included: {", ".join(already_included)}
 
 Available categories:
 {categories_str}
 
 Request: "{message[:200]}"
 
-Reply with 0-{max_categories} category names separated by commas, or NONE if no additional categories needed:"""
+Reply with 0-{max_categories} category names separated by commas, \
+or NONE if no additional categories needed:"""
 
         try:
             start_time = time.perf_counter()
@@ -337,7 +346,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
                 max_tokens=50,
             )
             elapsed_ms = (time.perf_counter() - start_time) * 1000
-            logger.debug(f"NPU classification took {elapsed_ms:.0f}ms: {result}")
+            logger.debug("NPU classification took %.0fms: %s", elapsed_ms, result)
 
             # Parse response
             if "NONE" in result.upper():
@@ -357,8 +366,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
 
             return categories
 
-        except Exception as e:
-            logger.error(f"NPU classification failed: {e}")
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("NPU classification failed: %s", e)
             self.stats.record_npu_timeout()
             return []
 
@@ -366,7 +376,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         self,
         message: str,
         already_included: set[str],
-        persona: str,
+        persona: str,  # pylint: disable=unused-argument
     ) -> tuple[list[str], str]:
         """Classify with NPU, falling back gracefully if unavailable.
 
@@ -383,8 +393,9 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             try:
                 categories = self._npu_classify(message, already_included)
                 return categories, "npu"
-            except Exception as e:
-                logger.warning(f"NPU classification failed: {e}")
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("NPU classification failed: %s", e)
 
         # Fallback strategies
         if self.fallback_strategy == "keyword_match":
@@ -392,11 +403,12 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             categories = [c for c in categories if c not in already_included]
             return categories[:3], "keyword_fallback"
 
-        elif self.fallback_strategy == "all_tools":
+        if self.fallback_strategy == "all_tools":
             return list(TOOL_CATEGORIES.keys()), "all_tools"
 
         return [], "none"
 
+    # pylint: disable-next=too-many-locals,too-many-statements
     def filter(
         self,
         message: str,
@@ -445,7 +457,10 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
             detected_persona, detection_reason = self._detect_persona(message, persona)
             if detected_persona != persona:
                 logger.info(
-                    f"Auto-detected persona: {detected_persona} (was {persona}) - {detection_reason}"
+                    "Auto-detected persona: %s (was %s) - %s",
+                    detected_persona,
+                    persona,
+                    detection_reason,
                 )
                 persona = detected_persona
                 persona_auto_detected = True
@@ -485,7 +500,7 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         methods_used = []
 
         # Track detailed context for each layer
-        context_details = {
+        context_details: dict[str, Any] = {
             "core": {"categories": [], "tools": []},
             "persona": {
                 "name": persona,
@@ -623,8 +638,11 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
         save_stats()
 
         logger.info(
-            f"Tool filter: {len(all_tools)} tools ({result['reduction_pct']}% reduction) "
-            f"in {elapsed_ms:.0f}ms via {', '.join(methods_used)}"
+            "Tool filter: %s tools (%s%% reduction) in %.0fms via %s",
+            len(all_tools),
+            result["reduction_pct"],
+            elapsed_ms,
+            ", ".join(methods_used),
         )
 
         return result
@@ -658,12 +676,12 @@ Reply with 0-{max_categories} category names separated by commas, or NONE if no 
 
 # ==================== Convenience Functions ====================
 
-_filter_instance: Optional[HybridToolFilter] = None
+_filter_instance: Optional[HybridToolFilter] = None  # pylint: disable=invalid-name
 
 
 def get_filter() -> HybridToolFilter:
     """Get or create the filter instance."""
-    global _filter_instance
+    global _filter_instance  # pylint: disable=global-statement
     if _filter_instance is None:
         _filter_instance = HybridToolFilter()
     return _filter_instance
@@ -733,8 +751,9 @@ def _update_session_dynamic_count(
         message: The message that triggered the filter (truncated for storage)
     """
     try:
-        from datetime import datetime
+        from datetime import datetime  # pylint: disable=import-outside-toplevel
 
+        # pylint: disable-next=import-outside-toplevel
         from server.workspace_state import WorkspaceRegistry
 
         workspace = WorkspaceRegistry.get(workspace_uri)
@@ -748,8 +767,11 @@ def _update_session_dynamic_count(
                 # Persist change (debounced by save_to_disk)
                 WorkspaceRegistry.save_to_disk()
                 logger.debug(
-                    f"Updated dynamic_tool_count={tool_count} for session {session.session_id[:8]}"
+                    "Updated dynamic_tool_count=%s for session %s",
+                    tool_count,
+                    session.session_id[:8],
                 )
-    except Exception as e:
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         # Don't fail the filter if we can't update the session
-        logger.debug(f"Failed to update dynamic tool count: {e}")
+        logger.debug("Failed to update dynamic tool count: %s", e)

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """State Persistence Layer for Slack Listener.
 
 Manages persistent state using SQLite to survive server restarts:
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+from services.slack.message_fields import SlackMessageFields
 
 logger = logging.getLogger(__name__)
 
@@ -131,15 +133,11 @@ def parse_sidebar_file(file_path: str | Path) -> list[dict[str, str]]:
 
 
 @dataclass
-class PendingMessage:
+# pylint: disable-next=too-many-instance-attributes
+class PendingMessage(SlackMessageFields):
     """Represents a message waiting to be processed by the LLM."""
 
     id: str  # Unique message ID (channel_ts)
-    channel_id: str
-    channel_name: str
-    user_id: str
-    user_name: str
-    text: str
     timestamp: str  # Slack ts (e.g., "1234567890.123456")
     thread_ts: str | None
     is_mention: bool
@@ -152,11 +150,7 @@ class PendingMessage:
         """Serialize to dict for storage."""
         return {
             "id": self.id,
-            "channel_id": self.channel_id,
-            "channel_name": self.channel_name,
-            "user_id": self.user_id,
-            "user_name": self.user_name,
-            "text": self.text,
+            **self.identity_dict(),
             "timestamp": self.timestamp,
             "thread_ts": self.thread_ts,
             "is_mention": self.is_mention,
@@ -187,6 +181,7 @@ class PendingMessage:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class CachedChannel:
     """Represents a cached Slack channel for discovery."""
 
@@ -231,6 +226,7 @@ class CachedChannel:
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class CachedUser:
     """Represents a cached Slack user for discovery."""
 
@@ -309,6 +305,7 @@ class CachedGroup:
         )
 
 
+# pylint: disable-next=too-many-public-methods
 class SlackStateDB:
     """
     SQLite-based persistence for Slack listener state.
@@ -340,12 +337,15 @@ class SlackStateDB:
         async with self._lock:
             await self._connect_unlocked()
 
-    async def _connect_unlocked(self):
+    async def _connect_unlocked(self) -> aiosqlite.Connection:
         """Connect to database (internal, caller must hold lock)."""
-        if self._db is None:
-            self._db = await aiosqlite.connect(self.db_path)
+        db = self._db
+        if db is None:
+            db = await aiosqlite.connect(self.db_path)
+            self._db = db
             await self._create_tables()
-            logger.info(f"Connected to state database: {self.db_path}")
+            logger.info("Connected to state database: %s", self.db_path)
+        return db
 
     async def close(self):
         """Close database connection."""
@@ -438,17 +438,17 @@ class SlackStateDB:
 
         # Clean up old notified messages (older than 1 hour)
         try:
-            import time
-
             cutoff = time.time() - 3600  # 1 hour
             await self._db.execute(
                 "DELETE FROM notified_messages WHERE notified_at < ?",
                 (cutoff,),
             )
             await self._db.commit()
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             logger.debug(
-                f"Suppressed error in _ensure_tables (cleanup old notifications): {e}"
+                "Suppressed error in _ensure_tables (cleanup old notifications): %s", e
             )  # Table might not exist yet on first run
 
         # Migration: Add avatar_url column to user_cache if it doesn't exist
@@ -461,16 +461,18 @@ class SlackStateDB:
                 )
                 await self._db.commit()
                 logger.info("Migrated user_cache: added avatar_url column")
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug(f"Migration check for avatar_url: {e}")
+            logger.debug("Migration check for avatar_url: %s", e)
 
     # ==================== Channel State ====================
 
     async def get_last_processed_ts(self, channel_id: str) -> str | None:
         """Get the last processed message timestamp for a channel."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT last_processed_ts FROM channel_state WHERE channel_id = ?",
                 (channel_id,),
             )
@@ -485,8 +487,8 @@ class SlackStateDB:
     ):
         """Update the last processed timestamp for a channel."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO channel_state
                 (channel_id, last_processed_ts, channel_name, updated_at)
@@ -494,13 +496,13 @@ class SlackStateDB:
                 """,
                 (channel_id, timestamp, channel_name, time.time()),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_all_channel_states(self) -> dict[str, str]:
         """Get all channel states as dict of channel_id -> last_processed_ts."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT channel_id, last_processed_ts FROM channel_state"
             )
             rows = await cursor.fetchall()
@@ -511,8 +513,8 @@ class SlackStateDB:
     async def was_notified(self, message_ts: str) -> bool:
         """Check if a message was already notified (survives restarts)."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT 1 FROM notified_messages WHERE message_ts = ?",
                 (message_ts,),
             )
@@ -522,8 +524,8 @@ class SlackStateDB:
     async def mark_notified(self, message_ts: str, channel_id: str):
         """Mark a message as notified (persisted to survive restarts)."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO notified_messages
                 (message_ts, channel_id, notified_at)
@@ -531,15 +533,15 @@ class SlackStateDB:
                 """,
                 (message_ts, channel_id, time.time()),
             )
-            await self._db.commit()
+            await db.commit()
 
     # ==================== Pending Messages ====================
 
     async def add_pending_message(self, message: PendingMessage):
         """Add a message to the pending queue."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO pending_messages
                 (id, channel_id, data, created_at, processed_at)
@@ -552,7 +554,7 @@ class SlackStateDB:
                     message.created_at,
                 ),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_pending_messages(
         self,
@@ -561,10 +563,10 @@ class SlackStateDB:
     ) -> list[PendingMessage]:
         """Get unprocessed pending messages."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
             if channel_id:
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
                     SELECT data FROM pending_messages
                     WHERE processed_at IS NULL AND channel_id = ?
@@ -573,7 +575,7 @@ class SlackStateDB:
                     (channel_id, limit),
                 )
             else:
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
                     SELECT data FROM pending_messages
                     WHERE processed_at IS NULL
@@ -588,18 +590,18 @@ class SlackStateDB:
     async def mark_message_processed(self, message_id: str):
         """Mark a message as processed."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 "UPDATE pending_messages SET processed_at = ? WHERE id = ?",
                 (time.time(), message_id),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_pending_count(self) -> int:
         """Get count of unprocessed messages."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT COUNT(*) FROM pending_messages WHERE processed_at IS NULL"
             )
             row = await cursor.fetchone()
@@ -608,21 +610,21 @@ class SlackStateDB:
     async def clear_old_messages(self, older_than_hours: int = 24):
         """Remove processed messages older than specified hours."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
             cutoff = time.time() - (older_than_hours * 3600)
-            await self._db.execute(
+            await db.execute(
                 "DELETE FROM pending_messages WHERE processed_at IS NOT NULL AND processed_at < ?",
                 (cutoff,),
             )
-            await self._db.commit()
+            await db.commit()
 
     # ==================== User Cache ====================
 
     async def get_user_name(self, user_id: str) -> str | None:
         """Get cached user name."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT user_name FROM user_cache WHERE user_id = ?", (user_id,)
             )
             row = await cursor.fetchone()
@@ -637,8 +639,8 @@ class SlackStateDB:
     ):
         """Cache user information."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO user_cache
                 (user_id, user_name, display_name, real_name, updated_at)
@@ -646,13 +648,13 @@ class SlackStateDB:
                 """,
                 (user_id, user_name, display_name, real_name, time.time()),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_all_cached_users(self) -> dict[str, dict[str, str]]:
         """Get all cached users."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT user_id, user_name, display_name, real_name, avatar_url FROM user_cache"
             )
             rows = await cursor.fetchall()
@@ -669,11 +671,12 @@ class SlackStateDB:
     async def cache_users_bulk(self, users: list[CachedUser]):
         """Cache multiple users at once (more efficient for bulk refresh)."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.executemany(
+            db = await self._connect_unlocked()
+            await db.executemany(
                 """
                 INSERT OR REPLACE INTO user_cache
-                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at)
+                (user_id, user_name, display_name, real_name, email,
+                 gitlab_username, avatar_url, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
@@ -690,32 +693,33 @@ class SlackStateDB:
                     for u in users
                 ],
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_user_cache_stats(self) -> dict[str, Any]:
         """Get statistics about the user cache."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
-            cursor = await self._db.execute("SELECT COUNT(*) FROM user_cache")
+            cursor = await db.execute("SELECT COUNT(*) FROM user_cache")
             total = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 "SELECT COUNT(*) FROM user_cache WHERE avatar_url IS NOT NULL AND avatar_url != ''"
             )
             with_avatar = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 "SELECT COUNT(*) FROM user_cache WHERE email IS NOT NULL AND email != ''"
             )
             with_email = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
-                "SELECT COUNT(*) FROM user_cache WHERE gitlab_username IS NOT NULL AND gitlab_username != ''"
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM user_cache "
+                "WHERE gitlab_username IS NOT NULL AND gitlab_username != ''"
             )
             with_gitlab = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 "SELECT MIN(updated_at), MAX(updated_at) FROM user_cache"
             )
             row = await cursor.fetchone()
@@ -737,8 +741,8 @@ class SlackStateDB:
     async def get_meta(self, key: str, default: str = "") -> str:
         """Get metadata value."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 "SELECT value FROM listener_meta WHERE key = ?", (key,)
             )
             row = await cursor.fetchone()
@@ -747,23 +751,23 @@ class SlackStateDB:
     async def set_meta(self, key: str, value: str):
         """Set metadata value."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO listener_meta (key, value, updated_at)
                 VALUES (?, ?, ?)
                 """,
                 (key, value, time.time()),
             )
-            await self._db.commit()
+            await db.commit()
 
     # ==================== Channel Cache (Knowledge) ====================
 
     async def cache_channel(self, channel: CachedChannel):
         """Cache channel information for discovery."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO channel_cache
                 (channel_id, name, display_name, is_private, is_member,
@@ -782,13 +786,13 @@ class SlackStateDB:
                     time.time(),
                 ),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def cache_channels_bulk(self, channels: list[CachedChannel]):
         """Cache multiple channels at once (more efficient)."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.executemany(
+            db = await self._connect_unlocked()
+            await db.executemany(
                 """
                 INSERT OR REPLACE INTO channel_cache
                 (channel_id, name, display_name, is_private, is_member,
@@ -810,13 +814,13 @@ class SlackStateDB:
                     for c in channels
                 ],
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_cached_channel(self, channel_id: str) -> CachedChannel | None:
         """Get a cached channel by ID."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 """
                 SELECT channel_id, name, display_name, is_private, is_member,
                        purpose, topic, num_members, updated_at
@@ -857,7 +861,7 @@ class SlackStateDB:
             List of matching CachedChannel objects
         """
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
             # Build query based on filters - using predefined SQL patterns
             # to avoid SQL injection (all user input goes through parameters)
@@ -916,7 +920,7 @@ class SlackStateDB:
                 """
                 params = [limit]
 
-            cursor = await self._db.execute(sql, params)
+            cursor = await db.execute(sql, params)
             rows = await cursor.fetchall()
             return [
                 CachedChannel(
@@ -940,9 +944,9 @@ class SlackStateDB:
     async def get_channel_by_name(self, name: str) -> CachedChannel | None:
         """Get a channel by exact name match."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
             # Try exact match first, then case-insensitive
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 """
                 SELECT channel_id, name, display_name, is_private, is_member,
                        purpose, topic, num_members, updated_at
@@ -970,17 +974,17 @@ class SlackStateDB:
     async def get_channel_cache_stats(self) -> dict[str, Any]:
         """Get statistics about the channel cache."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
-            cursor = await self._db.execute("SELECT COUNT(*) FROM channel_cache")
+            cursor = await db.execute("SELECT COUNT(*) FROM channel_cache")
             total = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 "SELECT COUNT(*) FROM channel_cache WHERE is_member = 1"
             )
             member_count = (await cursor.fetchone())[0]
 
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 "SELECT MIN(updated_at), MAX(updated_at) FROM channel_cache"
             )
             row = await cursor.fetchone()
@@ -1015,6 +1019,8 @@ class SlackStateDB:
             parsed = parse_sidebar_file(file_path)
         except FileNotFoundError as e:
             return {"success": False, "error": str(e)}
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             return {"success": False, "error": f"Failed to parse sidebar: {e}"}
 
@@ -1077,8 +1083,8 @@ class SlackStateDB:
     async def cache_group(self, group: CachedGroup):
         """Cache user group information for @team mention resolution."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO group_cache
                 (group_id, handle, name, description, members, updated_at)
@@ -1093,13 +1099,13 @@ class SlackStateDB:
                     time.time(),
                 ),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def cache_groups_bulk(self, groups: list[CachedGroup]):
         """Cache multiple groups at once."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.executemany(
+            db = await self._connect_unlocked()
+            await db.executemany(
                 """
                 INSERT OR REPLACE INTO group_cache
                 (group_id, handle, name, description, members, updated_at)
@@ -1117,13 +1123,13 @@ class SlackStateDB:
                     for g in groups
                 ],
             )
-            await self._db.commit()
+            await db.commit()
 
     async def get_cached_group(self, group_id: str) -> CachedGroup | None:
         """Get a cached group by ID."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 """
                 SELECT group_id, handle, name, description, members, updated_at
                 FROM group_cache WHERE group_id = ?
@@ -1146,10 +1152,10 @@ class SlackStateDB:
     async def get_group_by_handle(self, handle: str) -> CachedGroup | None:
         """Get a group by handle (e.g., 'aap-analytics-team')."""
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
             # Remove @ prefix if present
             handle = handle.lstrip("@")
-            cursor = await self._db.execute(
+            cursor = await db.execute(
                 """
                 SELECT group_id, handle, name, description, members, updated_at
                 FROM group_cache
@@ -1183,11 +1189,11 @@ class SlackStateDB:
             List of matching CachedGroup objects
         """
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
             if query:
                 search_pattern = f"%{query}%"
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
                     SELECT group_id, handle, name, description, members, updated_at
                     FROM group_cache
@@ -1198,7 +1204,7 @@ class SlackStateDB:
                     (search_pattern, search_pattern, search_pattern, limit),
                 )
             else:
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
                     SELECT group_id, handle, name, description, members, updated_at
                     FROM group_cache
@@ -1227,6 +1233,7 @@ class SlackStateDB:
 
     # ==================== Extended User Cache ====================
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def cache_user_extended(
         self,
         user_id: str,
@@ -1239,11 +1246,12 @@ class SlackStateDB:
     ):
         """Cache extended user information including email, gitlab username, and avatar."""
         async with self._lock:
-            await self._connect_unlocked()
-            await self._db.execute(
+            db = await self._connect_unlocked()
+            await db.execute(
                 """
                 INSERT OR REPLACE INTO user_cache
-                (user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at)
+                (user_id, user_name, display_name, real_name, email,
+                 gitlab_username, avatar_url, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
@@ -1257,7 +1265,7 @@ class SlackStateDB:
                     time.time(),
                 ),
             )
-            await self._db.commit()
+            await db.commit()
 
     async def find_users(
         self,
@@ -1268,20 +1276,22 @@ class SlackStateDB:
         Find users matching a query.
 
         Args:
-            query: Search string (matches user_name, display_name, real_name, email, gitlab_username)
+            query: Search string (matches user_name, display_name,
+                real_name, email, gitlab_username)
             limit: Maximum results to return
 
         Returns:
             List of user dicts with all cached fields
         """
         async with self._lock:
-            await self._connect_unlocked()
+            db = await self._connect_unlocked()
 
             if query:
                 search_pattern = f"%{query}%"
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
-                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                    SELECT user_id, user_name, display_name, real_name, email,
+                           gitlab_username, avatar_url, updated_at
                     FROM user_cache
                     WHERE user_name LIKE ? OR display_name LIKE ? OR real_name LIKE ?
                           OR email LIKE ? OR gitlab_username LIKE ?
@@ -1298,9 +1308,10 @@ class SlackStateDB:
                     ),
                 )
             else:
-                cursor = await self._db.execute(
+                cursor = await db.execute(
                     """
-                    SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                    SELECT user_id, user_name, display_name, real_name, email,
+                           gitlab_username, avatar_url, updated_at
                     FROM user_cache
                     ORDER BY user_name ASC
                     LIMIT ?
@@ -1328,10 +1339,11 @@ class SlackStateDB:
     ) -> dict[str, Any] | None:
         """Get a user by their GitLab username."""
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 """
-                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                SELECT user_id, user_name, display_name, real_name, email,
+                       gitlab_username, avatar_url, updated_at
                 FROM user_cache
                 WHERE gitlab_username = ? OR gitlab_username = ? COLLATE NOCASE
                 LIMIT 1
@@ -1366,10 +1378,11 @@ class SlackStateDB:
             return None
 
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute(
+            db = await self._connect_unlocked()
+            cursor = await db.execute(
                 """
-                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+                SELECT user_id, user_name, display_name, real_name, email,
+                       gitlab_username, avatar_url, updated_at
                 FROM user_cache
                 WHERE email = ? COLLATE NOCASE
                 LIMIT 1
@@ -1390,6 +1403,7 @@ class SlackStateDB:
                 }
             return None
 
+    # pylint: disable-next=too-many-locals
     async def find_user_by_name_fuzzy(
         self,
         name: str,
@@ -1410,6 +1424,7 @@ class SlackStateDB:
         Returns:
             List of user dicts sorted by match score (best first)
         """
+        # pylint: disable-next=import-outside-toplevel
         from difflib import SequenceMatcher
 
         if not name:
@@ -1418,9 +1433,10 @@ class SlackStateDB:
         name_lower = name.lower().strip()
 
         async with self._lock:
-            await self._connect_unlocked()
-            cursor = await self._db.execute("""
-                SELECT user_id, user_name, display_name, real_name, email, gitlab_username, avatar_url, updated_at
+            db = await self._connect_unlocked()
+            cursor = await db.execute("""
+                SELECT user_id, user_name, display_name, real_name, email,
+                       gitlab_username, avatar_url, updated_at
                 FROM user_cache
                 """)
             rows = await cursor.fetchall()
@@ -1476,6 +1492,7 @@ class SlackStateDB:
 
     # ==================== Target Resolution ====================
 
+    # pylint: disable-next=too-many-return-statements
     async def resolve_target(self, target: str) -> dict[str, Any]:
         """
         Resolve a Slack target (channel, user, or group) to its ID.

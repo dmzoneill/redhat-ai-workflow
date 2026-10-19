@@ -16,10 +16,9 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import numpy as np
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -40,6 +39,7 @@ PIPER_MODELS_DIR = Path.home() / ".cache" / "piper"
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class TTSResult:
     """Result of TTS synthesis."""
 
@@ -83,6 +83,7 @@ class PiperTTS:
             return True
 
         try:
+            # pylint: disable-next=import-outside-toplevel
             import shutil
 
             # Check for piper CLI
@@ -97,17 +98,19 @@ class PiperTTS:
             model_path = await self._get_model_path()
             if not model_path:
                 logger.warning(
-                    f"Model {self.voice} not found, will try to download on first use"
+                    "Model %s not found, will try to download on first use", self.voice
                 )
 
             self._initialized = True
             logger.info(
-                f"Piper TTS ready (CLI: {self._piper_cli}, voice: {self.voice})"
+                "Piper TTS ready (CLI: %s, voice: %s)", self._piper_cli, self.voice
             )
             return True
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to initialize Piper TTS: {e}")
+            logger.error("Failed to initialize Piper TTS: %s", e)
             return False
 
     async def _get_model_path(self) -> Optional[Path]:
@@ -123,12 +126,10 @@ class PiperTTS:
             return model_path
 
         # Try to download model
-        logger.info(f"Downloading Piper voice model: {self.voice}")
+        logger.info("Downloading Piper voice model: %s", self.voice)
 
         try:
             # Use piper_download if available
-            import subprocess
-
             subprocess.run(
                 [
                     "piper",
@@ -141,6 +142,7 @@ class PiperTTS:
                 capture_output=True,
                 text=True,
                 timeout=120,
+                check=False,
             )
 
             if model_path.exists():
@@ -153,6 +155,7 @@ class PiperTTS:
             voice_parts = self.voice.split("-")
             lang = voice_parts[0]  # e.g., "en_US"
 
+            # pylint: disable-next=import-outside-toplevel
             import urllib.request
 
             model_url = f"{base_url}/{lang}/{self.voice}/{self.voice}.onnx"
@@ -166,8 +169,10 @@ class PiperTTS:
                 self._config_path = config_path
                 return model_path
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to download voice model: {e}")
+            logger.error("Failed to download voice model: %s", e)
 
         return None
 
@@ -184,8 +189,6 @@ class PiperTTS:
         if not self._initialized or not self._piper_cli:
             raise RuntimeError("Piper TTS not initialized")
 
-        import subprocess
-
         try:
             # Get full path to model file
             model_path = self._model_path
@@ -193,7 +196,7 @@ class PiperTTS:
                 # Try to find model in cache
                 model_path = PIPER_MODELS_DIR / f"{self.voice}.onnx"
                 if not model_path.exists():
-                    logger.error(f"Model not found: {model_path}")
+                    logger.error("Model not found: %s", model_path)
                     return np.array([], dtype=np.float32), 22050
 
             # Build piper command - output raw audio to stdout
@@ -204,24 +207,26 @@ class PiperTTS:
                 "--output-raw",
             ]
 
-            logger.debug(f"Running piper: {' '.join(cmd)}")
+            logger.debug("Running piper: %s", " ".join(cmd))
 
             # Run piper with text on stdin
             result = subprocess.run(
-                cmd, input=text.encode(), capture_output=True, timeout=30
+                cmd, input=text.encode(), capture_output=True, timeout=30, check=False
             )
 
             if result.returncode != 0:
-                logger.error(f"Piper CLI error: {result.stderr.decode()}")
+                logger.error("Piper CLI error: %s", result.stderr.decode())
                 return np.array([], dtype=np.float32), 22050
 
             # Parse raw audio (16-bit signed, mono, 22050 Hz by default)
-            audio_data = np.frombuffer(result.stdout, dtype=np.int16)
-            audio_data = audio_data.astype(np.float32) / 32768.0
+            audio_i16 = np.frombuffer(result.stdout, dtype=np.int16)
+            audio_data = audio_i16.astype(np.float32) / 32768.0
 
             sample_rate = 22050  # Piper default
             logger.info(
-                f"Piper synthesized {len(audio_data)} samples ({len(audio_data)/sample_rate:.1f}s)"
+                "Piper synthesized %s samples (%.1fs)",
+                len(audio_data),
+                len(audio_data) / sample_rate,
             )
 
             return audio_data, sample_rate
@@ -229,8 +234,10 @@ class PiperTTS:
         except subprocess.TimeoutExpired:
             logger.error("Piper CLI timed out")
             return np.array([], dtype=np.float32), 22050
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Piper synthesis error: {e}")
+            logger.error("Piper synthesis error: %s", e)
             return np.array([], dtype=np.float32), 22050
 
     async def synthesize_async(self, text: str) -> Tuple[np.ndarray, int]:
@@ -282,17 +289,21 @@ class PiperTTS:
                 audio_path = output_dir / f"piper_{timestamp}.wav"
 
                 # Save to file
+                # pylint: disable-next=import-outside-toplevel
                 import wave
 
-                with wave.open(
-                    str(audio_path), "wb"
-                ) as wav:  # pylint: disable=no-member
-                    wav.setnchannels(1)  # pylint: disable=no-member
-                    wav.setsampwidth(2)  # pylint: disable=no-member
-                    wav.setframerate(sample_rate)  # pylint: disable=no-member
+                # pylint: disable-next=no-member
+                with wave.open(str(audio_path), "wb") as wav:
+                    # pylint: disable-next=no-member
+                    wav.setnchannels(1)
+                    # pylint: disable-next=no-member
+                    wav.setsampwidth(2)
+                    # pylint: disable-next=no-member
+                    wav.setframerate(sample_rate)
                     # Convert back to int16 for file
                     audio_int16 = (audio_data * 32767).astype(np.int16)
-                    wav.writeframes(audio_int16.tobytes())  # pylint: disable=no-member
+                    # pylint: disable-next=no-member
+                    wav.writeframes(audio_int16.tobytes())
 
             return TTSResult(
                 audio_path=audio_path,
@@ -303,8 +314,10 @@ class PiperTTS:
                 audio_data=audio_data,
             )
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Piper TTS synthesis failed: {e}")
+            logger.error("Piper TTS synthesis failed: %s", e)
             return TTSResult(
                 audio_path=Path(""),
                 duration_seconds=0,
@@ -315,6 +328,7 @@ class PiperTTS:
             )
 
 
+# pylint: disable-next=too-many-instance-attributes
 class GPTSoVITSEngine:
     """
     GPT-SoVITS voice cloning TTS engine.
@@ -430,21 +444,21 @@ if __name__ == "__main__":
         try:
             # Check venv exists
             if not GPT_SOVITS_VENV.exists():
-                logger.error(f"GPT-SoVITS venv not found: {GPT_SOVITS_VENV}")
+                logger.error("GPT-SoVITS venv not found: %s", GPT_SOVITS_VENV)
                 return False
 
             # Check models exist
             if not self.gpt_model.exists():
-                logger.error(f"GPT model not found: {self.gpt_model}")
+                logger.error("GPT model not found: %s", self.gpt_model)
                 return False
 
             if not self.sovits_model.exists():
-                logger.error(f"SoVITS model not found: {self.sovits_model}")
+                logger.error("SoVITS model not found: %s", self.sovits_model)
                 return False
 
             # Check reference audio
             if not self.ref_audio.exists():
-                logger.warning(f"Reference audio not found: {self.ref_audio}")
+                logger.warning("Reference audio not found: %s", self.ref_audio)
                 # Try to create from full recording
                 full_recording = VOICE_SAMPLES_DIR / "reference.wav"
                 if full_recording.exists():
@@ -466,14 +480,17 @@ if __name__ == "__main__":
                             str(self.ref_audio),
                         ],
                         capture_output=True,
+                        check=False,
                     )
 
             self.initialized = True
             logger.info("GPT-SoVITS engine ready")
             return True
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to initialize GPT-SoVITS: {e}")
+            logger.error("Failed to initialize GPT-SoVITS: %s", e)
             return False
 
     async def synthesize(
@@ -518,7 +535,7 @@ if __name__ == "__main__":
 
             output_path = self.output_dir / output_filename
 
-            logger.info(f"Synthesizing: '{text[:50]}...' -> {output_path}")
+            logger.info("Synthesizing: '%s...' -> %s", text[:50], output_path)
 
             # Run synthesis via subprocess
             loop = asyncio.get_event_loop()
@@ -531,6 +548,7 @@ if __name__ == "__main__":
                 str(output_path),
             )
 
+            # pylint: disable-next=no-else-return
             if result.get("success"):
                 return TTSResult(
                     audio_path=Path(result["output"]),
@@ -549,8 +567,10 @@ if __name__ == "__main__":
                     error=result.get("error", "Unknown error"),
                 )
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"TTS synthesis failed: {e}")
+            logger.error("TTS synthesis failed: %s", e)
             return TTSResult(
                 audio_path=Path(""),
                 duration_seconds=0,
@@ -589,6 +609,7 @@ if __name__ == "__main__":
                 timeout=120,
                 cwd=str(GPT_SOVITS_ROOT),
                 env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"},
+                check=False,
             )
 
             # Parse JSON output
@@ -604,10 +625,12 @@ if __name__ == "__main__":
 
         except subprocess.TimeoutExpired:
             return {"success": False, "error": "TTS timed out (120s)"}
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def synthesize_stream(self, text: str, chunk_callback: callable):
+    async def synthesize_stream(self, text: str, chunk_callback: Callable[..., Any]):
         """
         Stream synthesis for lower latency.
 
@@ -616,6 +639,7 @@ if __name__ == "__main__":
         # For now, fall back to full synthesis
         result = await self.synthesize(text)
         if result.success:
+            # pylint: disable-next=import-outside-toplevel
             import soundfile as sf
 
             audio_data, sample_rate = sf.read(str(result.audio_path))
@@ -644,6 +668,7 @@ class TTSEngine:
 
     async def initialize(self) -> bool:
         """Initialize the selected backend."""
+        # pylint: disable-next=no-else-return
         if self.backend == "piper":
             self._piper = PiperTTS()
             return await self._piper.initialize()
@@ -666,6 +691,7 @@ class TTSEngine:
         Returns:
             TTSResult with audio data and/or path
         """
+        # pylint: disable-next=no-else-return
         if self.backend == "piper":
             if not self._piper:
                 self._piper = PiperTTS()
@@ -691,6 +717,7 @@ class TTSEngine:
             raise RuntimeError("Sync synthesis only available with Piper backend")
         return self._piper.synthesize(text)
 
+    # pylint: disable-next=too-many-locals
     async def speak_to_pipe(self, text: str, pipe_path: Path) -> float:
         """
         Synthesize text and write audio to a named pipe for Chrome mic injection.
@@ -711,7 +738,7 @@ class TTSEngine:
             # Synthesize audio
             result = await self.synthesize(text)
             if not result.success or result.audio_data is None:
-                logger.error(f"TTS synthesis failed: {result.error}")
+                logger.error("TTS synthesis failed: %s", result.error)
                 return 0.0
 
             audio_data = result.audio_data
@@ -720,6 +747,7 @@ class TTSEngine:
             # Resample to 16kHz if needed (Chrome mic expects 16kHz)
             target_rate = 16000
             if sample_rate != target_rate:
+                # pylint: disable-next=import-outside-toplevel
                 import scipy.signal
 
                 num_samples = int(len(audio_data) * target_rate / sample_rate)
@@ -774,8 +802,9 @@ class TTSEngine:
             audio_data = np.concatenate([silence_start, audio_data, silence_end])
 
             logger.info(
-                f"Audio enhanced: {lead_in_samples/sample_rate:.2f}s lead-in, "
-                f"{tail_samples/sample_rate:.2f}s tail, fade in/out applied"
+                "Audio enhanced: %.2fs lead-in, %.2fs tail, fade in/out applied",
+                lead_in_samples / sample_rate,
+                tail_samples / sample_rate,
             )
 
             # Convert to 16-bit PCM
@@ -783,7 +812,10 @@ class TTSEngine:
 
             duration = len(audio_int16) / sample_rate
             logger.info(
-                f"Writing {len(audio_int16)} samples ({duration:.1f}s) to pipe: {pipe_path}"
+                "Writing %s samples (%.1fs) to pipe: %s",
+                len(audio_int16),
+                duration,
+                pipe_path,
             )
 
             # Write to pipe using blocking I/O for reliability
@@ -796,20 +828,21 @@ class TTSEngine:
                 audio_int16.tobytes(),
             )
 
+            # pylint: disable-next=no-else-return
             if success:
                 logger.info("Successfully wrote audio to pipe")
                 return duration
             else:
                 return 0.0
 
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to write to pipe: {e}")
+            logger.error("Failed to write to pipe: %s", e)
             return 0.0
 
     def _write_to_pipe_blocking(self, pipe_path: str, audio_bytes: bytes) -> bool:
         """Write audio to pipe using blocking I/O (runs in thread pool)."""
-        import os
-
         try:
             # Open pipe for writing (blocking mode)
             # This will wait until a reader is ready
@@ -824,24 +857,28 @@ class TTSEngine:
                         break
                     total_written += written
 
-                logger.debug(f"Wrote {total_written} bytes to pipe")
+                logger.debug("Wrote %s bytes to pipe", total_written)
                 return total_written == len(audio_bytes)
             finally:
                 os.close(fd)
 
         except FileNotFoundError:
-            logger.error(f"Pipe not found: {pipe_path}")
+            logger.error("Pipe not found: %s", pipe_path)
             return False
         except BrokenPipeError:
             logger.warning("Pipe reader closed")
             return False
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Pipe write error: {e}")
+            logger.error("Pipe write error: %s", e)
             return False
 
 
 # Global engine instances
+# pylint: disable-next=invalid-name
 _tts_engine: Optional[TTSEngine] = None
+# pylint: disable-next=invalid-name
 _gpt_sovits_engine: Optional[GPTSoVITSEngine] = None
 
 
@@ -852,6 +889,7 @@ def get_tts_engine(backend: str = "piper") -> TTSEngine:
     Args:
         backend: "piper" (default, fast) or "gpt-sovits" (voice cloning)
     """
+    # pylint: disable-next=global-statement
     global _tts_engine
     if _tts_engine is None or _tts_engine.backend != backend:
         _tts_engine = TTSEngine(backend=backend)
@@ -860,6 +898,7 @@ def get_tts_engine(backend: str = "piper") -> TTSEngine:
 
 def get_gpt_sovits_engine() -> GPTSoVITSEngine:
     """Get the GPT-SoVITS engine specifically (for voice cloning)."""
+    # pylint: disable-next=global-statement
     global _gpt_sovits_engine
     if _gpt_sovits_engine is None:
         _gpt_sovits_engine = GPTSoVITSEngine()

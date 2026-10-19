@@ -8,7 +8,7 @@ Part of Layer 5: Usage Pattern Learning
 
 import hashlib
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 
 def _generate_pattern_id(tool_name: str, category: str, error_snippet: str) -> str:
@@ -23,7 +23,7 @@ def _extract_incorrect_param_pattern(
     tool_name: str, params: dict, error_message: str, evidence: dict
 ) -> dict:
     """Extract pattern for INCORRECT_PARAMETER errors."""
-    pattern = {
+    pattern: dict[str, Any] = {
         "error_regex": "",
         "parameter": None,
         "common_mistakes": [],
@@ -60,9 +60,10 @@ def _extract_incorrect_param_pattern(
     return pattern
 
 
+# pylint: disable-next=unused-argument
 def _extract_format_pattern(params: dict, error_message: str, evidence: dict) -> dict:
     """Extract pattern for PARAMETER_FORMAT errors."""
-    pattern = {
+    pattern: dict[str, Any] = {
         "error_regex": "",
         "parameter": None,
         "validation": {},
@@ -99,10 +100,13 @@ def _extract_format_pattern(params: dict, error_message: str, evidence: dict) ->
 
 
 def _extract_prerequisite_pattern(
-    tool_name: str, error_message: str, context: dict
+    # pylint: disable-next=unused-argument
+    tool_name: str,
+    error_message: str,
+    context: dict,  # pylint: disable=unused-argument
 ) -> dict:
     """Extract pattern for MISSING_PREREQUISITE errors."""
-    pattern = {"error_regex": "", "context": ""}
+    pattern: dict[str, Any] = {"error_regex": "", "context": ""}
 
     # Determine what prerequisite is missing
     if (
@@ -133,10 +137,18 @@ def _extract_prerequisite_pattern(
 
 
 def _extract_sequence_pattern(
-    tool_name: str, error_message: str, context: dict, evidence: dict
+    # pylint: disable-next=unused-argument
+    tool_name: str,
+    error_message: str,  # pylint: disable=unused-argument
+    context: dict,  # pylint: disable=unused-argument
+    evidence: dict,
 ) -> dict:
     """Extract pattern for WORKFLOW_SEQUENCE errors."""
-    pattern = {"error_regex": "", "missing_step": None, "correct_sequence": []}
+    pattern: dict[str, Any] = {
+        "error_regex": "",
+        "missing_step": None,
+        "correct_sequence": [],
+    }
 
     # Extract missing prerequisite from evidence
     if "missing_prerequisite" in evidence:
@@ -165,6 +177,7 @@ def _extract_sequence_pattern(
     return pattern
 
 
+# pylint: disable-next=unused-argument
 def _generate_param_validation_steps(tool_name: str, evidence: dict) -> list[dict]:
     """Generate prevention steps for parameter validation."""
     steps = []
@@ -236,6 +249,7 @@ def _generate_format_validation_steps(evidence: dict) -> list[dict]:
     return steps
 
 
+# pylint: disable-next=unused-argument
 def _generate_prerequisite_steps(tool_name: str, context: dict) -> list[dict]:
     """Generate prevention steps for prerequisite checks."""
     steps = []
@@ -319,19 +333,19 @@ def _generate_root_cause(
         param = mistake_pattern.get("parameter", "parameter")
         return f"Claude used incorrect value for '{param}' parameter"
 
-    elif category == "PARAMETER_FORMAT":
+    if category == "PARAMETER_FORMAT":
         param = mistake_pattern.get("parameter", "parameter")
         expected = mistake_pattern.get("validation", {}).get(
             "expected", "correct format"
         )
         return f"Claude used wrong format for '{param}' (expected: {expected})"
 
-    elif category == "MISSING_PREREQUISITE":
+    if category == "MISSING_PREREQUISITE":
         return (
             f"Claude called {tool_name} before completing required prerequisite steps"
         )
 
-    elif category == "WORKFLOW_SEQUENCE":
+    if category == "WORKFLOW_SEQUENCE":
         prereqs = classification.get("evidence", {}).get("missing_prerequisite", [])
         if prereqs:
             return (
@@ -339,8 +353,7 @@ def _generate_root_cause(
             )
         return f"Claude called {tool_name} in wrong workflow order"
 
-    else:
-        return f"Claude made a usage error with {tool_name}"
+    return f"Claude made a usage error with {tool_name}"
 
 
 def extract_usage_pattern(
@@ -366,7 +379,7 @@ def extract_usage_pattern(
     if context is None:
         context = {}
 
-    pattern = {
+    pattern: dict[str, Any] = {
         "id": _generate_pattern_id(
             tool_name, classification.get("error_category", "unknown"), error_message
         ),

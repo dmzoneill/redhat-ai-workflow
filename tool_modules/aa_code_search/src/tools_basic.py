@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """
 Semantic code search tools using local vector embeddings.
 
@@ -43,9 +44,9 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 # Lazy imports for heavy dependencies
-_lancedb = None
-_sentence_transformer = None
-_openvino_model = None
+_lancedb = None  # pylint: disable=invalid-name
+_sentence_transformer = None  # pylint: disable=invalid-name
+_openvino_model = None  # pylint: disable=invalid-name
 
 # Configuration
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast, good quality, runs locally
@@ -86,12 +87,12 @@ def _import_watcher():
     """Import watcher module, handling both package and standalone loading."""
     try:
         # Try relative import first (works when loaded as package)
-        from . import watcher
+        from . import watcher  # pylint: disable=import-outside-toplevel
 
         return watcher
     except ImportError:
         # Fall back to absolute import (works when _TOOLS_DIR is in sys.path)
-        import watcher
+        import watcher  # pylint: disable=import-outside-toplevel
 
         return watcher
 
@@ -192,10 +193,10 @@ def _get_cached_embedding(query: str, model) -> list[float]:
 
 def _get_lancedb():
     """Lazy load lancedb."""
-    global _lancedb
+    global _lancedb  # pylint: disable=global-statement
     if _lancedb is None:
         try:
-            import lancedb
+            import lancedb  # pylint: disable=import-outside-toplevel
 
             _lancedb = lancedb
         except ImportError as e:
@@ -212,7 +213,7 @@ def _get_embedding_model():
     - openvino (Intel NPU/iGPU acceleration)
     - onnx (ONNX Runtime with CUDA/CPU)
     """
-    global _sentence_transformer, _openvino_model
+    global _sentence_transformer, _openvino_model  # pylint: disable=global-statement
 
     # Check config for backend preference
     vs_config = _get_vector_search_config()
@@ -226,8 +227,9 @@ def _get_embedding_model():
                 if _openvino_model:
                     logger.info("Using OpenVINO embedding backend")
                     return _openvino_model
-            except Exception as e:
-                logger.warning(f"OpenVINO backend failed, falling back: {e}")
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("OpenVINO backend failed, falling back: %s", e)
 
     # Try ONNX backend
     if backend == "onnx":
@@ -237,12 +239,14 @@ def _get_embedding_model():
                 if _sentence_transformer:
                     logger.info("Using ONNX embedding backend")
                     return _sentence_transformer
-            except Exception as e:
-                logger.warning(f"ONNX backend failed, falling back: {e}")
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.warning("ONNX backend failed, falling back: %s", e)
 
     # Default: sentence-transformers
     if _sentence_transformer is None:
         try:
+            # pylint: disable-next=import-outside-toplevel
             from sentence_transformers import SentenceTransformer
 
             _sentence_transformer = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
@@ -264,7 +268,9 @@ def _load_openvino_model():
     Requires: uv add optimum[openvino] openvino
     """
     try:
-        from transformers import AutoTokenizer
+        from transformers import (  # pylint: disable=import-outside-toplevel
+            AutoTokenizer,
+        )
 
         vs_config = _get_vector_search_config()
         ov_config = (
@@ -279,6 +285,7 @@ def _load_openvino_model():
             return _load_openvino_npu_static()
 
         # For GPU/CPU, dynamic shapes work fine
+        # pylint: disable-next=import-outside-toplevel
         from optimum.intel import OVModelForFeatureExtraction
 
         model_name = f"sentence-transformers/{DEFAULT_EMBEDDING_MODEL}"
@@ -290,13 +297,16 @@ def _load_openvino_model():
         )
 
         # Wrap in a class with encode() method for compatibility
-        class OpenVINOEmbedder:
+        class OpenVINOEmbedder:  # pylint: disable=too-few-public-methods
+            """Adapter exposing encode() for an OpenVINO model."""
+
             def __init__(self, model, tokenizer, device):
                 self.model = model
                 self.tokenizer = tokenizer
                 self.device = device
 
-            def encode(self, texts, **kwargs):
+            def encode(self, texts, **kwargs):  # pylint: disable=unused-argument
+                """Return embeddings for one string or a list of strings."""
                 if isinstance(texts, str):
                     texts = [texts]
 
@@ -316,13 +326,15 @@ def _load_openvino_model():
         return OpenVINOEmbedder(model, tokenizer, device)
 
     except ImportError as e:
-        logger.debug(f"OpenVINO not available: {e}")
+        logger.debug("OpenVINO not available: %s", e)
         return None
-    except Exception as e:
-        logger.warning(f"Failed to load OpenVINO model: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load OpenVINO model: %s", e)
         return None
 
 
+# pylint: disable-next=too-many-locals
 def _load_openvino_npu_static():
     """
     Load embedding model for NPU with FIXED input shapes.
@@ -331,12 +343,14 @@ def _load_openvino_npu_static():
     Uses optimum-intel's export with static shapes.
     """
     try:
-        pass
+        import numpy as np  # pylint: disable=import-outside-toplevel
+        import openvino as ov  # pylint: disable=import-outside-toplevel
 
-        import numpy as np
-        import openvino as ov
+        # pylint: disable-next=import-outside-toplevel
         from optimum.intel import OVModelForFeatureExtraction
-        from transformers import AutoTokenizer
+        from transformers import (  # pylint: disable=import-outside-toplevel
+            AutoTokenizer,
+        )
 
         vs_config = _get_vector_search_config()
         ov_config = (
@@ -346,10 +360,10 @@ def _load_openvino_npu_static():
         )
 
         # Fixed sequence length for NPU (shorter = faster, but truncates long queries)
-        FIXED_SEQ_LEN = ov_config.get("fixed_seq_len", 128)
+        fixed_seq_len = ov_config.get("fixed_seq_len", 128)
 
         model_name = f"sentence-transformers/{DEFAULT_EMBEDDING_MODEL}"
-        cache_dir = VECTOR_DB_PATH / "openvino_cache" / f"npu_seq{FIXED_SEQ_LEN}"
+        cache_dir = VECTOR_DB_PATH / "openvino_cache" / f"npu_seq{fixed_seq_len}"
         cache_dir.mkdir(parents=True, exist_ok=True)
 
         ir_path = cache_dir / "openvino_model.xml"
@@ -359,7 +373,8 @@ def _load_openvino_npu_static():
         # Export with static shapes if not cached
         if not ir_path.exists():
             logger.info(
-                f"Exporting model with fixed shape (seq_len={FIXED_SEQ_LEN}) for NPU..."
+                "Exporting model with fixed shape (seq_len=%s) for NPU...",
+                fixed_seq_len,
             )
 
             # Use optimum-intel to export with static shapes
@@ -374,18 +389,18 @@ def _load_openvino_npu_static():
             model = ov_model.model
             model.reshape(
                 {
-                    "input_ids": [1, FIXED_SEQ_LEN],
-                    "attention_mask": [1, FIXED_SEQ_LEN],
-                    "token_type_ids": [1, FIXED_SEQ_LEN],
+                    "input_ids": [1, fixed_seq_len],
+                    "attention_mask": [1, fixed_seq_len],
+                    "token_type_ids": [1, fixed_seq_len],
                 }
             )
 
             # Save the reshaped model
             ov.save_model(model, str(ir_path))
-            logger.info(f"Saved static NPU model to {ir_path}")
+            logger.info("Saved static NPU model to %s", ir_path)
 
         # Load and compile for NPU
-        logger.info(f"Compiling model for NPU (fixed seq_len={FIXED_SEQ_LEN})...")
+        logger.info("Compiling model for NPU (fixed seq_len=%s)...", fixed_seq_len)
         ov_model = core.read_model(str(ir_path))
 
         # NPU-specific optimizations
@@ -395,6 +410,7 @@ def _load_openvino_npu_static():
 
         compiled_model = core.compile_model(ov_model, "NPU", config)
 
+        # pylint: disable-next=too-few-public-methods
         class OpenVINONPUEmbedder:
             """Embedder using NPU with fixed input shapes."""
 
@@ -404,7 +420,8 @@ def _load_openvino_npu_static():
                 self.seq_len = seq_len
                 self.infer_request = compiled_model.create_infer_request()
 
-            def encode(self, texts, **kwargs):
+            def encode(self, texts, **kwargs):  # pylint: disable=unused-argument
+                """Return embeddings for one string or a list of strings."""
                 if isinstance(texts, str):
                     texts = [texts]
 
@@ -442,13 +459,14 @@ def _load_openvino_npu_static():
 
                 return embeddings
 
-        embedder = OpenVINONPUEmbedder(compiled_model, tokenizer, FIXED_SEQ_LEN)
+        embedder = OpenVINONPUEmbedder(compiled_model, tokenizer, fixed_seq_len)
         logger.info("✅ NPU embedder ready with fixed shapes")
         return embedder
 
-    except Exception as e:
-        logger.warning(f"Failed to load NPU static model: {e}")
-        import traceback
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Failed to load NPU static model: %s", e)
+        import traceback  # pylint: disable=import-outside-toplevel
 
         traceback.print_exc()
         return None
@@ -461,6 +479,7 @@ def _load_onnx_model():
     Requires: uv add onnxruntime-gpu (or onnxruntime for CPU)
     """
     try:
+        # pylint: disable-next=import-outside-toplevel
         from sentence_transformers import SentenceTransformer
 
         vs_config = _get_vector_search_config()
@@ -480,18 +499,21 @@ def _load_onnx_model():
 
         return model
 
-    except Exception as e:
-        logger.debug(f"ONNX backend not available: {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("ONNX backend not available: %s", e)
         return None
 
 
 def _load_config() -> dict:
     """Load config via ConfigManager."""
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.config_manager import config as config_manager
 
         return config_manager.get_all()
-    except Exception:
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception:  # pylint: disable=broad-exception-caught
         return {}
 
 
@@ -540,12 +562,13 @@ def _chunk_code_simple(content: str, file_path: str, language: str) -> list[dict
     return chunks
 
 
+# pylint: disable-next=too-many-locals
 def _chunk_python_code(content: str, file_path: str) -> list[dict]:
     """Chunk Python code by functions and classes."""
-    chunks = []
+    chunks: list[dict[str, Any]] = []
     lines = content.split("\n")
 
-    current_chunk = []
+    current_chunk: list[str] = []
     current_type = "module"
     current_name = "module"
     chunk_start_line = 1
@@ -614,7 +637,7 @@ def _chunk_python_code(content: str, file_path: str) -> list[dict]:
             )
 
     # Split large chunks
-    final_chunks = []
+    final_chunks: list[dict[str, Any]] = []
     for chunk in chunks:
         if len(chunk["content"]) > CHUNK_SIZE * 2:
             # Split large chunks
@@ -633,6 +656,7 @@ def _chunk_python_code(content: str, file_path: str) -> list[dict]:
     return final_chunks
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def _chunk_by_size(
     content: str,
     file_path: str,
@@ -642,10 +666,10 @@ def _chunk_by_size(
     chunk_name: str = "unknown",
 ) -> list[dict]:
     """Chunk content by size with overlap."""
-    chunks = []
+    chunks: list[dict[str, Any]] = []
     lines = content.split("\n")
 
-    current_chunk_lines = []
+    current_chunk_lines: list[str] = []
     current_start = base_line
     current_size = 0
 
@@ -785,7 +809,8 @@ def _is_index_stale(project: str, max_age_minutes: int = INDEX_STALE_MINUTES) ->
         indexed_at = datetime.fromisoformat(metadata.get("indexed_at", ""))
         age = datetime.now() - indexed_at
         return age > timedelta(minutes=max_age_minutes)
-    except Exception:
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception:  # pylint: disable=broad-exception-caught
         return True
 
 
@@ -795,12 +820,13 @@ def _auto_update_if_stale(project: str) -> dict | None:
         return None
 
     if _is_index_stale(project):
-        logger.info(f"Index for {project} is stale, auto-updating...")
+        logger.info("Index for %s is stale, auto-updating...", project)
         return _index_project(project, force=False)
 
     return None
 
 
+# pylint: disable-next=too-many-locals,too-many-branches,too-many-statements
 def _index_project(project: str, force: bool = False) -> dict:
     """
     Index a project's code into LanceDB.
@@ -819,7 +845,7 @@ def _index_project(project: str, force: bool = False) -> dict:
     model = _get_embedding_model()
 
     # Track statistics
-    stats = {
+    stats: dict[str, Any] = {
         "files_indexed": 0,
         "files_skipped": 0,
         "chunks_created": 0,
@@ -834,7 +860,9 @@ def _index_project(project: str, force: bool = False) -> dict:
             with open(metadata_path, encoding="utf-8") as f:
                 existing_hashes = json.load(f).get("file_hashes", {})
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Corrupted metadata.json for {project}, will re-index: {e}")
+            logger.warning(
+                "Corrupted metadata.json for %s, will re-index: %s", project, e
+            )
             existing_hashes = {}
 
     new_hashes = {}
@@ -889,7 +917,8 @@ def _index_project(project: str, force: bool = False) -> dict:
             stats["files_indexed"] += 1
             stats["chunks_created"] += len(chunks)
 
-        except Exception as e:
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             stats["errors"].append(f"{rel_path}: {str(e)}")
 
     # Create or overwrite table
@@ -960,12 +989,15 @@ def _index_project(project: str, force: bool = False) -> dict:
 
                 stats["index_time_ms"] = (time.time() - index_start) * 1000
                 logger.info(
-                    f"Created {stats.get('index_type', 'FLAT')} index in {stats['index_time_ms']:.0f}ms"
+                    "Created %s index in %.0fms",
+                    stats.get("index_type", "FLAT"),
+                    stats["index_time_ms"],
                 )
 
-            except Exception as e:
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning(
-                    f"Failed to create index (falling back to brute force): {e}"
+                    "Failed to create index (falling back to brute force): %s", e
                 )
                 stats["index_type"] = "FLAT"
                 stats["index_error"] = str(e)
@@ -976,15 +1008,14 @@ def _index_project(project: str, force: bool = False) -> dict:
         # Optimize data files to reduce disk usage
         # LanceDB creates new fragment files on each write; optimize merges them
         try:
-            from datetime import timedelta
-
             optimize_start = time.time()
             # Remove all old versions except the latest
             table.optimize(cleanup_older_than=timedelta(days=0))
             stats["optimize_time_ms"] = (time.time() - optimize_start) * 1000
-            logger.info(f"Optimized table in {stats['optimize_time_ms']:.0f}ms")
-        except Exception as e:
-            logger.warning(f"Failed to optimize table: {e}")
+            logger.info("Optimized table in %.0fms", stats["optimize_time_ms"])
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to optimize table: %s", e)
             stats["optimize_error"] = str(e)
 
     # Save metadata
@@ -1007,6 +1038,7 @@ def _index_project(project: str, force: bool = False) -> dict:
     return stats
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
 def _search_code(
     query: str,
     project: str,
@@ -1041,7 +1073,7 @@ def _search_code(
         update_stats = _auto_update_if_stale(project)
         if update_stats and "error" not in update_stats:
             logger.info(
-                f"Auto-updated index: {update_stats.get('files_indexed', 0)} files"
+                "Auto-updated index: %s files", update_stats.get("files_indexed", 0)
             )
 
     # Get LanceDB connection
@@ -1078,11 +1110,15 @@ def _search_code(
     # Execute search with error handling for corrupted/empty indexes
     try:
         results = search_query.to_pandas()
-    except Exception as e:
-        logger.error(f"LanceDB search failed for project '{project}': {e}")
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("LanceDB search failed for project '%s': %s", project, e)
         return [
             {
-                "error": f"Search failed: {e}. Try re-indexing with code_index(project='{project}', force=True)"
+                "error": (
+                    f"Search failed: {e}. Try re-indexing with "
+                    f"code_index(project='{project}', force=True)"
+                )
             }
         ]
 
@@ -1105,11 +1141,14 @@ def _search_code(
     missing_cols = required_cols - set(results.columns)
     if missing_cols:
         logger.error(
-            f"Index schema mismatch for '{project}': missing columns {missing_cols}"
+            "Index schema mismatch for '%s': missing columns %s", project, missing_cols
         )
         return [
             {
-                "error": f"Index schema mismatch. Re-index with code_index(project='{project}', force=True)"
+                "error": (
+                    "Index schema mismatch. Re-index with "
+                    f"code_index(project='{project}', force=True)"
+                )
             }
         ]
 
@@ -1121,8 +1160,9 @@ def _search_code(
             ]
         if type_filter:
             results = results[results["type"] == type_filter]
-    except Exception as e:
-        logger.warning(f"Filter application failed: {e}")
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.warning("Filter application failed: %s", e)
         # Continue without filters rather than crashing
 
     # Limit results
@@ -1165,6 +1205,7 @@ def _search_code(
     return formatted
 
 
+# pylint: disable-next=too-many-locals,too-many-branches
 def _get_index_stats(project: str) -> dict:
     """Get comprehensive statistics about indexed project."""
     metadata_path = VECTOR_DB_PATH / project / "metadata.json"
@@ -1184,15 +1225,16 @@ def _get_index_stats(project: str) -> dict:
         if table_name in db.table_names():
             table = db.open_table(table_name)
             chunk_count = len(table)
-    except Exception as exc:
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.debug("Suppressed error: %s", exc)
 
     # Calculate disk size
     disk_size_bytes = 0
     if db_path.exists():
-        for f in db_path.rglob("*"):
-            if f.is_file():
-                disk_size_bytes += f.stat().st_size
+        for entry in db_path.rglob("*"):
+            if entry.is_file():
+                disk_size_bytes += entry.stat().st_size
 
     # Format disk size
     if disk_size_bytes >= 1024 * 1024:
@@ -1219,7 +1261,8 @@ def _get_index_stats(project: str) -> dict:
             else:
                 index_age = "just now"
             is_stale = age > timedelta(minutes=INDEX_STALE_MINUTES)
-        except Exception as exc:
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             logger.debug("Suppressed error: %s", exc)
 
     # Get search stats
@@ -1320,8 +1363,9 @@ def _update_search_stats(
 
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
-    except Exception as e:
-        logger.debug(f"Failed to update search stats: {e}")
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Failed to update search stats: %s", e)
 
 
 def get_all_vector_stats() -> dict:
@@ -1342,7 +1386,7 @@ def get_all_vector_stats() -> dict:
     projects = list(config.get("repositories", {}).keys())
     vs_config = config.get("vector_search", {})
 
-    result = {
+    result: dict[str, Any] = {
         "projects": [],
         "totals": {
             "indexed_count": 0,
@@ -1432,9 +1476,8 @@ def get_all_vector_stats() -> dict:
         result["totals"]["total_cache_hits"] + result["totals"]["total_cache_misses"]
     )
     if total_cache > 0:
-        result["totals"][
-            "cache_hit_rate"
-        ] = f"{result['totals']['total_cache_hits'] / total_cache * 100:.1f}%"
+        hit_rate = result["totals"]["total_cache_hits"] / total_cache * 100
+        result["totals"]["cache_hit_rate"] = f"{hit_rate:.1f}%"
     else:
         result["totals"]["cache_hit_rate"] = "N/A"
 
@@ -1450,7 +1493,7 @@ def get_vector_health() -> dict:
     """
     stats = get_all_vector_stats()
 
-    health = {
+    health: dict[str, Any] = {
         "status": "healthy",
         "issues": [],
         "recommendations": [],
@@ -1512,6 +1555,7 @@ def get_vector_health() -> dict:
 # ============================================================================
 
 
+# pylint: disable-next=too-many-statements
 def register_tools(registry: Any) -> None:  # noqa: C901
     """Register code search tools with the MCP registry."""
 
@@ -1570,9 +1614,9 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             result = f"""✅ **Indexed {project}**
 
 📊 **Statistics:**
-- Files indexed: {stats['files_indexed']}
-- Files skipped (unchanged): {stats['files_skipped']}
-- Code chunks created: {stats['chunks_created']}
+- Files indexed: {stats["files_indexed"]}
+- Files skipped (unchanged): {stats["files_skipped"]}
+- Code chunks created: {stats["chunks_created"]}
 {index_info}
 """
             if stats["errors"]:
@@ -1585,7 +1629,10 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                     + "\n"
                 )
 
-            result += f"\n💡 Now use `code_search('{project}', 'your query')` to search semantically."
+            result += (
+                f"\n💡 Now use `code_search('{project}', 'your query')` "
+                "to search semantically."
+            )
             result += "\n🏥 Use `code_health()` to check performance metrics."
 
             return [TextContent(type="text", text=result)]
@@ -1594,10 +1641,14 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```",
+                    text=(
+                        f"❌ Missing dependency: {e}\n\n"
+                        "Install with:\n```\nuv add lancedb sentence-transformers\n```"
+                    ),
                 )
             ]
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Indexing failed: {e}")]
 
     @registry.tool()
@@ -1675,7 +1726,8 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                     content = content[:800] + "\n... (truncated)"
 
                 parts.append(
-                    f"### {i}. `{result['file_path']}` (lines {result['start_line']}-{result['end_line']})\n"
+                    f"### {i}. `{result['file_path']}` "
+                    f"(lines {result['start_line']}-{result['end_line']})\n"
                     f"**Type:** {result['type']} | **Name:** {result['name']}"
                     f" | **Relevance:** {result['similarity']:.0%}\n\n"
                     f"```{result['language']}\n{content}\n```\n"
@@ -1688,13 +1740,18 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```",
+                    text=(
+                        f"❌ Missing dependency: {e}\n\n"
+                        "Install with:\n```\nuv add lancedb sentence-transformers\n```"
+                    ),
                 )
             ]
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Search failed: {e}")]
 
     @registry.tool()
+    # pylint: disable-next=too-many-locals
     async def code_stats(
         project: str = "",
     ) -> list[TextContent]:
@@ -1764,7 +1821,10 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                     output += (
                         f"| **Searches** | {stats.get('search_count', 0):,} total |\n"
                     )
-                    output += f"| **Avg Search Time** | {stats.get('avg_search_time_ms', 0):.0f}ms |\n"
+                    output += (
+                        "| **Avg Search Time** | "
+                        f"{stats.get('avg_search_time_ms', 0):.0f}ms |\n"
+                    )
 
                 # Watcher status
                 if watcher:
@@ -1788,11 +1848,15 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                 total_size = f"{total_size_bytes} B"
 
             output += "---\n\n"
-            output += f"**Total:** {total_chunks:,} chunks, {total_size}, {total_searches:,} searches\n"
+            output += (
+                f"**Total:** {total_chunks:,} chunks, {total_size}, "
+                f"{total_searches:,} searches\n"
+            )
 
         return [TextContent(type="text", text=output)]
 
     @registry.tool()
+    # pylint: disable-next=too-many-locals,too-many-branches
     async def code_compact(
         project: str = "",
     ) -> list[TextContent]:
@@ -1813,8 +1877,6 @@ def register_tools(registry: Any) -> None:  # noqa: C901
             code_compact("redhat-ai-workflow")  # Optimize single project
             code_compact()  # Optimize all projects
         """
-        from datetime import timedelta
-
         config = _load_config()
         projects = list(config.get("repositories", {}).keys())
 
@@ -1871,7 +1933,8 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                         f"✅ **{proj}**: Already optimized ({files_after} files)"
                     )
 
-            except Exception as e:
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 results.append(f"❌ **{proj}**: {e}")
 
         output = "## 🗜️ Vector Database Optimization\n\n"
@@ -1890,7 +1953,7 @@ def register_tools(registry: Any) -> None:  # noqa: C901
     @registry.tool()
     async def knowledge_deep_scan(
         project: str,
-        update_memory: bool = True,
+        update_memory: bool = True,  # pylint: disable=unused-argument
     ) -> list[TextContent]:
         """
         Deep scan a project using vector search + Claude analysis.
@@ -1941,13 +2004,14 @@ def register_tools(registry: Any) -> None:  # noqa: C901
                 results = _search_code(query, project, limit=5)
                 if results and "error" not in results[0]:
                     findings[key] = results
-            except Exception as exc:
+            # Intentional: log the failure and continue at this boundary.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 logger.debug("Suppressed error: %s", exc)
 
         # Format findings for Claude to analyze
         output = f"""## 🔬 Deep Scan Results: {project}
 
-**Indexed:** {stats.get('chunks_count', 0)} code chunks from {stats.get('file_count', 0)} files
+**Indexed:** {stats.get("chunks_count", 0)} code chunks from {stats.get("file_count", 0)} files
 
 ---
 
@@ -1986,6 +2050,7 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
         return [TextContent(type="text", text=output)]
 
     @registry.tool()
+    # pylint: disable-next=too-many-locals,too-many-return-statements
     async def code_watch(
         project: str = "",
         action: str = "start",
@@ -2068,7 +2133,10 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
                     return [
                         TextContent(
                             type="text",
-                            text=f"❌ Project '{project}' not indexed. Run `code_index('{project}')` first.",
+                            text=(
+                                f"❌ Project '{project}' not indexed. "
+                                f"Run `code_index('{project}')` first."
+                            ),
                         )
                     ]
 
@@ -2098,30 +2166,27 @@ Use `code_watch('{project}', 'stop')` to stop watching.
                 return [
                     TextContent(
                         type="text",
-                        text=f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add watchfiles\n```",
+                        text=(
+                            f"❌ Missing dependency: {e}\n\n"
+                            "Install with:\n```\nuv add watchfiles\n```"
+                        ),
                     )
                 ]
-            except Exception as e:
+            # Intentional: convert the failure into an error result for the caller.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 return [
                     TextContent(type="text", text=f"❌ Failed to start watcher: {e}")
                 ]
 
-        elif action == "stop":
+        if action == "stop":
             stopped = await stop_watcher(project)
             if stopped:
                 return [TextContent(type="text", text=f"✅ Stopped watching {project}")]
-            else:
-                return [
-                    TextContent(type="text", text=f"⚠️ No active watcher for {project}")
-                ]
+            warning = f"⚠️ No active watcher for {project}"
+            return [TextContent(type="text", text=warning)]
 
-        else:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'.",
-                )
-            ]
+        unknown = f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'."
+        return [TextContent(type="text", text=unknown)]
 
     @registry.tool()
     async def code_watch_all(
@@ -2166,7 +2231,8 @@ Use `code_watch('{project}', 'stop')` to stop watching.
                         debounce_seconds=debounce_seconds,
                     )
                     results.append(f"✅ {project}: watching")
-                except Exception as e:
+                # Intentional: log the failure and continue at this boundary.
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     results.append(f"❌ {project}: {e}")
 
             output = "## 👁️ Started Watchers\n\n"
@@ -2175,17 +2241,16 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
             return [TextContent(type="text", text=output)]
 
-        elif action == "stop":
+        if action == "stop":
             count = await stop_all_watchers()
             return [TextContent(type="text", text=f"✅ Stopped {count} watcher(s)")]
 
-        else:
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.",
-                )
-            ]
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.",
+            )
+        ]
 
     @registry.tool()
     async def code_health() -> list[TextContent]:
@@ -2217,7 +2282,7 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
             output = f"""## 🏥 Vector Search Health
 
-### Status: {status_emoji} {health['status'].upper()}
+### Status: {status_emoji} {health["status"].upper()}
 
 ---
 
@@ -2225,10 +2290,10 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
 | Metric | Value |
 |--------|-------|
-| **Indexed Projects** | {health['metrics']['indexed_projects']} |
-| **Total Vectors** | {health['metrics']['total_vectors']:,} |
-| **Avg Search Time** | {health['metrics']['avg_search_time_ms']:.1f}ms |
-| **Cache Hit Rate** | {health['metrics']['cache_hit_rate']} |
+| **Indexed Projects** | {health["metrics"]["indexed_projects"]} |
+| **Total Vectors** | {health["metrics"]["total_vectors"]:,} |
+| **Avg Search Time** | {health["metrics"]["avg_search_time_ms"]:.1f}ms |
+| **Cache Hit Rate** | {health["metrics"]["cache_hit_rate"]} |
 
 ---
 
@@ -2236,11 +2301,11 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
 | Setting | Value |
 |---------|-------|
-| **Index Type** | {stats['config']['index_type']} |
-| **nprobes** | {stats['config']['nprobes']} |
-| **Embedding Model** | `{stats['config']['embedding_model']}` |
-| **Embedding Backend** | {stats['config']['embedding_backend']} |
-| **Cache Enabled** | {stats['config']['cache_enabled']} |
+| **Index Type** | {stats["config"]["index_type"]} |
+| **nprobes** | {stats["config"]["nprobes"]} |
+| **Embedding Model** | `{stats["config"]["embedding_model"]}` |
+| **Embedding Backend** | {stats["config"]["embedding_backend"]} |
+| **Cache Enabled** | {stats["config"]["cache_enabled"]} |
 
 ---
 
@@ -2248,10 +2313,10 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
 | Metric | Value |
 |--------|-------|
-| **Cache Size** | {stats['cache']['size']} / {stats['cache']['max_size']} |
-| **Session Hit Rate** | {stats['cache']['hit_rate']} |
-| **Total Hits** | {stats['cache']['hits']} |
-| **Total Misses** | {stats['cache']['misses']} |
+| **Cache Size** | {stats["cache"]["size"]} / {stats["cache"]["max_size"]} |
+| **Session Hit Rate** | {stats["cache"]["hit_rate"]} |
+| **Total Hits** | {stats["cache"]["hits"]} |
+| **Total Misses** | {stats["cache"]["misses"]} |
 
 """
 
@@ -2267,7 +2332,8 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
             return [TextContent(type="text", text=output)]
 
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Health check failed: {e}")]
 
     @registry.tool()
@@ -2299,10 +2365,10 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
 | Metric | Value |
 |--------|-------|
-| **Size** | {stats['size']} / {stats['max_size']} |
-| **Hit Rate** | {stats['hit_rate']} |
-| **Hits** | {stats['hits']} |
-| **Misses** | {stats['misses']} |
+| **Size** | {stats["size"]} / {stats["max_size"]} |
+| **Hit Rate** | {stats["hit_rate"]} |
+| **Hits** | {stats["hits"]} |
+| **Misses** | {stats["misses"]} |
 
 💡 Cache stores query embeddings to speed up repeated searches.
 Use `code_cache('clear')` to clear the cache.
