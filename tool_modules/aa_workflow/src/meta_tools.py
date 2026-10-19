@@ -246,7 +246,7 @@ async def _handle_tool_exec_error(
                 lines.append("💡 **Report this error:**")
                 lines.append(f"📝 [Create GitHub Issue]({issue_result['issue_url']})")
         except Exception as issue_err:
-            logger.debug(f"Failed to create GitHub issue: {issue_err}")
+            logger.debug("Failed to create GitHub issue: %s", issue_err)
 
     return [TextContent(type="text", text="\n".join(lines))]
 
@@ -505,7 +505,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             return [TextContent(type="text", text="\n".join(lines))]
 
         except Exception as e:
-            logger.error(f"Context filter error: {e}")
+            logger.error("Context filter error: %s", e)
             return [
                 TextContent(type="text", text=f"❌ Error running context filter: {e}")
             ]
@@ -628,7 +628,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
                         server.remove_tool(tool_name)
                         hidden_tools.append(tool_name)
                     except Exception as e:
-                        logger.warning(f"Could not remove tool {tool_name}: {e}")
+                        logger.warning("Could not remove tool %s: %s", tool_name, e)
                 else:
                     kept_tools.append(tool_name)
 
@@ -644,10 +644,10 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
                             )
                 except ValueError as e:
                     logger.debug(
-                        f"Could not send notification (expected in test mode): {e}"
+                        "Could not send notification (expected in test mode): %s", e
                     )
                 except Exception as e:
-                    logger.warning(f"Could not send tool list changed: {e}")
+                    logger.warning("Could not send tool list changed: %s", e)
 
             # Format response
             lines = [
@@ -707,7 +707,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
             return [TextContent(type="text", text="\n".join(lines))]
 
         except Exception as e:
-            logger.error(f"Apply tool filter error: {e}")
+            logger.error("Apply tool filter error: %s", e)
             import traceback
 
             logger.error(traceback.format_exc())
@@ -742,13 +742,12 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
                         "The VS Code extension will pick up changes automatically.",
                     )
                 ]
-            else:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Export failed: {result.get('error', 'Unknown error')}",
-                    )
-                ]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Export failed: {result.get('error', 'Unknown error')}",
+                )
+            ]
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Export error: {e}")]
 
@@ -1277,8 +1276,7 @@ def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:  # noqa
                         text=f"✅ Updated gap `{gap_id}` status to `{status}`",
                     )
                 ]
-            else:
-                return [TextContent(type="text", text=f"❌ Gap `{gap_id}` not found")]
+            return [TextContent(type="text", text=f"❌ Gap `{gap_id}` not found")]
 
         except Exception as e:
             return [TextContent(type="text", text=f"❌ Error updating tool gap: {e}")]

@@ -95,6 +95,7 @@ class SkillAutoHealer:
     def determine_fix_type(
         self, error_lower: str, matched_pattern: dict | None, matches: list
     ) -> str | None:
+        "Determine fix type."
         return _shared_SkillExecutor__determine_fix_type(
             self, error_lower, matched_pattern, matches
         )
@@ -102,6 +103,7 @@ class SkillAutoHealer:
     determine_fix_type.__doc__ = _shared_SkillExecutor__determine_fix_type.__doc__
 
     def detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
+        "Detect auto heal type."
         return _shared_SkillExecutor__detect_auto_heal_type(self, error_msg)
 
     detect_auto_heal_type.__doc__ = _shared_SkillExecutor__detect_auto_heal_type.__doc__
@@ -428,34 +430,31 @@ class SkillAutoHealer:
                 self._debug(f"  → VPN connect result: {proc.returncode}")
                 await asyncio.sleep(2)  # Wait for VPN to establish
                 return proc.returncode == 0
-            else:
-                # Fallback to nmcli with common VPN connection names
-                self._debug("  → VPN script not found, trying nmcli fallback")
-                vpn_names = [
-                    "Red Hat Global VPN",
-                    "Red Hat VPN",
-                    "redhat-vpn",
-                    "RH-VPN",
-                ]
-                for vpn_name in vpn_names:
-                    proc = await asyncio.create_subprocess_shell(
-                        f"nmcli connection up '{vpn_name}' 2>/dev/null",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=30)
-                        if proc.returncode == 0:
-                            self._debug(
-                                f"  → VPN connect result: success with {vpn_name}"
-                            )
-                            await asyncio.sleep(2)
-                            return True
-                    except asyncio.TimeoutError:
-                        continue
+            # Fallback to nmcli with common VPN connection names
+            self._debug("  → VPN script not found, trying nmcli fallback")
+            vpn_names = [
+                "Red Hat Global VPN",
+                "Red Hat VPN",
+                "redhat-vpn",
+                "RH-VPN",
+            ]
+            for vpn_name in vpn_names:
+                proc = await asyncio.create_subprocess_shell(
+                    f"nmcli connection up '{vpn_name}' 2>/dev/null",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=30)
+                    if proc.returncode == 0:
+                        self._debug(f"  → VPN connect result: success with {vpn_name}")
+                        await asyncio.sleep(2)
+                        return True
+                except asyncio.TimeoutError:
+                    continue
 
-                self._debug("  → All VPN connection attempts failed")
-                return False
+            self._debug("  → All VPN connection attempts failed")
+            return False
 
         except Exception as e:
             self._debug(f"  → Auto-fix failed: {e}")

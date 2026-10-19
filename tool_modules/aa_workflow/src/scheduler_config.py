@@ -152,14 +152,17 @@ class RetryConfig:
     def from_config(
         cls, job_config: dict, default_config: dict | None = None
     ) -> "RetryConfig":
+        "From config."
         return _shared_RetryConfig_from_config(cls, job_config, default_config)
 
     def calculate_delay(self, attempt: int) -> int:
+        "Calculate delay."
         return _shared_RetryConfig_calculate_delay(self, attempt)
 
     calculate_delay.__doc__ = _shared_RetryConfig_calculate_delay.__doc__
 
     def should_retry(self, failure_type: str, attempt: int) -> bool:
+        "Should retry."
         return _shared_RetryConfig_should_retry(self, failure_type, attempt)
 
     should_retry.__doc__ = _shared_RetryConfig_should_retry.__doc__
@@ -264,6 +267,7 @@ class SchedulerConfig:
         return [j for j in self.jobs if j.get("cron") and self._is_job_enabled(j)]
 
     def get_poll_jobs(self) -> list[dict]:
+        "Get poll jobs."
         return _shared_SchedulerConfig_get_poll_jobs(self)
 
     get_poll_jobs.__doc__ = _shared_SchedulerConfig_get_poll_jobs.__doc__
@@ -358,7 +362,7 @@ class JobExecutionLog:
                     data = json.load(f)
                     self.entries = data.get("executions", [])[-self.max_entries :]
         except Exception as e:
-            logger.warning(f"Failed to load cron history: {e}")
+            logger.warning("Failed to load cron history: %s", e)
             self.entries = []
 
     def _save_to_file(self):
@@ -369,7 +373,7 @@ class JobExecutionLog:
             with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({"executions": self.entries}, f, indent=2)
         except Exception as e:
-            logger.warning(f"Failed to save cron history: {e}")
+            logger.warning("Failed to save cron history: %s", e)
 
     def log_execution(
         self,
@@ -382,6 +386,7 @@ class JobExecutionLog:
         session_name: str | None = None,
         retry_info: dict | None = None,
     ):
+        "Log execution."
         return _shared_JobExecutionLog_log_execution(
             self,
             job_name,

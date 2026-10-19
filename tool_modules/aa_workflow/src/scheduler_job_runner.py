@@ -110,7 +110,11 @@ class JobRunner:
         )
         persona_info = f", persona: {persona}" if persona else ""
         logger.info(
-            f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}"
+            "Executing scheduled job: %s (skill: %s%s) in session: %s",
+            job_name,
+            skill,
+            persona_info,
+            session_name,
         )
         self._log_to_file(
             f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
@@ -157,7 +161,11 @@ class JobRunner:
                 # Calculate backoff delay
                 delay = retry_config.calculate_delay(attempt - 1)
                 logger.info(
-                    f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay"
+                    "Job %s: Retry attempt %s/%s after %ss delay",
+                    job_name,
+                    attempt,
+                    retry_config.max_attempts,
+                    delay,
                 )
                 self._log_to_file(
                     f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s"
@@ -194,17 +202,17 @@ class JobRunner:
                     output = await self._run_skill(skill, inputs, job_name=job_name)
                     success = True
                     logger.info(
-                        f"Job {job_name} completed successfully (direct execution)"
+                        "Job %s completed successfully (direct execution)", job_name
                     )
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"Job {job_name} failed: {e}")
+                    logger.error("Job %s failed: %s", job_name, e)
 
             # If successful, break out of retry loop
             if success:
                 if attempt > 0:
                     logger.info(
-                        f"Job {job_name} succeeded after {attempt + 1} attempts"
+                        "Job %s succeeded after %s attempts", job_name, attempt + 1
                     )
                 break
 
@@ -215,7 +223,10 @@ class JobRunner:
             # Check if we should retry
             if not retry_config.should_retry(failure_type, attempt):
                 logger.info(
-                    f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})"
+                    "Job %s: Not retrying (type=%s, attempt=%s)",
+                    job_name,
+                    failure_type,
+                    attempt,
                 )
                 break
 
@@ -228,7 +239,7 @@ class JobRunner:
 
             if not remediation_success:
                 logger.warning(
-                    f"Job {job_name}: Remediation failed, but will still retry"
+                    "Job %s: Remediation failed, but will still retry", job_name
                 )
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -313,7 +324,7 @@ class JobRunner:
             )
 
             if not os.path.exists(vpn_script):
-                logger.warning(f"VPN script not found: {vpn_script}")
+                logger.warning("VPN script not found: %s", vpn_script)
                 return False
 
             logger.info("Running vpn-connect")
@@ -338,7 +349,7 @@ class JobRunner:
                     logger.info("vpn_connect successful")
                     return True
 
-                logger.warning(f"vpn_connect failed: {output[:200]}")
+                logger.warning("vpn_connect failed: %s", output[:200])
                 return False
 
             except asyncio.TimeoutError:
@@ -350,7 +361,7 @@ class JobRunner:
             logger.warning("VPN script not found")
             return False
         except Exception as e:
-            logger.warning(f"vpn_connect error: {e}")
+            logger.warning("vpn_connect error: %s", e)
             return False
 
     async def _run_with_claude_cli(
@@ -466,11 +477,10 @@ Begin execution now."""
                 # Truncate output for preview
                 preview = output[:500] if len(output) > 500 else output
                 return True, preview, None
-            else:
-                error_msg = (
-                    error_output or f"Claude CLI exited with code {process.returncode}"
-                )
-                return False, output[:200] if output else None, error_msg
+            error_msg = (
+                error_output or f"Claude CLI exited with code {process.returncode}"
+            )
+            return False, output[:200] if output else None, error_msg
 
         except FileNotFoundError:
             self._cleanup_skill_execution_state(skill, "Claude CLI not found in PATH")

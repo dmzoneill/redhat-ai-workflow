@@ -84,17 +84,20 @@ class RetryConfig:
     def from_config(
         cls, job_config: dict, default_config: dict | None = None
     ) -> "RetryConfig":
+        "From config."
         return cast(
             "RetryConfig",
             _shared_RetryConfig_from_config(cls, job_config, default_config),
         )
 
     def calculate_delay(self, attempt: int) -> int:
+        "Calculate delay."
         return _shared_RetryConfig_calculate_delay(self, attempt)
 
     calculate_delay.__doc__ = _shared_RetryConfig_calculate_delay.__doc__
 
     def should_retry(self, failure_type: str, attempt: int) -> bool:
+        "Should retry."
         return _shared_RetryConfig_should_retry(self, failure_type, attempt)
 
     should_retry.__doc__ = _shared_RetryConfig_should_retry.__doc__
@@ -146,6 +149,7 @@ class SchedulerConfig:
         return [j for j in self.jobs if j.get("cron") and self._is_job_enabled(j)]
 
     def get_poll_jobs(self) -> list[dict]:
+        "Get poll jobs."
         return _shared_SchedulerConfig_get_poll_jobs(self)
 
     get_poll_jobs.__doc__ = _shared_SchedulerConfig_get_poll_jobs.__doc__
@@ -181,7 +185,7 @@ class JobExecutionLog:
                     data = json.load(f)
                     self.entries = data.get("executions", [])[-self.max_entries :]
         except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Failed to load cron history: {e}")
+            logger.warning("Failed to load cron history: %s", e)
             self.entries = []
 
     def _save_to_file(self):
@@ -192,7 +196,7 @@ class JobExecutionLog:
             with open(self.HISTORY_FILE, "w", encoding="utf-8") as f:
                 json.dump({"executions": self.entries}, f, indent=2)
         except OSError as e:
-            logger.warning(f"Failed to save cron history: {e}")
+            logger.warning("Failed to save cron history: %s", e)
 
     def log_execution(
         self,
@@ -205,6 +209,7 @@ class JobExecutionLog:
         session_name: str | None = None,
         retry_info: dict | None = None,
     ):
+        "Log execution."
         return _shared_JobExecutionLog_log_execution(
             self,
             job_name,
@@ -374,13 +379,13 @@ async def _shared_CronScheduler__apply_remediation(
         success = await self._run_kube_login()
         return "kube_login", success
 
-    elif failure_type == "network":
+    if failure_type == "network":
         logger.info(f"Job {job_name}: Applying network remediation (vpn_connect)")
         self._log_to_file(f"Applying vpn_connect remediation for {job_name}")
         success = await self._run_vpn_connect()
         return "vpn_connect", success
 
-    elif failure_type == "timeout":
+    if failure_type == "timeout":
         # For timeouts, just wait a bit longer (no specific fix)
         logger.info(f"Job {job_name}: Timeout detected, will retry with delay")
         return None, True
@@ -569,7 +574,7 @@ class CronScheduler:
             )
             for job in cron_jobs:
                 self._add_cron_job(job)
-            logger.info(f"Scheduler started with {len(cron_jobs)} cron jobs")
+            logger.info("Scheduler started with %s cron jobs", len(cron_jobs))
         elif self.config.enabled and not add_cron_jobs:
             logger.info("Scheduler started (cron jobs handled by cron_daemon)")
             self._log_to_file(
@@ -614,7 +619,7 @@ class CronScheduler:
         retry_config = self.config.get_retry_config(job_config)
 
         if not skill or not cron_expr:
-            logger.warning(f"Job {job_name} missing skill or cron expression")
+            logger.warning("Job %s missing skill or cron expression", job_name)
             return
 
         try:
@@ -649,11 +654,17 @@ class CronScheduler:
                 f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
             )
             logger.info(
-                f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}{timeout_info}"
+                "Added cron job: %s (%s) -> skill:%s%s%s%s",
+                job_name,
+                cron_expr,
+                skill,
+                persona_info,
+                retry_info,
+                timeout_info,
             )
 
         except Exception as e:
-            logger.error(f"Failed to add job {job_name}: {e}")
+            logger.error("Failed to add job %s: %s", job_name, e)
 
     def _parse_cron_to_trigger(self, cron_expr: str) -> CronTrigger:
         """Parse a cron expression into an APScheduler CronTrigger.
@@ -711,7 +722,11 @@ class CronScheduler:
         )
         persona_info = f", persona: {persona}" if persona else ""
         logger.info(
-            f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}"
+            "Executing scheduled job: %s (skill: %s%s) in session: %s",
+            job_name,
+            skill,
+            persona_info,
+            session_name,
         )
         self._log_to_file(
             f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
@@ -758,7 +773,11 @@ class CronScheduler:
                 # Calculate backoff delay
                 delay = retry_config.calculate_delay(attempt - 1)
                 logger.info(
-                    f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay"
+                    "Job %s: Retry attempt %s/%s after %ss delay",
+                    job_name,
+                    attempt,
+                    retry_config.max_attempts,
+                    delay,
                 )
                 self._log_to_file(
                     f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s"
@@ -795,17 +814,17 @@ class CronScheduler:
                     output = await self._run_skill(skill, inputs, job_name=job_name)
                     success = True
                     logger.info(
-                        f"Job {job_name} completed successfully (direct execution)"
+                        "Job %s completed successfully (direct execution)", job_name
                     )
                 except Exception as e:
                     error_msg = str(e)
-                    logger.error(f"Job {job_name} failed: {e}")
+                    logger.error("Job %s failed: %s", job_name, e)
 
             # If successful, break out of retry loop
             if success:
                 if attempt > 0:
                     logger.info(
-                        f"Job {job_name} succeeded after {attempt + 1} attempts"
+                        "Job %s succeeded after %s attempts", job_name, attempt + 1
                     )
                 break
 
@@ -816,7 +835,10 @@ class CronScheduler:
             # Check if we should retry
             if not retry_config.should_retry(failure_type, attempt):
                 logger.info(
-                    f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})"
+                    "Job %s: Not retrying (type=%s, attempt=%s)",
+                    job_name,
+                    failure_type,
+                    attempt,
                 )
                 break
 
@@ -829,7 +851,7 @@ class CronScheduler:
 
             if not remediation_success:
                 logger.warning(
-                    f"Job {job_name}: Remediation failed, but will still retry"
+                    "Job %s: Remediation failed, but will still retry", job_name
                 )
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -921,7 +943,7 @@ class CronScheduler:
                 vpn_script = os.path.expanduser(vpn_script)
 
             if not os.path.exists(vpn_script):
-                logger.warning(f"VPN script not found: {vpn_script}")
+                logger.warning("VPN script not found: %s", vpn_script)
                 return False
 
             logger.info("Running vpn-connect")
@@ -946,7 +968,7 @@ class CronScheduler:
                     logger.info("vpn_connect successful")
                     return True
 
-                logger.warning(f"vpn_connect failed: {output[:200]}")
+                logger.warning("vpn_connect failed: %s", output[:200])
                 return False
 
             except asyncio.TimeoutError:
@@ -958,7 +980,7 @@ class CronScheduler:
             logger.warning("VPN script not found")
             return False
         except Exception as e:
-            logger.warning(f"vpn_connect error: {e}")
+            logger.warning("vpn_connect error: %s", e)
             return False
 
     async def _run_with_claude_cli(
@@ -1074,11 +1096,10 @@ Begin execution now."""
                 # Truncate output for preview
                 preview = output[:500] if len(output) > 500 else output
                 return True, preview, None
-            else:
-                error_msg = (
-                    error_output or f"Claude CLI exited with code {process.returncode}"
-                )
-                return False, output[:200] if output else None, error_msg
+            error_msg = (
+                error_output or f"Claude CLI exited with code {process.returncode}"
+            )
+            return False, output[:200] if output else None, error_msg
 
         except FileNotFoundError:
             self._cleanup_skill_execution_state(skill, "Claude CLI not found in PATH")
@@ -1163,7 +1184,7 @@ Begin execution now."""
                 continue
             if job_id not in new_job_names:
                 self.scheduler.remove_job(job_id)
-                logger.info(f"Removed job: {job_id}")
+                logger.info("Removed job: %s", job_id)
 
         # Add/update jobs (replace_existing=True in _add_cron_job handles updates)
         for job in self.config.get_cron_jobs():

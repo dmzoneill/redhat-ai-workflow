@@ -141,12 +141,13 @@ class SkillTemplateEngine:
                         return match.group(0)
                 return str(value) if value is not None else ""
             except Exception as e:
-                logger.debug(f"Suppressed error in template variable resolution: {e}")
+                logger.debug("Suppressed error in template variable resolution: %s", e)
                 return match.group(0)
 
         return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
 
     def template(self, text: str) -> str:
+        "Template."
         return _shared_SkillExecutor__template(self, text)
 
     template.__doc__ = _shared_SkillExecutor__template.__doc__

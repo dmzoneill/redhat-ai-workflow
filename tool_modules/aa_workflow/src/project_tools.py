@@ -17,13 +17,6 @@ from mcp.types import TextContent
 from server.config_manager import config as config_manager
 from server.tool_registry import ToolRegistry
 
-# Support both package import and direct loading
-try:
-    from .constants import PROJECT_DIR
-except ImportError:
-    TOOL_MODULES_DIR = Path(__file__).parent.parent.parent
-    PROJECT_DIR = TOOL_MODULES_DIR.parent
-
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -65,7 +58,7 @@ def _save_config(config: dict) -> bool:
         config_manager.flush()
         return True
     except Exception as e:
-        logger.error(f"Failed to save config: {e}")
+        logger.error("Failed to save config: %s", e)
         return False
 
 
@@ -95,12 +88,13 @@ def _detect_default_branch(project_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             # refs/remotes/origin/main -> main
             return result.stdout.strip().split("/")[-1]
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_default_branch (symbolic-ref): {e}")
+        logger.debug("Suppressed error in _detect_default_branch (symbolic-ref): %s", e)
 
     # Fallback: check if main or master exists
     try:
@@ -110,6 +104,7 @@ def _detect_default_branch(project_path: Path) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             branches = result.stdout
@@ -118,7 +113,7 @@ def _detect_default_branch(project_path: Path) -> str:
             if "origin/master" in branches:
                 return "master"
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_default_branch (branch list): {e}")
+        logger.debug("Suppressed error in _detect_default_branch (branch list): %s", e)
 
     return "main"  # Default
 
@@ -132,6 +127,7 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             url = result.stdout.strip()
@@ -150,7 +146,7 @@ def _detect_gitlab_remote(project_path: Path) -> str | None:
                     path = path[:-4]
                 return path
     except (subprocess.SubprocessError, OSError) as e:
-        logger.debug(f"Suppressed error in _detect_gitlab_remote: {e}")
+        logger.debug("Suppressed error in _detect_gitlab_remote: %s", e)
     return None
 
 
@@ -183,7 +179,7 @@ def _detect_lint_command(project_path: Path, language: str) -> str:
                     return "npm run eslint"
             except (json.JSONDecodeError, OSError) as e:
                 logger.debug(
-                    f"Suppressed error in _detect_lint_command (package.json): {e}"
+                    "Suppressed error in _detect_lint_command (package.json): %s", e
                 )
         return "npm run lint"
 
@@ -212,7 +208,7 @@ def _detect_test_command(project_path: Path, language: str) -> str:
                     return "npm test"
             except (json.JSONDecodeError, OSError) as e:
                 logger.debug(
-                    f"Suppressed error in _detect_test_command (package.json): {e}"
+                    "Suppressed error in _detect_test_command (package.json): %s", e
                 )
         return "npm test"
 
@@ -844,6 +840,7 @@ def _shared_register_project_tools(server: "FastMCP") -> int:
 
 
 def register_project_tools(server: "FastMCP") -> int:
+    "Register project tools."
     return _shared_register_project_tools(server)
 
 

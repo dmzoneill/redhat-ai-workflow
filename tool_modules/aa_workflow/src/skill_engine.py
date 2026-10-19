@@ -318,7 +318,7 @@ class SprintSafetyGuard:
                                 break
 
         except Exception as e:
-            logger.error(f"Error checking git status: {e}")
+            logger.error("Error checking git status: %s", e)
 
         self._original_branch = result["branch"]
         return result
@@ -362,7 +362,7 @@ class SprintSafetyGuard:
             }
 
         except Exception as e:
-            logger.error(f"Error stashing changes: {e}")
+            logger.error("Error stashing changes: %s", e)
             return {"success": False, "message": str(e)}
 
     async def check_and_prepare(self, issue_key: str) -> dict[str, Any]:
@@ -472,7 +472,7 @@ class SprintSafetyGuard:
             }
 
         except Exception as e:
-            logger.error(f"Error restoring stash: {e}")
+            logger.error("Error restoring stash: %s", e)
             return {"success": False, "message": str(e)}
 
 
@@ -499,7 +499,7 @@ def _shared_SkillExecutor__determine_fix_type(
 
     if any(p in error_lower for p in auth_patterns):
         return "auth"
-    elif any(p in error_lower for p in network_patterns):
+    if any(p in error_lower for p in network_patterns):
         return "network"
 
     # Priority 3: Check matches from known issues
@@ -680,7 +680,10 @@ class SkillExecutor:
                 set_emitter(self.event_emitter, workspace_uri)
                 skill_name = skill.get("name", "unknown")
                 logger.info(
-                    f"Event emitter initialized for skill: {skill_name} (workspace: {workspace_uri}, source: {source})"
+                    "Event emitter initialized for skill: %s (workspace: %s, source: %s)",
+                    skill_name,
+                    workspace_uri,
+                    source,
                 )
                 # Debug: write to a file to confirm emitter is created
                 from pathlib import Path
@@ -697,7 +700,7 @@ class SkillExecutor:
                         f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"
                     )
             except Exception as e:
-                logger.warning(f"Failed to initialize event emitter: {e}")
+                logger.warning("Failed to initialize event emitter: %s", e)
                 # Also write to debug file on failure
                 try:
                     from datetime import datetime
@@ -720,7 +723,7 @@ class SkillExecutor:
             try:
                 self.usage_learner = UsagePatternLearner()
             except Exception as e:
-                logger.warning(f"Failed to initialize Layer 5 learner: {e}")
+                logger.warning("Failed to initialize Layer 5 learner: %s", e)
 
         # WebSocket server for real-time updates
         self.ws_server = None
@@ -728,7 +731,7 @@ class SkillExecutor:
             try:
                 self.ws_server = get_websocket_server()
             except Exception as e:
-                logger.debug(f"WebSocket server not available: {e}")
+                logger.debug("WebSocket server not available: %s", e)
 
         # Generate unique skill execution ID
         import uuid
@@ -770,7 +773,7 @@ class SkillExecutor:
             self._debug(f"Layer 5: Learned from error in {tool_name}")
         except Exception as e:
             # Don't let learning failure break the skill
-            logger.warning(f"Layer 5 learning failed: {e}")
+            logger.warning("Layer 5 learning failed: %s", e)
 
     def _find_matched_pattern(self, error_lower: str) -> tuple[dict | None, str | None]:
         """Find a matching pattern from memory based on error text.
@@ -846,34 +849,31 @@ class SkillExecutor:
                 self._debug(f"  → VPN connect result: {proc.returncode}")
                 await asyncio.sleep(2)  # Wait for VPN to establish
                 return proc.returncode == 0
-            else:
-                # Fallback to nmcli with common VPN connection names
-                self._debug("  → VPN script not found, trying nmcli fallback")
-                vpn_names = [
-                    "Red Hat Global VPN",
-                    "Red Hat VPN",
-                    "redhat-vpn",
-                    "RH-VPN",
-                ]
-                for vpn_name in vpn_names:
-                    proc = await asyncio.create_subprocess_shell(
-                        f"nmcli connection up '{vpn_name}' 2>/dev/null",
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=30)
-                        if proc.returncode == 0:
-                            self._debug(
-                                f"  → VPN connect result: success with {vpn_name}"
-                            )
-                            await asyncio.sleep(2)
-                            return True
-                    except asyncio.TimeoutError:
-                        continue
+            # Fallback to nmcli with common VPN connection names
+            self._debug("  → VPN script not found, trying nmcli fallback")
+            vpn_names = [
+                "Red Hat Global VPN",
+                "Red Hat VPN",
+                "redhat-vpn",
+                "RH-VPN",
+            ]
+            for vpn_name in vpn_names:
+                proc = await asyncio.create_subprocess_shell(
+                    f"nmcli connection up '{vpn_name}' 2>/dev/null",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=30)
+                    if proc.returncode == 0:
+                        self._debug(f"  → VPN connect result: success with {vpn_name}")
+                        await asyncio.sleep(2)
+                        return True
+                except asyncio.TimeoutError:
+                    continue
 
-                self._debug("  → All VPN connection attempts failed")
-                return False
+            self._debug("  → All VPN connection attempts failed")
+            return False
 
         except Exception as e:
             self._debug(f"  → Auto-fix failed: {e}")
@@ -1294,8 +1294,7 @@ class SkillExecutor:
             details="User manually edited skill",
         )
 
-        # Return None to signal skill should be aborted and re-run
-        return None
+        # Returning None signals the skill should be aborted and re-run.
 
     def _handle_skip_action(self, error_info: dict, step_name: str):
         """Handle skip action for interactive recovery."""
@@ -1304,7 +1303,6 @@ class SkillExecutor:
         self.error_recovery.log_fix_attempt(
             error_info, action="skip", success=False, details="User chose to skip"
         )
-        return None
 
     def _handle_abort_action(self, error_info: dict, error_msg: str, step_name: str):
         """Handle abort action for interactive recovery."""
@@ -1332,7 +1330,6 @@ class SkillExecutor:
             success=False,
             details="User aborted with issue creation",
         )
-        return None
 
     def _handle_continue_action(self, error_info: dict, error_msg: str):
         """Handle continue action for interactive recovery."""
@@ -1403,13 +1400,13 @@ class SkillExecutor:
         # Dispatch to action handlers
         if action == "auto_fix":
             return self._handle_auto_fix_action(error_info, step_name)
-        elif action == "edit":
+        if action == "edit":
             return self._handle_edit_action(error_info, error_msg, step_name)
-        elif action == "skip":
+        if action == "skip":
             return self._handle_skip_action(error_info, step_name)
-        elif action == "abort":
+        if action == "abort":
             return self._handle_abort_action(error_info, error_msg, step_name)
-        elif action == "continue":
+        if action == "continue":
             return self._handle_continue_action(error_info, error_msg)
 
         return None
@@ -1707,7 +1704,7 @@ class SkillExecutor:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, True, duration_ms)
             except Exception as stats_err:
-                logger.debug(f"Failed to record tool stats: {stats_err}")
+                logger.debug("Failed to record tool stats: %s", stats_err)
 
             return self._format_tool_result(result, duration)
         except Exception as e:
@@ -1797,7 +1794,7 @@ class SkillExecutor:
                 agent_stats = _get_agent_stats_module()
                 agent_stats.record_tool_call(tool_name, True, duration_ms)
             except Exception as stats_err:
-                logger.debug(f"Failed to record tool stats: {stats_err}")
+                logger.debug("Failed to record tool stats: %s", stats_err)
 
             return self._format_tool_result(result, duration)
 
@@ -2200,40 +2197,39 @@ class SkillExecutor:
                         }
                     )
                     return True
-                else:
-                    # Auto-heal failed, log and continue
-                    output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
-                    await self._log_auto_heal_to_memory(
-                        tool, heal_type, error_msg[:100], success=False
+                # Auto-heal failed, log and continue
+                output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
+                await self._log_auto_heal_to_memory(
+                    tool, heal_type, error_msg[:100], success=False
+                )
+
+                # Emit auto-heal completed (failed) event (WebSocket)
+                if self.ws_server and self.ws_server.is_running:
+                    import asyncio
+
+                    step_idx = (
+                        self.event_emitter.current_step_index
+                        if self.event_emitter
+                        else 0
+                    )
+                    asyncio.create_task(
+                        self.ws_server.auto_heal_completed(
+                            skill_id=self.skill_id,
+                            step_index=step_idx,
+                            fix_action=heal_type,
+                            success=False,
+                        )
                     )
 
-                    # Emit auto-heal completed (failed) event (WebSocket)
-                    if self.ws_server and self.ws_server.is_running:
-                        import asyncio
+                # Emit toast notification for auto-heal failure
+                try:
+                    from tool_modules.aa_workflow.src.notification_emitter import (
+                        notify_auto_heal_failed,
+                    )
 
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
-                        asyncio.create_task(
-                            self.ws_server.auto_heal_completed(
-                                skill_id=self.skill_id,
-                                step_index=step_idx,
-                                fix_action=heal_type,
-                                success=False,
-                            )
-                        )
-
-                    # Emit toast notification for auto-heal failure
-                    try:
-                        from tool_modules.aa_workflow.src.notification_emitter import (
-                            notify_auto_heal_failed,
-                        )
-
-                        notify_auto_heal_failed(step_name, error_msg[:100])
-                    except Exception as exc:
-                        logger.debug("Suppressed error: %s", exc)
+                    notify_auto_heal_failed(step_name, error_msg[:100])
+                except Exception as exc:
+                    logger.debug("Suppressed error: %s", exc)
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -2306,8 +2302,11 @@ class SkillExecutor:
             # Log to Python logger for journalctl visibility
             skill_name = self.skill.get("name", "unknown")
             logger.warning(
-                f"Skill '{skill_name}' step '{step_name}' failed with on_error=continue: "
-                f"tool={tool}, error={error_msg[:200]}"
+                "Skill '%s' step '%s' failed with on_error=continue: tool=%s, error=%s",
+                skill_name,
+                step_name,
+                tool,
+                error_msg[:200],
             )
 
             # Layer 5: Learn from this error
@@ -2342,8 +2341,7 @@ class SkillExecutor:
                 }
             )
             return True
-        else:
-            return False
+        return False
 
     def _parse_and_store_tool_result(self, result_text: str, output_name: str):
         """Parse key:value output from tool result and store in context."""
@@ -3185,7 +3183,7 @@ async def _skill_run_impl(
                     session_id = session.session_id
                     session_name = session.name
             except Exception as e:
-                logger.debug(f"Could not get session context: {e}")
+                logger.debug("Could not get session context: %s", e)
 
         # Execute mode: run the skill
         executor = SkillExecutor(
