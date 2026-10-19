@@ -98,7 +98,7 @@ class SkillHealMixin:
             # Try to use the configured VPN script first (same as vpn_connect tool)
             from server.utils import (  # pylint: disable=import-outside-toplevel
                 load_config,
-            )  # pylint: disable=import-outside-toplevel
+            )
 
             config = load_config()
             paths = config.get("paths", {})
@@ -428,7 +428,8 @@ class SkillHealMixin:
                 # Call kube_login tool
                 heal_result = await self._exec_tool("kube_login", {"cluster": cluster})
                 if not heal_result.get("success"):
-                    # Get error from either 'error' key or 'result' key (for tools that return error text)  # pylint: disable=line-too-long
+                    # pylint: disable-next=line-too-long
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
                     error_msg = heal_result.get("error") or heal_result.get(
                         "result", "unknown"
                     )
@@ -454,7 +455,8 @@ class SkillHealMixin:
                 # Call vpn_connect tool
                 heal_result = await self._exec_tool("vpn_connect", {})
                 if not heal_result.get("success"):
-                    # Get error from either 'error' key or 'result' key (for tools that return error text)  # pylint: disable=line-too-long
+                    # pylint: disable-next=line-too-long
+                    # Get error from either 'error' key or 'result' key (for tools that return error text)
                     error_msg = heal_result.get("error") or heal_result.get(
                         "result", "unknown"
                     )
@@ -497,7 +499,7 @@ class SkillHealMixin:
         try:
             from datetime import (  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
                 datetime,
-            )  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
+            )
 
             import yaml  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
 
@@ -564,29 +566,38 @@ class SkillHealMixin:
         except Exception as e:  # pylint: disable=broad-exception-caught
             self._debug(f"Failed to log auto-heal to memory: {e}")
 
-    def find_matched_pattern(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    def find_matched_pattern(self, *args, **kwargs):
+        """Return the learned pattern that matches this failure."""
         return self._find_matched_pattern(*args, **kwargs)
 
-    def determine_fix_type(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    def determine_fix_type(self, *args, **kwargs):
+        """Classify which automatic fix applies to this failure."""
         return self._determine_fix_type(*args, **kwargs)
 
-    def detect_auto_heal_type(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    def detect_auto_heal_type(self, *args, **kwargs):
+        """Detect the auto-heal category for this failure."""
         return self._detect_auto_heal_type(*args, **kwargs)
 
-    async def attempt_auto_heal(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    async def attempt_auto_heal(self, *args, **kwargs):
+        """Try the automatic fix and return whether it succeeded."""
         return await self._attempt_auto_heal(*args, **kwargs)
 
-    async def log_auto_heal_to_memory(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    async def log_auto_heal_to_memory(self, *args, **kwargs):
+        """Record an auto-heal attempt in skill memory."""
         return await self._log_auto_heal_to_memory(*args, **kwargs)
 
-    def update_pattern_usage_stats(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    def update_pattern_usage_stats(self, *args, **kwargs):
+        """Update how often a learned fix pattern has been used."""
         return self._update_pattern_usage_stats(*args, **kwargs)
 
-    async def try_auto_fix(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    async def try_auto_fix(self, *args, **kwargs):
+        """Apply the selected automatic fix."""
         return await self._try_auto_fix(*args, **kwargs)
 
-    async def apply_network_fix(self):  # pylint: disable=missing-function-docstring
+    async def apply_network_fix(self):
+        """Retry the step after a transient network failure."""
         return await self._apply_network_fix()
 
-    async def apply_auth_fix(self, *args, **kwargs):  # pylint: disable=missing-function-docstring
+    async def apply_auth_fix(self, *args, **kwargs):
+        """Refresh credentials and retry the step."""
         return await self._apply_auth_fix(*args, **kwargs)

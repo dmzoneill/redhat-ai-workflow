@@ -13,7 +13,7 @@ from .skill_template_mixin import SkillTemplateMixin
 logger = logging.getLogger(__name__)
 
 
-class SkillTemplateEngine(SkillTemplateMixin):
+class SkillTemplateEngine(SkillTemplateMixin):  # pylint: disable=too-few-public-methods
     """Jinja2 templating, condition evaluation, and link formatting.
 
     Args:

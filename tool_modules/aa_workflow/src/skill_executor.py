@@ -37,7 +37,7 @@ except ImportError:
     logger.debug("WebSocket server not available - real-time updates disabled")
 
 
-class SkillExecutor(  # pylint: disable=too-many-instance-attributes
+class SkillExecutor(  # pylint: disable=too-many-instance-attributes,too-few-public-methods
     SkillRunMixin,
     SkillStepMixin,
     SkillToolMixin,
@@ -52,7 +52,9 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes
     state and events per workspace.
     """
 
-    def __init__(  # pylint: disable=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-statements
+    # pylint: disable-next=line-too-long
+    # pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments,too-many-statements
+    def __init__(
         self,
         skill: dict,
         inputs: dict,
@@ -105,7 +107,8 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes
         if emit_events:
             try:
                 # Use absolute import to avoid relative import issues
-                from tool_modules.aa_workflow.src.skill_execution_events import (  # pylint: disable=import-outside-toplevel
+                # pylint: disable-next=import-outside-toplevel
+                from tool_modules.aa_workflow.src.skill_execution_events import (
                     SkillExecutionEmitter,
                     set_emitter,
                 )
@@ -137,11 +140,12 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes
                 with open(debug_file, "a", encoding="utf-8") as f:
                     from datetime import (  # pylint: disable=import-outside-toplevel
                         datetime,
-                    )  # pylint: disable=import-outside-toplevel
+                    )
 
                     skill_name = skill.get("name", "unknown")
                     f.write(
-                        f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"  # pylint: disable=line-too-long
+                        # pylint: disable-next=line-too-long
+                        f"{datetime.now().isoformat()} - Emitter created for {skill_name} (source: {source})\n"
                     )
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning("Failed to initialize event emitter: %s", e)
@@ -149,7 +153,7 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes
                 try:
                     from datetime import (  # pylint: disable=import-outside-toplevel
                         datetime,
-                    )  # pylint: disable=import-outside-toplevel
+                    )
                     from pathlib import Path  # pylint: disable=import-outside-toplevel
 
                     debug_file = (
@@ -209,12 +213,11 @@ class SkillExecutor(  # pylint: disable=too-many-instance-attributes
 
         try:
             # Learn from this error asynchronously
-            await self.usage_learner.learn_from_observation(  # type: ignore[attr-defined]
+            await self.usage_learner.analyze_result(
                 tool_name=tool_name,
                 params=params,
-                error_message=error_msg,
+                result=error_msg,
                 context={},
-                success=False,
             )
             self._debug(f"Layer 5: Learned from error in {tool_name}")
         except Exception as e:  # pylint: disable=broad-exception-caught
