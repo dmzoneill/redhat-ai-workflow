@@ -126,13 +126,19 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
             if "manager" in data:
                 manager_ref = data["manager"]
                 if isinstance(manager_ref, dict) and "$ref" in manager_ref:
-                    manager_name = manager_ref["$ref"].split("/")[-1].replace(".yml", "")
+                    manager_name = (
+                        manager_ref["$ref"].split("/")[-1].replace(".yml", "")
+                    )
                     lines.append(f"- **Manager:** {manager_name}")
 
             lines.append("")
             lines.append("### Raw YAML")
             lines.append("```yaml")
-            lines.append(truncate_output(yaml.dump(data, default_flow_style=False), max_length=1500))
+            lines.append(
+                truncate_output(
+                    yaml.dump(data, default_flow_style=False), max_length=1500
+                )
+            )
             lines.append("```")
         else:
             lines.append(f"```yaml\n{truncate_output(content, max_length=2000)}\n```")
@@ -142,7 +148,9 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
             lines.append(f"⚠️ User `{username}` not found in team `{team}`")
             lines.append(f"URL tried: {url}")
             lines.append("")
-            lines.append("Try a different team directory or check the username spelling.")
+            lines.append(
+                "Try a different team directory or check the username spelling."
+            )
         else:
             lines.append(f"❌ HTTP Error: {e.code} {e.reason}")
     except Exception as e:
@@ -151,7 +159,9 @@ async def _appinterface_get_user_impl(username: str, team: str) -> list[TextCont
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _appinterface_search_impl(query: str, file_type: str, path: str) -> list[TextContent]:
+async def _appinterface_search_impl(
+    query: str, file_type: str, path: str
+) -> list[TextContent]:
     """Implementation of appinterface_search tool."""
     repo_path = path or APP_INTERFACE_PATH
     if not repo_path or not os.path.isdir(repo_path):

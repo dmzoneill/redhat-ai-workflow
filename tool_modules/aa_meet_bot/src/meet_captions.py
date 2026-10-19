@@ -68,10 +68,16 @@ class MeetCaptions:
     def _instance_id(self):
         return self._controller._instance_id
 
-    async def start_caption_capture(self, callback: Callable[[CaptionEntry], None]) -> None:
-        return await _shared_GoogleMeetController_start_caption_capture(self, callback, logger=logger)
+    async def start_caption_capture(
+        self, callback: Callable[[CaptionEntry], None]
+    ) -> None:
+        return await _shared_GoogleMeetController_start_caption_capture(
+            self, callback, logger=logger
+        )
 
-    start_caption_capture.__doc__ = _shared_GoogleMeetController_start_caption_capture.__doc__
+    start_caption_capture.__doc__ = (
+        _shared_GoogleMeetController_start_caption_capture.__doc__
+    )
 
     async def _poll_captions(self) -> None:
         """Poll for settled/corrected captions from the JS observer buffer."""
@@ -105,7 +111,9 @@ class MeetCaptions:
                     entry = CaptionEntry(
                         speaker=speaker,
                         text=text.strip(),
-                        timestamp=(datetime.fromtimestamp(ts / 1000) if ts else datetime.now()),
+                        timestamp=(
+                            datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
+                        ),
                         caption_id=cap_id,
                         is_update=is_true_update,
                     )
@@ -126,10 +134,17 @@ class MeetCaptions:
                             self.state.caption_buffer.append(entry)
                             # Trim old entries when buffer exceeds max size
                             if len(self.state.caption_buffer) > MAX_CAPTION_BUFFER:
-                                trim_count = len(self.state.caption_buffer) - MAX_CAPTION_BUFFER
-                                self.state.caption_buffer = self.state.caption_buffer[trim_count:]
+                                trim_count = (
+                                    len(self.state.caption_buffer) - MAX_CAPTION_BUFFER
+                                )
+                                self.state.caption_buffer = self.state.caption_buffer[
+                                    trim_count:
+                                ]
                                 # Rebuild index mapping after trim
-                                caption_id_to_index = {e.caption_id: i for i, e in enumerate(self.state.caption_buffer)}
+                                caption_id_to_index = {
+                                    e.caption_id: i
+                                    for i, e in enumerate(self.state.caption_buffer)
+                                }
                         if self._caption_callback:
                             self._caption_callback(entry)
                         logger.debug(f"Caption NEW [{speaker}] {text[:50]}...")
@@ -144,7 +159,9 @@ class MeetCaptions:
                     or "Target page, context or browser has been closed" in error_msg
                     or "Browser has been closed" in error_msg
                 ):
-                    logger.warning(f"[Caption poll] Browser closed detected: {error_msg}")
+                    logger.warning(
+                        f"[Caption poll] Browser closed detected: {error_msg}"
+                    )
                     self._controller._browser_closed = True
                     if self.state:
                         self.state.joined = False
@@ -176,7 +193,9 @@ class MeetCaptions:
                     }
                 """)
             except Exception as e:
-                logger.debug(f"Suppressed error in stop_caption_capture (observer disconnect): {e}")
+                logger.debug(
+                    f"Suppressed error in stop_caption_capture (observer disconnect): {e}"
+                )
 
         logger.info("Caption capture stopped")
 

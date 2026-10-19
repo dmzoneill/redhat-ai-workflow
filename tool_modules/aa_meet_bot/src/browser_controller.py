@@ -39,7 +39,9 @@ try:
     from server.paths import MEETBOT_SCREENSHOTS_DIR
 except ImportError:
     # Fallback for standalone usage
-    MEETBOT_SCREENSHOTS_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+    MEETBOT_SCREENSHOTS_DIR = (
+        Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,9 @@ class MeetingState:
     errors: list[str] = field(default_factory=list)
 
 
-async def _shared_GoogleMeetController_start_caption_capture(self, callback: Callable[..., None], *, logger) -> None:
+async def _shared_GoogleMeetController_start_caption_capture(
+    self, callback: Callable[..., None], *, logger
+) -> None:
     """
     Start capturing captions via DOM observation.
 
@@ -339,7 +343,9 @@ async def _shared_GoogleMeetController__select_audio_device(
             dropdown_btn = self.page.locator(dropdown_selector)
             if await dropdown_btn.count() > 0:
                 await dropdown_btn.first.click()
-                logger.info(f"[AUDIO] Opened {device_type} dropdown via: {dropdown_selector}")
+                logger.info(
+                    f"[AUDIO] Opened {device_type} dropdown via: {dropdown_selector}"
+                )
                 await asyncio.sleep(0.5)
             else:
                 logger.info(f"[AUDIO] Could not find {device_type} dropdown button")
@@ -390,9 +396,13 @@ async def _shared_GoogleMeetController__select_audio_device(
             return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
         }
         """
-        js_result = await self.page.evaluate(js_click_option, {"searchText": "MeetBot", "excludeMic": is_speaker})
+        js_result = await self.page.evaluate(
+            js_click_option, {"searchText": "MeetBot", "excludeMic": is_speaker}
+        )
         if js_result and js_result.get("success"):
-            logger.info(f"[AUDIO] Selected {device_type}: {js_result.get('deviceName')}")
+            logger.info(
+                f"[AUDIO] Selected {device_type}: {js_result.get('deviceName')}"
+            )
             await asyncio.sleep(0.5)
             return True
 
@@ -439,7 +449,9 @@ async def _shared_GoogleMeetController__select_meetbot_camera(self, *, logger) -
                         meetbot_device_name = line.split(":")[-1].strip()
                         break
 
-        logger.info(f"[CAMERA] Looking for MeetBot device: {meetbot_device_name or 'any'}")
+        logger.info(
+            f"[CAMERA] Looking for MeetBot device: {meetbot_device_name or 'any'}"
+        )
 
         # Use JavaScript to find the MeetBot camera in the browser's device list
         js_find_camera = """
@@ -671,7 +683,9 @@ async def _shared_GoogleMeetController__set_devices_via_js(self, *, logger) -> b
         return False
 
 
-async def _shared_GoogleMeetController__create_virtual_audio_sink(self, *, logger) -> bool:
+async def _shared_GoogleMeetController__create_virtual_audio_sink(
+    self, *, logger
+) -> bool:
     """Create a virtual PulseAudio sink for meeting audio output.
 
     This creates a null sink that:
@@ -690,9 +704,13 @@ async def _shared_GoogleMeetController__create_virtual_audio_sink(self, *, logge
 
     try:
         # Check if sink already exists
-        result = subprocess.run(["pactl", "list", "short", "sinks"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "list", "short", "sinks"], capture_output=True, text=True
+        )
         if sink_name in result.stdout:
-            logger.info(f"[{self._instance_id}] Virtual audio sink already exists: {sink_name}")
+            logger.info(
+                f"[{self._instance_id}] Virtual audio sink already exists: {sink_name}"
+            )
             self._audio_sink_name = sink_name
             return True
 
@@ -711,19 +729,29 @@ async def _shared_GoogleMeetController__create_virtual_audio_sink(self, *, logge
 
         if result.returncode == 0:
             self._audio_sink_name = sink_name
-            logger.info(f"[{self._instance_id}] Created virtual audio sink: {sink_name}")
-            logger.info(f"[{self._instance_id}] To listen: pactl set-default-source {sink_name}.monitor")
+            logger.info(
+                f"[{self._instance_id}] Created virtual audio sink: {sink_name}"
+            )
+            logger.info(
+                f"[{self._instance_id}] To listen: pactl set-default-source {sink_name}.monitor"
+            )
             return True
         else:
-            logger.warning(f"[{self._instance_id}] Failed to create audio sink: {result.stderr}")
+            logger.warning(
+                f"[{self._instance_id}] Failed to create audio sink: {result.stderr}"
+            )
             return False
 
     except Exception as e:
-        logger.warning(f"[{self._instance_id}] Could not create virtual audio sink: {e}")
+        logger.warning(
+            f"[{self._instance_id}] Could not create virtual audio sink: {e}"
+        )
         return False
 
 
-async def _shared_GoogleMeetController__remove_virtual_audio_sink(self, *, logger) -> None:
+async def _shared_GoogleMeetController__remove_virtual_audio_sink(
+    self, *, logger
+) -> None:
     """Remove the virtual audio sink when done."""
     import subprocess
 
@@ -732,18 +760,24 @@ async def _shared_GoogleMeetController__remove_virtual_audio_sink(self, *, logge
 
     try:
         # Find the module index for our sink
-        result = subprocess.run(["pactl", "list", "short", "modules"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "list", "short", "modules"], capture_output=True, text=True
+        )
 
         for line in result.stdout.strip().split("\n"):
             if self._audio_sink_name in line:
                 module_index = line.split()[0]
                 subprocess.run(["pactl", "unload-module", module_index])
-                logger.info(f"[{self._instance_id}] Removed virtual audio sink: {self._audio_sink_name}")
+                logger.info(
+                    f"[{self._instance_id}] Removed virtual audio sink: {self._audio_sink_name}"
+                )
                 break
 
         self._audio_sink_name = None
     except Exception as e:
-        logger.warning(f"[{self._instance_id}] Could not remove virtual audio sink: {e}")
+        logger.warning(
+            f"[{self._instance_id}] Could not remove virtual audio sink: {e}"
+        )
 
 
 def _shared_GoogleMeetController_get_monitor_source(self) -> Optional[str]:
@@ -776,7 +810,9 @@ def _shared_GoogleMeetController_get_pipe_path(self) -> Optional[Path]:
     return None
 
 
-async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, logger) -> None:
+async def _shared_GoogleMeetController__route_browser_audio_to_sink(
+    self, *, logger
+) -> None:
     """Route Chrome's audio output to our virtual sink.
 
     This runs in the background and periodically checks for Chrome audio streams,
@@ -798,7 +834,9 @@ async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, log
         await asyncio.sleep(1)
 
     if not self.state or not self.state.joined:
-        logger.warning(f"[{self._instance_id}] Audio routing: meeting not joined, giving up")
+        logger.warning(
+            f"[{self._instance_id}] Audio routing: meeting not joined, giving up"
+        )
         return
 
     logger.info(f"[{self._instance_id}] Meeting joined, starting audio routing...")
@@ -809,7 +847,9 @@ async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, log
 
         try:
             # Get detailed info about all sink inputs
-            result = subprocess.run(["pactl", "list", "sink-inputs"], capture_output=True, text=True)
+            result = subprocess.run(
+                ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+            )
 
             # Parse sink inputs and find Chrome/Chromium ones not on our sink
             # IMPORTANT: Only route OUR browser instance, not user's regular Chrome
@@ -823,9 +863,16 @@ async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, log
 
                 if line.startswith("Sink Input #"):
                     # Save previous input if it was CONFIRMED our browser and not on our sink
-                    if current_input_id and is_chrome and current_sink and self._audio_sink_name not in current_sink:
+                    if (
+                        current_input_id
+                        and is_chrome
+                        and current_sink
+                        and self._audio_sink_name not in current_sink
+                    ):
                         # Only route if it's our browser PID (or we don't have PID yet)
-                        if not self._browser_pid or current_pid == str(self._browser_pid):
+                        if not self._browser_pid or current_pid == str(
+                            self._browser_pid
+                        ):
                             self._move_sink_input(current_input_id)
                             streams_routed += 1
                         else:
@@ -849,13 +896,20 @@ async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, log
                     app_name = line.split("=")[-1].strip().strip('"').lower()
                     if app_name in ["google chrome", "chromium", "chrome"]:
                         is_chrome = True
-                        logger.debug(f"[{self._instance_id}] Found Chrome audio stream: {current_input_id}")
+                        logger.debug(
+                            f"[{self._instance_id}] Found Chrome audio stream: {current_input_id}"
+                        )
 
                 elif "application.process.id" in line.lower():
                     current_pid = line.split("=")[-1].strip().strip('"')
 
             # Don't forget the last one
-            if current_input_id and is_chrome and current_sink and self._audio_sink_name not in current_sink:
+            if (
+                current_input_id
+                and is_chrome
+                and current_sink
+                and self._audio_sink_name not in current_sink
+            ):
                 if not self._browser_pid or current_pid == str(self._browser_pid):
                     self._move_sink_input(current_input_id)
                     streams_routed += 1
@@ -864,12 +918,16 @@ async def _shared_GoogleMeetController__route_browser_audio_to_sink(self, *, log
             logger.debug(f"[{self._instance_id}] Audio routing check failed: {e}")
 
     if streams_routed > 0:
-        logger.info(f"[{self._instance_id}] Audio routing monitor stopped (routed {streams_routed} streams)")
+        logger.info(
+            f"[{self._instance_id}] Audio routing monitor stopped (routed {streams_routed} streams)"
+        )
     else:
         logger.info(f"[{self._instance_id}] Audio routing monitor stopped")
 
 
-def _shared_GoogleMeetController__move_sink_input(self, sink_input_id: str, *, logger) -> bool:
+def _shared_GoogleMeetController__move_sink_input(
+    self, sink_input_id: str, *, logger
+) -> bool:
     """Move a sink input to our virtual audio sink."""
     import subprocess
 
@@ -883,7 +941,9 @@ def _shared_GoogleMeetController__move_sink_input(self, sink_input_id: str, *, l
             text=True,
         )
         if result.returncode == 0:
-            logger.info(f"[{self._instance_id}] Routed audio stream {sink_input_id} to virtual sink")
+            logger.info(
+                f"[{self._instance_id}] Routed audio stream {sink_input_id} to virtual sink"
+            )
             return True
         else:
             logger.debug(f"Failed to move sink-input {sink_input_id}: {result.stderr}")
@@ -893,7 +953,9 @@ def _shared_GoogleMeetController__move_sink_input(self, sink_input_id: str, *, l
         return False
 
 
-def _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser: bool = True, *, logger) -> list[str]:
+def _shared_GoogleMeetController__get_chrome_sink_inputs(
+    self, only_our_browser: bool = True, *, logger
+) -> list[str]:
     """Get Chrome/Chromium sink input IDs.
 
     Args:
@@ -904,7 +966,9 @@ def _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser:
 
     sink_inputs = []
     try:
-        result = subprocess.run(["pactl", "list", "sink-inputs"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+        )
 
         current_input_id = None
         is_chrome = False
@@ -916,7 +980,9 @@ def _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser:
             if line.startswith("Sink Input #"):
                 # Check if previous input matches our criteria
                 if current_input_id and is_chrome:
-                    if not only_our_browser or (self._browser_pid and current_pid == str(self._browser_pid)):
+                    if not only_our_browser or (
+                        self._browser_pid and current_pid == str(self._browser_pid)
+                    ):
                         sink_inputs.append(current_input_id)
                     elif only_our_browser and not self._browser_pid:
                         # If we don't have browser PID yet, include all Chrome inputs
@@ -933,7 +999,9 @@ def _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser:
 
         # Don't forget the last one
         if current_input_id and is_chrome:
-            if not only_our_browser or (self._browser_pid and current_pid == str(self._browser_pid)):
+            if not only_our_browser or (
+                self._browser_pid and current_pid == str(self._browser_pid)
+            ):
                 sink_inputs.append(current_input_id)
             elif only_our_browser and not self._browser_pid:
                 sink_inputs.append(current_input_id)
@@ -954,7 +1022,9 @@ def _shared_GoogleMeetController_unmute_audio(self, *, logger) -> bool:
 
     try:
         # Get the default sink
-        result = subprocess.run(["pactl", "get-default-sink"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "get-default-sink"], capture_output=True, text=True
+        )
         default_sink = result.stdout.strip()
 
         if not default_sink:
@@ -975,7 +1045,9 @@ def _shared_GoogleMeetController_unmute_audio(self, *, logger) -> bool:
                 text=True,
             )
             if result.returncode == 0:
-                logger.info(f"[{self._instance_id}] Unmuted: moved stream {sink_input_id} to {default_sink}")
+                logger.info(
+                    f"[{self._instance_id}] Unmuted: moved stream {sink_input_id} to {default_sink}"
+                )
                 success = True
 
         return success
@@ -1012,7 +1084,9 @@ def _shared_GoogleMeetController_mute_audio(self, *, logger) -> bool:
                 text=True,
             )
             if result.returncode == 0:
-                logger.info(f"[{self._instance_id}] Muted: moved stream {sink_input_id} to {self._audio_sink_name}")
+                logger.info(
+                    f"[{self._instance_id}] Muted: moved stream {sink_input_id} to {self._audio_sink_name}"
+                )
                 success = True
 
         return success
@@ -1034,7 +1108,9 @@ def _shared_GoogleMeetController_is_audio_muted(self, *, logger) -> bool:
         return False
 
     try:
-        result = subprocess.run(["pactl", "list", "sink-inputs"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "list", "sink-inputs"], capture_output=True, text=True
+        )
 
         current_input_id = None
         is_chrome = False
@@ -1070,7 +1146,9 @@ def _shared_GoogleMeetController_is_audio_muted(self, *, logger) -> bool:
         return False
 
 
-async def _shared_GoogleMeetController__restore_user_default_source(self, *, logger) -> None:
+async def _shared_GoogleMeetController__restore_user_default_source(
+    self, *, logger
+) -> None:
     """
     Restore the user's original microphone as the default audio source.
 
@@ -1092,17 +1170,23 @@ async def _shared_GoogleMeetController__restore_user_default_source(self, *, log
 
     try:
         # First, check what the current default is
-        result = subprocess.run(["pactl", "get-default-source"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "get-default-source"], capture_output=True, text=True
+        )
         current_default = result.stdout.strip()
 
         # If current default is already NOT a meetbot source, we're good
         if current_default and "meet_bot" not in current_default.lower():
-            logger.info(f"[{self._instance_id}] Default source is already user's device: {current_default}")
+            logger.info(
+                f"[{self._instance_id}] Default source is already user's device: {current_default}"
+            )
             return
 
         # Current default is meetbot - need to find and restore user's source
         # Get all available sources
-        result = subprocess.run(["pactl", "list", "sources", "short"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pactl", "list", "sources", "short"], capture_output=True, text=True
+        )
 
         # Find a non-meetbot, non-monitor source (user's actual mic/headset)
         user_source = None
@@ -1113,7 +1197,10 @@ async def _shared_GoogleMeetController__restore_user_default_source(self, *, log
             if len(parts) >= 2:
                 source_name = parts[1]
                 # Skip monitors and meetbot sources
-                if ".monitor" not in source_name and "meet_bot" not in source_name.lower():
+                if (
+                    ".monitor" not in source_name
+                    and "meet_bot" not in source_name.lower()
+                ):
                     user_source = source_name
                     # Don't break - keep looking in case there's a USB/Bluetooth device
                     # USB/Bluetooth devices typically have "usb" or "bluez" in the name
@@ -1133,9 +1220,13 @@ async def _shared_GoogleMeetController__restore_user_default_source(self, *, log
                 ],
                 capture_output=True,
             )
-            logger.info(f"[{self._instance_id}] Restored default source via pw-metadata: {user_source}")
+            logger.info(
+                f"[{self._instance_id}] Restored default source via pw-metadata: {user_source}"
+            )
         else:
-            logger.warning(f"[{self._instance_id}] No user audio source found to restore")
+            logger.warning(
+                f"[{self._instance_id}] No user audio source found to restore"
+            )
 
     except Exception as e:
         logger.warning(f"[{self._instance_id}] Failed to restore default source: {e}")
@@ -1154,7 +1245,9 @@ async def _shared_GoogleMeetController__move_user_browser_to_original_source(
 
     Keeping this function stub for backwards compatibility.
     """
-    logger.debug(f"[{self._instance_id}] _move_user_browser_to_original_source called but disabled")
+    logger.debug(
+        f"[{self._instance_id}] _move_user_browser_to_original_source called but disabled"
+    )
 
 
 async def _shared_GoogleMeetController_get_participant_count(self, *, logger) -> int:
@@ -1266,13 +1359,19 @@ class GoogleMeetController:
         self.state: MeetingState = MeetingState(meeting_id="", meeting_url="")
         self._caption_callback: Optional[Callable[[CaptionEntry], None]] = None
         self._caption_observer_running = False
-        self._caption_poll_task: Optional[asyncio.Task] = None  # Track caption polling task
+        self._caption_poll_task: Optional[asyncio.Task] = (
+            None  # Track caption polling task
+        )
         self._playwright = None
-        self._audio_sink_name: Optional[str] = None  # Virtual audio sink for meeting output
+        self._audio_sink_name: Optional[str] = (
+            None  # Virtual audio sink for meeting output
+        )
 
         # Unique instance tracking
         GoogleMeetController._instance_counter += 1
-        self._instance_id = f"meet-bot-{GoogleMeetController._instance_counter}-{id(self)}"
+        self._instance_id = (
+            f"meet-bot-{GoogleMeetController._instance_counter}-{id(self)}"
+        )
         self._browser_pid: Optional[int] = None
         self._created_at = datetime.now()
         self._last_activity = datetime.now()
@@ -1285,14 +1384,22 @@ class GoogleMeetController:
         GoogleMeetController._instances[self._instance_id] = self
 
     async def _create_virtual_audio_sink(self) -> bool:
-        return await _shared_GoogleMeetController__create_virtual_audio_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__create_virtual_audio_sink(
+            self, logger=logger
+        )
 
-    _create_virtual_audio_sink.__doc__ = _shared_GoogleMeetController__create_virtual_audio_sink.__doc__
+    _create_virtual_audio_sink.__doc__ = (
+        _shared_GoogleMeetController__create_virtual_audio_sink.__doc__
+    )
 
     async def _remove_virtual_audio_sink(self) -> None:
-        return await _shared_GoogleMeetController__remove_virtual_audio_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__remove_virtual_audio_sink(
+            self, logger=logger
+        )
 
-    _remove_virtual_audio_sink.__doc__ = _shared_GoogleMeetController__remove_virtual_audio_sink.__doc__
+    _remove_virtual_audio_sink.__doc__ = (
+        _shared_GoogleMeetController__remove_virtual_audio_sink.__doc__
+    )
 
     def get_audio_sink_name(self) -> Optional[str]:
         """Get the name of the virtual audio sink for this instance.
@@ -1323,19 +1430,29 @@ class GoogleMeetController:
     get_pipe_path.__doc__ = _shared_GoogleMeetController_get_pipe_path.__doc__
 
     async def _route_browser_audio_to_sink(self) -> None:
-        return await _shared_GoogleMeetController__route_browser_audio_to_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__route_browser_audio_to_sink(
+            self, logger=logger
+        )
 
-    _route_browser_audio_to_sink.__doc__ = _shared_GoogleMeetController__route_browser_audio_to_sink.__doc__
+    _route_browser_audio_to_sink.__doc__ = (
+        _shared_GoogleMeetController__route_browser_audio_to_sink.__doc__
+    )
 
     def _move_sink_input(self, sink_input_id: str) -> bool:
-        return _shared_GoogleMeetController__move_sink_input(self, sink_input_id, logger=logger)
+        return _shared_GoogleMeetController__move_sink_input(
+            self, sink_input_id, logger=logger
+        )
 
     _move_sink_input.__doc__ = _shared_GoogleMeetController__move_sink_input.__doc__
 
     def _get_chrome_sink_inputs(self, only_our_browser: bool = True) -> list[str]:
-        return _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser, logger=logger)
+        return _shared_GoogleMeetController__get_chrome_sink_inputs(
+            self, only_our_browser, logger=logger
+        )
 
-    _get_chrome_sink_inputs.__doc__ = _shared_GoogleMeetController__get_chrome_sink_inputs.__doc__
+    _get_chrome_sink_inputs.__doc__ = (
+        _shared_GoogleMeetController__get_chrome_sink_inputs.__doc__
+    )
 
     def unmute_audio(self) -> bool:
         return _shared_GoogleMeetController_unmute_audio(self, logger=logger)
@@ -1353,9 +1470,13 @@ class GoogleMeetController:
     is_audio_muted.__doc__ = _shared_GoogleMeetController_is_audio_muted.__doc__
 
     async def _restore_user_default_source(self) -> None:
-        return await _shared_GoogleMeetController__restore_user_default_source(self, logger=logger)
+        return await _shared_GoogleMeetController__restore_user_default_source(
+            self, logger=logger
+        )
 
-    _restore_user_default_source.__doc__ = _shared_GoogleMeetController__restore_user_default_source.__doc__
+    _restore_user_default_source.__doc__ = (
+        _shared_GoogleMeetController__restore_user_default_source.__doc__
+    )
 
     async def _move_user_browser_to_original_source(self, target_source: str) -> None:
         return await _shared_GoogleMeetController__move_user_browser_to_original_source(
@@ -1366,7 +1487,9 @@ class GoogleMeetController:
         _shared_GoogleMeetController__move_user_browser_to_original_source.__doc__
     )
 
-    async def _start_video_stream(self, video_device: str, video_enabled: bool = False) -> bool:
+    async def _start_video_stream(
+        self, video_device: str, video_enabled: bool = False
+    ) -> bool:
         """
         Start video daemon streaming to the virtual camera device.
 
@@ -1386,13 +1509,17 @@ class GoogleMeetController:
 
             client = get_client("video")
             if not await client.connect():
-                logger.warning(f"[{self._instance_id}] Could not connect to video daemon")
+                logger.warning(
+                    f"[{self._instance_id}] Could not connect to video daemon"
+                )
                 return False
 
             # Start black screen or full video based on video_enabled setting
             if video_enabled:
                 # Full AI video overlay
-                audio_source = f"{self._devices.sink_name}.monitor" if self._devices else ""
+                audio_source = (
+                    f"{self._devices.sink_name}.monitor" if self._devices else ""
+                )
                 result = await client.call_method(
                     "start_video",
                     [video_device, audio_source, "", 1920, 1080, False],
@@ -1407,13 +1534,17 @@ class GoogleMeetController:
             await client.disconnect()
 
             if not result or not result.get("success"):
-                logger.warning(f"[{self._instance_id}] Video daemon start failed: {result}")
+                logger.warning(
+                    f"[{self._instance_id}] Video daemon start failed: {result}"
+                )
                 return False
 
             # Wait for the device to switch to CAPTURE mode
             # With exclusive_caps=1, the device only shows as CAPTURE when actively streaming
             # Chrome will only detect it as a camera when it's in CAPTURE mode
-            logger.info(f"[{self._instance_id}] Waiting for video device to become active...")
+            logger.info(
+                f"[{self._instance_id}] Waiting for video device to become active..."
+            )
             await asyncio.sleep(1.0)  # Give time for first frames to be written
 
             # Verify the device is now in capture mode
@@ -1426,9 +1557,13 @@ class GoogleMeetController:
                 timeout=5,
             )
             if "Video Capture" in result.stdout and "Video Output" not in result.stdout:
-                logger.info(f"[{self._instance_id}] Device is in CAPTURE mode - Chrome will detect it")
+                logger.info(
+                    f"[{self._instance_id}] Device is in CAPTURE mode - Chrome will detect it"
+                )
             else:
-                logger.warning(f"[{self._instance_id}] Device may not be in pure CAPTURE mode")
+                logger.warning(
+                    f"[{self._instance_id}] Device may not be in pure CAPTURE mode"
+                )
 
             logger.info(f"[{self._instance_id}] Video stream started on {video_device}")
             return True
@@ -1496,9 +1631,13 @@ class GoogleMeetController:
             # Check DISPLAY is set (required for headless=False)
             display = os.environ.get("DISPLAY")
             if not display:
-                logger.error("DISPLAY environment variable not set - cannot launch visible browser")
+                logger.error(
+                    "DISPLAY environment variable not set - cannot launch visible browser"
+                )
                 if self.state:
-                    self.state.errors.append("DISPLAY not set - browser requires X11 display")
+                    self.state.errors.append(
+                        "DISPLAY not set - browser requires X11 display"
+                    )
                 return False
 
             logger.info(f"Starting browser with DISPLAY={display}")
@@ -1506,9 +1645,15 @@ class GoogleMeetController:
             # ========== CLEANUP ORPHANED DEVICES ==========
             # Remove any stale MeetBot devices from previous sessions
             # This prevents accumulation of orphaned sinks/sources/video devices
-            logger.info(f"[{self._instance_id}] Cleaning up orphaned MeetBot devices...")
-            cleanup_result = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
-            if cleanup_result.get("removed_modules") or cleanup_result.get("removed_video_devices"):
+            logger.info(
+                f"[{self._instance_id}] Cleaning up orphaned MeetBot devices..."
+            )
+            cleanup_result = await cleanup_orphaned_meetbot_devices(
+                active_instance_ids=set()
+            )
+            if cleanup_result.get("removed_modules") or cleanup_result.get(
+                "removed_video_devices"
+            ):
                 logger.info(
                     f"[{self._instance_id}] Cleanup removed: "
                     f"{len(cleanup_result.get('removed_modules', []))} audio modules, "
@@ -1525,21 +1670,31 @@ class GoogleMeetController:
             if self._devices:
                 self._audio_sink_name = self._devices.sink_name
                 logger.info(f"[{self._instance_id}] Audio devices ready:")
-                logger.info(f"[{self._instance_id}]   Sink: {self._devices.sink_name} (Chrome output)")
-                logger.info(f"[{self._instance_id}]   Source: {self._devices.source_name} (Chrome mic input)")
+                logger.info(
+                    f"[{self._instance_id}]   Sink: {self._devices.sink_name} (Chrome output)"
+                )
+                logger.info(
+                    f"[{self._instance_id}]   Source: {self._devices.source_name} (Chrome mic input)"
+                )
                 logger.info(f"[{self._instance_id}]   Pipe: {self._devices.pipe_path}")
             else:
-                logger.warning(f"[{self._instance_id}] Failed to create audio devices, falling back to legacy method")
+                logger.warning(
+                    f"[{self._instance_id}] Failed to create audio devices, falling back to legacy method"
+                )
 
             # Get virtual camera device path for Chrome launch args
             # The video_generator will stream to this device separately
             virtual_camera = None
             if self._devices and self._devices.video_device:
                 virtual_camera = self._devices.video_device
-                logger.info(f"[{self._instance_id}] Video device available: {virtual_camera}")
+                logger.info(
+                    f"[{self._instance_id}] Video device available: {virtual_camera}"
+                )
             elif Path(self.config.video.virtual_camera_device).exists():
                 virtual_camera = self.config.video.virtual_camera_device
-                logger.info(f"[{self._instance_id}] Using shared video device: {virtual_camera}")
+                logger.info(
+                    f"[{self._instance_id}] Using shared video device: {virtual_camera}"
+                )
 
             # Legacy fallback: create audio sink if per-instance devices failed
             if not self._devices:
@@ -1572,7 +1727,9 @@ class GoogleMeetController:
             # Use instance-specific profile to avoid lock conflicts, but copy cookies from main profile
             instance_profile_dir = profile_dir / f"instance-{self._instance_id}"
             instance_profile_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"[{self._instance_id}] Using instance profile: {instance_profile_dir}")
+            logger.info(
+                f"[{self._instance_id}] Using instance profile: {instance_profile_dir}"
+            )
 
             # Copy cookies and login data from main profile if they exist and instance doesn't have them
             await self._copy_profile_data(profile_dir, instance_profile_dir)
@@ -1586,8 +1743,12 @@ class GoogleMeetController:
                 browser_env["PULSE_SINK"] = self._devices.sink_name
                 browser_env["PULSE_SOURCE"] = self._devices.source_name
                 logger.info(f"[{self._instance_id}] Pre-routing audio via env vars:")
-                logger.info(f"[{self._instance_id}]   PULSE_SINK={self._devices.sink_name}")
-                logger.info(f"[{self._instance_id}]   PULSE_SOURCE={self._devices.source_name}")
+                logger.info(
+                    f"[{self._instance_id}]   PULSE_SINK={self._devices.sink_name}"
+                )
+                logger.info(
+                    f"[{self._instance_id}]   PULSE_SOURCE={self._devices.source_name}"
+                )
 
             # Build Chrome args - include video device if available
             chrome_args = [
@@ -1615,15 +1776,23 @@ class GoogleMeetController:
             # This ensures the v4l2loopback device is active when Chrome enumerates cameras
             # Without an active stream, Chrome may not see the device as a valid camera
             if virtual_camera and Path(virtual_camera).exists():
-                logger.info(f"[{self._instance_id}] Virtual camera available: {virtual_camera}")
-                video_ready = await self._start_video_stream(virtual_camera, self._video_enabled)
+                logger.info(
+                    f"[{self._instance_id}] Virtual camera available: {virtual_camera}"
+                )
+                video_ready = await self._start_video_stream(
+                    virtual_camera, self._video_enabled
+                )
                 if video_ready:
-                    video_mode = "full AI overlay" if self._video_enabled else "black screen"
+                    video_mode = (
+                        "full AI overlay" if self._video_enabled else "black screen"
+                    )
                     logger.info(
                         f"[{self._instance_id}] Video stream active ({video_mode}) - Chrome will see virtual camera"
                     )
                 else:
-                    logger.warning(f"[{self._instance_id}] Video stream not ready - Chrome may not see virtual camera")
+                    logger.warning(
+                        f"[{self._instance_id}] Video stream not ready - Chrome may not see virtual camera"
+                    )
 
             self.browser = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(instance_profile_dir),
@@ -1649,7 +1818,9 @@ class GoogleMeetController:
                         cmdline = proc.info.get("cmdline") or []
                         if any(self._instance_id in str(arg) for arg in cmdline):
                             self._browser_pid = proc.info["pid"]
-                            logger.info(f"[{self._instance_id}] Browser PID: {self._browser_pid}")
+                            logger.info(
+                                f"[{self._instance_id}] Browser PID: {self._browser_pid}"
+                            )
                             break
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
@@ -1663,7 +1834,9 @@ class GoogleMeetController:
             #
             # Legacy fallback: if we didn't use per-instance devices, route manually
             if not self._devices and self._audio_sink_name:
-                logger.info(f"[{self._instance_id}] Using legacy audio routing (no pre-routing)")
+                logger.info(
+                    f"[{self._instance_id}] Using legacy audio routing (no pre-routing)"
+                )
                 asyncio.create_task(self._route_browser_audio_to_sink())
 
             # CRITICAL: Restore the user's default audio source
@@ -1671,7 +1844,11 @@ class GoogleMeetController:
             # This runs in the background to restore it after Chrome settles
             asyncio.create_task(self._restore_user_default_source())
 
-            self.page = self.browser.pages[0] if self.browser.pages else await self.browser.new_page()
+            self.page = (
+                self.browser.pages[0]
+                if self.browser.pages
+                else await self.browser.new_page()
+            )
 
             # Skip stealth scripts - they may break Google Meet UI
             # await self._inject_stealth_scripts()
@@ -1680,7 +1857,9 @@ class GoogleMeetController:
             # The browser will navigate directly to the meeting URL when join_meeting is called
             # Audio devices will be initialized when we navigate to the actual meeting
 
-            logger.info("Browser initialized successfully (will navigate when joining meeting)")
+            logger.info(
+                "Browser initialized successfully (will navigate when joining meeting)"
+            )
             return True
 
         except ImportError as e:
@@ -1708,11 +1887,15 @@ class GoogleMeetController:
             # CRITICAL: Clean up audio devices if browser initialization failed
             # Otherwise devices are orphaned and accumulate on repeated failures
             if self._device_manager:
-                logger.info(f"[{self._instance_id}] Cleaning up devices after browser init failure")
+                logger.info(
+                    f"[{self._instance_id}] Cleaning up devices after browser init failure"
+                )
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
                 except Exception as cleanup_err:
-                    logger.warning(f"[{self._instance_id}] Device cleanup failed: {cleanup_err}")
+                    logger.warning(
+                        f"[{self._instance_id}] Device cleanup failed: {cleanup_err}"
+                    )
                 self._device_manager = None
                 self._devices = None
 
@@ -1768,7 +1951,9 @@ class GoogleMeetController:
         try:
             # Get credentials from redhatter API
             logger.info("Fetching credentials from redhatter API...")
-            username, password = await get_google_credentials(self.config.bot_account.email)
+            username, password = await get_google_credentials(
+                self.config.bot_account.email
+            )
 
             # Check if we need to sign in - look for Sign in button on Meet page
             # Google Meet uses a div[role="button"] with "Sign in" text
@@ -1812,7 +1997,9 @@ class GoogleMeetController:
                     await asyncio.sleep(1)
 
                     # Click Next button
-                    next_button = await self.page.wait_for_selector("#identifierNext", timeout=5000)
+                    next_button = await self.page.wait_for_selector(
+                        "#identifierNext", timeout=5000
+                    )
                     if next_button:
                         logger.info("Clicking Next...")
                         await next_button.click()
@@ -1838,14 +2025,20 @@ class GoogleMeetController:
                         await fill_sso_form(self.page, username, password)
                     except ImportError:
                         # Fallback to inline implementation if aa_sso not available
-                        logger.warning("aa_sso module not available, using inline SSO form fill")
+                        logger.warning(
+                            "aa_sso module not available, using inline SSO form fill"
+                        )
                         await saml_username.fill(username)
                         await asyncio.sleep(0.5)
-                        saml_password = await self.page.wait_for_selector("#password", timeout=5000)
+                        saml_password = await self.page.wait_for_selector(
+                            "#password", timeout=5000
+                        )
                         if saml_password:
                             await saml_password.fill(password)
                             await asyncio.sleep(0.5)
-                        submit_button = await self.page.wait_for_selector("#submit", timeout=5000)
+                        submit_button = await self.page.wait_for_selector(
+                            "#submit", timeout=5000
+                        )
                         if submit_button:
                             await submit_button.click()
 
@@ -1860,8 +2053,13 @@ class GoogleMeetController:
                             current_url = self.page.url
 
                             # Check for Google "Verify it's you" / account confirmation page
-                            if "speedbump" in current_url or "samlconfirmaccount" in current_url:
-                                logger.info("Google verification page detected, clicking Continue...")
+                            if (
+                                "speedbump" in current_url
+                                or "samlconfirmaccount" in current_url
+                            ):
+                                logger.info(
+                                    "Google verification page detected, clicking Continue..."
+                                )
                                 try:
                                     # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
                                     # Try multiple selectors to find the actual clickable button
@@ -1877,20 +2075,34 @@ class GoogleMeetController:
                                         try:
                                             btn = self.page.locator(selector).first
                                             if await btn.count() > 0:
-                                                logger.info(f"Found Continue button with selector: {selector}")
-                                                await btn.click(force=True, timeout=5000)
-                                                logger.info("Clicked Continue on verification page")
+                                                logger.info(
+                                                    f"Found Continue button with selector: {selector}"
+                                                )
+                                                await btn.click(
+                                                    force=True, timeout=5000
+                                                )
+                                                logger.info(
+                                                    "Clicked Continue on verification page"
+                                                )
                                                 clicked = True
                                                 await asyncio.sleep(3)
                                                 break
                                         except Exception as e:
-                                            logger.debug(f"Selector {selector} failed: {e}")
+                                            logger.debug(
+                                                f"Selector {selector} failed: {e}"
+                                            )
 
                                     if not clicked:
                                         # Last resort: find by role and text
-                                        logger.info("Trying role-based selector for Continue...")
-                                        await self.page.get_by_role("button", name="Continue").click(timeout=5000)
-                                        logger.info("Clicked Continue via role selector")
+                                        logger.info(
+                                            "Trying role-based selector for Continue..."
+                                        )
+                                        await self.page.get_by_role(
+                                            "button", name="Continue"
+                                        ).click(timeout=5000)
+                                        logger.info(
+                                            "Clicked Continue via role selector"
+                                        )
                                         await asyncio.sleep(3)
 
                                 except Exception as e:
@@ -1922,7 +2134,9 @@ class GoogleMeetController:
             current_url = self.page.url
             if "meet.google.com" in current_url:
                 # Check if sign-in link is gone
-                sign_in_link = await self.page.query_selector(self.SELECTORS["sign_in_link"])
+                sign_in_link = await self.page.query_selector(
+                    self.SELECTORS["sign_in_link"]
+                )
                 if not sign_in_link:
                     logger.info("Sign-in appears successful")
                     return True
@@ -1968,7 +2182,9 @@ class GoogleMeetController:
             # Close any existing browser resources
             await self.close()
             # Reinitialize the browser
-            if not await self.initialize(video_enabled=getattr(self, "_video_enabled", False)):
+            if not await self.initialize(
+                video_enabled=getattr(self, "_video_enabled", False)
+            ):
                 error_msg = "Failed to reinitialize browser after closure"
                 logger.error(f"[JOIN] ERROR: {error_msg}")
                 if self.state:
@@ -2024,7 +2240,9 @@ class GoogleMeetController:
             # Handle "Got it" dialog if present
             logger.info("[JOIN] Checking for 'Got it' dialog...")
             try:
-                got_it = await self.page.wait_for_selector(self.SELECTORS["got_it_button"], timeout=3000)
+                got_it = await self.page.wait_for_selector(
+                    self.SELECTORS["got_it_button"], timeout=3000
+                )
                 if got_it:
                     logger.info("[JOIN] Found 'Got it' dialog - clicking")
                     await got_it.click()
@@ -2034,7 +2252,12 @@ class GoogleMeetController:
 
             # Check if we need to sign in (look for Sign in button or name input for guest)
             logger.info("[JOIN] Checking if sign-in is required...")
-            sign_in_button = await self.page.locator('div[role="button"]:has-text("Sign in")').count() > 0
+            sign_in_button = (
+                await self.page.locator(
+                    'div[role="button"]:has-text("Sign in")'
+                ).count()
+                > 0
+            )
             name_input = await self.page.query_selector(self.SELECTORS["name_input"])
             logger.info(
                 f"[JOIN] Sign-in button present: {sign_in_button}, Name input present: {name_input is not None}"
@@ -2057,8 +2280,12 @@ class GoogleMeetController:
 
                 # Check if we need to re-navigate (sometimes SSO redirects elsewhere)
                 if "meet.google.com" not in self.page.url:
-                    logger.info(f"[JOIN] Re-navigating to meeting after sign-in (current: {self.page.url})")
-                    await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
+                    logger.info(
+                        f"[JOIN] Re-navigating to meeting after sign-in (current: {self.page.url})"
+                    )
+                    await self.page.goto(
+                        meet_url, wait_until="domcontentloaded", timeout=30000
+                    )
                     await asyncio.sleep(2)
             else:
                 logger.info("[JOIN] No sign-in required, proceeding to join")
@@ -2069,7 +2296,9 @@ class GoogleMeetController:
 
             # UNMUTE microphone (it's a virtual pipe - only produces sound when we write to it)
             # Turn off camera before joining (we use virtual avatar instead)
-            logger.info("[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)...")
+            logger.info(
+                "[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)..."
+            )
             # Always unmute - the bot's mic is a virtual pipe, not a real microphone
             # It only produces sound when TTS writes audio to it
             await self._toggle_mute(mute=False)
@@ -2126,18 +2355,24 @@ class GoogleMeetController:
                         locator = self.page.locator(selector)
                         if await locator.count() > 0:
                             join_button = locator.first
-                            logger.info(f"Found '{btn_text}' button with selector: {selector}")
+                            logger.info(
+                                f"Found '{btn_text}' button with selector: {selector}"
+                            )
                             break
                 except Exception as e:
                     logger.debug(f"Error finding '{btn_text}': {e}")
 
             # If no button found, wait and retry once
             if not join_button:
-                logger.info("[JOIN] No join button found on first try, waiting 3s and retrying...")
+                logger.info(
+                    "[JOIN] No join button found on first try, waiting 3s and retrying..."
+                )
 
                 # Take a screenshot for debugging
                 try:
-                    screenshot_path = str(Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png")
+                    screenshot_path = str(
+                        Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png"
+                    )
                     await self.page.screenshot(path=screenshot_path)
                     logger.info(f"[JOIN] Debug screenshot saved to: {screenshot_path}")
                 except Exception as e:
@@ -2147,7 +2382,9 @@ class GoogleMeetController:
                 try:
                     body_text = await self.page.inner_text("body")
                     # Truncate to first 500 chars
-                    logger.info(f"[JOIN] Page body text (first 500 chars): {body_text[:500]}")
+                    logger.info(
+                        f"[JOIN] Page body text (first 500 chars): {body_text[:500]}"
+                    )
                 except Exception as e:
                     logger.warning(f"[JOIN] Could not get page text: {e}")
 
@@ -2164,7 +2401,9 @@ class GoogleMeetController:
                             locator = self.page.locator(selector)
                             if await locator.count() > 0:
                                 join_button = locator.first
-                                logger.info(f"[JOIN] Found '{btn_text}' button on retry")
+                                logger.info(
+                                    f"[JOIN] Found '{btn_text}' button on retry"
+                                )
                                 break
                     except Exception:
                         pass
@@ -2180,9 +2419,13 @@ class GoogleMeetController:
                 # Handle permissions dialog if it appears
                 # "Do you want people to hear you in the meeting?"
                 try:
-                    mic_button = self.page.locator('button:has-text("Microphone allowed")')
+                    mic_button = self.page.locator(
+                        'button:has-text("Microphone allowed")'
+                    )
                     if await mic_button.count() > 0:
-                        logger.info("Permissions dialog detected - clicking 'Microphone allowed'")
+                        logger.info(
+                            "Permissions dialog detected - clicking 'Microphone allowed'"
+                        )
                         await mic_button.click(force=True)
                         await asyncio.sleep(2)
                 except Exception as e:
@@ -2193,7 +2436,9 @@ class GoogleMeetController:
                 # We use this opportunity to select the MeetBot virtual camera
                 # NOTE: Do NOT press Escape here - in Google Meet it can toggle camera!
                 try:
-                    device_dialog = self.page.locator('[aria-label="Settings"], [aria-label="Audio settings"]')
+                    device_dialog = self.page.locator(
+                        '[aria-label="Settings"], [aria-label="Audio settings"]'
+                    )
                     if await device_dialog.count() > 0:
                         logger.info("Device selection dialog detected")
                         # Try to select the MeetBot camera before dismissing
@@ -2215,7 +2460,9 @@ class GoogleMeetController:
                     for btn_text in ["Join anyway", "Join now"]:
                         join_again = self.page.locator(f'button:has-text("{btn_text}")')
                         if await join_again.count() > 0:
-                            logger.info(f"Found '{btn_text}' after permissions - clicking")
+                            logger.info(
+                                f"Found '{btn_text}' after permissions - clicking"
+                            )
                             await join_again.first.click()
                             await asyncio.sleep(3)
                             break
@@ -2252,10 +2499,14 @@ class GoogleMeetController:
                     # Then turn on the camera
                     await self._toggle_camera(camera_on=True)
 
-                logger.info(f"[JOIN] ========== SUCCESS: Joined meeting {meeting_id} ==========")
+                logger.info(
+                    f"[JOIN] ========== SUCCESS: Joined meeting {meeting_id} =========="
+                )
                 return True
             else:
-                logger.error("[JOIN] ========== FAILED: Join button not found ==========")
+                logger.error(
+                    "[JOIN] ========== FAILED: Join button not found =========="
+                )
                 logger.error(f"[JOIN] Current URL: {self.page.url}")
                 self.state.errors.append("Join button not found")
                 return False
@@ -2284,7 +2535,9 @@ class GoogleMeetController:
             try:
                 off_button = self.page.locator('button[aria-label="Turn off captions"]')
                 if await off_button.count() > 0:
-                    logger.info("[CAPTIONS] Captions already enabled (found 'Turn off captions' button)")
+                    logger.info(
+                        "[CAPTIONS] Captions already enabled (found 'Turn off captions' button)"
+                    )
                     self.state.captions_enabled = True
                     return True
             except Exception:
@@ -2302,7 +2555,9 @@ class GoogleMeetController:
                     if box:
                         center_x = box["x"] + box["width"] / 2
                         center_y = box["y"] + box["height"] / 2
-                        logger.info(f"[CAPTIONS] Clicking at center ({center_x}, {center_y})")
+                        logger.info(
+                            f"[CAPTIONS] Clicking at center ({center_x}, {center_y})"
+                        )
                         await self.page.mouse.click(center_x, center_y)
                     else:
                         # Fallback to regular click
@@ -2311,7 +2566,9 @@ class GoogleMeetController:
                     await asyncio.sleep(1.0)
 
                     # Verify captions are now on
-                    off_button = self.page.locator('button[aria-label="Turn off captions"]')
+                    off_button = self.page.locator(
+                        'button[aria-label="Turn off captions"]'
+                    )
                     if await off_button.count() > 0:
                         logger.info("[CAPTIONS] Captions enabled successfully")
                         self.state.captions_enabled = True
@@ -2319,18 +2576,26 @@ class GoogleMeetController:
                         # WORKAROUND: Re-enable camera if it got turned off
                         # Google Meet sometimes toggles camera when clicking nearby buttons
                         if self._video_enabled:
-                            logger.info("[CAPTIONS] Checking camera state after captions...")
+                            logger.info(
+                                "[CAPTIONS] Checking camera state after captions..."
+                            )
                             await asyncio.sleep(0.5)
-                            camera_btn = self.page.locator('button[aria-label="Turn on camera"]')
+                            camera_btn = self.page.locator(
+                                'button[aria-label="Turn on camera"]'
+                            )
                             if await camera_btn.count() > 0:
-                                logger.warning("[CAPTIONS] Camera was turned OFF! Re-enabling...")
+                                logger.warning(
+                                    "[CAPTIONS] Camera was turned OFF! Re-enabling..."
+                                )
                                 await camera_btn.first.click()
                                 await asyncio.sleep(0.5)
                                 logger.info("[CAPTIONS] Camera re-enabled")
 
                         return True
                     else:
-                        logger.warning("[CAPTIONS] Button clicked but captions may not be on")
+                        logger.warning(
+                            "[CAPTIONS] Button clicked but captions may not be on"
+                        )
                         self.state.captions_enabled = True
                         return True
             except Exception as e:
@@ -2339,12 +2604,16 @@ class GoogleMeetController:
             # Method 3: Try through the three-dots menu (slowest)
             logger.info("Trying to enable captions via menu...")
             try:
-                more_button = self.page.locator('[aria-label="More options"], [aria-label="More actions"]')
+                more_button = self.page.locator(
+                    '[aria-label="More options"], [aria-label="More actions"]'
+                )
                 if await more_button.count() > 0:
                     await more_button.first.click()
                     await asyncio.sleep(0.5)
 
-                    captions_option = self.page.locator('li:has-text("captions"), [aria-label*="captions" i]')
+                    captions_option = self.page.locator(
+                        'li:has-text("captions"), [aria-label*="captions" i]'
+                    )
                     if await captions_option.count() > 0:
                         await captions_option.first.click()
                         self.state.captions_enabled = True
@@ -2379,13 +2648,17 @@ class GoogleMeetController:
                 logger.info("[CAMERA-SELECT] Opening Video settings dropdown...")
 
                 # Wait for the Video settings button to be visible and clickable
-                video_settings = self.page.locator('button[aria-label="Video settings"]')
+                video_settings = self.page.locator(
+                    'button[aria-label="Video settings"]'
+                )
 
                 try:
                     # Wait up to 5 seconds for button to be visible
                     await video_settings.first.wait_for(state="visible", timeout=5000)
                 except Exception:
-                    logger.warning(f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})")
+                    logger.warning(
+                        f"[CAMERA-SELECT] Video settings button not visible (attempt {attempt + 1})"
+                    )
                     continue
 
                 # Click with a shorter timeout
@@ -2396,7 +2669,9 @@ class GoogleMeetController:
                 meetbot_pattern = "MeetBot"
 
                 # Try to find and click the MeetBot option
-                menu_items = self.page.locator('[role="menuitem"], [role="menuitemradio"], li')
+                menu_items = self.page.locator(
+                    '[role="menuitem"], [role="menuitemradio"], li'
+                )
                 count = await menu_items.count()
                 logger.info(f"[CAMERA-SELECT] Found {count} menu items")
 
@@ -2414,7 +2689,9 @@ class GoogleMeetController:
                         continue
 
                 # Close dropdown if we didn't find MeetBot
-                logger.warning("[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape")
+                logger.warning(
+                    "[CAMERA-SELECT] MeetBot not found in dropdown, pressing Escape"
+                )
                 await self.page.keyboard.press("Escape")
                 await asyncio.sleep(0.3)
 
@@ -2436,7 +2713,9 @@ class GoogleMeetController:
 
         try:
             # Find mute button
-            mute_button = await self.page.wait_for_selector(self.SELECTORS["mute_button"], timeout=5000)
+            mute_button = await self.page.wait_for_selector(
+                self.SELECTORS["mute_button"], timeout=5000
+            )
 
             if mute_button:
                 # Check current state
@@ -2474,7 +2753,9 @@ class GoogleMeetController:
 
             for selector in selectors:
                 try:
-                    camera_button = await self.page.wait_for_selector(selector, timeout=2000)
+                    camera_button = await self.page.wait_for_selector(
+                        selector, timeout=2000
+                    )
                     if camera_button:
                         break
                 except Exception:
@@ -2486,7 +2767,9 @@ class GoogleMeetController:
                 aria_label_lower = aria_label.lower()
 
                 # Determine current state - if label says "turn of", camera is currently ON
-                camera_currently_on = "turn of" in aria_label_lower or "stop" in aria_label_lower
+                camera_currently_on = (
+                    "turn of" in aria_label_lower or "stop" in aria_label_lower
+                )
 
                 if camera_currently_on != camera_on:
                     await camera_button.click()
@@ -2504,9 +2787,13 @@ class GoogleMeetController:
         return False
 
     async def _set_devices_via_js(self) -> bool:
-        return await _shared_GoogleMeetController__set_devices_via_js(self, logger=logger)
+        return await _shared_GoogleMeetController__set_devices_via_js(
+            self, logger=logger
+        )
 
-    _set_devices_via_js.__doc__ = _shared_GoogleMeetController__set_devices_via_js.__doc__
+    _set_devices_via_js.__doc__ = (
+        _shared_GoogleMeetController__set_devices_via_js.__doc__
+    )
 
     async def _select_meetbot_devices(self) -> dict:
         """
@@ -2532,7 +2819,9 @@ class GoogleMeetController:
                 mic_name = self._devices.source_name
                 # The sink name is what appears as speaker in Chrome
                 speaker_name = self._devices.sink_name
-                logger.info(f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}")
+                logger.info(
+                    f"[DEVICES] Looking for mic: {mic_name}, speaker: {speaker_name}"
+                )
 
             # Step 1: Select the camera
             logger.info("[DEVICES] Selecting MeetBot camera...")
@@ -2541,12 +2830,16 @@ class GoogleMeetController:
             # Step 2: Select the microphone
             if mic_name:
                 logger.info("[DEVICES] Selecting MeetBot microphone...")
-                results["microphone"] = await self._select_audio_device("microphone", mic_name)
+                results["microphone"] = await self._select_audio_device(
+                    "microphone", mic_name
+                )
 
             # Step 3: Select the speaker
             if speaker_name:
                 logger.info("[DEVICES] Selecting MeetBot speaker...")
-                results["speaker"] = await self._select_audio_device("speaker", speaker_name)
+                results["speaker"] = await self._select_audio_device(
+                    "speaker", speaker_name
+                )
 
             logger.info(f"[DEVICES] Selection results: {results}")
             return results
@@ -2556,14 +2849,22 @@ class GoogleMeetController:
             return results
 
     async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
-        return await _shared_GoogleMeetController__select_audio_device(self, device_type, device_name, logger=logger)
+        return await _shared_GoogleMeetController__select_audio_device(
+            self, device_type, device_name, logger=logger
+        )
 
-    _select_audio_device.__doc__ = _shared_GoogleMeetController__select_audio_device.__doc__
+    _select_audio_device.__doc__ = (
+        _shared_GoogleMeetController__select_audio_device.__doc__
+    )
 
     async def _select_meetbot_camera(self) -> bool:
-        return await _shared_GoogleMeetController__select_meetbot_camera(self, logger=logger)
+        return await _shared_GoogleMeetController__select_meetbot_camera(
+            self, logger=logger
+        )
 
-    _select_meetbot_camera.__doc__ = _shared_GoogleMeetController__select_meetbot_camera.__doc__
+    _select_meetbot_camera.__doc__ = (
+        _shared_GoogleMeetController__select_meetbot_camera.__doc__
+    )
 
     async def _dismiss_chrome_sync_dialog(self) -> bool:
         """
@@ -2587,7 +2888,10 @@ class GoogleMeetController:
             page_content = await self.page.content()
             dialog_found = False
 
-            if "Sign in to Chromium" in page_content or "Sign in to Chrome" in page_content:
+            if (
+                "Sign in to Chromium" in page_content
+                or "Sign in to Chrome" in page_content
+            ):
                 dialog_found = True
                 logger.info("Chrome sync dialog detected via page content")
 
@@ -2646,7 +2950,9 @@ class GoogleMeetController:
             # Try Playwright's get_by_role
             try:
                 logger.info("Trying get_by_role for dismiss button...")
-                await self.page.get_by_role("button", name="Use Chromium without an account").click(timeout=3000)
+                await self.page.get_by_role(
+                    "button", name="Use Chromium without an account"
+                ).click(timeout=3000)
                 logger.info("Chrome sync dialog dismissed via get_by_role")
                 return True
             except Exception as e:
@@ -2682,7 +2988,9 @@ class GoogleMeetController:
             await asyncio.sleep(2)
 
             # Check if dialog is present by looking for the dialog text
-            dialog_text = self.page.locator('text="Do you want people to hear you in the meeting?"')
+            dialog_text = self.page.locator(
+                'text="Do you want people to hear you in the meeting?"'
+            )
             if await dialog_text.count() == 0:
                 logger.info("No permissions dialog found")
                 return False
@@ -2700,12 +3008,16 @@ class GoogleMeetController:
                     mic_only = self.page.locator(selector)
                     count = await mic_only.count()
                     if count > 0:
-                        logger.info(f"Trying to click 'Microphone allowed' ({selector})")
+                        logger.info(
+                            f"Trying to click 'Microphone allowed' ({selector})"
+                        )
                         await mic_only.first.click(force=True, timeout=3000)
                         await asyncio.sleep(1)
                         # Check if dialog is gone
                         if await dialog_text.count() == 0:
-                            logger.info("Dialog dismissed via Microphone allowed button")
+                            logger.info(
+                                "Dialog dismissed via Microphone allowed button"
+                            )
                             return True
                 except Exception as e:
                     logger.debug(f"Mic button click failed: {e}")
@@ -2778,7 +3090,9 @@ class GoogleMeetController:
                     count = await button.count()
                     if count > 0:
                         await button.first.click(timeout=1000)
-                        logger.info(f"Dismissed dialog popup by clicking '{text}' button")
+                        logger.info(
+                            f"Dismissed dialog popup by clicking '{text}' button"
+                        )
                         await asyncio.sleep(0.3)
                         return  # Only dismiss one popup at a time
                 except Exception:
@@ -2800,10 +3114,16 @@ class GoogleMeetController:
         except Exception as e:
             logger.debug(f"Error dismissing info popups: {e}")
 
-    async def start_caption_capture(self, callback: Callable[[CaptionEntry], None]) -> None:
-        return await _shared_GoogleMeetController_start_caption_capture(self, callback, logger=logger)
+    async def start_caption_capture(
+        self, callback: Callable[[CaptionEntry], None]
+    ) -> None:
+        return await _shared_GoogleMeetController_start_caption_capture(
+            self, callback, logger=logger
+        )
 
-    start_caption_capture.__doc__ = _shared_GoogleMeetController_start_caption_capture.__doc__
+    start_caption_capture.__doc__ = (
+        _shared_GoogleMeetController_start_caption_capture.__doc__
+    )
 
     async def _poll_captions(self) -> None:
         """Poll for settled/corrected captions from the JS observer buffer."""
@@ -2837,7 +3157,9 @@ class GoogleMeetController:
                     entry = CaptionEntry(
                         speaker=speaker,
                         text=text.strip(),
-                        timestamp=(datetime.fromtimestamp(ts / 1000) if ts else datetime.now()),
+                        timestamp=(
+                            datetime.fromtimestamp(ts / 1000) if ts else datetime.now()
+                        ),
                         caption_id=cap_id,
                         is_update=is_true_update,
                     )
@@ -2870,7 +3192,9 @@ class GoogleMeetController:
                     or "Target page, context or browser has been closed" in error_msg
                     or "Browser has been closed" in error_msg
                 ):
-                    logger.warning(f"[Caption poll] Browser closed detected: {error_msg}")
+                    logger.warning(
+                        f"[Caption poll] Browser closed detected: {error_msg}"
+                    )
                     self._browser_closed = True
                     if self.state:
                         self.state.joined = False
@@ -2922,7 +3246,9 @@ class GoogleMeetController:
             await self.stop_caption_capture()
 
             # Click leave button
-            leave_button = await self.page.wait_for_selector(self.SELECTORS["leave_button"], timeout=5000)
+            leave_button = await self.page.wait_for_selector(
+                self.SELECTORS["leave_button"], timeout=5000
+            )
 
             if leave_button:
                 await leave_button.click()
@@ -3150,13 +3476,17 @@ class GoogleMeetController:
 
             if js_participants:
                 participants = js_participants
-                logger.debug(f"JavaScript extraction found {len(participants)} participants")
+                logger.debug(
+                    f"JavaScript extraction found {len(participants)} participants"
+                )
 
             # Fallback: Try Playwright selectors if JS extraction failed
             if not participants:
                 try:
                     # Use role-based selectors
-                    elements = await self.page.query_selector_all('[role="listitem"][aria-label]')
+                    elements = await self.page.query_selector_all(
+                        '[role="listitem"][aria-label]'
+                    )
                     for el in elements:
                         try:
                             name = await el.get_attribute("aria-label")
@@ -3164,7 +3494,9 @@ class GoogleMeetController:
                                 name = clean_name(name)
                                 if is_valid_name(name):
                                     if not any(p["name"] == name for p in participants):
-                                        participants.append({"name": name, "email": None})
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
                         except Exception:
                             continue
                 except Exception as e:
@@ -3173,7 +3505,9 @@ class GoogleMeetController:
             # Secondary fallback: data-participant-id elements
             if not participants:
                 try:
-                    elements = await self.page.query_selector_all("[data-participant-id]")
+                    elements = await self.page.query_selector_all(
+                        "[data-participant-id]"
+                    )
                     for el in elements:
                         try:
                             name = await el.get_attribute("aria-label")
@@ -3181,7 +3515,9 @@ class GoogleMeetController:
                                 name = clean_name(name)
                                 if is_valid_name(name):
                                     if not any(p["name"] == name for p in participants):
-                                        participants.append({"name": name, "email": None})
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
                         except Exception:
                             continue
                 except Exception as e:
@@ -3208,9 +3544,13 @@ class GoogleMeetController:
         return participants
 
     async def get_participant_count(self) -> int:
-        return await _shared_GoogleMeetController_get_participant_count(self, logger=logger)
+        return await _shared_GoogleMeetController_get_participant_count(
+            self, logger=logger
+        )
 
-    get_participant_count.__doc__ = _shared_GoogleMeetController_get_participant_count.__doc__
+    get_participant_count.__doc__ = (
+        _shared_GoogleMeetController_get_participant_count.__doc__
+    )
 
     async def close(self, restore_browser_audio: bool = False) -> None:
         """Close the browser and cleanup resources.
@@ -3221,7 +3561,9 @@ class GoogleMeetController:
                                    meeting dies unexpectedly (browser crashed, service
                                    restarted, etc.) to ensure user's Chrome keeps mic.
         """
-        logger.info(f"[{self._instance_id}] Closing browser controller (restore_audio={restore_browser_audio})...")
+        logger.info(
+            f"[{self._instance_id}] Closing browser controller (restore_audio={restore_browser_audio})..."
+        )
 
         # Stop caption capture first (this cancels the polling task)
         try:
@@ -3233,7 +3575,9 @@ class GoogleMeetController:
             try:
                 await asyncio.wait_for(self.browser.close(), timeout=10.0)
             except asyncio.TimeoutError:
-                logger.warning(f"[{self._instance_id}] Timeout closing browser, forcing...")
+                logger.warning(
+                    f"[{self._instance_id}] Timeout closing browser, forcing..."
+                )
                 await self.force_kill()
             except Exception as e:
                 logger.warning(f"[{self._instance_id}] Error closing browser: {e}")
@@ -3250,7 +3594,9 @@ class GoogleMeetController:
 
         # Clean up per-instance audio devices (new method)
         if self._device_manager:
-            await self._device_manager.cleanup(restore_browser_audio=restore_browser_audio)
+            await self._device_manager.cleanup(
+                restore_browser_audio=restore_browser_audio
+            )
             self._device_manager = None
             self._devices = None
         else:
@@ -3285,11 +3631,15 @@ class GoogleMeetController:
             loop.create_task(self._handle_browser_close_async())
         except RuntimeError:
             # No running event loop - cleanup will happen via health monitor
-            logger.warning(f"[{self._instance_id}] No event loop for async cleanup, relying on health monitor")
+            logger.warning(
+                f"[{self._instance_id}] No event loop for async cleanup, relying on health monitor"
+            )
 
     async def _handle_browser_close_async(self) -> None:
         """Async handler for browser close - cleans up devices immediately."""
-        logger.info(f"[{self._instance_id}] Running immediate device cleanup after browser close...")
+        logger.info(
+            f"[{self._instance_id}] Running immediate device cleanup after browser close..."
+        )
 
         # Clean up audio devices - RESTORE browser audio since this is unexpected
         if self._device_manager:
@@ -3340,10 +3690,14 @@ class GoogleMeetController:
                 import signal
 
                 os.kill(self._browser_pid, signal.SIGKILL)
-                logger.info(f"[{self._instance_id}] Killed browser PID {self._browser_pid}")
+                logger.info(
+                    f"[{self._instance_id}] Killed browser PID {self._browser_pid}"
+                )
                 killed = True
             except (ProcessLookupError, PermissionError) as e:
-                logger.debug(f"[{self._instance_id}] Browser already dead or inaccessible: {e}")
+                logger.debug(
+                    f"[{self._instance_id}] Browser already dead or inaccessible: {e}"
+                )
 
         # Try to find and kill by instance ID in cmdline
         try:
@@ -3354,7 +3708,9 @@ class GoogleMeetController:
                     cmdline = proc.info.get("cmdline") or []
                     if any(self._instance_id in str(arg) for arg in cmdline):
                         proc.kill()
-                        logger.info(f"[{self._instance_id}] Killed process {proc.info['pid']} by cmdline match")
+                        logger.info(
+                            f"[{self._instance_id}] Killed process {proc.info['pid']} by cmdline match"
+                        )
                         killed = True
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
@@ -3402,7 +3758,9 @@ class GoogleMeetController:
         for instance_id, controller in list(cls._instances.items()):
             age = (now - controller._last_activity).total_seconds() / 60
             if age > max_age_minutes:
-                logger.warning(f"Instance {instance_id} is hung (no activity for {age:.1f} min)")
+                logger.warning(
+                    f"Instance {instance_id} is hung (no activity for {age:.1f} min)"
+                )
                 await controller.force_kill()
                 killed.append(instance_id)
 
@@ -3464,7 +3822,9 @@ class GoogleMeetController:
         """
         # Check flag first (set by error handlers when we catch closure exceptions)
         if getattr(self, "_browser_closed", False):
-            logger.debug(f"[{self._instance_id}] is_browser_closed: _browser_closed flag is True")
+            logger.debug(
+                f"[{self._instance_id}] is_browser_closed: _browser_closed flag is True"
+            )
             return True
 
         # Check if page exists and is closed
@@ -3474,13 +3834,17 @@ class GoogleMeetController:
                 self._browser_closed = True
                 return True
             if self.page.is_closed():
-                logger.warning(f"[{self._instance_id}] is_browser_closed: page.is_closed() returned True")
+                logger.warning(
+                    f"[{self._instance_id}] is_browser_closed: page.is_closed() returned True"
+                )
                 self._browser_closed = True
                 return True
 
         except Exception as e:
             # Any error checking means browser is likely dead
-            logger.warning(f"[{self._instance_id}] is_browser_closed: exception during check: {e}")
+            logger.warning(
+                f"[{self._instance_id}] is_browser_closed: exception during check: {e}"
+            )
             self._browser_closed = True
             return True
 
@@ -3493,7 +3857,9 @@ class GoogleMeetController:
         Args:
             interval_seconds: Time between screenshots (default 10s)
         """
-        logger.info(f"[{self._instance_id}] Starting screenshot loop (every {interval_seconds}s)")
+        logger.info(
+            f"[{self._instance_id}] Starting screenshot loop (every {interval_seconds}s)"
+        )
         consecutive_failures = 0
         max_failures = 3  # Stop after 3 consecutive failures (browser likely closed)
 
@@ -3505,7 +3871,9 @@ class GoogleMeetController:
                 else:
                     consecutive_failures += 1
             except BrowserClosedError:
-                logger.error(f"[{self._instance_id}] Browser closed - stopping screenshot loop")
+                logger.error(
+                    f"[{self._instance_id}] Browser closed - stopping screenshot loop"
+                )
                 self.state.joined = False
                 break
             except Exception as e:
@@ -3514,7 +3882,9 @@ class GoogleMeetController:
 
             # If too many consecutive failures, assume browser is dead
             if consecutive_failures >= max_failures:
-                logger.error(f"[{self._instance_id}] Too many screenshot failures - browser likely closed")
+                logger.error(
+                    f"[{self._instance_id}] Too many screenshot failures - browser likely closed"
+                )
                 self._browser_closed = True
                 self.state.joined = False
                 break

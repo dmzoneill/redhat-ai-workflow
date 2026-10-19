@@ -164,7 +164,9 @@ async def _prometheus_get_alerts_impl(
     # Reuse prometheus_alerts implementation from tools_basic
     from .tools_basic import _prometheus_alerts_impl
 
-    result = await _prometheus_alerts_impl(environment=environment, state="", namespace=namespace, severity="")
+    result = await _prometheus_alerts_impl(
+        environment=environment, state="", namespace=namespace, severity=""
+    )
     return result
 
 
@@ -386,7 +388,11 @@ async def _prometheus_targets_impl(
 
     if not active_targets:
         filter_msg = f" with state={state}" if state else ""
-        return [TextContent(type="text", text=f"No active targets{filter_msg} in {environment}")]
+        return [
+            TextContent(
+                type="text", text=f"No active targets{filter_msg} in {environment}"
+            )
+        ]
 
     # Count by health
     up = len([t for t in active_targets if t.get("health") == "up"])

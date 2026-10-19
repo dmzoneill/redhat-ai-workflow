@@ -102,7 +102,11 @@ class InteractiveActions:
         """
         try:
             # Create meeting ID from database ID or generate one
-            meeting_id = str(self._state.meeting_id) if self._state.meeting_id else f"meet-{id(self)}"
+            meeting_id = (
+                str(self._state.meeting_id)
+                if self._state.meeting_id
+                else f"meet-{id(self)}"
+            )
             meeting_title = self._state.title or "Untitled Meeting"
 
             # Initialize LLM responder with meeting context
@@ -113,10 +117,14 @@ class InteractiveActions:
             logger.info(
                 f"🎤 Interactive mode: LLM responder initialized for meeting '{meeting_title}' (ID: {meeting_id})"
             )
-            logger.info("🎤 Interactive mode: Conversation history will be maintained throughout this meeting")
+            logger.info(
+                "🎤 Interactive mode: Conversation history will be maintained throughout this meeting"
+            )
 
             # Set up wake word callback for voice responses
-            logger.info(f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'")
+            logger.info(
+                f"🎤 Interactive mode: Listening for wake word '{self.config.wake_word}'"
+            )
 
         except Exception as e:
             logger.error(f"Failed to set up interactive mode: {e}")
@@ -183,8 +191,12 @@ class InteractiveActions:
                 self._wake_word_manager.text_detector.reset()
                 logger.debug("Wake word detector reset after response")
 
-    async def _stream_and_speak(self, command: str, speaker: str, context_before: list) -> None:
-        return await _shared_NotesBot__stream_and_speak(self, command, speaker, context_before, logger=logger)
+    async def _stream_and_speak(
+        self, command: str, speaker: str, context_before: list
+    ) -> None:
+        return await _shared_NotesBot__stream_and_speak(
+            self, command, speaker, context_before, logger=logger
+        )
 
     _stream_and_speak.__doc__ = _shared_NotesBot__stream_and_speak.__doc__
 
@@ -194,9 +206,13 @@ class InteractiveActions:
     _speak_response.__doc__ = _shared_NotesBot__speak_response.__doc__
 
     async def _speak_response_audio_only(self, text: str) -> None:
-        return await _shared_NotesBot__speak_response_audio_only(self, text, logger=logger)
+        return await _shared_NotesBot__speak_response_audio_only(
+            self, text, logger=logger
+        )
 
-    _speak_response_audio_only.__doc__ = _shared_NotesBot__speak_response_audio_only.__doc__
+    _speak_response_audio_only.__doc__ = (
+        _shared_NotesBot__speak_response_audio_only.__doc__
+    )
 
     # ── Video daemon integration ──────────────────────────────────────────
 
@@ -230,11 +246,17 @@ class InteractiveActions:
                     video_device = devices.video_device
                     sink_name = devices.sink_name
                     # Audio source is the sink's monitor (for logging - actual capture via sink-input)
-                    audio_source = f"{devices.sink_name}.monitor" if devices.sink_name else None
-                    logger.info(f"📺 Device info: video={video_device}, audio={audio_source}")
+                    audio_source = (
+                        f"{devices.sink_name}.monitor" if devices.sink_name else None
+                    )
+                    logger.info(
+                        f"📺 Device info: video={video_device}, audio={audio_source}"
+                    )
 
             if not video_device:
-                logger.warning("📺 No video device available, skipping video integration")
+                logger.warning(
+                    "📺 No video device available, skipping video integration"
+                )
                 return
 
             # Find Chromium's sink-input index for monitor-stream capture
@@ -242,7 +264,9 @@ class InteractiveActions:
             if sink_input_index is not None:
                 logger.info(f"📺 Found Chromium sink-input index: {sink_input_index}")
             else:
-                logger.warning("📺 Could not find Chromium sink-input, waveform may not work")
+                logger.warning(
+                    "📺 Could not find Chromium sink-input, waveform may not work"
+                )
 
             # Update audio source on the video daemon
             # The video daemon is already rendering - just update the audio capture
@@ -258,7 +282,9 @@ class InteractiveActions:
                 if not result or not result.get("success"):
                     # Fall back to switch_to_full_video if update_audio_source fails
                     # (e.g., if in black screen mode)
-                    logger.info(f"📺 update_audio_source failed ({result}), trying switch_to_full_video...")
+                    logger.info(
+                        f"📺 update_audio_source failed ({result}), trying switch_to_full_video..."
+                    )
                     result = await client.call_method(
                         "switch_to_full_video",
                         [
@@ -276,7 +302,9 @@ class InteractiveActions:
                     logger.info(f"📺 Video integration active on {video_device}")
 
                     # Start participant polling task
-                    self._participant_poll_task = asyncio.create_task(self._poll_participants(controller))
+                    self._participant_poll_task = asyncio.create_task(
+                        self._poll_participants(controller)
+                    )
                 else:
                     # May fail if video was disabled - that's OK, keep black screen
                     logger.info(f"📺 Video result: {result}")
@@ -288,7 +316,9 @@ class InteractiveActions:
         except Exception as e:
             logger.warning(f"📺 Failed to start video integration: {e}")
 
-    async def _find_chromium_sink_input(self, target_sink: Optional[str]) -> Optional[int]:
+    async def _find_chromium_sink_input(
+        self, target_sink: Optional[str]
+    ) -> Optional[int]:
         """Find Chromium's sink-input index for monitor-stream capture.
 
         PipeWire's null-sink monitors don't work properly (output zeros).
@@ -342,7 +372,9 @@ class InteractiveActions:
                 if line.startswith("Sink Input #"):
                     # Save previous if it was Chromium
                     if is_chromium and current_index is not None:
-                        sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
+                        sink_name = sink_id_to_name.get(
+                            current_sink_id, current_sink_id
+                        )
                         chromium_candidates.append((current_index, sink_name))
 
                     # Start new sink-input
@@ -369,19 +401,25 @@ class InteractiveActions:
                 sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
                 chromium_candidates.append((current_index, sink_name))
 
-            logger.info(f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}")
+            logger.info(
+                f"📺 Found {len(chromium_candidates)} Chromium sink-inputs: {chromium_candidates}"
+            )
 
             # Find the one connected to our target sink
             for idx, sink_name in chromium_candidates:
                 if target_sink and target_sink in sink_name:
-                    logger.info(f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})")
+                    logger.info(
+                        f"📺 Selected Chromium sink-input {idx} (connected to {sink_name})"
+                    )
                     return idx
 
             # If no match but we have candidates, return the last one (most recent)
             # This handles cases where Playwright Chromium might be named differently
             if chromium_candidates:
                 idx, sink_name = chromium_candidates[-1]
-                logger.info(f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})")
+                logger.info(
+                    f"📺 Using last Chromium sink-input {idx} (connected to {sink_name})"
+                )
                 return idx
 
             return None
@@ -404,7 +442,11 @@ class InteractiveActions:
         rapid_interval = 2.0  # Fast polling at start
         normal_interval = 15.0  # Match video rotation interval
 
-        while self._state.status == "capturing" and controller and self._video_daemon_active:
+        while (
+            self._state.status == "capturing"
+            and controller
+            and self._video_daemon_active
+        ):
             try:
                 # Get participants from Google Meet
                 participants = await controller.get_participants()
@@ -413,9 +455,13 @@ class InteractiveActions:
                     # Send to video daemon via D-Bus
                     await self._update_video_attendees(participants)
                     if poll_count == 0:
-                        logger.info(f"📺 Initial participant poll: {len(participants)} participants")
+                        logger.info(
+                            f"📺 Initial participant poll: {len(participants)} participants"
+                        )
                     else:
-                        logger.debug(f"📺 Sent {len(participants)} participants to video daemon")
+                        logger.debug(
+                            f"📺 Sent {len(participants)} participants to video daemon"
+                        )
 
             except Exception as e:
                 logger.debug(f"Participant poll error: {e}")

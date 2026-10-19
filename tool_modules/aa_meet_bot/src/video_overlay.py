@@ -141,8 +141,12 @@ class VideoOverlayRenderer:
         self._init_static_cache()
 
         # Pre-allocate waveform and NPU buffers
-        self._wave_buffer = np.zeros((self.wave_height, self.wave_width, 3), dtype=np.uint8)
-        self._npu_buffer = np.zeros((self.npu_height, self.npu_width, 3), dtype=np.uint8)
+        self._wave_buffer = np.zeros(
+            (self.wave_height, self.wave_width, 3), dtype=np.uint8
+        )
+        self._npu_buffer = np.zeros(
+            (self.npu_height, self.npu_width, 3), dtype=np.uint8
+        )
 
         # Pre-allocate FFT computation buffers to avoid per-frame allocations
         self._fft_bar_heights = np.zeros(self.wave_bars, dtype=np.float32)
@@ -188,7 +192,9 @@ class VideoOverlayRenderer:
         )
 
         # Right column vertical divider
-        cv2.line(base_frame, (right_col_x, 50), (right_col_x, bottom_section_y), CV_GREEN, 2)
+        cv2.line(
+            base_frame, (right_col_x, 50), (right_col_x, bottom_section_y), CV_GREEN, 2
+        )
 
         # "Building Context" heading
         cv2.putText(
@@ -373,8 +379,16 @@ class VideoOverlayRenderer:
 
         for i in range(self.wave_bars):
             # Logarithmic mapping: more resolution at low frequencies
-            low_freq = int(n_fft_bins * (np.exp(i / self.wave_bars * np.log(n_fft_bins)) - 1) / (n_fft_bins - 1))
-            high_freq = int(n_fft_bins * (np.exp((i + 1) / self.wave_bars * np.log(n_fft_bins)) - 1) / (n_fft_bins - 1))
+            low_freq = int(
+                n_fft_bins
+                * (np.exp(i / self.wave_bars * np.log(n_fft_bins)) - 1)
+                / (n_fft_bins - 1)
+            )
+            high_freq = int(
+                n_fft_bins
+                * (np.exp((i + 1) / self.wave_bars * np.log(n_fft_bins)) - 1)
+                / (n_fft_bins - 1)
+            )
             high_freq = max(high_freq, low_freq + 1)
 
             # Average the FFT bins for this bar
@@ -407,7 +421,9 @@ class VideoOverlayRenderer:
 
         return self._fft_bar_heights
 
-    def generate_waveform_frame_from_audio(self, bar_heights: np.ndarray, out: np.ndarray = None) -> np.ndarray:
+    def generate_waveform_frame_from_audio(
+        self, bar_heights: np.ndarray, out: np.ndarray = None
+    ) -> np.ndarray:
         """Generate waveform frame from audio-derived bar heights.
 
         Args:
@@ -451,12 +467,20 @@ class VideoOverlayRenderer:
     def generate_waveform_frame(self, t: float, out: np.ndarray = None) -> np.ndarray:
         return _shared_RealtimeVideoRenderer__generate_waveform_frame(self, t, out)
 
-    generate_waveform_frame.__doc__ = _shared_RealtimeVideoRenderer__generate_waveform_frame.__doc__
+    generate_waveform_frame.__doc__ = (
+        _shared_RealtimeVideoRenderer__generate_waveform_frame.__doc__
+    )
 
-    def generate_npu_frame(self, t: float, frame_num: int, out: np.ndarray = None) -> np.ndarray:
-        return _shared_RealtimeVideoRenderer__generate_npu_frame(self, t, frame_num, out)
+    def generate_npu_frame(
+        self, t: float, frame_num: int, out: np.ndarray = None
+    ) -> np.ndarray:
+        return _shared_RealtimeVideoRenderer__generate_npu_frame(
+            self, t, frame_num, out
+        )
 
-    generate_npu_frame.__doc__ = _shared_RealtimeVideoRenderer__generate_npu_frame.__doc__
+    generate_npu_frame.__doc__ = (
+        _shared_RealtimeVideoRenderer__generate_npu_frame.__doc__
+    )
 
     def precompute_attendee_data(self, attendee: "Attendee") -> dict:
         """Pre-compute attendee-specific data to avoid per-frame string operations.
@@ -494,8 +518,12 @@ class VideoOverlayRenderer:
                     h, w = img.shape[:2]
                     scale = target_size / max(h, w)
                     new_w, new_h = int(w * scale), int(h * scale)
-                    photo_bgr = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-                    logger.debug(f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}")
+                    photo_bgr = cv2.resize(
+                        img, (new_w, new_h), interpolation=cv2.INTER_AREA
+                    )
+                    logger.debug(
+                        f"Loaded photo for {attendee.name}: {photo_path} -> {new_w}x{new_h}"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load photo {photo_path}: {e}")
 
@@ -513,7 +541,11 @@ class VideoOverlayRenderer:
             "email": email,
             "has_slack_data": attendee.slack_id is not None,
             "tools": [
-                (f"slack://user/{slack_id}" if attendee.slack_id else f"slack://search?user={first_name}.{last_name}"),
+                (
+                    f"slack://user/{slack_id}"
+                    if attendee.slack_id
+                    else f"slack://search?user={first_name}.{last_name}"
+                ),
                 f"ldap://query?uid={username}",
                 f"jira://search?assignee={username}",
                 f"gitlab://commits?author={email}",
@@ -584,7 +616,9 @@ class VideoOverlayRenderer:
         }
 
         if not self._gpu_text_renderer:
-            raise RuntimeError("GPU text renderer not initialized - required for video generation")
+            raise RuntimeError(
+                "GPU text renderer not initialized - required for video generation"
+            )
 
         c = self.config
 
@@ -619,7 +653,9 @@ class VideoOverlayRenderer:
             text_items.append((f"[+] {finding}", c.left_margin, y, "cyan", "normal"))
 
         # === WAVEFORM LABEL - above the waveform box, left aligned ===
-        text_items.append(("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium"))
+        text_items.append(
+            ("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium")
+        )
 
         # === LIVE TRANSCRIPTION STACK (below waveform box) ===
         transcript_start_y = c.wave_y + c.wave_h + 20
@@ -644,7 +680,9 @@ class VideoOverlayRenderer:
         # === VOICE PROFILE ANALYSIS - LEFT of facial recognition (top right area) ===
         voice_x = c.voice_profile_x
         voice_y = c.voice_profile_y
-        text_items.append(("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large"))
+        text_items.append(
+            ("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large")
+        )
 
         stats = [
             f"Voice Print ID: {attendee_data['voice_print_id']:05d}",
@@ -654,10 +692,14 @@ class VideoOverlayRenderer:
         ]
         for i, stat in enumerate(stats):
             if stat:  # Skip empty lines
-                text_items.append((stat, voice_x, voice_y + 45 + i * 40, "orange", "medium"))
+                text_items.append(
+                    (stat, voice_x, voice_y + 45 + i * 40, "orange", "medium")
+                )
 
         # === FACIAL RECOGNITION - TOP RIGHT ===
-        text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large"))
+        text_items.append(
+            ("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large")
+        )
 
         # Show Slack username below the profile image
         if attendee_data and attendee_data.get("has_slack_data"):
@@ -665,8 +707,12 @@ class VideoOverlayRenderer:
             slack_id = attendee_data.get("slack_id", "")
             # Position below the face box
             slack_info_y = c.face_y + c.face_h + 25
-            text_items.append((f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium"))
-            text_items.append((f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal"))
+            text_items.append(
+                (f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium")
+            )
+            text_items.append(
+                (f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal")
+            )
 
         # === NPU STATS (all GPU-rendered for consistent quality) ===
         npu_header_y = c.npu_y + 18
@@ -699,7 +745,11 @@ class VideoOverlayRenderer:
         npu = npu_stats
         busy_sec = npu["busy_us"] / 1_000_000
         mem_mb = npu["mem_bytes"] / (1024 * 1024)
-        util_pct = min(100, int(npu["busy_delta_us"] / 5000)) if npu["busy_delta_us"] > 0 else 0
+        util_pct = (
+            min(100, int(npu["busy_delta_us"] / 5000))
+            if npu["busy_delta_us"] > 0
+            else 0
+        )
         runtime_status = npu["runtime_status"].upper()
 
         # Column 1 - NPU core stats
@@ -709,7 +759,9 @@ class VideoOverlayRenderer:
             f"MEM: {mem_mb:.1f} MB",
         ]
         for i, stat in enumerate(col1_stats):
-            text_items.append((stat, col_x[0], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[0], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 2 - NPU utilization
         col2_stats = [
@@ -719,7 +771,9 @@ class VideoOverlayRenderer:
         ]
         for i, stat in enumerate(col2_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
-            text_items.append((stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[1], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Column 3 - Model info (static but accurate)
         col3_stats = [
@@ -728,7 +782,9 @@ class VideoOverlayRenderer:
             "INPUT: 16kHz PCM",
         ]
         for i, stat in enumerate(col3_stats):
-            text_items.append((stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[2], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 4 - Real inference counters from STT engine
         stt = stt_stats
@@ -738,7 +794,9 @@ class VideoOverlayRenderer:
             f"FRAMES: {frame_num}",
         ]
         for i, stat in enumerate(col4_stats):
-            text_items.append((stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size))
+            text_items.append(
+                (stat, col_x[3], npu_stats_y + i * npu_line_h, "green", npu_size)
+            )
 
         # Column 5 - Real inference performance
         rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rt"] > 0 else "---"
@@ -749,11 +807,19 @@ class VideoOverlayRenderer:
         ]
         for i, stat in enumerate(col5_stats):
             color = "cyan" if "ON" in stat or stt["avg_rt"] < 0.5 else "green"
-            text_items.append((stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[4], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Column 6 - Real telemetry from STT engine
-        latency_display = f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
-        rate_display = f"{stt['inferences_per_second']:.1f}/s" if stt["inferences_per_second"] > 0 else "---"
+        latency_display = (
+            f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
+        )
+        rate_display = (
+            f"{stt['inferences_per_second']:.1f}/s"
+            if stt["inferences_per_second"] > 0
+            else "---"
+        )
         col6_stats = [
             f"RATE: {rate_display}",
             f"LATENCY: {latency_display}",
@@ -761,7 +827,9 @@ class VideoOverlayRenderer:
         ]
         for i, stat in enumerate(col6_stats):
             color = "cyan" if "ACTIVE" in stat else "green"
-            text_items.append((stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size))
+            text_items.append(
+                (stat, col_x[5], npu_stats_y + i * npu_line_h, color, npu_size)
+            )
 
         # Build shapes list for GPU rendering
         has_photo = attendee_data and attendee_data.get("photo_bgr") is not None
@@ -794,7 +862,9 @@ class VideoOverlayRenderer:
         # Only show face box and silhouette if NO photo available
         if not has_photo:
             # Face box outline
-            shapes.append(("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1))
+            shapes.append(
+                ("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1)
+            )
             # Silhouette
             center_x = c.face_x + c.face_w // 2
             silhouette_size = 180
@@ -911,7 +981,9 @@ class VideoOverlayRenderer:
             name_parts = attendee.name.split()
             first_name = name_parts[0].lower() if name_parts else "user"
             last_name = name_parts[-1].lower() if len(name_parts) > 1 else first_name
-            username = f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
+            username = (
+                f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
+            )
             email_domain = "redhat.com"
             realistic_tools = [
                 f"ldap://query?uid={username}",
@@ -980,7 +1052,9 @@ class VideoOverlayRenderer:
                 )
 
         # Findings - appear after tools (dynamic)
-        findings_start = len(realistic_tools[: config.num_tools]) * config.tool_display_time
+        findings_start = (
+            len(realistic_tools[: config.num_tools]) * config.tool_display_time
+        )
         findings_y = y_pos + config.num_tools * 20 + 15
         for j, finding in enumerate(findings):
             finding_start = findings_start + j * 1.0
@@ -1054,7 +1128,11 @@ class VideoOverlayRenderer:
         pitch_var = 12 + int(8 * math.sin(t * 0.9))
 
         # Left stats column
-        voice_print_id = attendee_data["voice_print_id"] if attendee_data else hash(attendee.name) % 99999
+        voice_print_id = (
+            attendee_data["voice_print_id"]
+            if attendee_data
+            else hash(attendee.name) % 99999
+        )
         cv2.putText(
             frame,
             f"VOICE PRINT ID: VP-{voice_print_id:05d}",
@@ -1172,7 +1250,9 @@ class VideoOverlayRenderer:
             thickness,
             CV_LINE_TYPE,
         )
-        profile_color = (0, 255, 0) if t > 10 else CV_GREEN  # Bright green when complete
+        profile_color = (
+            (0, 255, 0) if t > 10 else CV_GREEN
+        )  # Bright green when complete
         cv2.putText(
             frame,
             f"PROFILE: {min(100, int(t * 7))}%",
@@ -1186,17 +1266,23 @@ class VideoOverlayRenderer:
 
         # Generate waveform into pre-allocated buffer
         if has_audio:
-            wave_arr = self.generate_waveform_frame_from_audio(audio_buffer, self._wave_buffer)
+            wave_arr = self.generate_waveform_frame_from_audio(
+                audio_buffer, self._wave_buffer
+            )
         else:
             wave_arr = self.generate_waveform_frame(t, self._wave_buffer)
 
         # Scale waveform using cv2.resize (100x faster than fancy indexing)
         target_h = wave_h - 4
         target_w = wave_w - 4
-        scaled_wave = cv2.resize(wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+        scaled_wave = cv2.resize(
+            wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST
+        )
 
         # Paste waveform
-        frame[wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w] = scaled_wave
+        frame[
+            wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w
+        ] = scaled_wave
 
         # Generate NPU panel into pre-allocated buffer
         npu_arr = self.generate_npu_frame(t, frame_num, self._npu_buffer)

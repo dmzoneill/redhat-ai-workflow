@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal, cast
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -34,18 +34,7 @@ except ImportError:
 
 # Shared implementations live in scheduler_config.py (single source of truth).
 try:
-    from .scheduler_config import DEFAULT_RETRY_CONFIG  # noqa: F401
     from .scheduler_config import (
-        _shared_JobExecutionLog_log_execution,
-        _shared_RetryConfig_calculate_delay,
-        _shared_RetryConfig_from_config,
-        _shared_RetryConfig_should_retry,
-        _shared_SchedulerConfig___init__,
-        _shared_SchedulerConfig__is_job_enabled,
-        _shared_SchedulerConfig_get_poll_jobs,
-    )
-except ImportError:
-    from scheduler_config import (  # type: ignore[no-redef]  # noqa: F401; type: ignore[no-redef]
         DEFAULT_RETRY_CONFIG,
         _shared_JobExecutionLog_log_execution,
         _shared_RetryConfig_calculate_delay,
@@ -55,6 +44,20 @@ except ImportError:
         _shared_SchedulerConfig__is_job_enabled,
         _shared_SchedulerConfig_get_poll_jobs,
     )
+except ImportError:
+    from scheduler_config import (  # type: ignore[no-redef]
+        DEFAULT_RETRY_CONFIG,
+        _shared_JobExecutionLog_log_execution,
+        _shared_RetryConfig_calculate_delay,
+        _shared_RetryConfig_from_config,
+        _shared_RetryConfig_should_retry,
+        _shared_SchedulerConfig___init__,
+        _shared_SchedulerConfig__is_job_enabled,
+        _shared_SchedulerConfig_get_poll_jobs,
+    )
+
+# Re-export for callers that import this name from scheduler.
+__all__ = ["DEFAULT_RETRY_CONFIG"]
 
 
 @dataclass
@@ -78,8 +81,13 @@ class RetryConfig:
     retry_on: list[str] = field(default_factory=lambda: ["auth", "network"])
 
     @classmethod
-    def from_config(cls, job_config: dict, default_config: dict | None = None) -> "RetryConfig":
-        return _shared_RetryConfig_from_config(cls, job_config, default_config)
+    def from_config(
+        cls, job_config: dict, default_config: dict | None = None
+    ) -> "RetryConfig":
+        return cast(
+            "RetryConfig",
+            _shared_RetryConfig_from_config(cls, job_config, default_config),
+        )
 
     def calculate_delay(self, attempt: int) -> int:
         return _shared_RetryConfig_calculate_delay(self, attempt)
@@ -102,6 +110,7 @@ from server.config_manager import CONFIG_FILE  # noqa: E402
 from server.config_manager import config as config_manager  # noqa: E402
 from server.state_manager import state as state_manager  # noqa: E402
 
+
 class SchedulerConfig:
     """Configuration for the scheduler loaded from config.json and state.json."""
 
@@ -122,7 +131,9 @@ class SchedulerConfig:
         return config_manager.get_all()
 
     def _is_job_enabled(self, job_config: dict) -> bool:
-        return _shared_SchedulerConfig__is_job_enabled(self, job_config, state_manager=state_manager)
+        return _shared_SchedulerConfig__is_job_enabled(
+            self, job_config, state_manager=state_manager
+        )
 
     _is_job_enabled.__doc__ = _shared_SchedulerConfig__is_job_enabled.__doc__
 
@@ -218,7 +229,9 @@ class JobExecutionLog:
         return job_entries[-limit:]
 
 
-def _shared_CronScheduler__cleanup_skill_execution_state(self, skill_name: str, error: str, *, logger):
+def _shared_CronScheduler__cleanup_skill_execution_state(
+    self, skill_name: str, error: str, *, logger
+):
     """Clean up stale skill execution state after timeout or crash.
 
     When a cron job times out or crashes, the skill_execution.json file
@@ -230,7 +243,9 @@ def _shared_CronScheduler__cleanup_skill_execution_state(self, skill_name: str, 
         error: Error message to record
     """
     try:
-        execution_file = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+        execution_file = (
+            Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
+        )
         if not execution_file.exists():
             return
 
@@ -246,7 +261,9 @@ def _shared_CronScheduler__cleanup_skill_execution_state(self, skill_name: str, 
             return
 
         if current_state.get("status") != "running":
-            self._log_to_file(f"Skill execution state is already {current_state.get('status')}, not cleaning up")
+            self._log_to_file(
+                f"Skill execution state is already {current_state.get('status')}, not cleaning up"
+            )
             return
 
         # Update state to failed
@@ -371,7 +388,9 @@ async def _shared_CronScheduler__apply_remediation(
     return None, False
 
 
-async def _shared_CronScheduler__run_kube_login(self, cluster: str = "stage", *, logger) -> bool:
+async def _shared_CronScheduler__run_kube_login(
+    self, cluster: str = "stage", *, logger
+) -> bool:
     """Run kube_login to refresh credentials.
 
     Returns:
@@ -401,7 +420,9 @@ async def _shared_CronScheduler__run_kube_login(self, cluster: str = "stage", *,
 
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
-            output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+            output = (stdout.decode() if stdout else "") + (
+                stderr.decode() if stderr else ""
+            )
 
             if process.returncode == 0 or "logged in" in output.lower():
                 logger.info(f"kube_login({cluster}) successful")
@@ -498,9 +519,13 @@ class CronScheduler:
             logger.debug("Suppressed error: %s", exc)
 
     def _cleanup_skill_execution_state(self, skill_name: str, error: str):
-        return _shared_CronScheduler__cleanup_skill_execution_state(self, skill_name, error, logger=logger)
+        return _shared_CronScheduler__cleanup_skill_execution_state(
+            self, skill_name, error, logger=logger
+        )
 
-    _cleanup_skill_execution_state.__doc__ = _shared_CronScheduler__cleanup_skill_execution_state.__doc__
+    _cleanup_skill_execution_state.__doc__ = (
+        _shared_CronScheduler__cleanup_skill_execution_state.__doc__
+    )
 
     async def start(self, add_cron_jobs: bool = True):
         """Start the scheduler.
@@ -512,7 +537,9 @@ class CronScheduler:
             add_cron_jobs: If False, skip adding cron jobs (useful when cron daemon handles them).
                           Default True for backward compatibility with cron_daemon.py.
         """
-        self._log_to_file(f"start() called, _running={self._running}, add_cron_jobs={add_cron_jobs}")
+        self._log_to_file(
+            f"start() called, _running={self._running}, add_cron_jobs={add_cron_jobs}"
+        )
 
         if self._running:
             logger.warning("Scheduler already running")
@@ -537,13 +564,17 @@ class CronScheduler:
         # The MCP server should pass add_cron_jobs=False since cron_daemon handles cron jobs
         if self.config.enabled and add_cron_jobs:
             cron_jobs = self.config.get_cron_jobs()
-            self._log_to_file(f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}")
+            self._log_to_file(
+                f"Adding {len(cron_jobs)} cron jobs: {[j.get('name') for j in cron_jobs]}"
+            )
             for job in cron_jobs:
                 self._add_cron_job(job)
             logger.info(f"Scheduler started with {len(cron_jobs)} cron jobs")
         elif self.config.enabled and not add_cron_jobs:
             logger.info("Scheduler started (cron jobs handled by cron_daemon)")
-            self._log_to_file("Scheduler started, cron jobs skipped (handled by cron_daemon)")
+            self._log_to_file(
+                "Scheduler started, cron jobs skipped (handled by cron_daemon)"
+            )
         else:
             logger.info("Scheduler started (disabled in config, watching for changes)")
             self._log_to_file("Scheduler disabled in config")
@@ -551,7 +582,9 @@ class CronScheduler:
         # Start the scheduler
         self.scheduler.start()
         self._running = True
-        self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        self._config_mtime = (
+            CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        )
         self._log_to_file(f"Scheduler started, _running={self._running}")
 
     async def stop(self):
@@ -607,8 +640,14 @@ class CronScheduler:
             )
 
             persona_info = f" (persona: {persona})" if persona else ""
-            retry_info = f", retry: {retry_config.max_attempts}" if retry_config.enabled else ", retry: disabled"
-            timeout_info = f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
+            retry_info = (
+                f", retry: {retry_config.max_attempts}"
+                if retry_config.enabled
+                else ", retry: disabled"
+            )
+            timeout_info = (
+                f", timeout: {timeout_seconds}s" if timeout_seconds != 600 else ""
+            )
             logger.info(
                 f"Added cron job: {job_name} ({cron_expr}) -> skill:{skill}{persona_info}{retry_info}{timeout_info}"
             )
@@ -623,7 +662,9 @@ class CronScheduler:
         """
         parts = cron_expr.split()
         if len(parts) != 5:
-            raise ValueError(f"Invalid cron expression: {cron_expr} (expected 5 fields)")
+            raise ValueError(
+                f"Invalid cron expression: {cron_expr} (expected 5 fields)"
+            )
 
         minute, hour, day, month, day_of_week = parts
 
@@ -665,9 +706,13 @@ class CronScheduler:
         now = datetime.now()
         # Replace / with - in skill name to avoid invalid file paths
         safe_skill = skill.replace("/", "-")
-        session_name = f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        session_name = (
+            f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
+        )
         persona_info = f", persona: {persona}" if persona else ""
-        logger.info(f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}")
+        logger.info(
+            f"Executing scheduled job: {job_name} (skill: {skill}{persona_info}) in session: {session_name}"
+        )
         self._log_to_file(
             f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
         )
@@ -712,30 +757,46 @@ class CronScheduler:
                 retry_info["retried"] = True
                 # Calculate backoff delay
                 delay = retry_config.calculate_delay(attempt - 1)
-                logger.info(f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay")
-                self._log_to_file(f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s")
+                logger.info(
+                    f"Job {job_name}: Retry attempt {attempt}/{retry_config.max_attempts} after {delay}s delay"
+                )
+                self._log_to_file(
+                    f"Retry {attempt}/{retry_config.max_attempts} for {job_name}, waiting {delay}s"
+                )
                 await asyncio.sleep(delay)
 
             # Execute the job
             if use_claude_cli and claude_path:
-                self._log_to_file(f"Using Claude CLI at {claude_path} (attempt {attempt + 1})")
+                self._log_to_file(
+                    f"Using Claude CLI at {claude_path} (attempt {attempt + 1})"
+                )
                 success, output, error_msg = await self._run_with_claude_cli(
                     job_name=job_name,
                     skill=skill,
                     inputs=inputs,
-                    session_name=(f"{session_name}-attempt{attempt + 1}" if attempt > 0 else session_name),
+                    session_name=(
+                        f"{session_name}-attempt{attempt + 1}"
+                        if attempt > 0
+                        else session_name
+                    ),
                     persona=persona,
                     timeout_seconds=timeout_seconds,
                 )
             else:
                 if use_claude_cli and not claude_path:
-                    self._log_to_file("Claude CLI not found, falling back to direct execution")
+                    self._log_to_file(
+                        "Claude CLI not found, falling back to direct execution"
+                    )
                 else:
-                    self._log_to_file(f"Using direct execution mode (attempt {attempt + 1})")
+                    self._log_to_file(
+                        f"Using direct execution mode (attempt {attempt + 1})"
+                    )
                 try:
                     output = await self._run_skill(skill, inputs, job_name=job_name)
                     success = True
-                    logger.info(f"Job {job_name} completed successfully (direct execution)")
+                    logger.info(
+                        f"Job {job_name} completed successfully (direct execution)"
+                    )
                 except Exception as e:
                     error_msg = str(e)
                     logger.error(f"Job {job_name} failed: {e}")
@@ -743,7 +804,9 @@ class CronScheduler:
             # If successful, break out of retry loop
             if success:
                 if attempt > 0:
-                    logger.info(f"Job {job_name} succeeded after {attempt + 1} attempts")
+                    logger.info(
+                        f"Job {job_name} succeeded after {attempt + 1} attempts"
+                    )
                 break
 
             # Detect failure type for potential retry
@@ -752,16 +815,22 @@ class CronScheduler:
 
             # Check if we should retry
             if not retry_config.should_retry(failure_type, attempt):
-                logger.info(f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})")
+                logger.info(
+                    f"Job {job_name}: Not retrying (type={failure_type}, attempt={attempt})"
+                )
                 break
 
             # Apply remediation before retry
-            remediation_applied, remediation_success = await self._apply_remediation(failure_type, job_name)
+            remediation_applied, remediation_success = await self._apply_remediation(
+                failure_type, job_name
+            )
             retry_info["remediation_applied"] = remediation_applied
             retry_info["remediation_success"] = remediation_success
 
             if not remediation_success:
-                logger.warning(f"Job {job_name}: Remediation failed, but will still retry")
+                logger.warning(
+                    f"Job {job_name}: Remediation failed, but will still retry"
+                )
 
         duration_ms = int((time.time() - start_time) * 1000)
         duration_seconds = duration_ms / 1000.0
@@ -792,7 +861,11 @@ class CronScheduler:
             error=error_msg,
             output_preview=output,
             session_name=session_name,
-            retry_info=(retry_info if retry_info["attempts"] > 1 or retry_info["failure_type"] else None),
+            retry_info=(
+                retry_info
+                if retry_info["attempts"] > 1 or retry_info["failure_type"]
+                else None
+            ),
         )
 
         # Send notifications
@@ -811,8 +884,12 @@ class CronScheduler:
 
     _detect_failure_type.__doc__ = _shared_CronScheduler__detect_failure_type.__doc__
 
-    async def _apply_remediation(self, failure_type: str, job_name: str) -> tuple[str | None, bool]:
-        return await _shared_CronScheduler__apply_remediation(self, failure_type, job_name, logger=logger)
+    async def _apply_remediation(
+        self, failure_type: str, job_name: str
+    ) -> tuple[str | None, bool]:
+        return await _shared_CronScheduler__apply_remediation(
+            self, failure_type, job_name, logger=logger
+        )
 
     _apply_remediation.__doc__ = _shared_CronScheduler__apply_remediation.__doc__
 
@@ -837,7 +914,9 @@ class CronScheduler:
             _cfg = _load_cfg()
             vpn_script = _cfg.get("paths", {}).get("vpn_connect_script")
             if not vpn_script:
-                vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
+                vpn_script = os.path.expanduser(
+                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
+                )
             else:
                 vpn_script = os.path.expanduser(vpn_script)
 
@@ -853,10 +932,17 @@ class CronScheduler:
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
-                output = (stdout.decode() if stdout else "") + (stderr.decode() if stderr else "")
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=120
+                )
+                output = (stdout.decode() if stdout else "") + (
+                    stderr.decode() if stderr else ""
+                )
 
-                if process.returncode == 0 or "successfully activated" in output.lower():
+                if (
+                    process.returncode == 0
+                    or "successfully activated" in output.lower()
+                ):
                     logger.info("vpn_connect successful")
                     return True
 
@@ -934,7 +1020,9 @@ Begin execution now."""
         log_file = log_dir / f"{session_name}.log"
 
         timeout_minutes = timeout_seconds // 60
-        self._log_to_file(f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s")
+        self._log_to_file(
+            f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s"
+        )
 
         try:
             # Run Claude CLI with --print flag for non-interactive mode
@@ -978,14 +1066,18 @@ Begin execution now."""
                 if error_output:
                     f.write(f"\n=== STDERR ===\n{error_output}\n")
 
-            self._log_to_file(f"Claude CLI completed with exit code {process.returncode}")
+            self._log_to_file(
+                f"Claude CLI completed with exit code {process.returncode}"
+            )
 
             if process.returncode == 0:
                 # Truncate output for preview
                 preview = output[:500] if len(output) > 500 else output
                 return True, preview, None
             else:
-                error_msg = error_output or f"Claude CLI exited with code {process.returncode}"
+                error_msg = (
+                    error_output or f"Claude CLI exited with code {process.returncode}"
+                )
                 return False, output[:200] if output else None, error_msg
 
         except FileNotFoundError:
@@ -996,7 +1088,9 @@ Begin execution now."""
             self._cleanup_skill_execution_state(skill, str(e))
             return False, None, str(e)
 
-    async def _run_skill(self, skill_name: str, inputs: dict, job_name: str | None = None) -> str:
+    async def _run_skill(
+        self, skill_name: str, inputs: dict, job_name: str | None = None
+    ) -> str:
         """Run a skill and return its output.
 
         Args:
@@ -1101,7 +1195,9 @@ Begin execution now."""
             return
 
         logger.info("Config file changed, checking for updates...")
-        self._config_mtime = CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        self._config_mtime = (
+            CONFIG_FILE.stat().st_mtime if CONFIG_FILE.exists() else None
+        )
 
         # Reload config
         old_enabled = self.config.enabled
@@ -1293,7 +1389,9 @@ def init_scheduler(
         )
         return _scheduler
 
-    _scheduler = CronScheduler(server=server, notification_callback=notification_callback)
+    _scheduler = CronScheduler(
+        server=server, notification_callback=notification_callback
+    )
     return _scheduler
 
 

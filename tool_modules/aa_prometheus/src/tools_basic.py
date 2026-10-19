@@ -89,7 +89,12 @@ def _format_alert(alert):
     icon = "🔴" if state == "firing" else "🟡"
     sev_icon = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}.get(sev, "❓")
 
-    msg = annotations.get("message") or annotations.get("summary") or annotations.get("description") or ""
+    msg = (
+        annotations.get("message")
+        or annotations.get("summary")
+        or annotations.get("description")
+        or ""
+    )
     if len(msg) > 200:
         msg = msg[:200] + "..."
 
@@ -384,7 +389,9 @@ async def _prometheus_rules_impl(
     if rule_type:
         params["type"] = rule_type
 
-    success, result = await prometheus_api_request(url, "/api/v1/rules", params=params, token=token)
+    success, result = await prometheus_api_request(
+        url, "/api/v1/rules", params=params, token=token
+    )
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to get rules: {result}")]
@@ -413,7 +420,9 @@ async def _prometheus_rules_impl(
 
             if rtype == "alerting":
                 state = rule.get("state", "unknown")
-                icon = {"firing": "🔴", "pending": "🟡", "inactive": "🟢"}.get(state, "❓")
+                icon = {"firing": "🔴", "pending": "🟡", "inactive": "🟢"}.get(
+                    state, "❓"
+                )
                 lines.append(f"  {icon} `{name}` ({state})")
             else:
                 lines.append(f"  📊 `{name}` (recording)")
@@ -519,7 +528,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Time series data.
         """
-        return await _prometheus_query_range_impl(query, environment, start, end, step, duration)
+        return await _prometheus_query_range_impl(
+            query, environment, start, end, step, duration
+        )
 
     @auto_heal_stage()
     @registry.tool()

@@ -176,7 +176,9 @@ class SlackApiClient:
                             "Re-obtain from browser dev tools."
                         )
                     elif error == "token_revoked":
-                        raise ValueError("Token has been revoked. Re-authenticate via browser.")
+                        raise ValueError(
+                            "Token has been revoked. Re-authenticate via browser."
+                        )
                     elif error == "ratelimited":
                         await asyncio.sleep(self.base_backoff * (2**attempt))
                         continue
@@ -354,5 +356,9 @@ class SlackApiClient:
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
-            logger.error(f"Edge API error: {e.response.status_code} - {e.response.text[:200]}")
-            raise ValueError(f"Edge API request to {edge_path} failed: {e.response.status_code}") from e
+            logger.error(
+                f"Edge API error: {e.response.status_code} - {e.response.text[:200]}"
+            )
+            raise ValueError(
+                f"Edge API request to {edge_path} failed: {e.response.status_code}"
+            ) from e

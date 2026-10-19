@@ -261,13 +261,17 @@ class MeetParticipants:
 
             if js_participants:
                 participants = js_participants
-                logger.debug(f"JavaScript extraction found {len(participants)} participants")
+                logger.debug(
+                    f"JavaScript extraction found {len(participants)} participants"
+                )
 
             # Fallback: Try Playwright selectors if JS extraction failed
             if not participants:
                 try:
                     # Use role-based selectors
-                    elements = await self.page.query_selector_all('[role="listitem"][aria-label]')
+                    elements = await self.page.query_selector_all(
+                        '[role="listitem"][aria-label]'
+                    )
                     for el in elements:
                         try:
                             name = await el.get_attribute("aria-label")
@@ -275,7 +279,9 @@ class MeetParticipants:
                                 name = clean_name(name)
                                 if is_valid_name(name):
                                     if not any(p["name"] == name for p in participants):
-                                        participants.append({"name": name, "email": None})
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
                         except Exception:
                             continue
                 except Exception as e:
@@ -284,7 +290,9 @@ class MeetParticipants:
             # Secondary fallback: data-participant-id elements
             if not participants:
                 try:
-                    elements = await self.page.query_selector_all("[data-participant-id]")
+                    elements = await self.page.query_selector_all(
+                        "[data-participant-id]"
+                    )
                     for el in elements:
                         try:
                             name = await el.get_attribute("aria-label")
@@ -292,7 +300,9 @@ class MeetParticipants:
                                 name = clean_name(name)
                                 if is_valid_name(name):
                                     if not any(p["name"] == name for p in participants):
-                                        participants.append({"name": name, "email": None})
+                                        participants.append(
+                                            {"name": name, "email": None}
+                                        )
                         except Exception:
                             continue
                 except Exception as e:
@@ -314,11 +324,17 @@ class MeetParticipants:
                     await self.page.keyboard.press("Escape")
                     await asyncio.sleep(0.3)  # Brief wait for panel to close
                 except Exception as e:
-                    logger.debug(f"Suppressed error in get_participants (panel close): {e}")
+                    logger.debug(
+                        f"Suppressed error in get_participants (panel close): {e}"
+                    )
 
         return participants
 
     async def get_participant_count(self) -> int:
-        return await _shared_GoogleMeetController_get_participant_count(self, logger=logger)
+        return await _shared_GoogleMeetController_get_participant_count(
+            self, logger=logger
+        )
 
-    get_participant_count.__doc__ = _shared_GoogleMeetController_get_participant_count.__doc__
+    get_participant_count.__doc__ = (
+        _shared_GoogleMeetController_get_participant_count.__doc__
+    )

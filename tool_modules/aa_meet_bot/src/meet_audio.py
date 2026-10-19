@@ -76,14 +76,22 @@ class MeetAudio:
         return self._controller.state
 
     async def create_virtual_audio_sink(self) -> bool:
-        return await _shared_GoogleMeetController__create_virtual_audio_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__create_virtual_audio_sink(
+            self, logger=logger
+        )
 
-    create_virtual_audio_sink.__doc__ = _shared_GoogleMeetController__create_virtual_audio_sink.__doc__
+    create_virtual_audio_sink.__doc__ = (
+        _shared_GoogleMeetController__create_virtual_audio_sink.__doc__
+    )
 
     async def remove_virtual_audio_sink(self) -> None:
-        return await _shared_GoogleMeetController__remove_virtual_audio_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__remove_virtual_audio_sink(
+            self, logger=logger
+        )
 
-    remove_virtual_audio_sink.__doc__ = _shared_GoogleMeetController__remove_virtual_audio_sink.__doc__
+    remove_virtual_audio_sink.__doc__ = (
+        _shared_GoogleMeetController__remove_virtual_audio_sink.__doc__
+    )
 
     def get_audio_sink_name(self) -> Optional[str]:
         """Get the name of the virtual audio sink for this instance.
@@ -114,19 +122,29 @@ class MeetAudio:
     get_pipe_path.__doc__ = _shared_GoogleMeetController_get_pipe_path.__doc__
 
     async def route_browser_audio_to_sink(self) -> None:
-        return await _shared_GoogleMeetController__route_browser_audio_to_sink(self, logger=logger)
+        return await _shared_GoogleMeetController__route_browser_audio_to_sink(
+            self, logger=logger
+        )
 
-    route_browser_audio_to_sink.__doc__ = _shared_GoogleMeetController__route_browser_audio_to_sink.__doc__
+    route_browser_audio_to_sink.__doc__ = (
+        _shared_GoogleMeetController__route_browser_audio_to_sink.__doc__
+    )
 
     def _move_sink_input(self, sink_input_id: str) -> bool:
-        return _shared_GoogleMeetController__move_sink_input(self, sink_input_id, logger=logger)
+        return _shared_GoogleMeetController__move_sink_input(
+            self, sink_input_id, logger=logger
+        )
 
     _move_sink_input.__doc__ = _shared_GoogleMeetController__move_sink_input.__doc__
 
     def _get_chrome_sink_inputs(self, only_our_browser: bool = True) -> list[str]:
-        return _shared_GoogleMeetController__get_chrome_sink_inputs(self, only_our_browser, logger=logger)
+        return _shared_GoogleMeetController__get_chrome_sink_inputs(
+            self, only_our_browser, logger=logger
+        )
 
-    _get_chrome_sink_inputs.__doc__ = _shared_GoogleMeetController__get_chrome_sink_inputs.__doc__
+    _get_chrome_sink_inputs.__doc__ = (
+        _shared_GoogleMeetController__get_chrome_sink_inputs.__doc__
+    )
 
     def unmute_audio(self) -> bool:
         return _shared_GoogleMeetController_unmute_audio(self, logger=logger)
@@ -144,9 +162,13 @@ class MeetAudio:
     is_audio_muted.__doc__ = _shared_GoogleMeetController_is_audio_muted.__doc__
 
     async def restore_user_default_source(self) -> None:
-        return await _shared_GoogleMeetController__restore_user_default_source(self, logger=logger)
+        return await _shared_GoogleMeetController__restore_user_default_source(
+            self, logger=logger
+        )
 
-    restore_user_default_source.__doc__ = _shared_GoogleMeetController__restore_user_default_source.__doc__
+    restore_user_default_source.__doc__ = (
+        _shared_GoogleMeetController__restore_user_default_source.__doc__
+    )
 
     async def move_user_browser_to_original_source(self, target_source: str) -> None:
         return await _shared_GoogleMeetController__move_user_browser_to_original_source(
