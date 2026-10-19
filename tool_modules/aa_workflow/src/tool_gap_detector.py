@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code,cyclic-import
 """Tool Gap Detector - Logs desired actions when no MCP tool exists.
 
 This is a REUSABLE component used by ALL skills, not just Sprint Bot.
@@ -41,7 +42,7 @@ TOOL_GAP_FILE = PROJECT_ROOT / "memory" / "learned" / "tool_requests.yaml"
 
 
 @dataclass
-class ToolGapRequest:
+class ToolGapRequest:  # pylint: disable=too-many-instance-attributes
     """A request for a tool that doesn't exist yet."""
 
     id: str
@@ -99,9 +100,10 @@ class ToolGapDetector:
                 with open(TOOL_GAP_FILE, encoding="utf-8") as f:
                     data = yaml.safe_load(f) or {}
                     self._gaps = data.get("tool_requests", [])
-                    logger.debug(f"Loaded {len(self._gaps)} tool gap requests")
-            except Exception as e:
-                logger.error(f"Failed to load tool gaps: {e}")
+                    logger.debug("Loaded %s tool gap requests", len(self._gaps))
+            # Corrupt or unreadable gap files should not block later logging.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("Failed to load tool gaps: %s", e)
                 self._gaps = []
         else:
             self._gaps = []
@@ -120,11 +122,12 @@ class ToolGapDetector:
                     default_flow_style=False,
                     sort_keys=False,
                 )
-            logger.debug(f"Saved {len(self._gaps)} tool gap requests")
-        except Exception as e:
-            logger.error(f"Failed to save tool gaps: {e}")
+            logger.debug("Saved %s tool gap requests", len(self._gaps))
+        # Disk or permission errors should not crash the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to save tool gaps: %s", e)
 
-    def log(
+    def log(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         suggested_tool_name: str,
         action: str,
@@ -166,8 +169,10 @@ class ToolGapDetector:
                     gap["context"] = context
                 self._save()
                 logger.info(
-                    f"Tool gap '{suggested_tool_name}' requested again "
-                    f"(vote #{gap['vote_count']}) by {skill}"
+                    "Tool gap '%s' requested again (vote #%s) by %s",
+                    suggested_tool_name,
+                    gap["vote_count"],
+                    skill,
                 )
                 return gap.get("id", suggested_tool_name)
 
@@ -189,9 +194,10 @@ class ToolGapDetector:
         }
         self._gaps.append(new_gap)
         self._save()
-        logger.info(f"New tool gap logged: '{suggested_tool_name}' by {skill}")
+        logger.info("New tool gap logged: '%s' by %s", suggested_tool_name, skill)
         return gap_id
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals
     def try_or_log(
         self,
         tool_name: str,
@@ -227,10 +233,15 @@ class ToolGapDetector:
         # We try to import the tool registry, but if it fails, assume tool doesn't exist
         tool_exists = False
         try:
-            # Try to check tool existence via the loaded tools
-            # This is a simplified check - in practice you'd check the MCP tool registry
-            from server.main import get_tool_registry
+            # server.main may not expose get_tool_registry; getattr keeps mypy quiet.
+            # pylint: disable-next=import-outside-toplevel
+            import server.main as server_main
 
+            get_tool_registry = getattr(server_main, "get_tool_registry", None)
+            if not callable(get_tool_registry):
+                raise ImportError("server.main.get_tool_registry is not available")
+            # Pylint infers a non-callable when every src package is loaded together.
+            # pylint: disable-next=not-callable
             registry = get_tool_registry()
             if registry and hasattr(registry, "tool_exists"):
                 tool_exists = registry.tool_exists(tool_name)
@@ -240,11 +251,12 @@ class ToolGapDetector:
             # If we can't import the registry, check a simpler way
             # Just assume the tool doesn't exist and log the gap
             logger.debug("Optional import not available: %s", exc)
-        except Exception as e:
-            logger.debug(f"Error checking tool existence: {e}")
+        # Registry lookup can fail for many runtime reasons; log the gap instead.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Error checking tool existence: %s", e)
 
         if tool_exists:
-            logger.debug(f"Tool '{tool_name}' exists, caller should use it")
+            logger.debug("Tool '%s' exists, caller should use it", tool_name)
             return True, None
 
         # Tool doesn't exist, log the gap
@@ -262,10 +274,11 @@ class ToolGapDetector:
         if fallback:
             try:
                 result = fallback()
-                logger.debug(f"Fallback for '{tool_name}' executed successfully")
+                logger.debug("Fallback for '%s' executed successfully", tool_name)
                 return False, result
-            except Exception as e:
-                logger.error(f"Fallback for '{tool_name}' failed: {e}")
+            # Caller-supplied fallbacks are arbitrary and must not escape.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("Fallback for '%s' failed: %s", tool_name, e)
                 return False, gap_id
 
         return False, gap_id
