@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Any
 
 import cv2
 import numpy as np
@@ -51,7 +52,7 @@ def rgb_to_yuyv_fast(rgb: np.ndarray) -> np.ndarray:
     return yuyv
 
 
-def bgr_to_yuyv_fast(bgr: np.ndarray, yuyv_out: np.ndarray = None) -> np.ndarray:
+def bgr_to_yuyv_fast(bgr: np.ndarray, yuyv_out: np.ndarray | None = None) -> np.ndarray:
     """
     Convert BGR numpy array to YUYV422 format using OpenCV.
 
@@ -472,7 +473,7 @@ class UltraLowCPURenderer(DynamicFields):
         self.queue.finish()
 
     def render_frame(
-        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Render a frame on GPU and return YUYV data.
@@ -627,7 +628,7 @@ class StreamingRenderer(UltraLowCPURenderer):
         super().__init__(config, use_intel)
 
         self.enable_streaming = enable_streaming
-        self._streaming_pipeline = None
+        self._streaming_pipeline: Any = None
 
         # Compile BGRA kernel
         cl = self._cl
@@ -663,7 +664,9 @@ class StreamingRenderer(UltraLowCPURenderer):
             "enabled" if enable_streaming else "disabled",
         )
 
-    def start_streaming(self, signaling_port: int = 8765, v4l2_device: str = None):
+    def start_streaming(
+        self, signaling_port: int = 8765, v4l2_device: str | None = None
+    ):
         """
         Start the WebRTC streaming pipeline.
 
@@ -711,7 +714,7 @@ class StreamingRenderer(UltraLowCPURenderer):
             logger.info("Streaming stopped")
 
     def render_frame_bgra(
-        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Render a frame on GPU and return BGRA data.
@@ -753,7 +756,7 @@ class StreamingRenderer(UltraLowCPURenderer):
         return self.bgra_host
 
     def render_and_stream(
-        self, t: float, progress_fraction: float, audio_bars: np.ndarray = None
+        self, t: float, progress_fraction: float, audio_bars: np.ndarray | None = None
     ) -> np.ndarray:
         """
         Render frame and push to streaming pipeline.

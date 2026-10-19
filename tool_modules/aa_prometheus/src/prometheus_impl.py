@@ -94,7 +94,7 @@ async def _prometheus_alerts_impl(  # pylint: disable=too-many-branches,too-many
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to get alerts: {result}")]
 
     if result.get("status") != "success":
@@ -200,7 +200,7 @@ async def _prometheus_pod_health_impl(
             token=token,
         )
 
-        if success and result.get("status") == "success":
+        if success and isinstance(result, dict) and result.get("status") == "success":
             data = result.get("data", {}).get("result", [])
             if data:
                 value = data[0].get("value", [None, "N/A"])
@@ -232,7 +232,7 @@ async def _prometheus_query_impl(
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Query failed: {result}")]
 
     if result.get("status") != "success":
@@ -311,7 +311,7 @@ async def _prometheus_query_range_impl(
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Query failed: {result}")]
 
     if result.get("status") != "success":
@@ -376,7 +376,7 @@ async def _prometheus_rules_impl(  # pylint: disable=too-many-locals
         url, "/api/v1/rules", params=params, token=token
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to get rules: {result}")]
 
     if result.get("status") != "success":
@@ -426,7 +426,7 @@ async def _prometheus_check_health_impl(  # pylint: disable=too-many-locals
 
     success, result = await prometheus_api_request(url, "/api/v1/alerts", token=token)
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to check health: {result}")]
 
     alerts = result.get("data", {}).get("alerts", [])
@@ -499,7 +499,7 @@ async def _prometheus_error_rate_impl(
         "",
     ]
 
-    if not success or result.get("status") != "success":
+    if not success or not isinstance(result, dict) or result.get("status") != "success":
         lines.append("⚠️ Query failed or no data")
         return [TextContent(type="text", text="\n".join(lines))]
 
@@ -543,7 +543,7 @@ async def _prometheus_labels_impl(
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to get labels: {result}")]
 
     if result.get("status") != "success":
@@ -605,7 +605,7 @@ async def _prometheus_namespace_metrics_impl(
             token=token,
         )
 
-        if success and result.get("status") == "success":
+        if success and isinstance(result, dict) and result.get("status") == "success":
             data = result.get("data", {}).get("result", [])
             if data:
                 value = data[0].get("value", [None, "N/A"])
@@ -694,7 +694,7 @@ async def _prometheus_series_impl(
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to get series: {result}")]
 
     if result.get("status") != "success":
@@ -735,7 +735,7 @@ async def _prometheus_targets_impl(  # pylint: disable=too-many-locals
         token=token,
     )
 
-    if not success:
+    if not success or not isinstance(result, dict):
         return [TextContent(type="text", text=f"❌ Failed to get targets: {result}")]
 
     if result.get("status") != "success":

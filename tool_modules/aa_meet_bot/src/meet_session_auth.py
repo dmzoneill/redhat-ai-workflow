@@ -9,9 +9,12 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
+
+if TYPE_CHECKING:
+    from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,11 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     config: Any
     enable_captions: Any
     initialize: Any
+    _device_manager: Any
+    _playwright: Any
+    browser: Any
     page: Any
+    state: Any
     stop_caption_capture: Any
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
@@ -882,7 +889,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         }
 
     @classmethod
-    def get_all_instances(cls) -> dict[str, "GoogleMeetController"]:  # noqa: F821
+    def get_all_instances(cls) -> dict[str, GoogleMeetController]:
         """Get all active controller instances."""
         return cls._instances.copy()
 
