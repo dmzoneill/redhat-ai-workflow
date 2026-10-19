@@ -51,7 +51,7 @@ async def prometheus_api_request(
         await client.close()
 
 
-async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
+async def _shared_get_prometheus_config(environment: str) -> tuple[str, str | None]:
     """Get URL and token for Prometheus environment.
 
     Uses shared utilities from server for config loading.
@@ -62,6 +62,13 @@ async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
     kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
     token = await get_bearer_token(kubeconfig, environment=environment, auto_auth=True)
     return url, token
+
+
+async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
+    return await _shared_get_prometheus_config(environment)
+
+
+get_prometheus_config.__doc__ = _shared_get_prometheus_config.__doc__
 
 
 # ==================== INSTANT QUERIES ====================

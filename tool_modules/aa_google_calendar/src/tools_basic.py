@@ -32,6 +32,7 @@ from tool_modules.common import (  # noqa: E402  # Sets up sys.path
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 from server.tool_registry import ToolRegistry  # noqa: E402
+from tool_modules.aa_google_slides.src.tools_basic import _shared__try_oauth_flow
 
 logger = logging.getLogger(__name__)
 
@@ -91,22 +92,10 @@ def _try_service_account(service_account, scopes):
 
 
 def _try_oauth_flow(scopes):
-    """Try to run OAuth flow for new credentials."""
-    if CREDENTIALS_FILE.exists():
-        try:
-            from google_auth_oauthlib.flow import InstalledAppFlow
+    return _shared__try_oauth_flow(scopes)
 
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_FILE), scopes
-            )
-            creds = flow.run_local_server(port=0)
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            with open(TOKEN_FILE, "w", encoding="utf-8") as f:
-                f.write(creds.to_json())
-            return creds, None
-        except Exception as e:
-            return None, f"OAuth flow failed: {e}"
-    return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
+
+_try_oauth_flow.__doc__ = _shared__try_oauth_flow.__doc__
 
 
 def get_calendar_service():

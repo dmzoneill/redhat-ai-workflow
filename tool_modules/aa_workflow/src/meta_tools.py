@@ -16,6 +16,7 @@ from mcp.types import TextContent
 
 from server.tool_discovery import build_full_manifest, get_module_for_tool
 from server.tool_registry import ToolRegistry
+from tool_modules.aa_workflow.src.skill_engine import _shared__format_known_issues
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT
@@ -113,24 +114,10 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
 
 
 def _format_known_issues(matches: list) -> str:
-    """Format known issues for display."""
-    if not matches:
-        return ""
+    return _shared__format_known_issues(matches)
 
-    lines = ["\n## 💡 Known Issues Found!\n"]
-    for match in matches[:3]:  # Limit to 3
-        lines.append(f"**Pattern:** `{match.get('pattern', '?')}`")
-        if match.get("meaning"):
-            lines.append(f"*{match.get('meaning')}*")
-        if match.get("fix"):
-            lines.append(f"**Fix:** {match.get('fix')}")
-        if match.get("commands"):
-            lines.append("**Try:**")
-            for cmd in match.get("commands", [])[:2]:
-                lines.append(f"- `{cmd}`")
-        lines.append("")
 
-    return "\n".join(lines)
+_format_known_issues.__doc__ = _shared__format_known_issues.__doc__
 
 
 # ============== Dynamic Tool Discovery ==============

@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING, Optional
 
 from tool_modules.aa_meet_bot.src.config import get_config
 from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder
+from tool_modules.aa_meet_bot.src.notes_bot import (
+    _shared_NotesBot__speak_response,
+    _shared_NotesBot__speak_response_audio_only,
+    _shared_NotesBot__stream_and_speak,
+)
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent, WakeWordManager
 
 # D-Bus client for video daemon communication
@@ -189,119 +194,25 @@ class InteractiveActions:
     async def _stream_and_speak(
         self, command: str, speaker: str, context_before: list
     ) -> None:
-        """Stream LLM response and speak sentences as they arrive.
+        return await _shared_NotesBot__stream_and_speak(
+            self, command, speaker, context_before, logger=logger
+        )
 
-        This reduces perceived latency by starting TTS as soon as the first
-        sentence is complete, rather than waiting for the full response.
-
-        Note: The bot's mic is a virtual pipe - it stays unmuted permanently.
-        No mute/unmute needed since it only produces sound when we write to it.
-        """
-        from tool_modules.aa_meet_bot.src.tts_engine import TTSEngine
-
-        tts = TTSEngine()
-        if not await tts.initialize():
-            logger.error("Failed to initialize TTS for streaming")
-            return
-
-        pipe_path = self._controller.get_pipe_path() if self._controller else None
-        if not pipe_path:
-            logger.warning("No pipe path for streaming TTS")
-            return
-
-        # Build messages for Ollama
-        messages = self._llm_responder._build_messages(command, speaker, context_before)
-
-        sentence_count = 0
-        full_response = []
-
-        async for sentence in self._llm_responder.stream_ollama_sentences(messages):
-            sentence_count += 1
-            full_response.append(sentence)
-            logger.info(f"🔊 Streaming sentence {sentence_count}: {sentence[:50]}...")
-
-            # Speak this sentence immediately
-            duration = await tts.speak_to_pipe(sentence, pipe_path)
-            if duration > 0:
-                # Wait for this sentence to finish before next
-                await asyncio.sleep(duration + 0.1)
-
-        if full_response:
-            # Add to conversation history
-            self._llm_responder.conversation_history.append(
-                {"role": "user", "content": command}
-            )
-            self._llm_responder.conversation_history.append(
-                {"role": "assistant", "content": " ".join(full_response)}
-            )
-            logger.info(f"🎤 Streamed {sentence_count} sentences")
-        else:
-            logger.warning("No response from streaming")
+    _stream_and_speak.__doc__ = _shared_NotesBot__stream_and_speak.__doc__
 
     async def _speak_response(self, text: str) -> None:
-        """Speak a response using TTS.
+        return await _shared_NotesBot__speak_response(self, text, logger=logger)
 
-        The bot's microphone is a virtual pipe - it only produces sound when
-        we write audio to it. No mute/unmute needed.
-        """
-        if not self._controller:
-            logger.warning("No controller available for TTS")
-            return
-
-        try:
-            await self._speak_response_audio_only(text)
-        except Exception as e:
-            logger.error(f"TTS error: {e}")
-            import traceback
-
-            traceback.print_exc()
+    _speak_response.__doc__ = _shared_NotesBot__speak_response.__doc__
 
     async def _speak_response_audio_only(self, text: str) -> None:
-        """Speak a response using TTS by writing audio to the virtual pipe.
+        return await _shared_NotesBot__speak_response_audio_only(
+            self, text, logger=logger
+        )
 
-        The bot's mic is a virtual pipe - no physical microphone is connected.
-        Audio written here goes directly to the meeting.
-        """
-        if not self._controller:
-            logger.warning("No controller available for TTS")
-            return
-
-        try:
-            from tool_modules.aa_meet_bot.src.tts_engine import TTSEngine
-
-            tts = TTSEngine()
-            if not await tts.initialize():
-                logger.error("Failed to initialize TTS engine")
-                return
-
-            # Get the pipe path for audio output
-            pipe_path = self._controller.get_pipe_path()
-            if not pipe_path:
-                logger.warning("No pipe path available for TTS")
-                return
-
-            # Synthesize and write to pipe - returns actual duration
-            logger.info(f"🔊 Synthesizing: {text[:50]}...")
-            duration = await tts.speak_to_pipe(text, pipe_path)
-
-            if duration > 0:
-                # Wait for audio to actually play through PulseAudio
-                # The duration includes silence padding (500ms lead-in, 800ms tail)
-                # plus extra buffer for PulseAudio latency and stream flushing
-                wait_time = duration + 0.5  # Extra 500ms for PA latency
-                logger.info(
-                    f"🔊 Playing audio ({duration:.1f}s), waiting {wait_time:.1f}s..."
-                )
-                await asyncio.sleep(wait_time)
-                logger.info("🔊 Finished speaking")
-            else:
-                logger.warning("Failed to write audio to pipe")
-
-        except Exception as e:
-            logger.error(f"TTS error: {e}")
-            import traceback
-
-            traceback.print_exc()
+    _speak_response_audio_only.__doc__ = (
+        _shared_NotesBot__speak_response_audio_only.__doc__
+    )
 
     # ── Video daemon integration ──────────────────────────────────────────
 

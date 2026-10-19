@@ -17,12 +17,7 @@ from mcp.types import TextContent
 from server.auto_heal_decorator import auto_heal_stage
 from server.http_client import prometheus_client
 from server.tool_registry import ToolRegistry
-from server.utils import (
-    get_bearer_token,
-    get_env_config,
-    get_kubeconfig,
-    get_service_url,
-)
+from tool_modules.aa_prometheus.src.tools_basic import _shared_get_prometheus_config
 
 # Setup project path for server imports
 
@@ -50,16 +45,10 @@ async def prometheus_api_request(
 
 
 async def get_prometheus_config(environment: str) -> tuple[str, str | None]:
-    """Get URL and token for Prometheus environment.
+    return await _shared_get_prometheus_config(environment)
 
-    Uses shared utilities from server for config loading.
-    Auto-refreshes auth if credentials are stale.
-    """
-    url = get_service_url("prometheus", environment)
-    env_config = get_env_config(environment, "prometheus")
-    kubeconfig = env_config.get("kubeconfig", get_kubeconfig(environment))
-    token = await get_bearer_token(kubeconfig, environment=environment, auto_auth=True)
-    return url, token
+
+get_prometheus_config.__doc__ = _shared_get_prometheus_config.__doc__
 
 
 # ==================== INSTANT QUERIES ====================

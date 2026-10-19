@@ -17,6 +17,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    _shared_GoogleMeetController__select_audio_device,
+    _shared_GoogleMeetController__select_meetbot_camera,
+    _shared_GoogleMeetController__set_devices_via_js,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,293 +102,22 @@ class MeetDevices:
             return results
 
     async def _select_audio_device(self, device_type: str, device_name: str) -> bool:
-        """
-        Select an audio device (microphone or speaker) in Google Meet's UI.
+        return await _shared_GoogleMeetController__select_audio_device(
+            self, device_type, device_name, logger=logger
+        )
 
-        Args:
-            device_type: "microphone" or "speaker"
-            device_name: The PulseAudio device name to look for (e.g., "MeetBot_meet_bot_1_...")
-
-        Returns:
-            True if device was selected, False otherwise.
-        """
-        if not self.page:
-            return False
-
-        try:
-            # Map device_type to WebRTC device kind
-            kind = "audioinput" if device_type == "microphone" else "audiooutput"
-
-            # First, find the device in the browser's device list
-            js_find_device = f"""
-            async () => {{
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const matches = devices.filter(d => d.kind === '{kind}');
-                console.log('Available {device_type}s:', matches.map(d => d.label));
-                // Look for MeetBot device
-                const meetbot = matches.find(d => d.label.includes('MeetBot'));
-                return meetbot ? {{ label: meetbot.label, deviceId: meetbot.deviceId }} : null;
-            }}
-            """
-            device_info = await self.page.evaluate(js_find_device)
-
-            if not device_info:
-                logger.info(f"[AUDIO] MeetBot {device_type} not found in browser")
-                return False
-
-            device_label = device_info.get("label", "")
-            logger.info(f"[AUDIO] Found MeetBot {device_type}: {device_label}")
-
-            # Step 1: Open the appropriate dropdown using aria-label (stable attribute)
-            if device_type == "microphone":
-                dropdown_selector = 'button[aria-label^="Microphone:"]'
-            else:  # speaker
-                dropdown_selector = 'button[aria-label^="Speaker:"]'
-
-            try:
-                dropdown_btn = self.page.locator(dropdown_selector)
-                if await dropdown_btn.count() > 0:
-                    await dropdown_btn.first.click()
-                    logger.info(
-                        f"[AUDIO] Opened {device_type} dropdown via: {dropdown_selector}"
-                    )
-                    await asyncio.sleep(0.5)
-                else:
-                    logger.info(f"[AUDIO] Could not find {device_type} dropdown button")
-                    return False
-            except Exception as e:
-                logger.info(f"[AUDIO] Could not open {device_type} dropdown: {e}")
-                return False
-
-            # Step 2: Wait for dropdown menu to appear
-            await asyncio.sleep(0.3)
-
-            # Step 3: Find and click the MeetBot option using stable selectors
-            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
-            is_speaker = device_type == "speaker"
-            js_click_option = """
-            async (args) => {
-                const { searchText, excludeMic } = args;
-                // Find all menu items with role="menuitemradio" and data-device-id
-                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
-
-                for (const item of menuItems) {
-                    // Get the device name from span[jsname="K4r5F"]
-                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
-                    if (!nameSpan) continue;
-
-                    const deviceName = nameSpan.textContent || '';
-
-                    // Check if this is a MeetBot device
-                    if (!deviceName.includes(searchText)) continue;
-
-                    // For speaker, exclude microphone entries (those ending with _Mic)
-                    if (excludeMic && deviceName.includes('_Mic')) continue;
-
-                    // Check if visible
-                    const rect = item.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
-                        item.click();
-                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
-                    }
-                }
-
-                // Debug: list all visible menu items
-                const allNames = Array.from(menuItems).map(item => {
-                    const span = item.querySelector('span[jsname="K4r5Ff"]');
-                    return span ? span.textContent : 'no-name';
-                });
-
-                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
-            }
-            """
-            js_result = await self.page.evaluate(
-                js_click_option, {"searchText": "MeetBot", "excludeMic": is_speaker}
-            )
-            if js_result and js_result.get("success"):
-                logger.info(
-                    f"[AUDIO] Selected {device_type}: {js_result.get('deviceName')}"
-                )
-                await asyncio.sleep(0.5)
-                return True
-
-            logger.info(f"[AUDIO] {device_type} selection failed: {js_result}")
-
-            # Close dropdown if we couldn't select
-            await self.page.keyboard.press("Escape")
-            logger.info(f"[AUDIO] MeetBot {device_type} found but couldn't click in UI")
-            return False
-
-        except Exception as e:
-            logger.warning(f"[AUDIO] Failed to select {device_type}: {e}")
-            return False
+    _select_audio_device.__doc__ = (
+        _shared_GoogleMeetController__select_audio_device.__doc__
+    )
 
     async def select_meetbot_camera(self) -> bool:
-        """
-        Select the MeetBot virtual camera in Google Meet's device settings.
+        return await _shared_GoogleMeetController__select_meetbot_camera(
+            self, logger=logger
+        )
 
-        Opens the camera dropdown in Google Meet's pre-join screen and selects
-        the MeetBot virtual camera.
-
-        Returns:
-            True if camera was selected, False otherwise.
-        """
-        if not self.page:
-            return False
-
-        try:
-            # First, get the MeetBot device name from v4l2
-            meetbot_device_name = None
-            if self._devices and self._devices.video_device:
-                import subprocess
-
-                result = subprocess.run(
-                    ["v4l2-ctl", "--device", self._devices.video_device, "--all"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if result.returncode == 0:
-                    for line in result.stdout.split("\n"):
-                        if "Card type" in line:
-                            meetbot_device_name = line.split(":")[-1].strip()
-                            break
-
-            logger.info(
-                f"[CAMERA] Looking for MeetBot device: {meetbot_device_name or 'any'}"
-            )
-
-            # Use JavaScript to find the MeetBot camera in the browser's device list
-            js_find_camera = """
-            async () => {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(d => d.kind === 'videoinput');
-                console.log('Available cameras:', cameras.map(c => c.label));
-                const meetbot = cameras.find(c => c.label.includes('MeetBot'));
-                return meetbot ? { label: meetbot.label, deviceId: meetbot.deviceId } : null;
-            }
-            """
-            meetbot_info = await self.page.evaluate(js_find_camera)
-
-            if not meetbot_info:
-                logger.info("[CAMERA] MeetBot camera not found in browser device list")
-                # Log available cameras for debugging
-                js_list_cameras = """
-                async () => {
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    return devices.filter(d => d.kind === 'videoinput').map(c => c.label);
-                }
-                """
-                cameras = await self.page.evaluate(js_list_cameras)
-                logger.info(f"[CAMERA] Available cameras: {cameras}")
-                return False
-
-            camera_label = meetbot_info.get("label", "")
-            logger.info(f"[CAMERA] Found MeetBot in browser: {camera_label}")
-
-            # Step 1: Open camera dropdown using aria-label (stable attribute)
-            dropdown_selector = 'button[aria-label^="Camera:"]'
-            try:
-                dropdown_btn = self.page.locator(dropdown_selector)
-                if await dropdown_btn.count() > 0:
-                    await dropdown_btn.first.click()
-                    logger.info(
-                        f"[CAMERA] Opened camera dropdown via: {dropdown_selector}"
-                    )
-                    await asyncio.sleep(0.5)
-                else:
-                    logger.info("[CAMERA] Could not find camera dropdown button")
-                    return False
-            except Exception as e:
-                logger.info(f"[CAMERA] Could not open camera dropdown: {e}")
-                return False
-
-            # Step 2: Wait for dropdown menu to appear
-            await asyncio.sleep(0.3)
-
-            # Step 3: Find and click the MeetBot option using stable selectors
-            # Structure: li[role="menuitemradio"] > ... > span[jsname="K4r5F"] contains device name
-            js_click_option = """
-            async (searchText) => {
-                // Find all menu items with role="menuitemradio" and data-device-id
-                const menuItems = document.querySelectorAll('li[role="menuitemradio"][data-device-id]');
-
-                for (const item of menuItems) {
-                    // Get the device name from span[jsname="K4r5F"]
-                    const nameSpan = item.querySelector('span[jsname="K4r5Ff"]');
-                    if (!nameSpan) continue;
-
-                    const deviceName = nameSpan.textContent || '';
-
-                    // Check if this is a MeetBot device
-                    if (!deviceName.includes(searchText)) continue;
-
-                    // Check if visible
-                    const rect = item.getBoundingClientRect();
-                    if (rect.width > 0 && rect.height > 0) {
-                        item.click();
-                        return { success: true, deviceName: deviceName, deviceId: item.getAttribute('data-device-id') };
-                    }
-                }
-
-                // Debug: list all visible menu items
-                const allNames = Array.from(menuItems).map(item => {
-                    const span = item.querySelector('span[jsname="K4r5Ff"]');
-                    return span ? span.textContent : 'no-name';
-                });
-
-                return { success: false, error: 'MeetBot device not found in menu', availableDevices: allNames };
-            }
-            """
-            js_result = await self.page.evaluate(js_click_option, "MeetBot")
-            if js_result and js_result.get("success"):
-                logger.info(f"[CAMERA] Selected: {js_result.get('deviceName')}")
-                await asyncio.sleep(0.5)
-                return True
-
-            logger.info(f"[CAMERA] Selection failed: {js_result}")
-
-            # Step 3: Try using JavaScript to programmatically select the camera
-            # This uses the MediaDevices API to request the specific camera
-            logger.info("[CAMERA] Attempting programmatic camera selection via JS...")
-            js_select_camera = """
-            async () => {{
-                try {{
-                    // Get the MeetBot device
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-                    const meetbot = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
-                    if (!meetbot) return {{ success: false, error: 'MeetBot not found' }};
-
-                    // Request a stream with this specific device
-                    // This should trigger Google Meet to switch to this camera
-                    const stream = await navigator.mediaDevices.getUserMedia({{
-                        video: {{ deviceId: {{ exact: meetbot.deviceId }} }}
-                    }});
-
-                    // Stop the stream - we just wanted to trigger the switch
-                    stream.getTracks().forEach(t => t.stop());
-
-                    return {{ success: true, deviceId: meetbot.deviceId, label: meetbot.label }};
-                }} catch (e) {{
-                    return {{ success: false, error: e.message }};
-                }}
-            }}
-            """
-            js_result = await self.page.evaluate(js_select_camera)
-            if js_result and js_result.get("success"):
-                logger.info(
-                    f"[CAMERA] Programmatically selected: {js_result.get('label')}"
-                )
-                await asyncio.sleep(1)
-                return True
-            else:
-                logger.info(f"[CAMERA] Programmatic selection failed: {js_result}")
-
-            return False
-
-        except Exception as e:
-            logger.warning(f"[CAMERA] Failed to select MeetBot camera: {e}")
-            return False
+    select_meetbot_camera.__doc__ = (
+        _shared_GoogleMeetController__select_meetbot_camera.__doc__
+    )
 
     async def select_camera_in_meeting(self) -> bool:
         """Select MeetBot camera via Video settings dropdown in the meeting.
@@ -464,101 +199,10 @@ class MeetDevices:
         return False
 
     async def set_devices_via_js(self) -> bool:
-        """
-        Programmatically set audio/video devices using JavaScript MediaDevices API.
+        return await _shared_GoogleMeetController__set_devices_via_js(
+            self, logger=logger
+        )
 
-        This requests getUserMedia with specific device constraints, which tells
-        Chrome to use our MeetBot devices. This is more reliable than clicking
-        UI elements.
-
-        Returns:
-            True if devices were set successfully.
-        """
-        if not self.page:
-            return False
-
-        try:
-            # JavaScript to find MeetBot devices and request streams with them
-            js_set_devices = """
-            async () => {
-                const results = { camera: false, microphone: false, speaker: false, errors: [] };
-
-                try {
-                    // Get all devices
-                    const devices = await navigator.mediaDevices.enumerateDevices();
-
-                    // Find MeetBot devices
-                    const meetbotCamera = devices.find(d => d.kind === 'videoinput' && d.label.includes('MeetBot'));
-                    const meetbotMic = devices.find(d => d.kind === 'audioinput' && d.label.includes('MeetBot'));
-                    const meetbotSpeaker = devices.find(d => d.kind === 'audiooutput' && d.label.includes('MeetBot'));
-
-                    console.log('[MeetBot] Found devices:', {
-                        camera: meetbotCamera?.label,
-                        mic: meetbotMic?.label,
-                        speaker: meetbotSpeaker?.label
-                    });
-
-                    // Request camera stream with MeetBot device
-                    if (meetbotCamera) {
-                        try {
-                            const videoStream = await navigator.mediaDevices.getUserMedia({
-                                video: { deviceId: { exact: meetbotCamera.deviceId } }
-                            });
-                            // Keep the stream active briefly so Chrome registers it as the selected device
-                            await new Promise(r => setTimeout(r, 500));
-                            videoStream.getTracks().forEach(t => t.stop());
-                            results.camera = true;
-                            console.log('[MeetBot] Camera set to:', meetbotCamera.label);
-                        } catch (e) {
-                            results.errors.push('Camera: ' + e.message);
-                        }
-                    }
-
-                    // Request microphone stream with MeetBot device
-                    if (meetbotMic) {
-                        try {
-                            const audioStream = await navigator.mediaDevices.getUserMedia({
-                                audio: { deviceId: { exact: meetbotMic.deviceId } }
-                            });
-                            await new Promise(r => setTimeout(r, 500));
-                            audioStream.getTracks().forEach(t => t.stop());
-                            results.microphone = true;
-                            console.log('[MeetBot] Microphone set to:', meetbotMic.label);
-                        } catch (e) {
-                            results.errors.push('Microphone: ' + e.message);
-                        }
-                    }
-
-                    // Set speaker output (if supported)
-                    if (meetbotSpeaker && typeof document.createElement('audio').setSinkId === 'function') {
-                        try {
-                            // Create a temporary audio element to set the sink
-                            const audio = document.createElement('audio');
-                            await audio.setSinkId(meetbotSpeaker.deviceId);
-                            results.speaker = true;
-                            console.log('[MeetBot] Speaker set to:', meetbotSpeaker.label);
-                        } catch (e) {
-                            results.errors.push('Speaker: ' + e.message);
-                        }
-                    }
-
-                } catch (e) {
-                    results.errors.push('General: ' + e.message);
-                }
-
-                return results;
-            }
-            """
-
-            result = await self.page.evaluate(js_set_devices)
-            logger.info(f"[DEVICES-JS] Programmatic device selection: {result}")
-
-            if result.get("errors"):
-                for err in result["errors"]:
-                    logger.warning(f"[DEVICES-JS] Error: {err}")
-
-            return result.get("camera") or result.get("microphone")
-
-        except Exception as e:
-            logger.warning(f"[DEVICES-JS] Failed to set devices via JS: {e}")
-            return False
+    set_devices_via_js.__doc__ = (
+        _shared_GoogleMeetController__set_devices_via_js.__doc__
+    )

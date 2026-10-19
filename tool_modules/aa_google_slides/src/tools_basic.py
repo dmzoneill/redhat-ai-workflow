@@ -81,7 +81,7 @@ def _try_service_account(service_account, scopes):
     return None
 
 
-def _try_oauth_flow(scopes):
+def _shared__try_oauth_flow(scopes):
     """Try to run OAuth flow for new credentials."""
     if CREDENTIALS_FILE.exists():
         try:
@@ -98,6 +98,13 @@ def _try_oauth_flow(scopes):
         except Exception as e:
             return None, f"OAuth flow failed: {e}"
     return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
+
+
+def _try_oauth_flow(scopes):
+    return _shared__try_oauth_flow(scopes)
+
+
+_try_oauth_flow.__doc__ = _shared__try_oauth_flow.__doc__
 
 
 def get_slides_service() -> tuple["Resource | None", str | None]:

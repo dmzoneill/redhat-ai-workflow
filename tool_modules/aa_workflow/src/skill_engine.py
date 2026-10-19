@@ -179,7 +179,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     return matches
 
 
-def _format_known_issues(matches: list) -> str:
+def _shared__format_known_issues(matches: list) -> str:
     """Format known issues for display."""
     if not matches:
         return ""
@@ -198,6 +198,13 @@ def _format_known_issues(matches: list) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+def _format_known_issues(matches: list) -> str:
+    return _shared__format_known_issues(matches)
+
+
+_format_known_issues.__doc__ = _shared__format_known_issues.__doc__
 
 
 class SprintSafetyGuard:
@@ -472,6 +479,133 @@ class SprintSafetyGuard:
             return {"success": False, "message": str(e)}
 
 
+def _shared_SkillExecutor__determine_fix_type(
+    self, error_lower: str, matched_pattern: dict | None, matches: list
+) -> str | None:
+    """Determine which fix type to apply based on patterns.
+
+    Returns:
+        "network", "auth", or None
+    """
+    # Priority 1: Use matched pattern from learned memory
+    if matched_pattern:
+        commands = matched_pattern.get("commands", [])
+        for cmd in commands:
+            if "vpn" in cmd.lower() or "connect" in cmd.lower():
+                return "network"
+            if "login" in cmd.lower() or "auth" in cmd.lower() or "kube" in cmd.lower():
+                return "auth"
+
+    # Priority 2: Hardcoded patterns
+    auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
+    network_patterns = ["no route to host", "connection refused", "timeout"]
+
+    if any(p in error_lower for p in auth_patterns):
+        return "auth"
+    elif any(p in error_lower for p in network_patterns):
+        return "network"
+
+    # Priority 3: Check matches from known issues
+    for match in matches:
+        fix = match.get("fix", "").lower()
+        if "vpn" in fix or "connect" in fix:
+            return "network"
+        if "login" in fix or "auth" in fix or "kube" in fix:
+            return "auth"
+
+    return None
+
+
+def _shared_SkillExecutor__detect_auto_heal_type(
+    self, error_msg: str
+) -> tuple[str | None, str]:
+    """Detect if error is auto-healable and what type.
+
+    Returns:
+        (heal_type, cluster_hint) where heal_type is 'auth', 'network', or None
+    """
+    error_lower = error_msg.lower()
+
+    # Auth patterns that can be fixed with kube_login
+    auth_patterns = [
+        "unauthorized",
+        "401",
+        "forbidden",
+        "403",
+        "token expired",
+        "authentication required",
+        "not authorized",
+        "permission denied",
+        "the server has asked for the client to provide credentials",
+    ]
+
+    # Network patterns that can be fixed with vpn_connect
+    network_patterns = [
+        "no route to host",
+        "no such host",  # DNS resolution failure
+        "connection refused",
+        "network unreachable",
+        "timeout",
+        "dial tcp",
+        "connection reset",
+        "eof",
+        "cannot connect",
+        "name or service not known",  # Another DNS failure pattern
+    ]
+
+    # Determine cluster from error context
+    cluster = "stage"  # default
+    if "ephemeral" in error_lower or "bonfire" in error_lower:
+        cluster = "ephemeral"
+    elif "konflux" in error_lower:
+        cluster = "konflux"
+    elif "prod" in error_lower:
+        cluster = "prod"
+
+    if any(p in error_lower for p in auth_patterns):
+        return "auth", cluster
+    if any(p in error_lower for p in network_patterns):
+        return "network", cluster
+
+    return None, cluster
+
+
+def _shared_SkillExecutor__template(self, text: str) -> str:
+    """Resolve {{ variable }} templates in text using Jinja2 if available.
+
+    Uses ChainableUndefined to allow attribute access on undefined variables
+    (returns empty string) while still catching completely missing variables
+    in debug mode.
+    """
+    if not isinstance(text, str) or "{{" not in text:
+        return text
+
+    try:
+        from jinja2 import ChainableUndefined, Environment
+
+        # autoescape=False to preserve Slack link format <url|text>
+        # Skills don't generate HTML, they generate plain text and Slack markdown
+        # ChainableUndefined allows {{ foo.bar.baz }} to return "" if foo is undefined
+        # but still allows chained attribute access without errors
+        env = Environment(autoescape=False, undefined=ChainableUndefined)
+        env.filters.update(self._create_jinja_filters())
+
+        template = env.from_string(text)
+        rendered = template.render(**self.context)
+
+        # Warn if template rendered to empty when it had variables
+        # This helps catch cases where context variables are missing
+        if rendered == "" and "{{" in text:
+            self._debug(f"WARNING: Template rendered to empty string: {text[:100]}")
+
+        return rendered
+    except ImportError:
+        return self._template_with_regex_fallback(text)
+    except Exception as e:
+        self._debug(f"Template error: {e}")
+        return text
+
+
 class SkillExecutor:
     """Full skill execution engine with debug support.
 
@@ -678,42 +812,11 @@ class SkillExecutor:
     def _determine_fix_type(
         self, error_lower: str, matched_pattern: dict | None, matches: list
     ) -> str | None:
-        """Determine which fix type to apply based on patterns.
+        return _shared_SkillExecutor__determine_fix_type(
+            self, error_lower, matched_pattern, matches
+        )
 
-        Returns:
-            "network", "auth", or None
-        """
-        # Priority 1: Use matched pattern from learned memory
-        if matched_pattern:
-            commands = matched_pattern.get("commands", [])
-            for cmd in commands:
-                if "vpn" in cmd.lower() or "connect" in cmd.lower():
-                    return "network"
-                if (
-                    "login" in cmd.lower()
-                    or "auth" in cmd.lower()
-                    or "kube" in cmd.lower()
-                ):
-                    return "auth"
-
-        # Priority 2: Hardcoded patterns
-        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
-        network_patterns = ["no route to host", "connection refused", "timeout"]
-
-        if any(p in error_lower for p in auth_patterns):
-            return "auth"
-        elif any(p in error_lower for p in network_patterns):
-            return "network"
-
-        # Priority 3: Check matches from known issues
-        for match in matches:
-            fix = match.get("fix", "").lower()
-            if "vpn" in fix or "connect" in fix:
-                return "network"
-            if "login" in fix or "auth" in fix or "kube" in fix:
-                return "auth"
-
-        return None
+    _determine_fix_type.__doc__ = _shared_SkillExecutor__determine_fix_type.__doc__
 
     async def _apply_network_fix(self) -> bool:
         """Apply VPN connect fix using the configured VPN script or nmcli fallback."""
@@ -1066,39 +1169,9 @@ class SkillExecutor:
             return None
 
     def _template(self, text: str) -> str:
-        """Resolve {{ variable }} templates in text using Jinja2 if available.
+        return _shared_SkillExecutor__template(self, text)
 
-        Uses ChainableUndefined to allow attribute access on undefined variables
-        (returns empty string) while still catching completely missing variables
-        in debug mode.
-        """
-        if not isinstance(text, str) or "{{" not in text:
-            return text
-
-        try:
-            from jinja2 import ChainableUndefined, Environment
-
-            # autoescape=False to preserve Slack link format <url|text>
-            # Skills don't generate HTML, they generate plain text and Slack markdown
-            # ChainableUndefined allows {{ foo.bar.baz }} to return "" if foo is undefined
-            # but still allows chained attribute access without errors
-            env = Environment(autoescape=False, undefined=ChainableUndefined)
-            env.filters.update(self._create_jinja_filters())
-
-            template = env.from_string(text)
-            rendered = template.render(**self.context)
-
-            # Warn if template rendered to empty when it had variables
-            # This helps catch cases where context variables are missing
-            if rendered == "" and "{{" in text:
-                self._debug(f"WARNING: Template rendered to empty string: {text[:100]}")
-
-            return rendered
-        except ImportError:
-            return self._template_with_regex_fallback(text)
-        except Exception as e:
-            self._debug(f"Template error: {e}")
-            return text
+    _template.__doc__ = _shared_SkillExecutor__template.__doc__
 
     def _template_dict(self, d: dict) -> dict:
         """Recursively template a dictionary."""
@@ -1833,55 +1906,11 @@ class SkillExecutor:
         return result
 
     def _detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
-        """Detect if error is auto-healable and what type.
+        return _shared_SkillExecutor__detect_auto_heal_type(self, error_msg)
 
-        Returns:
-            (heal_type, cluster_hint) where heal_type is 'auth', 'network', or None
-        """
-        error_lower = error_msg.lower()
-
-        # Auth patterns that can be fixed with kube_login
-        auth_patterns = [
-            "unauthorized",
-            "401",
-            "forbidden",
-            "403",
-            "token expired",
-            "authentication required",
-            "not authorized",
-            "permission denied",
-            "the server has asked for the client to provide credentials",
-        ]
-
-        # Network patterns that can be fixed with vpn_connect
-        network_patterns = [
-            "no route to host",
-            "no such host",  # DNS resolution failure
-            "connection refused",
-            "network unreachable",
-            "timeout",
-            "dial tcp",
-            "connection reset",
-            "eof",
-            "cannot connect",
-            "name or service not known",  # Another DNS failure pattern
-        ]
-
-        # Determine cluster from error context
-        cluster = "stage"  # default
-        if "ephemeral" in error_lower or "bonfire" in error_lower:
-            cluster = "ephemeral"
-        elif "konflux" in error_lower:
-            cluster = "konflux"
-        elif "prod" in error_lower:
-            cluster = "prod"
-
-        if any(p in error_lower for p in auth_patterns):
-            return "auth", cluster
-        if any(p in error_lower for p in network_patterns):
-            return "network", cluster
-
-        return None, cluster
+    _detect_auto_heal_type.__doc__ = (
+        _shared_SkillExecutor__detect_auto_heal_type.__doc__
+    )
 
     async def _attempt_auto_heal(
         self,

@@ -25,6 +25,11 @@ if TYPE_CHECKING:
     from .gpu_text import VideoTextRenderer
     from .video_generator import Attendee, VideoConfig
 
+from tool_modules.aa_meet_bot.src.video_generator import (
+    _shared_RealtimeVideoRenderer__generate_npu_frame,
+    _shared_RealtimeVideoRenderer__generate_waveform_frame,
+)
+
 logger = logging.getLogger(__name__)
 
 # OpenCV font settings (much faster than PIL)
@@ -460,256 +465,22 @@ class VideoOverlayRenderer:
         return img
 
     def generate_waveform_frame(self, t: float, out: np.ndarray = None) -> np.ndarray:
-        """Generate a single waveform frame at time t using numpy (fast).
+        return _shared_RealtimeVideoRenderer__generate_waveform_frame(self, t, out)
 
-        Args:
-            t: Time in seconds
-            out: Optional pre-allocated output buffer (wave_height, wave_width, 3)
-
-        Returns:
-            numpy array (wave_height, wave_width, 3) in RGB format
-        """
-        # Use pre-allocated buffer or create new one
-        if out is None:
-            img = np.zeros((self.wave_height, self.wave_width, 3), dtype=np.uint8)
-        else:
-            img = out
-            img.fill(0)
-
-        img[:, :, 1] = 18  # Green channel background
-
-        # Vectorized height calculation (use cached arrays)
-        i = self.wave_i_arr
-        p = self.wave_phases
-        s = self.wave_speeds
-
-        heights = (
-            45
-            + 35 * np.sin(t * 4 * s + i * 0.12 + p)
-            + 20 * np.sin(t * 7 * s + i * 0.2 + p * 1.3)
-            + 12 * np.sin(t * 11 * s + i * 0.35 + p * 0.7)
-            + 15 * np.sin(t * 2.5 * s + i * 0.06)
-        )
-
-        # Spike bursts
-        st = (t * 3 + i * 0.1) % 4
-        spike_mask = st < 0.3
-        heights[spike_mask] += np.sin(st[spike_mask] / 0.3 * np.pi) * 25
-
-        heights = np.clip(heights, 6, self.wave_height - 4).astype(np.int32)
-
-        x_starts = (i * self.wave_step).astype(np.int32)
-        tops = (self.wave_height - heights) // 2
-        bottoms = (self.wave_height + heights) // 2
-
-        # Draw all bars (loop is fast enough for 150 bars)
-        for idx in range(self.wave_bars):
-            x = x_starts[idx]
-            x_end = min(x + self.wave_bar_width, self.wave_width)
-            top = tops[idx]
-            bottom = bottoms[idx]
-            # Green bar (BGR format for OpenCV compatibility)
-            img[top:bottom, x:x_end, 0] = 25
-            img[top:bottom, x:x_end, 1] = 200
-            img[top:bottom, x:x_end, 2] = 25
-
-        return img
+    generate_waveform_frame.__doc__ = (
+        _shared_RealtimeVideoRenderer__generate_waveform_frame.__doc__
+    )
 
     def generate_npu_frame(
         self, t: float, frame_num: int, out: np.ndarray = None
     ) -> np.ndarray:
-        """Generate a single NPU panel frame using OpenCV (much faster than PIL).
-
-        Args:
-            t: Time in seconds
-            frame_num: Current frame number
-            out: Optional pre-allocated output buffer (npu_height, npu_width, 3)
-
-        Returns:
-            numpy array (npu_height, npu_width, 3) in BGR format
-        """
-        # Use pre-allocated buffer or create new one
-        if out is None:
-            frame = np.zeros((self.npu_height, self.npu_width, 3), dtype=np.uint8)
-        else:
-            frame = out
-            frame.fill(0)
-
-        frame[:, :, 1] = 17  # Dark green background
-
-        font_small = 0.4
-        thickness = 1
-
-        # Header
-        cv2.putText(
-            frame,
-            "[ INTEL NPU - METEOR LAKE ]",
-            (15, 18),
-            CV_FONT,
-            font_small,
-            CV_CYAN,
-            thickness,
-            CV_LINE_TYPE,
+        return _shared_RealtimeVideoRenderer__generate_npu_frame(
+            self, t, frame_num, out
         )
 
-        y = 35
-        line_h = 16
-
-        # Column 1 - NPU stats
-        stats1 = [
-            "FREQ: 1400 MHz",
-            f"BUSY: {t*1.2+17.99:.1f}s",
-            "MEM: 65.5 MB",
-            f"UTIL: {40+int(30*math.sin(t*0.4))}%",
-            f"TEMP: {45+int(10*math.sin(t*0.2))}C",
-        ]
-        for i, s in enumerate(stats1):
-            cv2.putText(
-                frame,
-                s,
-                (15, y + i * line_h),
-                CV_FONT,
-                font_small,
-                CV_GREEN,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Column 2 - Model info
-        stats2 = [
-            "MODEL: whisper-int8",
-            "PRECISION: INT8",
-            "INPUT: 16kHz PCM",
-            "TILES: 2/2",
-            "CACHE: ENABLED",
-        ]
-        for i, s in enumerate(stats2):
-            cv2.putText(
-                frame,
-                s,
-                (180, y + i * line_h),
-                CV_FONT,
-                font_small,
-                CV_GREEN,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Column 3 - Counters
-        stats3 = [
-            f"SAMPLES: {int(t*16000)}",
-            f"INFERENCES: {int(t*18)}",
-            f"TOKENS: {int(t*45)}",
-            f"FRAMES: {frame_num}",
-            f"TIME: {int(t) // 60:02d}:{int(t) % 60:02d}.{int((t % 1) * 100):02d}",
-        ]
-        for i, s in enumerate(stats3):
-            cv2.putText(
-                frame,
-                s,
-                (380, y + i * line_h),
-                CV_FONT,
-                font_small,
-                CV_GREEN,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Column 4 - System stats
-        stats4 = [
-            f"CPU: {15+int(10*math.sin(t*0.5))}%",
-            f"MEM: {65+int(5*math.sin(t*0.3))} MB",
-            f"QUEUE: {int((t * 3) % 5)}",
-            f"LATENCY: {25+int(8*math.sin(t*2))}ms",
-            "STATUS: ACTIVE",
-        ]
-        for i, s in enumerate(stats4):
-            color = CV_CYAN if i == 4 else CV_GREEN
-            cv2.putText(
-                frame,
-                s,
-                (560, y + i * line_h),
-                CV_FONT,
-                font_small,
-                color,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Column 5 - Additional telemetry
-        stats5 = [
-            f"RATE: {15+int(10*math.sin(t*0.5))} req/s",
-            f"THROUGHPUT: {0.8+0.4*math.sin(t*0.3):.2f} TOPS",
-            f"POWER: {4.2+0.8*math.sin(t*0.2):.1f}W",
-            "DMA: ACTIVE",
-            f"IRQ: {146 + int(t) % 10}",
-        ]
-        for i, s in enumerate(stats5):
-            cv2.putText(
-                frame,
-                s,
-                (740, y + i * line_h),
-                CV_FONT,
-                font_small,
-                CV_GREEN,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Column 6 - Far right
-        stats6 = [
-            "BATCH: 1",
-            "STREAMS: 1",
-            f"CONTEXT: {int(t * 100) % 512}",
-            "BUFFER: 480ms",
-            "RUNTIME: ACTIVE",
-        ]
-        for i, s in enumerate(stats6):
-            color = CV_CYAN if i == 4 else CV_GREEN
-            cv2.putText(
-                frame,
-                s,
-                (920, y + i * line_h),
-                CV_FONT,
-                font_small,
-                color,
-                thickness,
-                CV_LINE_TYPE,
-            )
-
-        # Progress bar at bottom
-        padding = 15
-        bar_max_width = self.npu_width - padding * 2 - 150
-        bar_width = int((t % 15) / 15 * bar_max_width)
-        bar_y = self.npu_height - 20
-
-        # Outline
-        cv2.rectangle(
-            frame, (padding, bar_y), (padding + bar_max_width, bar_y + 12), CV_GREEN, 1
-        )
-        # Fill
-        if bar_width > 0:
-            cv2.rectangle(
-                frame,
-                (padding + 2, bar_y + 2),
-                (padding + 2 + bar_width, bar_y + 10),
-                CV_GREEN,
-                -1,
-            )
-        # Percentage text
-        cv2.putText(
-            frame,
-            f"PROCESSING: {int((t % 15) / 15 * 100)}%",
-            (self.npu_width - padding - 130, bar_y + 10),
-            CV_FONT,
-            font_small,
-            CV_GREEN,
-            thickness,
-            CV_LINE_TYPE,
-        )
-
-        # Return BGR array directly (caller expects BGR for OpenCV compatibility)
-        return frame
+    generate_npu_frame.__doc__ = (
+        _shared_RealtimeVideoRenderer__generate_npu_frame.__doc__
+    )
 
     def precompute_attendee_data(self, attendee: "Attendee") -> dict:
         """Pre-compute attendee-specific data to avoid per-frame string operations.

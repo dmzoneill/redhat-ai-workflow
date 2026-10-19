@@ -18,6 +18,11 @@ from pathlib import Path
 
 import yaml
 
+from tool_modules.aa_workflow.src.skill_engine import (
+    _shared_SkillExecutor__detect_auto_heal_type,
+    _shared_SkillExecutor__determine_fix_type,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,93 +96,16 @@ class SkillAutoHealer:
     def determine_fix_type(
         self, error_lower: str, matched_pattern: dict | None, matches: list
     ) -> str | None:
-        """Determine which fix type to apply based on patterns.
+        return _shared_SkillExecutor__determine_fix_type(
+            self, error_lower, matched_pattern, matches
+        )
 
-        Returns:
-            "network", "auth", or None
-        """
-        # Priority 1: Use matched pattern from learned memory
-        if matched_pattern:
-            commands = matched_pattern.get("commands", [])
-            for cmd in commands:
-                if "vpn" in cmd.lower() or "connect" in cmd.lower():
-                    return "network"
-                if (
-                    "login" in cmd.lower()
-                    or "auth" in cmd.lower()
-                    or "kube" in cmd.lower()
-                ):
-                    return "auth"
-
-        # Priority 2: Hardcoded patterns
-        auth_patterns = ["unauthorized", "401", "403", "forbidden", "token expired"]
-        network_patterns = ["no route to host", "connection refused", "timeout"]
-
-        if any(p in error_lower for p in auth_patterns):
-            return "auth"
-        elif any(p in error_lower for p in network_patterns):
-            return "network"
-
-        # Priority 3: Check matches from known issues
-        for match in matches:
-            fix = match.get("fix", "").lower()
-            if "vpn" in fix or "connect" in fix:
-                return "network"
-            if "login" in fix or "auth" in fix or "kube" in fix:
-                return "auth"
-
-        return None
+    determine_fix_type.__doc__ = _shared_SkillExecutor__determine_fix_type.__doc__
 
     def detect_auto_heal_type(self, error_msg: str) -> tuple[str | None, str]:
-        """Detect if error is auto-healable and what type.
+        return _shared_SkillExecutor__detect_auto_heal_type(self, error_msg)
 
-        Returns:
-            (heal_type, cluster_hint) where heal_type is 'auth', 'network', or None
-        """
-        error_lower = error_msg.lower()
-
-        # Auth patterns that can be fixed with kube_login
-        auth_patterns = [
-            "unauthorized",
-            "401",
-            "forbidden",
-            "403",
-            "token expired",
-            "authentication required",
-            "not authorized",
-            "permission denied",
-            "the server has asked for the client to provide credentials",
-        ]
-
-        # Network patterns that can be fixed with vpn_connect
-        network_patterns = [
-            "no route to host",
-            "no such host",  # DNS resolution failure
-            "connection refused",
-            "network unreachable",
-            "timeout",
-            "dial tcp",
-            "connection reset",
-            "eof",
-            "cannot connect",
-            "name or service not known",  # Another DNS failure pattern
-        ]
-
-        # Determine cluster from error context
-        cluster = "stage"  # default
-        if "ephemeral" in error_lower or "bonfire" in error_lower:
-            cluster = "ephemeral"
-        elif "konflux" in error_lower:
-            cluster = "konflux"
-        elif "prod" in error_lower:
-            cluster = "prod"
-
-        if any(p in error_lower for p in auth_patterns):
-            return "auth", cluster
-        if any(p in error_lower for p in network_patterns):
-            return "network", cluster
-
-        return None, cluster
+    detect_auto_heal_type.__doc__ = _shared_SkillExecutor__detect_auto_heal_type.__doc__
 
     async def attempt_auto_heal(
         self,

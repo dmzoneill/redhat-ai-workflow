@@ -55,8 +55,8 @@ def _get_slack_config() -> dict:
     return cast(dict, config.get("slack", {}))
 
 
-async def _send_via_dbus(
-    channel_id: str, text: str, thread_ts: str = ""
+async def _shared__send_via_dbus(
+    channel_id: str, text: str, thread_ts: str = "", *, logger
 ) -> dict | None:
     """
     Try to send a message via the D-Bus daemon.
@@ -89,12 +89,21 @@ async def _send_via_dbus(
         return None
 
 
+async def _send_via_dbus(
+    channel_id: str, text: str, thread_ts: str = ""
+) -> dict | None:
+    return await _shared__send_via_dbus(channel_id, text, thread_ts, logger=logger)
+
+
+_send_via_dbus.__doc__ = _shared__send_via_dbus.__doc__
+
+
 # Global manager instance (initialized on first use)
 _manager = None
 _manager_lock = asyncio.Lock()
 
 
-async def get_manager():
+async def _shared_get_manager(*, logger):
     """Get or create the SlackListenerManager singleton."""
     global _manager
     async with _manager_lock:
@@ -125,6 +134,13 @@ async def get_manager():
 
             _manager = SlackListenerManager()
         return _manager
+
+
+async def get_manager():
+    return await _shared_get_manager(logger=logger)
+
+
+get_manager.__doc__ = _shared_get_manager.__doc__
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================

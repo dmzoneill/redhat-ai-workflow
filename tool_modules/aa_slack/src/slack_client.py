@@ -20,6 +20,11 @@ from typing import Any
 
 import httpx
 
+from tool_modules.aa_slack.src.slack_api_client import _shared_SlackApiClient_get_client
+from tool_modules.aa_slack.src.slack_message_builder import (
+    _shared_get_app_commands_summary,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,24 +165,9 @@ class SlackSession:
         )
 
     async def get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                headers={
-                    "User-Agent": self.USER_AGENT,
-                    "Referer": self.REFERER,
-                    "Accept": "application/json",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": f"https://{self.SLACK_HOST}",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-site",
-                },
-                cookies={"d": self.d_cookie},
-                timeout=30.0,
-            )
-        return self._client
+        return await _shared_SlackApiClient_get_client(self)
+
+    get_client.__doc__ = _shared_SlackApiClient_get_client.__doc__
 
     async def close(self):
         """Close the HTTP client."""
@@ -2250,74 +2240,9 @@ class SlackSession:
             return {"ok": False, "error": str(e), "app_actions": [], "commands": []}
 
     def get_app_commands_summary(self, data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Summarize app commands data into a more usable format.
+        return _shared_get_app_commands_summary(self, data)
 
-        Args:
-            data: Raw app commands response from get_app_commands()
-
-        Returns:
-            Summarized dict with categorized commands and actions
-        """
-        if not data.get("ok"):
-            return data
-
-        # Categorize commands
-        core_commands = []
-        app_commands = []
-        service_commands = []
-
-        for cmd in data.get("commands", []):
-            cmd_type = cmd.get("type", "")
-            cmd_info = {
-                "name": cmd.get("name", ""),
-                "desc": cmd.get("desc", ""),
-                "usage": cmd.get("usage", ""),
-                "app_name": cmd.get("app_name", ""),
-            }
-
-            if cmd_type == "core":
-                core_commands.append(cmd_info)
-            elif cmd_type == "app":
-                app_commands.append(cmd_info)
-            elif cmd_type == "service":
-                service_commands.append(cmd_info)
-
-        # Categorize app actions by type
-        global_actions = []
-        message_actions = []
-
-        for app in data.get("app_actions", []):
-            app_name = app.get("app_name", "")
-            app_id = app.get("app_id", "")
-
-            for action in app.get("actions", []):
-                action_info = {
-                    "name": action.get("name", ""),
-                    "desc": action.get("desc", ""),
-                    "app_name": app_name,
-                    "app_id": app_id,
-                    "action_id": action.get("action_id", ""),
-                    "callback_id": action.get("callback_id", ""),
-                }
-
-                if action.get("type") == "global_action":
-                    global_actions.append(action_info)
-                elif action.get("type") == "message_action":
-                    message_actions.append(action_info)
-
-        return {
-            "ok": True,
-            "core_commands": core_commands,
-            "app_commands": app_commands,
-            "service_commands": service_commands,
-            "global_actions": global_actions,
-            "message_actions": message_actions,
-            "total_commands": len(core_commands)
-            + len(app_commands)
-            + len(service_commands),
-            "total_actions": len(global_actions) + len(message_actions),
-        }
+    get_app_commands_summary.__doc__ = _shared_get_app_commands_summary.__doc__
 
     async def get_user_profile_sections(self, user_id: str) -> dict[str, Any]:
         """

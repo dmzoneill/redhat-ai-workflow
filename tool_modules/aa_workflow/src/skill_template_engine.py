@@ -12,6 +12,8 @@ import logging
 import re
 from typing import Any
 
+from tool_modules.aa_workflow.src.skill_engine import _shared_SkillExecutor__template
+
 logger = logging.getLogger(__name__)
 
 
@@ -145,39 +147,9 @@ class SkillTemplateEngine:
         return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
 
     def template(self, text: str) -> str:
-        """Resolve {{ variable }} templates in text using Jinja2 if available.
+        return _shared_SkillExecutor__template(self, text)
 
-        Uses ChainableUndefined to allow attribute access on undefined variables
-        (returns empty string) while still catching completely missing variables
-        in debug mode.
-        """
-        if not isinstance(text, str) or "{{" not in text:
-            return text
-
-        try:
-            from jinja2 import ChainableUndefined, Environment
-
-            # autoescape=False to preserve Slack link format <url|text>
-            # Skills don't generate HTML, they generate plain text and Slack markdown
-            # ChainableUndefined allows {{ foo.bar.baz }} to return "" if foo is undefined
-            # but still allows chained attribute access without errors
-            env = Environment(autoescape=False, undefined=ChainableUndefined)
-            env.filters.update(self._create_jinja_filters())
-
-            template = env.from_string(text)
-            rendered = template.render(**self.context)
-
-            # Warn if template rendered to empty when it had variables
-            # This helps catch cases where context variables are missing
-            if rendered == "" and "{{" in text:
-                self._debug(f"WARNING: Template rendered to empty string: {text[:100]}")
-
-            return rendered
-        except ImportError:
-            return self._template_with_regex_fallback(text)
-        except Exception as e:
-            self._debug(f"Template error: {e}")
-            return text
+    template.__doc__ = _shared_SkillExecutor__template.__doc__
 
     def template_dict(self, d: dict) -> dict:
         """Recursively template a dictionary."""

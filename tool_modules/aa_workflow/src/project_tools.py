@@ -689,7 +689,7 @@ async def _project_update_impl(
 # ==================== TOOL REGISTRATION ====================
 
 
-def register_project_tools(server: "FastMCP") -> int:
+def _shared_register_project_tools(server: "FastMCP") -> int:
     """Register project management tools with the MCP server."""
     registry = ToolRegistry(server)
 
@@ -843,3 +843,10 @@ def register_project_tools(server: "FastMCP") -> int:
         )
 
     return registry.count
+
+
+def register_project_tools(server: "FastMCP") -> int:
+    return _shared_register_project_tools(server)
+
+
+register_project_tools.__doc__ = _shared_register_project_tools.__doc__

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # ==================== Configuration ====================
 
 
-def find_app_interface_path() -> str:
+def _shared_find_app_interface_path() -> str:
     """Find app-interface repository path."""
     config = load_config()
 
@@ -66,6 +66,13 @@ def find_app_interface_path() -> str:
         if c and c.exists():
             return str(c)
     return ""
+
+
+def find_app_interface_path() -> str:
+    return _shared_find_app_interface_path()
+
+
+find_app_interface_path.__doc__ = _shared_find_app_interface_path.__doc__
 
 
 APP_INTERFACE_PATH = find_app_interface_path()

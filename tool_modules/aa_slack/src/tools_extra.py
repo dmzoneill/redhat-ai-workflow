@@ -24,6 +24,10 @@ from fastmcp import FastMCP
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
+from tool_modules.aa_slack.src.tools_basic import (
+    _shared__send_via_dbus,
+    _shared_get_manager,
+)
 
 # Setup project path for server imports FIRST
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
@@ -51,35 +55,10 @@ def _get_slack_config() -> dict:
 async def _send_via_dbus(
     channel_id: str, text: str, thread_ts: str = ""
 ) -> dict | None:
-    """
-    Try to send a message via the D-Bus daemon.
+    return await _shared__send_via_dbus(channel_id, text, thread_ts, logger=logger)
 
-    Uses send_message_rich to properly format Slack links and markdown.
 
-    Returns the result dict if successful, None if D-Bus is not available.
-    """
-    try:
-        # Import D-Bus client
-        scripts_dir = TOOL_MODULES_DIR.parent / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-
-        from services.slack.dbus import SlackAgentClient
-
-        client = SlackAgentClient()
-        if await client.connect():
-            # Use send_message_rich to properly format links like <url|text>
-            result = await client.send_message_rich(channel_id, text, thread_ts)
-            await client.disconnect()
-            logger.debug(f"D-Bus send result: {result}")
-            return result
-        else:
-            logger.debug("D-Bus connect failed")
-            return None
-    except Exception as e:
-        # D-Bus not available, will fall back to direct API
-        logger.debug(f"D-Bus not available: {e}")
-        return None
+_send_via_dbus.__doc__ = _shared__send_via_dbus.__doc__
 
 
 # Global manager instance (initialized on first use)
@@ -88,36 +67,10 @@ _manager_lock = asyncio.Lock()
 
 
 async def get_manager():
-    """Get or create the SlackListenerManager singleton."""
-    global _manager
-    async with _manager_lock:
-        if _manager is None:
-            # Use dynamic loading to avoid import issues when loaded via spec_from_file_location
-            try:
-                import importlib.util
-                from pathlib import Path
+    return await _shared_get_manager(logger=logger)
 
-                curr_dir = Path(__file__).parent.absolute()
-                listener_file = curr_dir / "listener.py"
 
-                spec = importlib.util.spec_from_file_location(
-                    "slack_listener_dynamic", listener_file
-                )
-                mod = importlib.util.module_from_spec(spec)
-                # Add to sys.modules to handle internal relative imports in listener.py if any
-                sys.modules["slack_listener_dynamic"] = mod
-                spec.loader.exec_module(mod)
-                SlackListenerManager = mod.SlackListenerManager
-            except Exception as e:
-                logger.error(f"Failed to load SlackListenerManager dynamically: {e}")
-                # Fallback to standard imports
-                try:
-                    from listener import SlackListenerManager
-                except ImportError:
-                    from .listener import SlackListenerManager
-
-            _manager = SlackListenerManager()
-        return _manager
+get_manager.__doc__ = _shared_get_manager.__doc__
 
 
 async def _slack_add_reaction_impl(channel_id: str, timestamp: str, emoji: str) -> str:

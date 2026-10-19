@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Callable, Optional
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    _shared_GoogleMeetController_start_caption_capture,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,215 +71,13 @@ class MeetCaptions:
     async def start_caption_capture(
         self, callback: Callable[[CaptionEntry], None]
     ) -> None:
-        """
-        Start capturing captions via DOM observation.
+        return await _shared_GoogleMeetController_start_caption_capture(
+            self, callback, logger=logger
+        )
 
-        Args:
-            callback: Function to call with each new caption entry.
-        """
-        if not self.page or self._caption_observer_running:
-            return
-
-        self._caption_callback = callback
-        self._caption_observer_running = True
-
-        # Inject DEBOUNCED caption observer with UPDATE-IN-PLACE support
-        # Google Meet corrects text in-place, so we:
-        # 1. Wait for text to "settle" (800ms no changes)
-        # 2. Use UPDATE mode for refinements of the same utterance (not new entries)
-        # 3. Only create NEW entries when speaker changes or it's clearly a new sentence
-        await self.page.evaluate("""
-            () => {
-                window._meetBotCaptions = [];
-                window._meetBotCurrentSpeaker = 'Unknown';
-                window._meetBotLastText = '';
-                window._meetBotDebounceTimer = null;
-                window._meetBotLastEmittedText = '';
-                window._meetBotLastEmittedId = null;  // Track ID for updates
-                window._meetBotLastSpeakerForText = 'Unknown';
-                window._meetBotCaptionIdCounter = 0;
-
-                function findCaptionContainer() {
-                    // Try multiple selectors for the caption container
-                    return document.querySelector('[aria-label="Captions"]') ||
-                           document.querySelector('.a4cQT') ||
-                           document.querySelector('[jsname="dsyhDe"]');
-                }
-
-                function findCaptionTextDiv(container) {
-                    if (!container) return null;
-                    const divs = container.querySelectorAll('div');
-                    let bestDiv = null;
-                    let bestLen = 0;
-                    for (const div of divs) {
-                        if (div.querySelector('button, img')) continue;
-                        const text = div.textContent || '';
-                        if (text.length > bestLen && !text.includes('Jump to')) {
-                            bestLen = text.length;
-                            bestDiv = div;
-                        }
-                    }
-                    return bestDiv;
-                }
-
-                function getSpeaker(container) {
-                    if (!container) return null;
-
-                    // Method 1: Look for speaker name near avatar image
-                    const img = container.querySelector('img');
-                    if (img) {
-                        // Check parent and siblings for name
-                        let parent = img.parentElement;
-                        for (let i = 0; i < 3 && parent; i++) {
-                            const spans = parent.querySelectorAll('span');
-                            for (const span of spans) {
-                                const t = span.textContent.trim();
-                                // Name should be reasonable length, not contain common UI text
-                                if (t && t.length > 1 && t.length < 50 &&
-                                    !t.includes('Jump') && !t.includes('caption') &&
-                                    !t.includes('English') && !t.includes('Live')) {
-                                    return t;
-                                }
-                            }
-                            parent = parent.parentElement;
-                        }
-                    }
-
-                    // Method 2: Look for speaker class patterns
-                    const speakerEl = container.querySelector('.zs7s8d, .KcIKyf, [data-speaker-name]');
-                    if (speakerEl) {
-                        const t = speakerEl.textContent.trim();
-                        if (t && t.length > 1 && t.length < 50) return t;
-                    }
-
-                    return null;
-                }
-
-                // Normalize text for comparison (lowercase, collapse whitespace)
-                function normalizeText(text) {
-                    return (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-                }
-
-                // Check if newText is a refinement of oldText (same utterance, just corrected/extended)
-                function isRefinement(oldText, newText) {
-                    if (!oldText) return false;
-                    const oldNorm = normalizeText(oldText);
-                    const newNorm = normalizeText(newText);
-
-                    // Same text (case correction only)
-                    if (oldNorm === newNorm) return true;
-
-                    // New text starts with old text (extension)
-                    if (newNorm.startsWith(oldNorm)) return true;
-
-                    // Old text starts with new text (correction that shortened)
-                    if (oldNorm.startsWith(newNorm)) return true;
-
-                    // Check if they share a significant common prefix (>60% of shorter)
-                    const minLen = Math.min(oldNorm.length, newNorm.length);
-                    let commonLen = 0;
-                    for (let i = 0; i < minLen; i++) {
-                        if (oldNorm[i] === newNorm[i]) commonLen++;
-                        else break;
-                    }
-                    if (commonLen > minLen * 0.6) return true;
-
-                    return false;
-                }
-
-                function emitCaption() {
-                    const text = window._meetBotLastText;
-                    const speaker = window._meetBotLastSpeakerForText || window._meetBotCurrentSpeaker || 'Unknown';
-
-                    if (!text) return;
-
-                    // Check if this is a refinement of the last emitted caption
-                    const lastEmitted = window._meetBotLastEmittedText;
-                    const lastId = window._meetBotLastEmittedId;
-
-                    if (lastId !== null && isRefinement(lastEmitted, text)) {
-                        // UPDATE existing caption instead of creating new one
-                        window._meetBotCaptions.push({
-                            id: lastId,
-                            speaker: speaker,
-                            text: text,
-                            ts: Date.now(),
-                            isUpdate: true  // Signal to update, not append
-                        });
-                        console.log('[MeetBot] Caption UPDATED:', speaker, text.substring(0, 50));
-                    } else {
-                        // NEW caption entry
-                        const newId = ++window._meetBotCaptionIdCounter;
-                        window._meetBotCaptions.push({
-                            id: newId,
-                            speaker: speaker,
-                            text: text,
-                            ts: Date.now(),
-                            isUpdate: false
-                        });
-                        window._meetBotLastEmittedId = newId;
-                        console.log('[MeetBot] Caption NEW:', speaker, text.substring(0, 50));
-                    }
-                    window._meetBotLastEmittedText = text;
-                }
-
-                const observer = new MutationObserver((mutations) => {
-                    const container = findCaptionContainer();
-                    if (!container) return;
-
-                    // Always try to get the current speaker
-                    const speaker = getSpeaker(container);
-                    if (speaker) {
-                        window._meetBotCurrentSpeaker = speaker;
-                        // Store the speaker associated with the current text being built
-                        window._meetBotLastSpeakerForText = speaker;
-                    }
-
-                    const captionDiv = findCaptionTextDiv(container);
-                    if (!captionDiv) return;
-
-                    const fullText = (captionDiv.textContent || '').trim();
-                    if (!fullText) return;
-
-                    // Detect speaker change - force new caption
-                    const lastSpeaker = window._meetBotLastSpeakerForText;
-                    if (speaker && lastSpeaker && speaker !== lastSpeaker) {
-                        // Speaker changed - emit previous caption and start fresh
-                        if (window._meetBotDebounceTimer) {
-                            clearTimeout(window._meetBotDebounceTimer);
-                            emitCaption();
-                        }
-                        window._meetBotLastEmittedText = '';
-                        window._meetBotLastEmittedId = null;
-                        window._meetBotLastSpeakerForText = speaker;
-                    }
-
-                    // Text changed - reset debounce timer
-                    window._meetBotLastText = fullText;
-
-                    if (window._meetBotDebounceTimer) {
-                        clearTimeout(window._meetBotDebounceTimer);
-                    }
-
-                    // Wait 400ms of no changes before emitting (allows corrections to settle)
-                    // Reduced from 800ms for faster wake word detection
-                    window._meetBotDebounceTimer = setTimeout(emitCaption, 400);
-                });
-
-                observer.observe(document.body, {
-                    childList: true,
-                    subtree: true,
-                    characterData: true
-                });
-
-                window._meetBotObserver = observer;
-                console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
-            }
-        """)
-
-        # Start polling for new captions (track task for cleanup)
-        self._caption_poll_task = asyncio.create_task(self._poll_captions())
-        logger.info("Caption capture started")
+    start_caption_capture.__doc__ = (
+        _shared_GoogleMeetController_start_caption_capture.__doc__
+    )
 
     async def _poll_captions(self) -> None:
         """Poll for settled/corrected captions from the JS observer buffer."""

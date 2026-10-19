@@ -17,6 +17,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
+from tool_modules.aa_meet_bot.src.browser_controller import (
+    _shared_GoogleMeetController_get_participant_count,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -328,52 +332,10 @@ class MeetParticipants:
         return participants
 
     async def get_participant_count(self) -> int:
-        """
-        Get the number of participants in the meeting.
+        return await _shared_GoogleMeetController_get_participant_count(
+            self, logger=logger
+        )
 
-        This is a lightweight alternative to get_participants() that just
-        reads the participant count from the UI without opening the panel.
-
-        Returns:
-            Number of participants, or 0 if unavailable.
-        """
-        if not self.page or not self.state or not self.state.joined:
-            return 0
-
-        try:
-            # Try to find participant count in the UI
-            count_selectors = [
-                "[data-participant-count]",
-                ".rua5Nb",  # Participant count badge
-                '[aria-label*="participant" i]',
-            ]
-
-            for selector in count_selectors:
-                try:
-                    el = await self.page.wait_for_selector(selector, timeout=500)
-                    if el:
-                        # Try data attribute first
-                        count_str = await el.get_attribute("data-participant-count")
-                        if count_str:
-                            return int(count_str)
-
-                        # Try text content
-                        text = await el.text_content()
-                        if text:
-                            # Extract number from text like "5 participants" or just "5"
-                            import re
-
-                            match = re.search(r"(\d+)", text)
-                            if match:
-                                return int(match.group(1))
-                except Exception:
-                    continue
-
-            # Fallback: count from state if we've scraped before
-            if self.state and self.state.participants:
-                return len(self.state.participants)
-
-        except Exception as e:
-            logger.debug(f"Failed to get participant count: {e}")
-
-        return 0
+    get_participant_count.__doc__ = (
+        _shared_GoogleMeetController_get_participant_count.__doc__
+    )

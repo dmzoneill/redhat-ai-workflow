@@ -30,6 +30,27 @@ class RateLimitState:
 
 
 @dataclass
+async def _shared_SlackApiClient_get_client(self) -> httpx.AsyncClient:
+    """Get or create the HTTP client."""
+    if self._client is None or self._client.is_closed:
+        self._client = httpx.AsyncClient(
+            headers={
+                "User-Agent": self.USER_AGENT,
+                "Referer": self.REFERER,
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": f"https://{self.SLACK_HOST}",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+            },
+            cookies={"d": self.d_cookie},
+            timeout=30.0,
+        )
+    return self._client
+
+
 class SlackApiClient:
     """Low-level HTTP transport for the Slack web API.
 
@@ -75,24 +96,9 @@ class SlackApiClient:
     # ------------------------------------------------------------------
 
     async def get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                headers={
-                    "User-Agent": self.USER_AGENT,
-                    "Referer": self.REFERER,
-                    "Accept": "application/json",
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": f"https://{self.SLACK_HOST}",
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-site",
-                },
-                cookies={"d": self.d_cookie},
-                timeout=30.0,
-            )
-        return self._client
+        return await _shared_SlackApiClient_get_client(self)
+
+    get_client.__doc__ = _shared_SlackApiClient_get_client.__doc__
 
     async def close(self):
         """Close the HTTP client."""

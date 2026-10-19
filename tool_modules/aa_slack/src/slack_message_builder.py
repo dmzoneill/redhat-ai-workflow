@@ -384,7 +384,7 @@ def get_channel_sections_summary(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
+def _shared_get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
     """
     Summarize app commands data into a more usable format.
 
@@ -453,6 +453,13 @@ def get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
         + len(service_commands),
         "total_actions": len(global_actions) + len(message_actions),
     }
+
+
+def get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
+    return _shared_get_app_commands_summary(data)
+
+
+get_app_commands_summary.__doc__ = _shared_get_app_commands_summary.__doc__
 
 
 # ---------------------------------------------------------------------------

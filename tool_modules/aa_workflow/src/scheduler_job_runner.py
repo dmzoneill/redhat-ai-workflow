@@ -26,6 +26,14 @@ if TYPE_CHECKING:
 
     from .scheduler_config import JobExecutionLog, RetryConfig, SchedulerConfig
 
+from tool_modules.aa_workflow.src.scheduler import (
+    _shared_CronScheduler__apply_remediation,
+    _shared_CronScheduler__cleanup_skill_execution_state,
+    _shared_CronScheduler__detect_failure_type,
+    _shared_CronScheduler__run_kube_login,
+    _shared_CronScheduler__send_notifications,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,74 +66,13 @@ class JobRunner:
             logger.debug("Suppressed error: %s", exc)
 
     def _cleanup_skill_execution_state(self, skill_name: str, error: str):
-        """Clean up stale skill execution state after timeout or crash.
+        return _shared_CronScheduler__cleanup_skill_execution_state(
+            self, skill_name, error, logger=logger
+        )
 
-        When a cron job times out or crashes, the skill_execution.json file
-        may be left in "running" state. This method resets it to "failed"
-        so the UI doesn't show a perpetually running skill.
-
-        Args:
-            skill_name: Name of the skill that failed
-            error: Error message to record
-        """
-        try:
-            execution_file = (
-                Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
-            )
-            if not execution_file.exists():
-                return
-
-            # Read current state to check if it's the same skill
-            with open(execution_file, encoding="utf-8") as f:
-                current_state = json.load(f)
-
-            # Only clean up if it's the same skill and still "running"
-            if current_state.get("skillName") != skill_name:
-                self._log_to_file(
-                    "Skill execution state is for different skill "
-                    f"({current_state.get('skillName')}), not cleaning up"
-                )
-                return
-
-            if current_state.get("status") != "running":
-                self._log_to_file(
-                    f"Skill execution state is already {current_state.get('status')}, not cleaning up"
-                )
-                return
-
-            # Update state to failed
-            current_state["status"] = "failed"
-            current_state["endTime"] = datetime.now().isoformat()
-
-            # Add a timeout event to the events list
-            if "events" not in current_state:
-                current_state["events"] = []
-            current_state["events"].append(
-                {
-                    "type": "skill_timeout",
-                    "timestamp": datetime.now().isoformat(),
-                    "skillName": skill_name,
-                    "workspaceUri": current_state.get("workspaceUri", "default"),
-                    "stepIndex": current_state.get("currentStepIndex"),
-                    "stepName": None,
-                    "data": {"error": error},
-                }
-            )
-
-            # Write atomically
-            tmp_file = execution_file.with_suffix(".tmp")
-            with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(current_state, f, indent=2)
-            tmp_file.rename(execution_file)
-
-            self._log_to_file(
-                f"Cleaned up stale skill execution state for {skill_name}"
-            )
-            logger.info(f"Cleaned up stale skill execution state for {skill_name}")
-
-        except Exception as e:
-            self._log_to_file(f"Failed to cleanup skill execution state: {e}")
-            logger.warning(f"Failed to cleanup skill execution state: {e}")
+    _cleanup_skill_execution_state.__doc__ = (
+        _shared_CronScheduler__cleanup_skill_execution_state.__doc__
+    )
 
     async def _execute_job(
         self,
@@ -332,146 +279,23 @@ class JobRunner:
             )
 
     def _detect_failure_type(self, error_text: str) -> str:
-        """Detect the type of failure from error text.
+        return _shared_CronScheduler__detect_failure_type(self, error_text)
 
-        Args:
-            error_text: Error message or output to analyze
-
-        Returns:
-            Failure type: "auth", "network", "timeout", or "unknown"
-        """
-        if not error_text:
-            return "unknown"
-
-        error_lower = error_text.lower()
-
-        # Auth patterns
-        auth_patterns = [
-            "unauthorized",
-            "401",
-            "forbidden",
-            "403",
-            "token expired",
-            "authentication required",
-            "not authorized",
-            "permission denied",
-            "credentials",
-        ]
-        if any(p in error_lower for p in auth_patterns):
-            return "auth"
-
-        # Network patterns
-        network_patterns = [
-            "no route to host",
-            "connection refused",
-            "network unreachable",
-            "timeout",
-            "dial tcp",
-            "connection reset",
-            "eof",
-            "cannot connect",
-            "httpsconnectionpool",
-        ]
-        if any(p in error_lower for p in network_patterns):
-            return "network"
-
-        # Timeout patterns
-        timeout_patterns = [
-            "timed out",
-            "deadline exceeded",
-            "context deadline",
-        ]
-        if any(p in error_lower for p in timeout_patterns):
-            return "timeout"
-
-        return "unknown"
+    _detect_failure_type.__doc__ = _shared_CronScheduler__detect_failure_type.__doc__
 
     async def _apply_remediation(
         self, failure_type: str, job_name: str
     ) -> tuple[str | None, bool]:
-        """Apply remediation based on failure type before retry.
+        return await _shared_CronScheduler__apply_remediation(
+            self, failure_type, job_name, logger=logger
+        )
 
-        Args:
-            failure_type: Type of failure (auth, network, timeout)
-            job_name: Name of the job for logging
-
-        Returns:
-            Tuple of (remediation_applied, success)
-        """
-
-        if failure_type == "auth":
-            logger.info(f"Job {job_name}: Applying auth remediation (kube_login)")
-            self._log_to_file(f"Applying kube_login remediation for {job_name}")
-            success = await self._run_kube_login()
-            return "kube_login", success
-
-        elif failure_type == "network":
-            logger.info(f"Job {job_name}: Applying network remediation (vpn_connect)")
-            self._log_to_file(f"Applying vpn_connect remediation for {job_name}")
-            success = await self._run_vpn_connect()
-            return "vpn_connect", success
-
-        elif failure_type == "timeout":
-            # For timeouts, just wait a bit longer (no specific fix)
-            logger.info(f"Job {job_name}: Timeout detected, will retry with delay")
-            return None, True
-
-        return None, False
+    _apply_remediation.__doc__ = _shared_CronScheduler__apply_remediation.__doc__
 
     async def _run_kube_login(self, cluster: str = "stage") -> bool:
-        """Run kube_login to refresh credentials.
+        return await _shared_CronScheduler__run_kube_login(self, cluster, logger=logger)
 
-        Returns:
-            True if successful
-        """
-        import asyncio
-
-        try:
-            # Map cluster names to short codes
-            cluster_map = {
-                "stage": "s",
-                "production": "p",
-                "prod": "p",
-                "ephemeral": "e",
-                "konflux": "k",
-            }
-            short = cluster_map.get(cluster, "s")
-
-            # Run kube command to refresh credentials
-            logger.info(f"Running kube {short} to refresh credentials")
-            process = await asyncio.create_subprocess_exec(
-                "kube",
-                short,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), timeout=120
-                )
-                output = (stdout.decode() if stdout else "") + (
-                    stderr.decode() if stderr else ""
-                )
-
-                if process.returncode == 0 or "logged in" in output.lower():
-                    logger.info(f"kube_login({cluster}) successful")
-                    return True
-
-                logger.warning(f"kube_login({cluster}) failed: {output[:200]}")
-                return False
-
-            except asyncio.TimeoutError:
-                process.kill()
-                logger.warning(f"kube_login({cluster}) timed out")
-                return False
-
-        except FileNotFoundError:
-            logger.warning("kube command not found")
-            return False
-        except Exception as e:
-            logger.warning(f"kube_login error: {e}")
-            return False
+    _run_kube_login.__doc__ = _shared_CronScheduler__run_kube_login.__doc__
 
     async def _run_vpn_connect(self) -> bool:
         """Run vpn_connect to establish VPN connection.
@@ -705,18 +529,15 @@ Begin execution now."""
         error: str | None,
         notify_channels: list[str],
     ):
-        """Send notifications for job completion."""
-        if not self.notification_callback:
-            return
+        return await _shared_CronScheduler__send_notifications(
+            self,
+            job_name,
+            skill,
+            success,
+            output,
+            error,
+            notify_channels,
+            logger=logger,
+        )
 
-        try:
-            await self.notification_callback(
-                job_name=job_name,
-                skill=skill,
-                success=success,
-                output=output,
-                error=error,
-                channels=notify_channels,
-            )
-        except Exception as e:
-            logger.error(f"Failed to send notifications for {job_name}: {e}")
+    _send_notifications.__doc__ = _shared_CronScheduler__send_notifications.__doc__

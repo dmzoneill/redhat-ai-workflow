@@ -18,6 +18,12 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 from server.utils import resolve_repo_path, run_cmd, truncate_output
+from tool_modules.aa_docker.src.tools_basic import (
+    _shared__docker_compose_up_impl,
+    _shared__docker_cp_impl,
+    _shared__docker_exec_impl,
+)
+from tool_modules.aa_make.src.tools_basic import _shared__make_target_impl
 
 logger = logging.getLogger(__name__)
 
@@ -202,93 +208,30 @@ async def _docker_compose_status_impl(
 
 @auto_heal()
 async def _docker_compose_up_impl(
-    repo: str,
-    detach: bool = True,
-    services: str = "",
-    timeout: int = 180,
+    repo: str, detach: bool = True, services: str = "", timeout: int = 180
 ) -> str:
-    """
-    Start docker-compose services.
+    return await _shared__docker_compose_up_impl(repo, detach, services, timeout)
 
-    Args:
-        repo: Repository path (where docker-compose.yml is)
-        detach: Run in background
-        services: Specific services to start (space-separated, empty = all)
-        timeout: Timeout in seconds
 
-    Returns:
-        Startup result.
-    """
-    path = resolve_repo_path(repo)
-
-    cmd = ["docker-compose", "up"]
-    if detach:
-        cmd.append("-d")
-    if services:
-        cmd.extend(services.split())
-
-    success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
-
-    if success:
-        return f"✅ docker-compose up completed\n\n{truncate_output(output, max_length=1000, mode='tail')}"
-    return f"❌ docker-compose up failed:\n{output}"
+_docker_compose_up_impl.__doc__ = _shared__docker_compose_up_impl.__doc__
 
 
 @auto_heal()
 async def _docker_cp_impl(
-    source: str,
-    destination: str,
-    to_container: bool = True,
+    source: str, destination: str, to_container: bool = True
 ) -> str:
-    """
-    Copy files to/from a Docker container.
+    return await _shared__docker_cp_impl(source, destination, to_container)
 
-    Args:
-        source: Source path (local path or container:path)
-        destination: Destination path (container:path or local path)
-        to_container: If True, copy from local to container
 
-    Returns:
-        Copy result.
-
-    Examples:
-        docker_cp("/tmp/script.sh", "my_container:/tmp/script.sh", to_container=True)
-        docker_cp("my_container:/var/log/app.log", "/tmp/app.log", to_container=False)
-    """
-    cmd = ["docker", "cp", source, destination]
-
-    success, output = await run_cmd(cmd, timeout=60)
-
-    if success:
-        direction = "to container" if to_container else "from container"
-        return f"✅ Copied {direction}: {source} → {destination}"
-    return f"❌ Copy failed: {output}"
+_docker_cp_impl.__doc__ = _shared__docker_cp_impl.__doc__
 
 
 @auto_heal()
-async def _docker_exec_impl(
-    container: str,
-    command: str,
-    timeout: int = 300,
-) -> str:
-    """
-    Execute a command in a running Docker container.
+async def _docker_exec_impl(container: str, command: str, timeout: int = 300) -> str:
+    return await _shared__docker_exec_impl(container, command, timeout)
 
-    Args:
-        container: Container name or ID
-        command: Command to execute
-        timeout: Timeout in seconds
 
-    Returns:
-        Command output.
-    """
-    cmd = ["docker", "exec", container, "bash", "-c", command]
-
-    success, output = await run_cmd(cmd, timeout=timeout)
-
-    if success:
-        return f"## Docker exec: {command[:50]}...\n\n```\n{output}\n```"
-    return f"❌ Docker exec failed:\n{output}"
+_docker_exec_impl.__doc__ = _shared__docker_exec_impl.__doc__
 
 
 @auto_heal()
@@ -1439,30 +1382,11 @@ async def _git_status_impl(repo: str) -> str:
 
 
 @auto_heal()
-async def _make_target_impl(
-    repo: str,
-    target: str,
-    timeout: int = 120,
-) -> str:
-    """
-    Run a make target in the repository.
+async def _make_target_impl(repo: str, target: str, timeout: int = 120) -> str:
+    return await _shared__make_target_impl(repo, target, timeout)
 
-    Args:
-        repo: Repository path
-        target: Make target to run (e.g., "test", "migrations", "data", "build")
-        timeout: Timeout in seconds
 
-    Returns:
-        Make output.
-    """
-    path = resolve_repo_path(repo)
-
-    cmd = ["make", target]
-    success, output = await run_cmd(cmd, cwd=path, timeout=timeout)
-
-    if success:
-        return f"✅ make {target} completed\n\n{truncate_output(output, 2000, mode='tail')}"
-    return f"❌ make {target} failed:\n{truncate_output(output, 2000, mode='tail')}"
+_make_target_impl.__doc__ = _shared__make_target_impl.__doc__
 
 
 def _register_code_quality_tools(registry: ToolRegistry) -> None:
