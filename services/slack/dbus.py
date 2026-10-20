@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # flake8: noqa: F821
+# pylint: disable=too-many-lines,duplicate-code
 # Note: F821 disabled because D-Bus type annotations like "s", "i", "b"
 # are valid dbus-next signatures but flake8 misinterprets them as undefined names.
+# too-many-lines: this module is the full Slack D-Bus surface and cannot be
+# split without new files. duplicate-code: the client mirrors DaemonClient.
 """
 D-Bus Interface for Slack Daemon
 
@@ -28,6 +31,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from typing import Any, TypeAlias
 
 from services.slack.dbus_config_handlers import (
     handle_get_app_commands,
@@ -80,6 +84,15 @@ except ImportError:
     DBUS_AVAILABLE = False
     print("Warning: dbus-next not installed. Install with: uv add dbus-next")
 
+# Quoted annotations ("s", "b", "i", "d") are dbus-next signatures. These
+# aliases let mypy resolve them; runtime __annotations__ stays the string.
+# pylint: disable=invalid-name
+s: TypeAlias = Any
+b: TypeAlias = Any
+i: TypeAlias = Any
+d: TypeAlias = Any
+# pylint: enable=invalid-name
+
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 logger = logging.getLogger(__name__)
@@ -107,13 +120,17 @@ __all__ = [
 
 
 if DBUS_AVAILABLE:
-
+    # One method per D-Bus operation; the IPC surface cannot be smaller.
+    # pylint: disable-next=too-many-public-methods
     class SlackPersonaDBusInterface(ServiceInterface):
         """D-Bus interface for the Slack Persona daemon.
 
         Thin routing layer: each @method() delegates to handler functions in
         dbus_message_handlers or dbus_config_handlers.
         """
+
+        # PascalCase names are D-Bus members; renaming them would break IPC.
+        # pylint: disable=invalid-name
 
         def __init__(self, daemon: "SlackDaemonWithDBus"):
             super().__init__(DBUS_INTERFACE_NAME)
@@ -259,6 +276,8 @@ if DBUS_AVAILABLE:
             return json.dumps(handle_set_debug_mode(self.daemon, enabled))
 
         @method()
+        # persona is part of the D-Bus signature; this handler does not read it.
+        # pylint: disable-next=unused-argument
         def RunPersonaTest(self, query: "s", persona: "s") -> "s":
             """Run a context gathering test for the Slack persona."""
             return json.dumps(handle_run_persona_test(query))
@@ -315,8 +334,9 @@ if DBUS_AVAILABLE:
             """Get the local cached photo path for a user."""
             try:
                 return json.dumps(format_photo_path_response(user_id))
-            except Exception as e:
-                logger.error(f"GetPhotoPath error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetPhotoPath error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         # ==================== Knowledge Cache Methods ====================
@@ -345,8 +365,9 @@ if DBUS_AVAILABLE:
                         "channels": [c.to_dict() for c in channels],
                     }
                 )
-            except Exception as e:
-                logger.error(f"FindChannel error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("FindChannel error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "channels": []})
 
         @method()
@@ -364,8 +385,9 @@ if DBUS_AVAILABLE:
                     query, count
                 )
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"SearchChannels error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("SearchChannels error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "channels": []})
 
         @method()
@@ -390,6 +412,8 @@ if DBUS_AVAILABLE:
                 if not result.get("success"):
                     return json.dumps(result)
 
+                # Deferred so persistence imports only when a cache method runs.
+                # pylint: disable-next=import-outside-toplevel
                 from tool_modules.aa_slack.src.persistence import CachedChannel
 
                 channels_to_cache = []
@@ -414,8 +438,9 @@ if DBUS_AVAILABLE:
                 result["cached"] = len(channels_to_cache)
                 return json.dumps(result)
 
-            except Exception as e:
-                logger.error(f"SearchAndCacheChannels error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("SearchAndCacheChannels error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "channels": []})
 
         @method()
@@ -436,8 +461,9 @@ if DBUS_AVAILABLE:
                         "users": users,
                     }
                 )
-            except Exception as e:
-                logger.error(f"FindUser error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("FindUser error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "users": []})
 
         @method()
@@ -453,8 +479,9 @@ if DBUS_AVAILABLE:
             try:
                 result = await self.daemon.session.search_users_and_cache(query, count)
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"SearchUsers error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("SearchUsers error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "users": []})
 
         @method()
@@ -477,6 +504,8 @@ if DBUS_AVAILABLE:
                 if not result.get("success"):
                     return json.dumps(result)
 
+                # Deferred so persistence imports only when a cache method runs.
+                # pylint: disable-next=import-outside-toplevel
                 from tool_modules.aa_slack.src.persistence import CachedUser
 
                 users_to_cache = []
@@ -504,8 +533,9 @@ if DBUS_AVAILABLE:
                 result["cached"] = len(users_to_cache)
                 return json.dumps(result)
 
-            except Exception as e:
-                logger.error(f"SearchAndCacheUsers error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("SearchAndCacheUsers error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "users": []})
 
         @method()
@@ -519,8 +549,9 @@ if DBUS_AVAILABLE:
             try:
                 result = await self.daemon.session.get_user_profile_details(user_id)
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"GetUserProfile error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetUserProfile error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "profile": {}})
 
         @method()
@@ -543,8 +574,9 @@ if DBUS_AVAILABLE:
                         "url": url,
                     }
                 )
-            except Exception as e:
-                logger.error(f"GetAvatarUrl error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetAvatarUrl error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "url": ""})
 
         @method()
@@ -568,8 +600,9 @@ if DBUS_AVAILABLE:
                         "channels": [c.to_dict() for c in channels],
                     }
                 )
-            except Exception as e:
-                logger.error(f"GetMyChannels error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetMyChannels error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "channels": []})
 
         @method()
@@ -589,8 +622,9 @@ if DBUS_AVAILABLE:
                         "groups": [g.to_dict() for g in groups],
                     }
                 )
-            except Exception as e:
-                logger.error(f"GetUserGroups error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetUserGroups error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "groups": []})
 
         # ==================== User Lookup Methods ====================
@@ -605,10 +639,10 @@ if DBUS_AVAILABLE:
                 user = await self.daemon.state_db.find_user_by_email(email)
                 if user:
                     return json.dumps(format_email_lookup_found(user))
-                else:
-                    return json.dumps(format_email_lookup_not_found(email))
-            except Exception as e:
-                logger.error(f"LookupUserByEmail error: {e}")
+                return json.dumps(format_email_lookup_not_found(email))
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("LookupUserByEmail error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -638,8 +672,9 @@ if DBUS_AVAILABLE:
                         "users": results,
                     }
                 )
-            except Exception as e:
-                logger.error(f"LookupUserByName error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("LookupUserByName error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "users": []})
 
         @method()
@@ -647,8 +682,9 @@ if DBUS_AVAILABLE:
             """Get the local file path to a cached Slack user's profile photo."""
             try:
                 return json.dumps(format_photo_path_response(user_id))
-            except Exception as e:
-                logger.error(f"GetUserPhotoPath error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetUserPhotoPath error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "photo_path": ""})
 
         @method()
@@ -670,8 +706,9 @@ if DBUS_AVAILABLE:
                 result = await self.daemon.state_db.resolve_target(target)
                 result["success"] = True
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"ResolveTarget error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("ResolveTarget error: %s", e)
                 return json.dumps(
                     {
                         "success": False,
@@ -693,8 +730,9 @@ if DBUS_AVAILABLE:
                 stats = await self.daemon.state_db.get_channel_cache_stats()
                 stats["success"] = True
                 return json.dumps(stats)
-            except Exception as e:
-                logger.error(f"GetChannelCacheStats error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetChannelCacheStats error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -706,6 +744,8 @@ if DBUS_AVAILABLE:
                 )
 
             try:
+                # Deferred so persistence imports only when a cache method runs.
+                # pylint: disable-next=import-outside-toplevel
                 from tool_modules.aa_slack.src.persistence import CachedChannel
 
                 channels_data = await self.daemon.session.get_conversations_list(
@@ -737,8 +777,9 @@ if DBUS_AVAILABLE:
                         "channels_cached": len(channels),
                     }
                 )
-            except Exception as e:
-                logger.error(f"RefreshChannelCache error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("RefreshChannelCache error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -753,8 +794,9 @@ if DBUS_AVAILABLE:
                     expanded_path
                 )
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"ImportSidebarChannels error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("ImportSidebarChannels error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -768,8 +810,9 @@ if DBUS_AVAILABLE:
             try:
                 dms = await self.daemon.state_db.get_sidebar_dms()
                 return json.dumps({"success": True, "dms": dms, "count": len(dms)})
-            except Exception as e:
-                logger.error(f"GetSidebarDMs error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetSidebarDMs error: %s", e)
                 return json.dumps({"success": False, "error": str(e), "dms": []})
 
         @method()
@@ -781,6 +824,8 @@ if DBUS_AVAILABLE:
                 )
 
             try:
+                # Deferred so persistence imports only when a cache method runs.
+                # pylint: disable-next=import-outside-toplevel
                 from tool_modules.aa_slack.src.persistence import CachedUser
 
                 stats = await self.daemon.state_db.get_user_cache_stats()
@@ -825,8 +870,9 @@ if DBUS_AVAILABLE:
                         "users_cached": len(users),
                     }
                 )
-            except Exception as e:
-                logger.error(f"RefreshUserCache error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("RefreshUserCache error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -839,8 +885,9 @@ if DBUS_AVAILABLE:
                 stats = await self.daemon.state_db.get_user_cache_stats()
                 stats["success"] = True
                 return json.dumps(stats)
-            except Exception as e:
-                logger.error(f"GetUserCacheStats error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetUserCacheStats error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         @method()
@@ -855,8 +902,9 @@ if DBUS_AVAILABLE:
                     channel_id, count
                 )
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"ListChannelMembers error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("ListChannelMembers error: %s", e)
                 return json.dumps(
                     {
                         "success": False,
@@ -909,8 +957,9 @@ if DBUS_AVAILABLE:
                 return json.dumps(
                     {"success": False, "error": f"Invalid JSON for user_ids: {e}"}
                 )
-            except Exception as e:
-                logger.error(f"CheckChannelMembership error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("CheckChannelMembership error: %s", e)
                 return json.dumps({"success": False, "error": str(e)})
 
         # ==================== Signals ====================
@@ -918,19 +967,20 @@ if DBUS_AVAILABLE:
         @dbus_signal()
         def MessageReceived(self, message_json: "s") -> None:
             """Emitted when a new message is received."""
-            pass
 
         @dbus_signal()
         def MessageProcessed(self, message_id: "s", status: "s") -> None:
             """Emitted when a message is processed."""
-            pass
 
         @dbus_signal()
         def PendingApproval(self, message_json: "s") -> None:
             """Emitted when a message needs approval."""
-            pass
+
+        # pylint: enable=invalid-name
 
 
+# The daemon tracks session, health, and D-Bus state on one object.
+# pylint: disable-next=too-many-instance-attributes
 class SlackDaemonWithDBus:
     """
     Extended Slack daemon with D-Bus IPC support.
@@ -984,9 +1034,10 @@ class SlackDaemonWithDBus:
             self._bus.export(DBUS_OBJECT_PATH, self._dbus_interface)
             await self._bus.request_name(DBUS_SERVICE_NAME)
 
-            logger.info(f"D-Bus service started: {DBUS_SERVICE_NAME}")
-        except Exception as e:
-            logger.error(f"Failed to start D-Bus: {e}")
+            logger.info("D-Bus service started: %s", DBUS_SERVICE_NAME)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # IPC boundary: report the failure instead of crashing the caller.
+            logger.error("Failed to start D-Bus: %s", e)
 
     async def stop_dbus(self):
         """Stop the D-Bus service."""
@@ -1027,7 +1078,8 @@ class SlackDaemonWithDBus:
                 self.messages_responded += 1
                 self.emit_message_processed(message_id, "sent")
                 return {"success": True, "message_id": message_id, "status": "sent"}
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # IPC boundary: report the failure instead of crashing the caller.
             return {"success": False, "error": str(e)}
 
         return {"success": False, "error": "Session not available"}
@@ -1066,7 +1118,8 @@ class SlackDaemonWithDBus:
                 typing_delay=True,
             )
             return {"success": True, "ts": result.get("ts", "")}
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # IPC boundary: report the failure instead of crashing the caller.
             return {"success": False, "error": str(e)}
 
     def reload_config(self):
@@ -1137,7 +1190,7 @@ class SlackDaemonWithDBus:
             checks["uptime_ok"] = False
 
         # Get listener stats for additional info
-        listener_stats = {}
+        listener_stats: dict[str, Any] = {}
         if self.listener:
             listener_stats = getattr(self.listener, "stats", {})
 
@@ -1173,6 +1226,8 @@ class SlackDaemonWithDBus:
 # =============================================================================
 
 
+# One client method per D-Bus operation.
+# pylint: disable-next=too-many-public-methods
 class SlackAgentClient:
     """Client for communicating with the Slack daemon via D-Bus."""
 
@@ -1197,7 +1252,8 @@ class SlackAgentClient:
                 introspection,
             )
             return True
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Client boundary: connection errors become a failed result.
             print(f"Failed to connect to Slack daemon: {e}")
             print("Is the daemon running? Start with: make slack-daemon-bg")
             return False

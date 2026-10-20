@@ -17,7 +17,7 @@ from typing import Any
 
 
 @dataclass
-class PrioritizedIssue:
+class PrioritizedIssue:  # pylint: disable=too-many-instance-attributes
     """An issue with its priority score and reasoning."""
 
     key: str
@@ -79,12 +79,11 @@ def calculate_age_score(created_date: str) -> tuple[float, str]:
 
         if age_days > 30:
             return 30, f"Aging issue ({age_days} days old)"
-        elif age_days > 14:
+        if age_days > 14:
             return 20, f"Getting stale ({age_days} days)"
-        elif age_days > 7:
+        if age_days > 7:
             return 10, f"Week old ({age_days} days)"
-        else:
-            return 5, f"Recent ({age_days} days)"
+        return 5, f"Recent ({age_days} days)"
     except (ValueError, TypeError):
         return 0, ""
 
@@ -99,15 +98,14 @@ def calculate_points_score(story_points: int | None) -> tuple[float, str]:
 
     if story_points <= 2:
         return 40, f"Quick win ({story_points} pts)"
-    elif story_points <= 5:
+    if story_points <= 5:
         return 30, f"Medium effort ({story_points} pts)"
-    elif story_points <= 8:
+    if story_points <= 8:
         return 20, f"Larger effort ({story_points} pts)"
-    else:
-        return 10, f"Large item ({story_points} pts)"
+    return 10, f"Large item ({story_points} pts)"
 
 
-def prioritize_issues(
+def prioritize_issues(  # pylint: disable=too-many-locals
     issues: list[dict[str, Any]], config: dict[str, Any] | None = None
 ) -> list[PrioritizedIssue]:
     """Order issues by weighted score, capturing reasoning for UI display.
@@ -211,9 +209,9 @@ def prioritize_issues(
     # Sort by score (highest first)
     prioritized.sort(key=lambda x: x.score, reverse=True)
 
-    # Assign ranks
-    for i, issue in enumerate(prioritized):
-        issue.rank = i + 1
+    # Assign ranks. Use a new name so it is not the dict from the loop above.
+    for rank, ranked in enumerate(prioritized, start=1):
+        ranked.rank = rank
 
     return prioritized
 

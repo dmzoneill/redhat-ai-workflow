@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # flake8: noqa: F821
+# pylint: disable=duplicate-code
 # Note: F821 disabled because D-Bus type annotations like "s", "i", "b"
 # are valid dbus-next signatures but flake8 misinterprets them as undefined names.
+# duplicate-code: DaemonClient and SlackAgentClient share the connect pattern.
 """
 Base D-Bus Interface for AI Workflow Daemons
 
@@ -29,9 +31,10 @@ import asyncio
 import json
 import logging
 import time
+import traceback
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeAlias, TypeVar
 
 # Check for dbus availability
 try:
@@ -45,33 +48,53 @@ except ImportError:
     DBUS_AVAILABLE = False
 
     # Create dummy decorators for when dbus-next isn't installed
-    def dbus_property(*args, **kwargs):
+    def dbus_property(*_args, **_kwargs):
+        """No-op property decorator used when dbus-next is not installed."""
+
         def decorator(func):
             return func
 
         return decorator
 
-    def method(*args, **kwargs):
+    def method(*_args, **_kwargs):
+        """No-op method decorator used when dbus-next is not installed."""
+
         def decorator(func):
             return func
 
         return decorator
 
-    def dbus_signal(*args, **kwargs):
+    def dbus_signal(*_args, **_kwargs):
+        """No-op signal decorator used when dbus-next is not installed."""
+
         def decorator(func):
             return func
 
         return decorator
 
-    class ServiceInterface:
+    # pylint: disable-next=too-few-public-methods
+    class ServiceInterface:  # type: ignore[no-redef]
+        """Stand-in interface used when dbus-next is not installed."""
+
         def __init__(self, name):
             self.name = name
 
-    class PropertyAccess:
+    # pylint: disable-next=too-few-public-methods
+    class PropertyAccess:  # type: ignore[no-redef]
+        """Stand-in access flags used when dbus-next is not installed."""
+
         READ = "read"
 
 
 logger = logging.getLogger(__name__)
+
+# Quoted annotations ("s", "b", "d") are dbus-next signatures. These aliases
+# let mypy resolve them; runtime __annotations__ stays the signature string.
+# pylint: disable=invalid-name
+s: TypeAlias = Any
+b: TypeAlias = Any
+d: TypeAlias = Any
+# pylint: enable=invalid-name
 
 T = TypeVar("T", bound="DaemonDBusBase")
 
@@ -90,6 +113,8 @@ class ServiceConfig:
 # =============================================================================
 
 
+# Health, bus, and handler state all live on the daemon instance.
+# pylint: disable-next=too-many-instance-attributes
 class DaemonDBusBase(ABC):
     """
     Base class for daemons with D-Bus support.
@@ -131,12 +156,10 @@ class DaemonDBusBase(ABC):
     @abstractmethod
     async def get_service_stats(self) -> dict:
         """Return service-specific statistics."""
-        pass
 
     @abstractmethod
     async def get_service_status(self) -> dict:
         """Return detailed service status."""
-        pass
 
     async def health_check(self) -> dict:
         """
@@ -204,33 +227,32 @@ class DaemonDBusBase(ABC):
         try:
             logger.info("[D-Bus] Getting event loop...")
             self._event_loop = asyncio.get_running_loop()
-            logger.info(f"[D-Bus] Event loop: {self._event_loop}")
+            logger.info("[D-Bus] Event loop: %s", self._event_loop)
 
             logger.info("[D-Bus] Connecting to message bus...")
             self._bus = await MessageBus().connect()
-            logger.info(f"[D-Bus] Connected: {self._bus}")
-            logger.info(f"[D-Bus] Bus unique name: {self._bus.unique_name}")
+            logger.info("[D-Bus] Connected: %s", self._bus)
+            logger.info("[D-Bus] Bus unique name: %s", self._bus.unique_name)
 
             # Create the interface dynamically
-            logger.info(f"[D-Bus] Creating interface for {self.interface_name}...")
+            logger.info("[D-Bus] Creating interface for %s...", self.interface_name)
             self._dbus_interface = create_daemon_interface(self)
-            logger.info(f"[D-Bus] Interface created: {self._dbus_interface}")
+            logger.info("[D-Bus] Interface created: %s", self._dbus_interface)
 
-            logger.info(f"[D-Bus] Exporting at {self.object_path}...")
+            logger.info("[D-Bus] Exporting at %s...", self.object_path)
             self._bus.export(self.object_path, self._dbus_interface)
             logger.info("[D-Bus] Exported successfully")
 
-            logger.info(f"[D-Bus] Requesting name {self.service_name}...")
+            logger.info("[D-Bus] Requesting name %s...", self.service_name)
             await self._bus.request_name(self.service_name)
-            logger.info(f"[D-Bus] Name acquired: {self.service_name}")
+            logger.info("[D-Bus] Name acquired: %s", self.service_name)
 
-            logger.info(f"D-Bus service started: {self.service_name}")
+            logger.info("D-Bus service started: %s", self.service_name)
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to start D-Bus: {e}")
-            import traceback
-
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # IPC boundary: report the failure instead of crashing the caller.
+            logger.error("Failed to start D-Bus: %s", e)
             logger.error(traceback.format_exc())
             return False
 
@@ -239,7 +261,7 @@ class DaemonDBusBase(ABC):
         if self._bus:
             self._bus.disconnect()
             self._bus = None
-            logger.info(f"D-Bus service stopped: {self.service_name}")
+            logger.info("D-Bus service stopped: %s", self.service_name)
 
     def request_shutdown(self):
         """Request graceful shutdown."""
@@ -303,6 +325,9 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
     class DynamicDaemonInterface(ServiceInterface):
         """Dynamically created D-Bus interface."""
 
+        # PascalCase names are D-Bus members; renaming them would break IPC.
+        # pylint: disable=invalid-name
+
         def __init__(self, daemon_instance: DaemonDBusBase):
             super().__init__(daemon_instance.interface_name)
             self._daemon = daemon_instance
@@ -341,8 +366,9 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
                 base = self._daemon.get_base_stats()
                 service = await self._daemon.get_service_status()
                 return json.dumps({**base, **service})
-            except Exception as e:
-                logger.error(f"GetStatus error on {self._daemon.service_name}: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetStatus error on %s: %s", self._daemon.service_name, e)
                 return json.dumps({"running": self._daemon.is_running, "error": str(e)})
 
         @method()
@@ -352,8 +378,9 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
                 base = self._daemon.get_base_stats()
                 service = await self._daemon.get_service_stats()
                 return json.dumps({**base, **service})
-            except Exception as e:
-                logger.error(f"GetStats error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("GetStats error: %s", e)
                 return json.dumps({"error": str(e)})
 
         @method()
@@ -376,8 +403,9 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
                         args = [args]
                     result = await self._daemon.call_handler(method_name, *args)
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"CallMethod error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("CallMethod error: %s", e)
                 return json.dumps({"error": str(e)})
 
         @method()
@@ -386,8 +414,9 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
             try:
                 result = await self._daemon.health_check()
                 return json.dumps(result)
-            except Exception as e:
-                logger.error(f"HealthCheck error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                # IPC boundary: report the failure instead of crashing the caller.
+                logger.error("HealthCheck error: %s", e)
                 return json.dumps(
                     {
                         "healthy": False,
@@ -402,12 +431,12 @@ def create_daemon_interface(daemon: DaemonDBusBase) -> "ServiceInterface":
         @dbus_signal()
         def StatusChanged(self, status: "s") -> None:
             """Emitted when daemon status changes."""
-            pass
 
         @dbus_signal()
         def Event(self, event_type: "s", data: "s") -> None:
             """Generic event signal."""
-            pass
+
+        # pylint: enable=invalid-name
 
     return DynamicDaemonInterface(daemon)
 
@@ -462,7 +491,8 @@ class DaemonClient:
                 introspection,
             )
             return True
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            # Client boundary: connection errors become a failed result.
             print(f"Failed to connect to {self.service_name}: {e}")
             print("Is the daemon running?")
             return False
@@ -496,7 +526,7 @@ class DaemonClient:
         result = await interface.call_shutdown()
         return json.loads(result)
 
-    async def call_method(self, method_name: str, args: list = None) -> dict:
+    async def call_method(self, method_name: str, args: list | None = None) -> dict:
         """Call a custom method on the daemon."""
         interface = self._get_interface()
         args_json = json.dumps(args or [])
@@ -611,7 +641,8 @@ async def check_daemon_status(service: str) -> dict:
             status = await client.get_status()
             await client.disconnect()
             return status
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Client boundary: connection errors become a failed result.
         return {"running": False, "error": str(e)}
 
     return {"running": False, "error": "Could not connect"}
@@ -636,7 +667,8 @@ async def check_daemon_health(service: str) -> dict:
             health = await client.health_check()
             await client.disconnect()
             return health
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        # Client boundary: connection errors become a failed result.
         return {
             "healthy": False,
             "checks": {"connection": False},

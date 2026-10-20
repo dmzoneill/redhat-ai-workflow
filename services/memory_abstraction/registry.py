@@ -27,7 +27,9 @@ import inspect
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
+
+from .adapter_protocol import SourceAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,7 @@ LATENCY_SLOW = "slow"  # >2s - external APIs, AI queries
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class AdapterInfo:
     """
     Metadata about a registered adapter.
@@ -91,26 +94,28 @@ class AdapterManifest:
     adapters: dict[str, AdapterInfo] = field(default_factory=dict)
     modules: dict[str, str] = field(default_factory=dict)  # module -> adapter_name
     _frozen: bool = False
-    _instances: dict[str, object] = field(
+    _instances: dict[str, SourceAdapter] = field(
         default_factory=dict
     )  # Cached adapter instances
 
     def register(self, info: AdapterInfo) -> None:
         """Register an adapter in the manifest."""
         if self._frozen:
-            logger.warning(f"Manifest frozen, cannot register: {info.name}")
+            logger.warning("Manifest frozen, cannot register: %s", info.name)
             return
 
         if info.name in self.adapters:
-            logger.warning(f"Adapter already registered, overwriting: {info.name}")
+            logger.warning("Adapter already registered, overwriting: %s", info.name)
 
         self.adapters[info.name] = info
         if info.module:
             self.modules[info.module] = info.name
 
         logger.debug(
-            f"Registered adapter: {info.name} (module={info.module}, "
-            f"capabilities={info.capabilities})"
+            "Registered adapter: %s (module=%s, capabilities=%s)",
+            info.name,
+            info.module,
+            info.capabilities,
         )
 
     def get_adapter(self, name: str) -> AdapterInfo | None:
@@ -122,7 +127,7 @@ class AdapterManifest:
         adapter_name = self.modules.get(module)
         return self.adapters.get(adapter_name) if adapter_name else None
 
-    def get_instance(self, name: str) -> object | None:
+    def get_instance(self, name: str) -> SourceAdapter | None:
         """
         Get or create an adapter instance.
 
@@ -136,11 +141,13 @@ class AdapterManifest:
             return None
 
         try:
-            instance = info.adapter_class()
+            instance = cast(SourceAdapter, info.adapter_class())
             self._instances[name] = instance
             return instance
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Failed to create adapter instance {name}: {e}")
+            logger.error("Failed to create adapter instance %s: %s", name, e)
             return None
 
     def list_adapters(self) -> list[str]:
@@ -184,7 +191,7 @@ class AdapterManifest:
     def freeze(self) -> None:
         """Freeze the manifest to prevent further registration."""
         self._frozen = True
-        logger.info(f"Adapter manifest frozen with {len(self.adapters)} adapters")
+        logger.info("Adapter manifest frozen with %s adapters", len(self.adapters))
 
     def clear(self) -> None:
         """Clear all registrations (for testing)."""
@@ -198,6 +205,7 @@ class AdapterManifest:
 ADAPTER_MANIFEST = AdapterManifest()
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 def memory_adapter(
     name: str,
     display_name: str,
@@ -250,6 +258,8 @@ def memory_adapter(
                 module = inspect.getmodule(cls)
                 if module and hasattr(module, "__file__"):
                     source_file = module.__file__ or ""
+            # Best-effort: log and continue.
+            # pylint: disable-next=broad-exception-caught
             except Exception as exc:
                 logger.debug("Suppressed error: %s", exc)
 
@@ -292,7 +302,7 @@ def memory_adapter(
         ADAPTER_MANIFEST.register(info)
 
         # Attach metadata to class for runtime access
-        cls._adapter_info = info
+        setattr(cls, "_adapter_info", info)
 
         return cls
 

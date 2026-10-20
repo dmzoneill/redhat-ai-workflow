@@ -10,11 +10,17 @@ Handles caption capture via DOM observation:
 Extracted from GoogleMeetController to separate caption concerns.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
+
+from tool_modules.aa_meet_bot.src.meet_runtime import (
+    CaptionEntry,
+    MeetControllerView,
+)
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
@@ -22,51 +28,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-MAX_CAPTION_BUFFER = 10000
+class CaptionMixin:
+    """Caption capture methods shared by the controller and MeetCaptions."""
 
+    # Declared for mixins that read sibling state.
+    _browser_closed: bool
+    _caption_callback: Callable[[CaptionEntry], None] | None
+    _caption_observer_running: bool
+    _caption_poll_task: Any
+    _video_enabled: Any
+    page: Any
+    state: Any
 
-@dataclass
-class CaptionEntry:
-    """A single caption entry from the meeting."""
-
-    speaker: str
-    text: str
-    timestamp: datetime = field(default_factory=datetime.now)
-    caption_id: int = 0  # Unique ID for tracking updates
-    is_update: bool = False  # True if this is an update to a previous caption
-
-    def __str__(self) -> str:
-        return f"[{self.timestamp.strftime('%H:%M:%S')}] {self.speaker}: {self.text}"
-
-
-class MeetCaptions:
-    """Handles caption capture from Google Meet via DOM observation.
-
-    Uses composition: receives a reference to the GoogleMeetController
-    to access page and state.
-    """
-
-    def __init__(self, controller: "GoogleMeetController"):
-        self._controller = controller
-        self._caption_callback: Optional[Callable[[CaptionEntry], None]] = None
-        self._caption_observer_running = False
-        self._caption_poll_task: Optional[asyncio.Task] = None
-
-    @property
-    def page(self):
-        return self._controller.page
-
-    @property
-    def state(self):
-        return self._controller.state
-
-    @property
-    def _instance_id(self):
-        return self._controller._instance_id
-
-    async def start_caption_capture(
-        self, callback: Callable[[CaptionEntry], None]
-    ) -> None:
+    async def start_caption_capture(self, callback: Callable[..., None]) -> None:
         """
         Start capturing captions via DOM observation.
 
@@ -142,7 +116,9 @@ class MeetCaptions:
                     }
 
                     // Method 2: Look for speaker class patterns
-                    const speakerEl = container.querySelector('.zs7s8d, .KcIKyf, [data-speaker-name]');
+                    const speakerEl = container.querySelector(
+                        '.zs7s8d, .KcIKyf, [data-speaker-name]'
+                    );
                     if (speakerEl) {
                         const t = speakerEl.textContent.trim();
                         if (t && t.length > 1 && t.length < 50) return t;
@@ -156,7 +132,8 @@ class MeetCaptions:
                     return (text || '').toLowerCase().replace(/\\s+/g, ' ').trim();
                 }
 
-                // Check if newText is a refinement of oldText (same utterance, just corrected/extended)
+                // Check if newText is a refinement of oldText
+                // (same utterance, just corrected/extended)
                 function isRefinement(oldText, newText) {
                     if (!oldText) return false;
                     const oldNorm = normalizeText(oldText);
@@ -185,7 +162,9 @@ class MeetCaptions:
 
                 function emitCaption() {
                     const text = window._meetBotLastText;
-                    const speaker = window._meetBotLastSpeakerForText || window._meetBotCurrentSpeaker || 'Unknown';
+                    const speaker = window._meetBotLastSpeakerForText
+                        || window._meetBotCurrentSpeaker
+                        || 'Unknown';
 
                     if (!text) return;
 
@@ -269,7 +248,9 @@ class MeetCaptions:
                 });
 
                 window._meetBotObserver = observer;
-                console.log('[MeetBot] Caption observer started (800ms debounce, update-in-place mode)');
+                console.log(
+                    '[MeetBot] Caption observer started (800ms debounce, update-in-place mode)'
+                );
             }
         """)
 
@@ -303,7 +284,7 @@ class MeetCaptions:
                     if not text.strip():
                         continue
 
-                    # Determine if this is truly an update (JS says update AND we've seen this ID before)
+                    # True when JS marks an update and this id was seen before.
                     is_true_update = is_update and cap_id in caption_id_to_index
 
                     entry = CaptionEntry(
@@ -321,35 +302,25 @@ class MeetCaptions:
                         idx = caption_id_to_index[cap_id]
                         if self.state and 0 <= idx < len(self.state.caption_buffer):
                             self.state.caption_buffer[idx] = entry
-                            logger.debug(f"Caption UPDATE [{speaker}] {text[:50]}...")
+                            logger.debug(
+                                "Caption UPDATE [%s] %s...", speaker, text[:50]
+                            )
                         # Also notify callback with updated entry (for live display)
-                        if self._caption_callback:
+                        if self._caption_callback is not None:
                             self._caption_callback(entry)
                     else:
                         # NEW caption entry
                         if self.state:
                             caption_id_to_index[cap_id] = len(self.state.caption_buffer)
                             self.state.caption_buffer.append(entry)
-                            # Trim old entries when buffer exceeds max size
-                            if len(self.state.caption_buffer) > MAX_CAPTION_BUFFER:
-                                trim_count = (
-                                    len(self.state.caption_buffer) - MAX_CAPTION_BUFFER
-                                )
-                                self.state.caption_buffer = self.state.caption_buffer[
-                                    trim_count:
-                                ]
-                                # Rebuild index mapping after trim
-                                caption_id_to_index = {
-                                    e.caption_id: i
-                                    for i, e in enumerate(self.state.caption_buffer)
-                                }
-                        if self._caption_callback:
+                        if self._caption_callback is not None:
                             self._caption_callback(entry)
-                        logger.debug(f"Caption NEW [{speaker}] {text[:50]}...")
+                        logger.debug("Caption NEW [%s] %s...", speaker, text[:50])
 
                 await asyncio.sleep(0.5)  # Poll every 500ms
 
-            except Exception as e:
+            # Meet UI boundary: page or callback failures must not kill the bot.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 error_msg = str(e)
                 # Detect browser/page closure
                 if (
@@ -358,13 +329,13 @@ class MeetCaptions:
                     or "Browser has been closed" in error_msg
                 ):
                     logger.warning(
-                        f"[Caption poll] Browser closed detected: {error_msg}"
+                        "[Caption poll] Browser closed detected: %s", error_msg
                     )
-                    self._controller._browser_closed = True
+                    self._browser_closed = True
                     if self.state:
                         self.state.joined = False
                     break
-                logger.debug(f"Caption poll error: {e}")
+                logger.debug("Caption poll error: %s", e)
                 await asyncio.sleep(1)
 
     async def stop_caption_capture(self) -> None:
@@ -390,10 +361,9 @@ class MeetCaptions:
                         }
                     }
                 """)
-            except Exception as e:
-                logger.debug(
-                    f"Suppressed error in stop_caption_capture (observer disconnect): {e}"
-                )
+            # Meet UI boundary: page or callback failures must not kill the bot.
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
         logger.info("Caption capture stopped")
 
@@ -402,3 +372,124 @@ class MeetCaptions:
         if self.state:
             return self.state.caption_buffer.copy()
         return []
+
+    async def _captions_already_enabled(self) -> bool:
+        """Return True when the Turn-off-captions button is already visible."""
+        try:
+            off_button = self.page.locator('button[aria-label="Turn off captions"]')
+            if await off_button.count() == 0:
+                return False
+            logger.info(
+                "[CAPTIONS] Captions already enabled (found 'Turn off captions' button)"
+            )
+            self.state.captions_enabled = True
+            return True
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Meet UI boundary: a missing captions control is not fatal.
+            return False
+
+    async def _reenable_camera_after_captions(self) -> None:
+        """Turn the camera back on if clicking captions toggled it off."""
+        if not self._video_enabled:
+            return
+        logger.info("[CAPTIONS] Checking camera state after captions...")
+        await asyncio.sleep(0.5)
+        camera_btn = self.page.locator('button[aria-label="Turn on camera"]')
+        if await camera_btn.count() == 0:
+            return
+        logger.warning("[CAPTIONS] Camera was turned OFF! Re-enabling...")
+        await camera_btn.first.click()
+        await asyncio.sleep(0.5)
+        logger.info("[CAPTIONS] Camera re-enabled")
+
+    async def _click_turn_on_captions(self) -> bool:
+        """Click Turn on captions at the button center. Return True on success."""
+        try:
+            on_button = self.page.locator('button[aria-label="Turn on captions"]')
+            if await on_button.count() == 0:
+                return False
+            logger.info("[CAPTIONS] Found 'Turn on captions' button")
+            box = await on_button.first.bounding_box()
+            if box:
+                center_x = box["x"] + box["width"] / 2
+                center_y = box["y"] + box["height"] / 2
+                logger.info(
+                    "[CAPTIONS] Clicking at center (%s, %s)", center_x, center_y
+                )
+                await self.page.mouse.click(center_x, center_y)
+            else:
+                await on_button.first.click()
+            await asyncio.sleep(1.0)
+            off_button = self.page.locator('button[aria-label="Turn off captions"]')
+            if await off_button.count() > 0:
+                logger.info("[CAPTIONS] Captions enabled successfully")
+                self.state.captions_enabled = True
+                await self._reenable_camera_after_captions()
+                return True
+            logger.warning("[CAPTIONS] Button clicked but captions may not be on")
+            self.state.captions_enabled = True
+            return True
+        except Exception as click_error:  # pylint: disable=broad-exception-caught
+            # Meet UI boundary: caption clicks must not kill the bot.
+            logger.debug("[CAPTIONS] Direct button click failed: %s", click_error)
+            return False
+
+    async def _enable_captions_via_menu(self) -> bool:
+        """Enable captions from the More options menu."""
+        logger.info("Trying to enable captions via menu...")
+        try:
+            more_button = self.page.locator(
+                '[aria-label="More options"], [aria-label="More actions"]'
+            )
+            if await more_button.count() == 0:
+                return False
+            await more_button.first.click()
+            await asyncio.sleep(0.5)
+            captions_option = self.page.locator(
+                'li:has-text("captions"), [aria-label*="captions" i]'
+            )
+            if await captions_option.count() == 0:
+                return False
+            await captions_option.first.click()
+            self.state.captions_enabled = True
+            logger.info("Captions enabled via menu")
+            return True
+        except Exception as menu_error:  # pylint: disable=broad-exception-caught
+            # Meet UI boundary: the overflow menu is optional.
+            logger.debug("Menu method failed: %s", menu_error)
+            return False
+
+    async def enable_captions(self) -> bool:
+        """Enable closed captions in the meeting.
+
+        NOTE: We do NOT use keyboard shortcut 'c' because in Google Meet:
+        - 'c' toggles the CAMERA, not captions!
+        - This was causing the bot to turn off video when trying to enable captions.
+        Instead, we click the CC button directly.
+        """
+        if not self.page or not self.state:
+            return False
+        try:
+            logger.info("Enabling captions via CC button...")
+            if await self._captions_already_enabled():
+                return True
+            if await self._click_turn_on_captions():
+                return True
+            if await self._enable_captions_via_menu():
+                return True
+            logger.warning("Could not enable captions - all methods failed")
+            return False
+        except Exception as caption_error:  # pylint: disable=broad-exception-caught
+            # Meet UI boundary: enabling captions must not kill the bot.
+            logger.error("Failed to enable captions: %s", caption_error)
+            return False
+
+
+class MeetCaptions(CaptionMixin, MeetControllerView):
+    """Handles caption capture from Google Meet via DOM observation."""
+
+    def __init__(self, controller: GoogleMeetController) -> None:
+        MeetControllerView.__init__(self, controller)
+        self._caption_callback = None
+        self._caption_observer_running = False
+        self._caption_poll_task = None
