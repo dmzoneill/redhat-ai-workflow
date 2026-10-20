@@ -8,11 +8,13 @@ These tools allow Claude to:
 - View sprint history
 """
 
+import importlib
 import logging
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-# Support both package import and direct loading
-try:
+# One import for the type checker. Runtime keeps the package and script fallbacks.
+if TYPE_CHECKING:
     from .sprint_bot import (
         SprintBotConfig,
         WorkingHours,
@@ -31,25 +33,43 @@ try:
         load_sprint_state,
         save_sprint_state,
     )
-except ImportError:
-    from sprint_bot import (
-        SprintBotConfig,
-        WorkingHours,
-        approve_issue,
-        disable_sprint_bot,
-        enable_sprint_bot,
-        get_sprint_status,
-        is_within_working_hours,
-        refresh_sprint_state,
-        skip_issue,
-    )
-    from sprint_history import (
-        SprintIssue,
-        TimelineEvent,
-        load_sprint_history,
-        load_sprint_state,
-        save_sprint_state,
-    )
+else:
+    try:
+        from .sprint_bot import (
+            SprintBotConfig,
+            WorkingHours,
+            approve_issue,
+            disable_sprint_bot,
+            enable_sprint_bot,
+            get_sprint_status,
+            is_within_working_hours,
+            refresh_sprint_state,
+            skip_issue,
+        )
+        from .sprint_history import (
+            SprintIssue,
+            TimelineEvent,
+            load_sprint_history,
+            load_sprint_state,
+            save_sprint_state,
+        )
+    except ImportError:
+        _sprint_bot = importlib.import_module("sprint_bot")
+        SprintBotConfig = _sprint_bot.SprintBotConfig
+        WorkingHours = _sprint_bot.WorkingHours
+        approve_issue = _sprint_bot.approve_issue
+        disable_sprint_bot = _sprint_bot.disable_sprint_bot
+        enable_sprint_bot = _sprint_bot.enable_sprint_bot
+        get_sprint_status = _sprint_bot.get_sprint_status
+        is_within_working_hours = _sprint_bot.is_within_working_hours
+        refresh_sprint_state = _sprint_bot.refresh_sprint_state
+        skip_issue = _sprint_bot.skip_issue
+        _sprint_history = importlib.import_module("sprint_history")
+        SprintIssue = _sprint_history.SprintIssue
+        TimelineEvent = _sprint_history.TimelineEvent
+        load_sprint_history = _sprint_history.load_sprint_history
+        load_sprint_state = _sprint_history.load_sprint_state
+        save_sprint_state = _sprint_history.save_sprint_state
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +129,8 @@ def sprint_load(
             f"**Bot Enabled:** {'Yes' if state.bot_enabled else 'No'}",
             (
                 f"**Total Issues:** {len(state.issues)}"
-                f" ({len(actionable_issues)} actionable, {len(not_actionable_issues)} not actionable)"
+                f" ({len(actionable_issues)} actionable,"
+                f" {len(not_actionable_issues)} not actionable)"
             ),
             "",
         ]
@@ -133,7 +154,8 @@ def sprint_load(
                     "blocked": "🔴",
                 }.get(issue.approval_status, "•")
                 lines.append(
-                    f"- {status_icon} **{issue.key}** {pts} ({issue.jira_status}) {issue.summary[:50]}..."
+                    f"- {status_icon} **{issue.key}** {pts} ({issue.jira_status}) "
+                    f"{issue.summary[:50]}..."
                 )
                 if issue.priority_reasoning:
                     lines.append(
@@ -158,8 +180,9 @@ def sprint_load(
 
         return "\n".join(lines)
 
-    except Exception as e:
-        logger.exception(f"sprint_load error: {e}")
+    # Surface any failure as text instead of raising out of the tool.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("sprint_load error: %s", e)
         return f"Error loading sprint: {str(e)}"
 
 
@@ -180,10 +203,7 @@ def sprint_enable() -> str:
 
     if result["success"]:
         return "✅ Sprint bot enabled! It will process approved issues during working hours."
-    else:
-        return (
-            f"❌ Failed to enable sprint bot: {result.get('message', 'Unknown error')}"
-        )
+    return f"❌ Failed to enable sprint bot: {result.get('message', 'Unknown error')}"
 
 
 def sprint_disable() -> str:
@@ -200,10 +220,7 @@ def sprint_disable() -> str:
 
     if result["success"]:
         return "🛑 Sprint bot disabled. No more issues will be automatically processed."
-    else:
-        return (
-            f"❌ Failed to disable sprint bot: {result.get('message', 'Unknown error')}"
-        )
+    return f"❌ Failed to disable sprint bot: {result.get('message', 'Unknown error')}"
 
 
 def sprint_approve(issue_key: str) -> str:
@@ -224,11 +241,7 @@ def sprint_approve(issue_key: str) -> str:
 
     # Check if issue is actionable first
     state = load_sprint_state()
-    issue = None
-    for i in state.issues:
-        if i.key == issue_key:
-            issue = i
-            break
+    issue = next((item for item in state.issues if item.key == issue_key), None)
 
     if not issue:
         return f"❌ Issue {issue_key} not found in current sprint."
@@ -244,8 +257,7 @@ def sprint_approve(issue_key: str) -> str:
 
     if result["success"]:
         return f"✅ Issue {issue_key} approved for sprint bot processing."
-    else:
-        return f"❌ {result.get('message', 'Failed to approve issue')}"
+    return f"❌ {result.get('message', 'Failed to approve issue')}"
 
 
 def sprint_skip(issue_key: str, reason: str = "") -> str:
@@ -270,8 +282,7 @@ def sprint_skip(issue_key: str, reason: str = "") -> str:
 
     if result["success"]:
         return f"⏭️ Issue {issue_key} skipped: {skip_reason}"
-    else:
-        return f"❌ {result.get('message', 'Failed to skip issue')}"
+    return f"❌ {result.get('message', 'Failed to skip issue')}"
 
 
 def sprint_status() -> str:
@@ -387,14 +398,8 @@ def sprint_timeline(issue_key: str) -> str:
         Formatted timeline.
     """
     state = load_sprint_state()
-
-    issue = None
-    for i in state.issues:
-        if i.key == issue_key:
-            issue = i
-            break
-
-    if not issue:
+    issue = next((item for item in state.issues if item.key == issue_key), None)
+    if issue is None:
         return f"Issue {issue_key} not found in current sprint."
 
     lines = [
@@ -462,8 +467,7 @@ def sprint_approve_all() -> str:
                 f"\n🚫 Skipped {skipped_count} non-actionable issues (in Review/Done)."
             )
         return msg
-    else:
-        return "No pending issues to approve."
+    return "No pending issues to approve."
 
 
 # Register tools with MCP server

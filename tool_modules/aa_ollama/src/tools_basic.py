@@ -10,13 +10,12 @@ Provides tools for:
 import logging
 
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
-
-from mcp.types import TextContent
 
 from server.tool_registry import ToolRegistry
 
@@ -29,6 +28,7 @@ logger = logging.getLogger(__name__)
 # ==================== Tool Registration ====================
 
 
+# pylint: disable-next=too-many-statements
 def register_tools(server: "FastMCP") -> int:
     """Register tools with the MCP server."""
     registry = ToolRegistry(server)
@@ -90,6 +90,7 @@ def register_tools(server: "FastMCP") -> int:
         return [TextContent(type="text", text="\n".join(lines))]
 
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def ollama_generate(
         prompt: str,
         instance: str = "npu",
@@ -116,7 +117,10 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Unknown instance: `{instance}`\n\nAvailable: {', '.join(get_instance_names())}",
+                    text=(
+                        f"❌ Unknown instance: `{instance}`\n\n"
+                        f"Available: {', '.join(get_instance_names())}"
+                    ),
                 )
             ]
 
@@ -126,7 +130,10 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Instance `{instance}` is offline\n\nTry: `ollama_status` to see available instances",
+                    text=(
+                        f"❌ Instance `{instance}` is offline\n\n"
+                        "Try: `ollama_status` to see available instances"
+                    ),
                 )
             ]
 
@@ -145,12 +152,16 @@ def register_tools(server: "FastMCP") -> int:
                 result,
                 "",
                 "---",
-                f"*Model: {model or client.default_model} | Latency: {client.last_latency_ms:.0f}ms*",
+                (
+                    f"*Model: {model or client.default_model} | "
+                    f"Latency: {client.last_latency_ms:.0f}ms*"
+                ),
             ]
 
             return [TextContent(type="text", text="\n".join(lines))]
 
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Generation failed: {e}")]
 
     @registry.tool()
@@ -182,14 +193,18 @@ def register_tools(server: "FastMCP") -> int:
 
         if not client.is_available():
             # Try fallback
-            client = get_available_client(instance)
-            if not client:
+            fallback = get_available_client(instance)
+            if fallback is None:
                 return [
                     TextContent(
                         type="text",
-                        text="❌ No inference instances available\n\nStart Ollama with: `ollama serve`",
+                        text=(
+                            "❌ No inference instances available\n\n"
+                            "Start Ollama with: `ollama serve`"
+                        ),
                     )
                 ]
+            client = fallback
 
         result = client.classify(text, category_list)
 
@@ -197,15 +212,17 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"**Category:** `{result}`\n\n*Classified by {client.name} in {client.last_latency_ms:.0f}ms*",
+                    text=(
+                        f"**Category:** `{result}`\n\n"
+                        f"*Classified by {client.name} in {client.last_latency_ms:.0f}ms*"
+                    ),
                 )
             ]
-        else:
-            return [
-                TextContent(
-                    type="text", text="❌ Classification failed - no category matched"
-                )
-            ]
+        return [
+            TextContent(
+                type="text", text="❌ Classification failed - no category matched"
+            )
+        ]
 
     @registry.tool()
     async def ollama_test(
@@ -226,7 +243,10 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Unknown instance: `{instance}`\n\nAvailable: {', '.join(get_instance_names())}",
+                    text=(
+                        f"❌ Unknown instance: `{instance}`\n\n"
+                        f"Available: {', '.join(get_instance_names())}"
+                    ),
                 )
             ]
 
@@ -265,7 +285,8 @@ Instance is ready for inference.""",
                 )
             ]
 
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Test failed: {e}")]
 
     @registry.tool()
@@ -293,11 +314,10 @@ Instance is ready for inference.""",
 Tool pre-filtering is enabled and will use this instance for classification.""",
                 )
             ]
-        else:
-            return [
-                TextContent(
-                    type="text",
-                    text="""## ⚠️ No Local Inference Available
+        return [
+            TextContent(
+                type="text",
+                text="""## ⚠️ No Local Inference Available
 
 All Ollama instances are offline. Tool filtering will use fallback strategy:
 - Keyword matching (regex-based)
@@ -307,8 +327,8 @@ To enable NPU inference:
 1. Start Ollama: `ollama serve`
 2. Pull model: `ollama pull qwen2.5:0.5b`
 3. Verify: `ollama_status`""",
-                )
-            ]
+            )
+        ]
 
     @registry.tool()
     async def inference_stats() -> list[TextContent]:
@@ -326,12 +346,14 @@ To enable NPU inference:
             Inference statistics for dashboard.
         """
         try:
-            from .tool_filter import get_filter
+            from .tool_filter import (  # pylint: disable=import-outside-toplevel
+                get_filter,
+            )
 
             filter_instance = get_filter()
             stats = filter_instance.get_stats()
 
-            import json
+            import json  # pylint: disable=import-outside-toplevel
 
             return [
                 TextContent(
@@ -339,7 +361,8 @@ To enable NPU inference:
                     text=json.dumps(stats, indent=2),
                 )
             ]
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Failed to get stats: {e}")]
 
     @registry.tool()
@@ -366,6 +389,7 @@ To enable NPU inference:
             Detailed filter results.
         """
         try:
+            # pylint: disable-next=import-outside-toplevel
             from .tool_filter import filter_tools_detailed
 
             result = filter_tools_detailed(
@@ -374,7 +398,7 @@ To enable NPU inference:
                 detected_skill=skill if skill else None,
             )
 
-            import json
+            import json  # pylint: disable=import-outside-toplevel
 
             return [
                 TextContent(
@@ -382,7 +406,8 @@ To enable NPU inference:
                     text=json.dumps(result, indent=2),
                 )
             ]
-        except Exception as e:
+        # Intentional: convert the failure into an error result for the caller.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             return [TextContent(type="text", text=f"❌ Inference test failed: {e}")]
 
     return registry.count

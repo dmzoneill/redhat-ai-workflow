@@ -13,23 +13,34 @@ Provides workflow coordination and local development tools:
 - precommit_run: Run pre-commit hooks
 """
 
+import hashlib
 import logging
 import os
+import platform
 import sys
+import time
+import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+import httpx
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
+# pylint: disable-next=wrong-import-position
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 
 # Setup project path for server imports
-from server.utils import load_config, resolve_repo_path, run_cmd_full
+from server.utils import (  # pylint: disable=wrong-import-position
+    load_config,
+    resolve_repo_path,
+    run_cmd_full,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +59,13 @@ else:
 
 # GitHub configuration for error reporting - single source of truth in constants.py
 try:
-    from .constants import GITHUB_API_URL, GITHUB_ISSUES_URL
+    from . import constants as _workflow_constants
 except ImportError:
-    from constants import GITHUB_API_URL, GITHUB_ISSUES_URL  # type: ignore[no-redef]
+    import constants as _workflow_constants  # type: ignore[no-redef]
+
+GITHUB_API_URL = _workflow_constants.GITHUB_API_URL
+GITHUB_ISSUES_URL = _workflow_constants.GITHUB_ISSUES_URL
+GITHUB_REPO = _workflow_constants.GITHUB_REPO
 
 # Track recently created issues to avoid duplicates (in-memory cache)
 _recent_issues: dict[str, float] = {}
@@ -65,13 +80,12 @@ def _get_github_token() -> str | None:
 
 def _issue_fingerprint(tool: str, error: str) -> str:
     """Create a fingerprint for deduplication."""
-    import hashlib
-
     # Use first 100 chars of error to group similar errors
     content = f"{tool}:{error[:100]}"
     return hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
+# pylint: disable-next=too-many-locals
 async def create_github_issue(
     tool: str,
     error: str,
@@ -85,16 +99,12 @@ async def create_github_issue(
     Returns:
         dict with 'success', 'issue_url', and 'message'
     """
-    import time
-
-    import httpx
-
     # Check for duplicate
     fingerprint = _issue_fingerprint(tool, error)
     now = time.time()
 
     # Cleanup: remove expired entries and enforce max size
-    global _recent_issues
+    global _recent_issues  # pylint: disable=global-statement
     _recent_issues = {
         k: v for k, v in _recent_issues.items() if now - v < _ISSUE_DEDUP_SECONDS
     }
@@ -124,9 +134,6 @@ async def create_github_issue(
         }
 
     # Build issue body
-    import platform
-    import sys
-
     body = f"""## 🐛 Automated Error Report
 
 **Tool/Skill:** `{tool}`
@@ -181,25 +188,27 @@ async def create_github_issue(
                 issue_url = data.get("html_url", "")
                 _recent_issues[fingerprint] = now
 
-                logger.info(f"Created GitHub issue: {issue_url}")
+                logger.info("Created GitHub issue: %s", issue_url)
                 return {
                     "success": True,
                     "issue_url": issue_url,
                     "message": f"Issue created: {issue_url}",
                 }
-            else:
-                logger.warning(
-                    f"Failed to create issue: {response.status_code} - {response.text[:200]}"
-                )
-                url = format_github_issue_url(tool, error, context)
-                return {
-                    "success": False,
-                    "issue_url": url,
-                    "message": f"API error {response.status_code} - use link to create manually",
-                }
+            logger.warning(
+                "Failed to create issue: %s - %s",
+                response.status_code,
+                response.text[:200],
+            )
+            url = format_github_issue_url(tool, error, context)
+            return {
+                "success": False,
+                "issue_url": url,
+                "message": f"API error {response.status_code} - use link to create manually",
+            }
 
-    except Exception as e:
-        logger.error(f"Error creating GitHub issue: {e}")
+    # GitHub or the network can fail in ways we turn into a manual-create link.
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error("Error creating GitHub issue: %s", e)
         url = format_github_issue_url(tool, error, context)
         return {
             "success": False,
@@ -210,8 +219,6 @@ async def create_github_issue(
 
 def format_github_issue_url(tool: str, error: str, context: str = "") -> str:
     """Generate a pre-filled GitHub issue URL for tool errors."""
-    import urllib.parse
-
     title = f"Tool Error: {tool}"
     body = f"""## Error Report
 
@@ -314,13 +321,13 @@ def register_tools(server: "FastMCP") -> int:
 
     # Detect Claude Code and set up AskUserQuestion integration
     try:
-        from .claude_code_integration import (
+        from .claude_code_integration import (  # pylint: disable=import-outside-toplevel
             create_ask_question_wrapper,
             get_claude_code_capabilities,
         )
 
         capabilities = get_claude_code_capabilities()
-        logger.info(f"Claude Code detection: {capabilities}")
+        logger.info("Claude Code detection: %s", capabilities)
 
         # Create AskUserQuestion wrapper if available
         ask_question_fn = create_ask_question_wrapper(server)
@@ -350,12 +357,13 @@ def register_tools(server: "FastMCP") -> int:
 
     # Register unified memory abstraction tools
     try:
+        # pylint: disable-next=import-outside-toplevel
         from .memory_unified import register_tools as register_unified_memory_tools
 
         tool_count += register_unified_memory_tools(server)
         logger.info("✅ Unified memory abstraction tools registered")
     except ImportError as e:
-        logger.warning(f"Unified memory tools not available: {e}")
+        logger.warning("Unified memory tools not available: %s", e)
 
-    logger.info(f"Registered {tool_count} core workflow tools")
+    logger.info("Registered %s core workflow tools", tool_count)
     return tool_count

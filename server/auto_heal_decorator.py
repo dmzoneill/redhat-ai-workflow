@@ -19,7 +19,7 @@ import asyncio
 import logging
 import os
 from functools import wraps
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from server.error_patterns import AUTH_PATTERNS, NETWORK_PATTERNS
 
@@ -87,6 +87,7 @@ async def _run_kube_login(cluster: str) -> bool:
     Returns True if successful.
     """
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import (
             KUBECONFIG_MAP,
             get_kubeconfig,
@@ -109,11 +110,11 @@ async def _run_kube_login(cluster: str) -> bool:
             )
             if not test_success:
                 # Credentials are stale, clean them up first
-                logger.info(f"Auto-heal: running kube-clean {short}")
+                logger.info("Auto-heal: running kube-clean %s", short)
                 await run_cmd_shell(["kube-clean", short], timeout=30)
 
         # Step 2: Run kube command to refresh credentials (opens browser for SSO)
-        logger.info(f"Auto-heal: running kube {short}")
+        logger.info("Auto-heal: running kube %s", short)
         success, stdout, stderr = await run_cmd_shell(
             ["kube", short],
             timeout=120,
@@ -121,7 +122,7 @@ async def _run_kube_login(cluster: str) -> bool:
 
         output = stdout + stderr
         if success or "logged in" in output.lower():
-            logger.info(f"Auto-heal: kube_login({cluster}) successful")
+            logger.info("Auto-heal: kube_login(%s) successful", cluster)
             return True
 
         # Fallback: try oc login directly if kube command not found
@@ -133,26 +134,29 @@ async def _run_kube_login(cluster: str) -> bool:
             )
             output = stdout + stderr
             if success or "logged in" in output.lower():
-                logger.info(f"Auto-heal: kube_login({cluster}) via oc login successful")
+                logger.info(
+                    "Auto-heal: kube_login(%s) via oc login successful", cluster
+                )
                 return True
 
-        logger.warning(f"Auto-heal: kube_login({cluster}) failed: {output[:200]}")
+        logger.warning("Auto-heal: kube_login(%s) failed: %s", cluster, output[:200])
         return False
 
     except ImportError as e:
-        logger.warning(f"Auto-heal: kube_login missing dependency: {e}")
+        logger.warning("Auto-heal: kube_login missing dependency: %s", e)
         return False
     except FileNotFoundError as e:
-        logger.warning(f"Auto-heal: kube_login({cluster}) command not found: {e}")
+        logger.warning("Auto-heal: kube_login(%s) command not found: %s", cluster, e)
         return False
     except OSError as e:
-        logger.warning(f"Auto-heal: kube_login({cluster}) OS error: {e}")
+        logger.warning("Auto-heal: kube_login(%s) OS error: %s", cluster, e)
         return False
 
 
 async def _run_vpn_connect() -> bool:
     """Run vpn_connect fix. Returns True if successful."""
     try:
+        # pylint: disable-next=import-outside-toplevel
         from server.utils import load_config, run_cmd_shell
 
         config = load_config()
@@ -177,38 +181,39 @@ async def _run_vpn_connect() -> bool:
                 logger.info("Auto-heal: vpn_connect successful")
                 return True
 
-            logger.warning(f"Auto-heal: vpn_connect failed: {output[:200]}")
+            logger.warning("Auto-heal: vpn_connect failed: %s", output[:200])
             return False
-        else:
-            # Fallback to nmcli with common VPN connection names
-            logger.info(
-                f"Auto-heal: VPN script not found at {vpn_script}, trying nmcli fallback"
-            )
-            vpn_names = [
-                "Red Hat Global VPN",
-                "Red Hat VPN",
-                "redhat-vpn",
-                "RH-VPN",
-            ]
-            for vpn_name in vpn_names:
-                success, stdout, stderr = await run_cmd_shell(
-                    ["nmcli", "connection", "up", vpn_name],
-                    timeout=30,
-                )
-                if success:
-                    logger.info(
-                        f"Auto-heal: vpn_connect successful via nmcli ({vpn_name})"
-                    )
-                    return True
 
-            logger.warning("Auto-heal: All VPN connection attempts failed")
-            return False
+        # Fallback to nmcli with common VPN connection names
+        logger.info(
+            "Auto-heal: VPN script not found at %s, trying nmcli fallback",
+            vpn_script,
+        )
+        vpn_names = [
+            "Red Hat Global VPN",
+            "Red Hat VPN",
+            "redhat-vpn",
+            "RH-VPN",
+        ]
+        for vpn_name in vpn_names:
+            success, stdout, stderr = await run_cmd_shell(
+                ["nmcli", "connection", "up", vpn_name],
+                timeout=30,
+            )
+            if success:
+                logger.info(
+                    "Auto-heal: vpn_connect successful via nmcli (%s)", vpn_name
+                )
+                return True
+
+        logger.warning("Auto-heal: All VPN connection attempts failed")
+        return False
 
     except ImportError as e:
-        logger.warning(f"Auto-heal: vpn_connect missing dependency: {e}")
+        logger.warning("Auto-heal: vpn_connect missing dependency: %s", e)
         return False
     except OSError as e:
-        logger.warning(f"Auto-heal: vpn_connect OS error: {e}")
+        logger.warning("Auto-heal: vpn_connect OS error: %s", e)
         return False
 
 
@@ -259,6 +264,7 @@ def _cleanup_old_stats(data: dict) -> None:
         data["failures"] = data["failures"][-100:]
 
 
+# pylint: disable-next=too-many-locals
 async def _log_auto_heal_to_memory(
     tool_name: str,
     failure_type: str,
@@ -267,9 +273,13 @@ async def _log_auto_heal_to_memory(
 ) -> None:
     """Log a successful auto-heal to memory for learning."""
     try:
+        # pylint: disable-next=import-outside-toplevel
         from datetime import datetime
+
+        # pylint: disable-next=import-outside-toplevel
         from pathlib import Path
 
+        # pylint: disable-next=import-outside-toplevel
         import yaml
 
         # Find memory directory
@@ -317,14 +327,16 @@ async def _log_auto_heal_to_memory(
         with open(failures_file, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False)
 
-        logger.debug(f"Logged auto-heal for {tool_name} to memory")
+        logger.debug("Logged auto-heal for %s to memory", tool_name)
 
+    # Best-effort: log and continue.
+    # pylint: disable-next=broad-exception-caught
     except Exception as e:
         # Memory logging is best-effort, don't fail the tool
-        logger.debug(f"Failed to log auto-heal to memory: {e}")
+        logger.debug("Failed to log auto-heal to memory: %s", e)
 
 
-def _convert_result_to_string(result: any) -> str:
+def _convert_result_to_string(result: Any) -> str:
     """Convert tool result to string for pattern matching."""
     if hasattr(result, "__iter__") and not isinstance(result, str):
         # Handle list[TextContent] or similar
@@ -344,11 +356,13 @@ async def _apply_auto_heal_fix(
             cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
         )
         logger.info(
-            f"Auto-heal: {tool_name} auth failure, running kube_login({target_cluster})"
+            "Auto-heal: %s auth failure, running kube_login(%s)",
+            tool_name,
+            target_cluster,
         )
         return await _run_kube_login(target_cluster)
-    elif failure_type == "network":
-        logger.info(f"Auto-heal: {tool_name} network failure, running vpn_connect()")
+    if failure_type == "network":
+        logger.info("Auto-heal: %s network failure, running vpn_connect()", tool_name)
         return await _run_vpn_connect()
     return False
 
@@ -366,7 +380,7 @@ async def _handle_retry_with_heal(
     )
 
     if not fix_applied:
-        logger.warning(f"Auto-heal: fix for {tool_name} failed, giving up")
+        logger.warning("Auto-heal: fix for %s failed, giving up", tool_name)
         return False
 
     # Log successful fix to memory
@@ -409,6 +423,7 @@ def auto_heal(
         async def bonfire_namespace_reserve(duration: str = "4h") -> str:
             ...
     """
+    # pylint: disable-next=import-outside-toplevel
     import inspect
 
     if retry_on is None:
@@ -455,14 +470,18 @@ def auto_heal(
                     if failure_type not in retry_on:
                         # Not a retryable failure type
                         logger.debug(
-                            f"Auto-heal: {tool_name} failed with non-retryable type: {failure_type}"
+                            "Auto-heal: %s failed with non-retryable type: %s",
+                            tool_name,
+                            failure_type,
                         )
                         return result
 
                     if attempt >= max_retries:
                         # Out of retries
                         logger.warning(
-                            f"Auto-heal: {tool_name} failed after {attempt + 1} attempts"
+                            "Auto-heal: %s failed after %s attempts",
+                            tool_name,
+                            attempt + 1,
                         )
                         return result
 
@@ -474,7 +493,10 @@ def auto_heal(
                     if not fix_success:
                         return result
                     logger.info(
-                        f"Auto-heal: retrying {tool_name} (attempt {attempt + 2}/{max_retries + 1})"
+                        "Auto-heal: retrying %s (attempt %s/%s)",
+                        tool_name,
+                        attempt + 2,
+                        max_retries + 1,
                     )
 
                 except Exception as e:

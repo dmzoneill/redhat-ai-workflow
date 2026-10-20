@@ -8,20 +8,18 @@ Extracted from dbus.py to reduce class size. Contains:
 
 import json
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+
+from services.slack.message_fields import SlackMessageFields
 
 
+# Every field is part of the history payload returned over D-Bus.
 @dataclass
-class MessageRecord:
+class MessageRecord(SlackMessageFields):  # pylint: disable=too-many-instance-attributes
     """Record of a processed message."""
 
     id: str
     timestamp: str
-    channel_id: str
-    channel_name: str
-    user_id: str
-    user_name: str
-    text: str
     intent: str
     classification: str
     response: str
@@ -31,9 +29,26 @@ class MessageRecord:
     thread_ts: str | None = None  # Thread timestamp for replies
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        """Return the record as a plain dictionary.
+
+        Key order matches the historical asdict() order from before the
+        shared channel fields moved to SlackMessageFields.
+        """
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            **self.identity_dict(),
+            "intent": self.intent,
+            "classification": self.classification,
+            "response": self.response,
+            "status": self.status,
+            "created_at": self.created_at,
+            "processed_at": self.processed_at,
+            "thread_ts": self.thread_ts,
+        }
 
     def to_json(self) -> str:
+        """Return the record as a JSON string."""
         return json.dumps(self.to_dict())
 
 
@@ -103,9 +118,9 @@ class MessageHistory:
     def get_stats(self) -> dict:
         """Get message statistics."""
         total = len(self.messages)
-        by_status = {}
-        by_classification = {}
-        by_intent = {}
+        by_status: dict[str, int] = {}
+        by_classification: dict[str, int] = {}
+        by_intent: dict[str, int] = {}
 
         for m in self.messages:
             by_status[m.status] = by_status.get(m.status, 0) + 1

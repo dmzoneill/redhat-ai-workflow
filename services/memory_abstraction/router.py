@@ -1,3 +1,4 @@
+# pylint: disable=cyclic-import,duplicate-code
 """
 Query Router - Route queries to appropriate memory adapters.
 
@@ -25,6 +26,7 @@ Usage:
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from .classifier import IntentClassifier
@@ -53,7 +55,7 @@ class QueryRouter:
     async def route(
         self,
         query: str,
-        sources: list[SourceFilter | str] | None = None,
+        sources: Sequence[SourceFilter | str] | None = None,
         capability: str = "query",
     ) -> tuple[IntentClassification, list[tuple[AdapterInfo, SourceFilter]]]:
         """
@@ -78,8 +80,9 @@ class QueryRouter:
             adapters = await self._route_by_intent(intent, capability)
 
         logger.debug(
-            f"Routed query to {len(adapters)} adapters: "
-            f"{[a[0].name for a in adapters]}"
+            "Routed query to %s adapters: %s",
+            len(adapters),
+            [a[0].name for a in adapters],
         )
 
         return intent, adapters
@@ -95,18 +98,18 @@ class QueryRouter:
         for source_filter in filters:
             info = ADAPTER_MANIFEST.get_adapter(source_filter.name)
             if not info:
-                logger.warning(f"Unknown adapter: {source_filter.name}")
+                logger.warning("Unknown adapter: %s", source_filter.name)
                 continue
 
             if capability not in info.capabilities:
                 logger.warning(
-                    f"Adapter {source_filter.name} doesn't support {capability}"
+                    "Adapter %s doesn't support %s", source_filter.name, capability
                 )
                 continue
 
             # Check health (cached)
             if not await self._is_healthy(source_filter.name):
-                logger.warning(f"Adapter {source_filter.name} is unhealthy, skipping")
+                logger.warning("Adapter %s is unhealthy, skipping", source_filter.name)
                 continue
 
             result.append((info, source_filter))
@@ -151,7 +154,7 @@ class QueryRouter:
 
     def _normalize_sources(
         self,
-        sources: list[SourceFilter | str],
+        sources: Sequence[SourceFilter | str],
     ) -> list[SourceFilter]:
         """Normalize sources to SourceFilter objects."""
         result = []
@@ -164,7 +167,7 @@ class QueryRouter:
             elif isinstance(source, SourceFilter):
                 result.append(source)
             else:
-                logger.warning(f"Unknown source type: {type(source)}")
+                logger.warning("Unknown source type: %s", type(source))
 
         return result
 
@@ -174,6 +177,7 @@ class QueryRouter:
 
         Health checks are cached to avoid repeated checks.
         """
+        # pylint: disable-next=import-outside-toplevel
         import time
 
         now = time.time()
@@ -196,8 +200,10 @@ class QueryRouter:
         try:
             status = await instance.health_check()
             healthy = status.healthy
+        # Best-effort: log and continue.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning(f"Health check failed for {adapter_name}: {e}")
+            logger.warning("Health check failed for %s: %s", adapter_name, e)
             healthy = False
 
         self._health_cache[adapter_name] = healthy
@@ -224,6 +230,7 @@ class QueryRouter:
         self._last_health_check = 0.0
 
 
+# pylint: disable-next=too-few-public-methods
 class ParallelExecutor:
     """
     Execute adapter queries in parallel.
@@ -256,8 +263,8 @@ class ParallelExecutor:
             return []
 
         tasks = []
-        for info, filter, instance in adapters:
-            task = self._execute_one(info.name, instance, method, query, filter)
+        for info, source_filter, instance in adapters:
+            task = self._execute_one(info.name, instance, method, query, source_filter)
             tasks.append(task)
 
         # Execute with timeout
@@ -266,15 +273,15 @@ class ParallelExecutor:
                 asyncio.gather(*tasks, return_exceptions=True), timeout=self.timeout
             )
         except asyncio.TimeoutError:
-            logger.warning(f"Parallel execution timed out after {self.timeout}s")
+            logger.warning("Parallel execution timed out after %ss", self.timeout)
             results = [TimeoutError(f"Timeout after {self.timeout}s")] * len(tasks)
 
         # Pair results with adapter names
-        output = []
+        output: list[tuple[str, Any]] = []
         for i, result in enumerate(results):
             name = adapters[i][0].name
             if isinstance(result, Exception):
-                logger.warning(f"Adapter {name} failed: {result}")
+                logger.warning("Adapter %s failed: %s", name, result)
                 output.append((name, result))
             else:
                 output.append((name, result))
@@ -287,16 +294,17 @@ class ParallelExecutor:
         instance: Any,
         method: str,
         query: str,
-        filter: SourceFilter,
+        source_filter: SourceFilter,
     ) -> Any:
         """Execute a single adapter query."""
+        # pylint: disable-next=import-outside-toplevel
         import time
 
         start = time.time()
 
         try:
             func = getattr(instance, method)
-            result = await func(query, filter)
+            result = await func(query, source_filter)
 
             # Add latency to result if it's an AdapterResult
             if hasattr(result, "latency_ms"):
@@ -305,5 +313,5 @@ class ParallelExecutor:
             return result
 
         except Exception as e:
-            logger.error(f"Adapter {name}.{method}() failed: {e}")
+            logger.error("Adapter %s.%s() failed: %s", name, method, e)
             raise

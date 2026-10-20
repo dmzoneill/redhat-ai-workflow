@@ -38,6 +38,7 @@ class GeminiResponse:
     error: Optional[str] = None
 
 
+# pylint: disable-next=too-many-instance-attributes
 class GeminiHotload:
     """
     Hot-loaded Gemini interface with conversation memory.
@@ -81,7 +82,7 @@ class GeminiHotload:
 
         # Stats
         self.messages_sent = 0
-        self.total_latency_ms = 0
+        self.total_latency_ms = 0.0
         self._start_time: Optional[float] = None
 
     async def start(self) -> bool:
@@ -100,11 +101,11 @@ class GeminiHotload:
                 f"System: {self.system_prompt}\n\nAcknowledge with 'Ready.'"
             )
             if response:
-                logger.info(f"Gemini ready: {response[:50]}...")
+                logger.info("Gemini ready: %s...", response[:50])
             else:
                 logger.warning("Gemini warm-up got no response")
 
-        logger.info(f"Gemini hotload ready (model: {self.model})")
+        logger.info("Gemini hotload ready (model: %s)", self.model)
         return True
 
     async def stop(self):
@@ -113,8 +114,9 @@ class GeminiHotload:
         self._history = []
 
         logger.info(
-            f"Gemini stopped. Sent {self.messages_sent} messages, "
-            f"avg latency: {self.total_latency_ms / max(1, self.messages_sent):.0f}ms"
+            "Gemini stopped. Sent %s messages, avg latency: %.0fms",
+            self.messages_sent,
+            self.total_latency_ms / max(1, self.messages_sent),
         )
 
     async def send(self, message: str) -> GeminiResponse:
@@ -147,6 +149,7 @@ class GeminiHotload:
 
                 latency = (time.time() - start) * 1000
 
+                # pylint: disable-next=no-else-return
                 if response_text:
                     # Add to history
                     self._history.append({"role": "user", "content": message})
@@ -176,6 +179,8 @@ class GeminiHotload:
                     latency_ms=(time.time() - start) * 1000,
                     error="Response timeout",
                 )
+            # Best-effort: failure is contained, not raised.
+            # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 return GeminiResponse(
                     text="", latency_ms=(time.time() - start) * 1000, error=str(e)
@@ -226,22 +231,25 @@ class GeminiHotload:
                 proc.communicate(input=prompt.encode()), timeout=self.timeout
             )
 
+            # pylint: disable-next=no-else-return
             if proc.returncode == 0:
                 return stdout.decode().strip()
             else:
                 error = stderr.decode().strip()
                 # Check for common errors
                 if "Organization Policy" in error:
-                    logger.error(f"Model {self.model} not allowed by org policy")
+                    logger.error("Model %s not allowed by org policy", self.model)
                 else:
-                    logger.error(f"Gemini error: {error[:200]}")
+                    logger.error("Gemini error: %s", error[:200])
                 return None
 
         except asyncio.TimeoutError:
             logger.error("Gemini call timed out")
             raise
+        # Best-effort: failure is contained, not raised.
+        # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error(f"Gemini call failed: {e}")
+            logger.error("Gemini call failed: %s", e)
             return None
 
     def clear_history(self):
@@ -251,10 +259,12 @@ class GeminiHotload:
 
     @property
     def is_running(self) -> bool:
+        """Whether the Gemini interface has been started."""
         return self._running
 
     @property
     def history_length(self) -> int:
+        """Number of turns kept in the local conversation history."""
         return len(self._history)
 
     def get_stats(self) -> dict:
@@ -308,11 +318,13 @@ class GeminiPool:
 
 
 # Global pool
+# pylint: disable-next=invalid-name
 _gemini_pool: Optional[GeminiPool] = None
 
 
 def get_gemini_pool() -> GeminiPool:
     """Get the global Gemini pool."""
+    # pylint: disable-next=global-statement
     global _gemini_pool
     if _gemini_pool is None:
         _gemini_pool = GeminiPool()

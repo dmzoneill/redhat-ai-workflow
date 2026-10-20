@@ -25,19 +25,17 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-
-# Suppress SSL warnings for internal Red Hat sites
-warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-
-from fastmcp import FastMCP  # noqa: E402
-
-from tool_modules.common import PROJECT_ROOT  # noqa: E402
+from fastmcp import FastMCP
+from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
 
-from server.auto_heal_decorator import auto_heal  # noqa: E402
-from server.tool_registry import ToolRegistry  # noqa: E402
-from server.utils import load_config  # noqa: E402
+from server.auto_heal_decorator import auto_heal
+from server.tool_registry import ToolRegistry
+from server.utils import load_config
+
+# Suppress SSL warnings for internal Red Hat sites
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +295,7 @@ def _auto_select_assistant(query: str) -> int:
     return 8
 
 
+# pylint: disable-next=too-many-branches
 async def _get_auth_token(auto_refresh: bool = True) -> str | None:
     """Get authentication token for InScope.
 
@@ -325,7 +324,7 @@ async def _get_auth_token(auto_refresh: bool = True) -> str | None:
 
     if token_path.exists():
         try:
-            content = token_path.read_text().strip()
+            content = token_path.read_text(encoding="utf-8").strip()
             # Handle both JSON format and raw token
             if content.startswith("{"):
                 token_data = json.loads(content)
@@ -335,28 +334,31 @@ async def _get_auth_token(auto_refresh: bool = True) -> str | None:
                 token = content
                 # Decode to get expiry
                 try:
-                    import jwt
+                    import jwt  # pylint: disable=import-outside-toplevel
 
                     claims = jwt.decode(token, options={"verify_signature": False})
                     expires_at = claims.get("exp", 0)
-                except Exception:
+                # Intentional: log the failure and continue at this boundary.
+                except Exception:  # pylint: disable=broad-exception-caught
                     expires_at = 0
 
             # Check if token is valid and not expiring soon (5 min buffer)
             time_remaining = expires_at - time.time()
             if time_remaining > 300:  # More than 5 minutes remaining
                 return token
-            elif time_remaining > 0:
+            if time_remaining > 0:
                 logger.info(
-                    f"InScope token expiring in {time_remaining/60:.0f} minutes, will refresh"
+                    "InScope token expiring in %.0f minutes, will refresh",
+                    time_remaining / 60,
                 )
                 needs_refresh = True
             else:
                 logger.warning("InScope token expired")
                 needs_refresh = True
 
-        except Exception as e:
-            logger.warning(f"Failed to read token file: {e}")
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to read token file: %s", e)
             needs_refresh = True
     else:
         needs_refresh = True
@@ -371,16 +373,16 @@ async def _get_auth_token(auto_refresh: bool = True) -> str | None:
                 logger.info("InScope token refreshed successfully")
                 # Re-read the token
                 if token_path.exists():
-                    content = token_path.read_text().strip()
+                    content = token_path.read_text(encoding="utf-8").strip()
                     if content.startswith("{"):
                         token_data = json.loads(content)
                         return token_data.get("token")
-                    else:
-                        return content
+                    return content
             else:
-                logger.warning(f"Auto-login failed: {result_data.get('error')}")
-        except Exception as e:
-            logger.warning(f"Auto-refresh failed: {e}")
+                logger.warning("Auto-login failed: %s", result_data.get("error"))
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Auto-refresh failed: %s", e)
 
     return token if token and not needs_refresh else None
 
@@ -404,9 +406,10 @@ async def _get_session_cookie() -> str | None:
     cookie_path = Path(cookie_file).expanduser()
     if cookie_path.exists():
         try:
-            return cookie_path.read_text().strip()
-        except Exception as e:
-            logger.warning(f"Failed to read cookie file: {e}")
+            return cookie_path.read_text(encoding="utf-8").strip()
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to read cookie file: %s", e)
 
     return None
 
@@ -454,12 +457,13 @@ async def _stream_response(response: httpx.Response) -> tuple[str, list[dict]]:
                 elif "search_metadata" in data:
                     search_metadata = data["search_metadata"]
             except json.JSONDecodeError:
-                logger.debug(f"Failed to parse SSE data: {line}")
+                logger.debug("Failed to parse SSE data: %s", line)
                 continue
 
     return full_text, search_metadata
 
 
+# pylint: disable-next=too-many-locals
 async def _inscope_query_impl(
     query: str,
     assistant: str | int = "app-interface",
@@ -482,7 +486,10 @@ async def _inscope_query_impl(
                 {
                     "success": False,
                     "error": "No authentication token available",
-                    "hint": "Configure inscope.bearer_token in config.json or run inscope_auth_setup()",
+                    "hint": (
+                        "Configure inscope.bearer_token in config.json "
+                        "or run inscope_auth_setup()"
+                    ),
                 }
             )
 
@@ -583,7 +590,8 @@ async def _inscope_query_impl(
                 "hint": "Try increasing timeout_secs or simplify the query",
             }
         )
-    except Exception as e:
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.exception("InScope query failed")
         return json.dumps(
             {
@@ -605,7 +613,7 @@ async def _inscope_list_assistants_impl() -> str:
             }
         )
 
-    aliases = {}
+    aliases: dict[int, list[str]] = {}
     for alias, aid in ASSISTANT_ALIASES.items():
         if aid not in aliases:
             aliases[aid] = []
@@ -631,7 +639,7 @@ async def _inscope_auth_status_impl() -> str:
     token = await _get_auth_token()
     cookie = await _get_session_cookie()
 
-    status = {
+    status: dict[str, Any] = {
         "has_token": token is not None,
         "has_cookie": cookie is not None,
         "authenticated": token is not None,
@@ -640,7 +648,7 @@ async def _inscope_auth_status_impl() -> str:
     if token:
         # Try to decode JWT to get expiry (without verification)
         try:
-            import jwt
+            import jwt  # pylint: disable=import-outside-toplevel
 
             # Decode without verification to read claims
             claims = jwt.decode(token, options={"verify_signature": False})
@@ -650,7 +658,8 @@ async def _inscope_auth_status_impl() -> str:
                 status["token_expires_in_seconds"] = max(0, exp - int(time.time()))
                 status["token_expired"] = exp < time.time()
             status["user"] = claims.get("sub", "").replace("user:default/", "")
-        except Exception as e:
+        # Intentional: log the failure and continue at this boundary.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             status["token_decode_error"] = str(e)
 
     config = _get_inscope_config()
@@ -674,7 +683,9 @@ async def _inscope_ask_impl(
     assistant_info = KNOWN_ASSISTANTS.get(assistant_id, {})
 
     logger.info(
-        f"Auto-selected assistant: {assistant_info.get('name', assistant_id)} for query: {query[:50]}..."
+        "Auto-selected assistant: %s for query: %s...",
+        assistant_info.get("name", assistant_id),
+        query[:50],
     )
 
     # Delegate to inscope_query
@@ -693,12 +704,13 @@ async def _inscope_save_token_impl(token: str, cookie: str = "") -> str:
     # Try to get expiry from token
     expires_at = int(time.time()) + 3600  # Default 1 hour
     try:
-        import jwt
+        import jwt  # pylint: disable=import-outside-toplevel
 
         claims = jwt.decode(token, options={"verify_signature": False})
         if "exp" in claims:
             expires_at = claims["exp"]
-    except Exception as exc:
+    # Intentional: log the failure and continue at this boundary.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         logger.debug("Suppressed error: %s", exc)
 
     token_data = {
@@ -706,14 +718,14 @@ async def _inscope_save_token_impl(token: str, cookie: str = "") -> str:
         "expires_at": expires_at,
         "saved_at": int(time.time()),
     }
-    token_path.write_text(json.dumps(token_data, indent=2))
+    token_path.write_text(json.dumps(token_data, indent=2), encoding="utf-8")
 
     # Save cookie if provided
     if cookie:
         cookie_file = config.get("cookie_file", "~/.cache/inscope/cookies")
         cookie_path = Path(cookie_file).expanduser()
         cookie_path.parent.mkdir(parents=True, exist_ok=True)
-        cookie_path.write_text(cookie)
+        cookie_path.write_text(cookie, encoding="utf-8")
 
     return json.dumps(
         {
@@ -882,9 +894,10 @@ def register_tools(server: FastMCP) -> int:
 async def _inscope_auto_login_impl(headless: bool = True) -> str:
     """Implementation of inscope_auto_login tool using aa_sso module."""
     try:
+        # pylint: disable-next=import-outside-toplevel
         from tool_modules.aa_sso.src.tools_basic import SSOAuthenticator
 
-        logger.info(f"Starting InScope auto-login via aa_sso (headless={headless})")
+        logger.info("Starting InScope auto-login via aa_sso (headless=%s)", headless)
 
         auth = SSOAuthenticator(headless=headless)
         result = await auth.authenticate("inscope")
@@ -910,18 +923,17 @@ async def _inscope_auto_login_impl(headless: bool = True) -> str:
                 response["cookies"] = list(result.cookies.keys())
 
             return json.dumps(response, indent=2)
-        else:
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": result.error or "Authentication failed",
-                    "screenshot": result.screenshot_path,
-                },
-                indent=2,
-            )
+        return json.dumps(
+            {
+                "success": False,
+                "error": result.error or "Authentication failed",
+                "screenshot": result.screenshot_path,
+            },
+            indent=2,
+        )
 
     except ImportError as e:
-        logger.error(f"aa_sso module not available: {e}")
+        logger.error("aa_sso module not available: %s", e)
         return json.dumps(
             {
                 "success": False,
@@ -929,7 +941,8 @@ async def _inscope_auto_login_impl(headless: bool = True) -> str:
                 "hint": "Install playwright: pip install playwright && playwright install chromium",
             }
         )
-    except Exception as e:
+    # Intentional: convert the failure into an error result for the caller.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         logger.exception("InScope auto-login failed")
         return json.dumps(
             {
