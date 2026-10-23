@@ -6,20 +6,20 @@
 repos:
   # Code formatting (line-length must match pyproject.toml [tool.black])
   - repo: https://github.com/psf/black
-    rev: 24.4.2
+    rev: 26.10.1
     hooks:
       - id: black
         language_version: python3
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 9.0.2
     hooks:
       - id: isort
 
   # Linting
   - repo: https://github.com/pycqa/flake8
-    rev: 7.0.0
+    rev: 7.4.1
     hooks:
       - id: flake8
         exclude: ^(\.claude/|extensions/.*node_modules/)
@@ -28,7 +28,7 @@ repos:
 
   # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
+    rev: v2.4.0
     hooks:
       - id: mypy
         files: ^scripts/common/(config_loader|parsers|validators)\.py$
@@ -40,7 +40,7 @@ repos:
 
   # General checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -53,7 +53,7 @@ repos:
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
-    rev: v1.35.1
+    rev: v1.38.0
     hooks:
       - id: yamllint
         args: ["-c", ".yamllint.yaml"]
