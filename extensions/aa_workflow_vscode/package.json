@@ -288,18 +288,18 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.0.0",
-    "@types/vscode": "^1.85.0",
-    "@types/ws": "^8.5.10",
-    "@typescript-eslint/eslint-plugin": "^8.65.0",
+    "@types/node": "^26.6.5",
+    "@types/vscode": "^1.140.0",
+    "@types/ws": "^8.18.2",
+    "@typescript-eslint/eslint-plugin": "^8.71.2",
     "@typescript-eslint/parser": "^8.65.0",
-    "eslint": "^10.7.0",
-    "typescript": "^5.0.0"
+    "eslint": "^10.13.0",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "dbus-next": "^0.10.2",
-    "js-yaml": "^5.4.1",
-    "ws": "^8.20.1"
+    "js-yaml": "^5.5.0",
+    "ws": "^8.22.0"
   },
   "overrides": {
     "form-data": "2.5.6",
