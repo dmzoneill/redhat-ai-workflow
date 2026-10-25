@@ -50,7 +50,9 @@ dependencies = [
     # WebSocket server for real-time skill updates
     "websockets>=12.0",
     # Slack integration
-    "pycookiecheat>=0.7.0",
+    "cryptography>=49.0.0",
+    "joserfc>=1.6.8",
+    "secretstorage>=3.3.0; sys_platform == 'linux'",
     # Code search with vector embeddings
     "lancedb>=0.4.0",
     "sentence-transformers>=2.2.0",
