@@ -10,7 +10,7 @@ Usage:
     python scripts/get_slack_creds.py --xoxc "..." # Manually provide xoxc_token
 
 Requirements:
-    uv add pycookiecheat
+    cryptography and secretstorage (project dependencies)
 
 Both credentials are extracted directly from Chrome's storage:
 - d_cookie: From Chrome's encrypted Cookies database
@@ -18,9 +18,12 @@ Both credentials are extracted directly from Chrome's storage:
 """
 
 import argparse
+import importlib
 import re
+import sqlite3
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -32,20 +35,18 @@ CONFIG_FILE = PROJECT_ROOT / "config.json"
 # Add scripts/common to path for shared utilities - must be before imports
 sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
 
-# Try pycookiecheat for Chrome cookie extraction
+# Chrome cookie extraction (in-repo replacement for pycookiecheat)
 try:
-    from pycookiecheat import chrome_cookies
+    from chrome_cookies import chrome_cookies
 
-    HAS_PYCOOKIECHEAT = True
+    HAS_CHROME_COOKIES = True
 except ImportError:
-    HAS_PYCOOKIECHEAT = False
+    HAS_CHROME_COOKIES = False
 
 
 def get_slack_url() -> str:
     """Get Slack URL from config or default."""
-    from config_loader import load_config
-
-    config = load_config()
+    config = importlib.import_module("config_loader").load_config()
     host = config.get("slack", {}).get("auth", {}).get("host", "")
     if host:
         return f"https://{host}"
@@ -54,9 +55,7 @@ def get_slack_url() -> str:
 
 def get_chrome_settings() -> tuple[Path, list[str]]:
     """Get Chrome user data dir and profiles from config."""
-    from config_loader import load_config
-
-    config = load_config()
+    config = importlib.import_module("config_loader").load_config()
     creds_config = config.get("slack", {}).get("credentials_extraction", {})
 
     # Chrome user data directory
@@ -73,8 +72,8 @@ def get_chrome_settings() -> tuple[Path, list[str]]:
 
 def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     """Get the d cookie from Chrome's cookie storage."""
-    if not HAS_PYCOOKIECHEAT:
-        print("❌ Missing: uv add pycookiecheat")
+    if not HAS_CHROME_COOKIES:
+        print("❌ Missing dependency: cryptography (run: uv sync)")
         return None
 
     chrome_base, default_profiles = get_chrome_settings()
@@ -93,7 +92,7 @@ def get_d_cookie_from_chrome(profile: str = "") -> str | None:
             if "d" in result:
                 print(f"📁 Found d_cookie in Chrome profile: {prof}")
                 return unquote(result["d"])
-        except Exception as e:
+        except (OSError, sqlite3.Error, ValueError) as e:
             print(f"⚠️  Error reading {prof}: {e}")
             continue
 
@@ -134,6 +133,7 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     ["strings", str(ldb_file)],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
 
                 if result.returncode != 0:
@@ -153,7 +153,7 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     )
                     return token
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"⚠️  Error reading Local Storage from {prof}: {e}")
             continue
 
@@ -162,10 +162,9 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
 
 def _format_mtime(path: Path) -> str:
     """Format file modification time."""
-    from datetime import datetime
-
     mtime = path.stat().st_mtime
-    return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+    local_time = datetime.fromtimestamp(mtime, tz=UTC).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M")
 
 
 def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = False):
@@ -173,8 +172,8 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
     Uses ConfigManager for thread-safe, debounced writes with file locking.
     """
-    # Import ConfigManager for thread-safe config access
-    from server.config_manager import config as config_manager
+    # Import ConfigManager lazily for thread-safe config access
+    config_manager = importlib.import_module("server.config_manager").config
 
     # Get current slack config
     slack_config = config_manager.get("slack", default={})
@@ -187,17 +186,15 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
     updated = False
 
-    if d_cookie:
-        if auth_config.get("d_cookie") != d_cookie:
-            auth_config["d_cookie"] = d_cookie
-            updated = True
-            print("✅ Updated slack.auth.d_cookie in config.json")
+    if d_cookie and auth_config.get("d_cookie") != d_cookie:
+        auth_config["d_cookie"] = d_cookie
+        updated = True
+        print("✅ Updated slack.auth.d_cookie in config.json")
 
-    if xoxc_token:
-        if auth_config.get("xoxc_token") != xoxc_token:
-            auth_config["xoxc_token"] = xoxc_token
-            updated = True
-            print("✅ Updated slack.auth.xoxc_token in config.json")
+    if xoxc_token and auth_config.get("xoxc_token") != xoxc_token:
+        auth_config["xoxc_token"] = xoxc_token
+        updated = True
+        print("✅ Updated slack.auth.xoxc_token in config.json")
 
     if updated:
         if dry_run:
@@ -214,6 +211,7 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
 
 def main():
+    """Extract Slack credentials from Chrome and store them in config.json."""
     parser = argparse.ArgumentParser(
         description="Extract Slack credentials and update config.json",
         formatter_class=argparse.RawDescriptionHelpFormatter,
