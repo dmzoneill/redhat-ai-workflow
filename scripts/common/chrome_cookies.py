@@ -24,6 +24,11 @@ from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+try:
+    import secretstorage
+except ImportError:  # optional: only needed to read the desktop keyring
+    secretstorage = None
+
 SALT = b"saltysalt"
 IV = b" " * 16
 KEY_LENGTH = 16
@@ -35,16 +40,16 @@ HOST_HASH_DB_VERSION = 24
 
 def derive_key(password: bytes) -> bytes:
     """Derive the AES key Chrome uses on Linux from a keyring password."""
-    kdf = PBKDF2HMAC(algorithm=hashes.SHA1(), length=KEY_LENGTH, salt=SALT, iterations=1)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA1(), length=KEY_LENGTH, salt=SALT, iterations=1
+    )
     return kdf.derive(password)
 
 
 def keyring_password(browser: str = "chrome") -> bytes:
     """Return the "<Browser> Safe Storage" secret, or Chrome's fallback password."""
     application = "chromium" if browser == "chromium" else "chrome"
-    try:
-        import secretstorage
-    except ImportError:
+    if secretstorage is None:
         logger.debug("secretstorage not installed; using Chrome's default password")
         return DEFAULT_PASSWORD
     try:
@@ -56,11 +61,15 @@ def keyring_password(browser: str = "chrome") -> bytes:
                 if item.get_attributes().get("application") == application:
                     return item.get_secret()
     except (OSError, secretstorage.exceptions.SecretStorageException) as exc:
-        logger.debug("No desktop keyring available (%s); using Chrome's default password", exc)
+        logger.debug(
+            "No desktop keyring available (%s); using Chrome's default password", exc
+        )
     return DEFAULT_PASSWORD
 
 
-def decrypt_value(encrypted: bytes, keys: dict[bytes, bytes], strip_host_hash: bool) -> str:
+def decrypt_value(
+    encrypted: bytes, keys: dict[bytes, bytes], strip_host_hash: bool
+) -> str:
     """Decrypt one ``encrypted_value`` blob from the Cookies database."""
     prefix = encrypted[:3]
     if prefix not in keys:
@@ -74,13 +83,35 @@ def decrypt_value(encrypted: bytes, keys: dict[bytes, bytes], strip_host_hash: b
     return plain.decode("utf-8")
 
 
-def _host_keys(hostname: str) -> list[str]:
+def host_keys_for(hostname: str) -> list[str]:
     """Cookie host_key values that apply to ``hostname`` (host and parent domains)."""
     parts = hostname.split(".")
     keys = [hostname]
     for index in range(len(parts) - 1):
         keys.append("." + ".".join(parts[index:]))
     return keys
+
+
+def _read_cookie_rows(cookie_file: str, host_keys: list[str]) -> tuple[list, bool]:
+    """Return matching cookie rows and whether values carry a host-hash prefix."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # Copy so a running browser's lock on the database does not block us.
+        db_copy = Path(tmp) / "Cookies"
+        shutil.copyfile(cookie_file, db_copy)
+        connection = sqlite3.connect(db_copy)
+        try:
+            meta_query = "SELECT value FROM meta WHERE key = 'version'"
+            row = connection.execute(meta_query).fetchone()
+            strip_host_hash = bool(row) and int(row[0]) >= HOST_HASH_DB_VERSION
+            placeholders = ",".join("?" for _ in host_keys)
+            query = (
+                "SELECT name, value, encrypted_value FROM cookies "
+                f"WHERE host_key IN ({placeholders})"
+            )
+            rows = connection.execute(query, host_keys).fetchall()
+        finally:
+            connection.close()
+    return rows, strip_host_hash
 
 
 def chrome_cookies(
@@ -90,25 +121,10 @@ def chrome_cookies(
     hostname = urlparse(url).hostname or ""
     keys = {
         b"v10": derive_key(DEFAULT_PASSWORD),
-        b"v11": derive_key(password if password is not None else keyring_password(browser)),
+        b"v11": derive_key(keyring_password(browser) if password is None else password),
     }
-    with tempfile.TemporaryDirectory() as tmp:
-        # Copy so a running browser's lock on the database does not block us.
-        db_copy = Path(tmp) / "Cookies"
-        shutil.copyfile(cookie_file, db_copy)
-        connection = sqlite3.connect(db_copy)
-        try:
-            row = connection.execute("SELECT value FROM meta WHERE key = 'version'").fetchone()
-            strip_host_hash = bool(row) and int(row[0]) >= HOST_HASH_DB_VERSION
-            host_keys = _host_keys(hostname)
-            placeholders = ",".join("?" for _ in host_keys)
-            rows = connection.execute(
-                f"SELECT name, value, encrypted_value FROM cookies WHERE host_key IN ({placeholders})",
-                host_keys,
-            ).fetchall()
-        finally:
-            connection.close()
+    rows, strip_host_hash = _read_cookie_rows(cookie_file, host_keys_for(hostname))
     cookies = {}
     for name, value, encrypted in rows:
-        cookies[name] = value if value else decrypt_value(encrypted, keys, strip_host_hash)
+        cookies[name] = value or decrypt_value(encrypted, keys, strip_host_hash)
     return cookies

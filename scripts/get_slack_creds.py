@@ -18,10 +18,12 @@ Both credentials are extracted directly from Chrome's storage:
 """
 
 import argparse
+import importlib
 import re
 import sqlite3
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -44,9 +46,7 @@ except ImportError:
 
 def get_slack_url() -> str:
     """Get Slack URL from config or default."""
-    from config_loader import load_config
-
-    config = load_config()
+    config = importlib.import_module("config_loader").load_config()
     host = config.get("slack", {}).get("auth", {}).get("host", "")
     if host:
         return f"https://{host}"
@@ -55,9 +55,7 @@ def get_slack_url() -> str:
 
 def get_chrome_settings() -> tuple[Path, list[str]]:
     """Get Chrome user data dir and profiles from config."""
-    from config_loader import load_config
-
-    config = load_config()
+    config = importlib.import_module("config_loader").load_config()
     creds_config = config.get("slack", {}).get("credentials_extraction", {})
 
     # Chrome user data directory
@@ -65,7 +63,9 @@ def get_chrome_settings() -> tuple[Path, list[str]]:
     chrome_base = Path(chrome_dir).expanduser()
 
     # Profiles to try (in order)
-    profiles = creds_config.get("chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"])
+    profiles = creds_config.get(
+        "chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"]
+    )
 
     return chrome_base, profiles
 
@@ -148,7 +148,9 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     # Return the first (and likely only) valid token from newest file
                     token = matches[0]
                     print(f"📁 Found xoxc_token in Chrome profile: {prof}")
-                    print(f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})")
+                    print(
+                        f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})"
+                    )
                     return token
 
         except (OSError, subprocess.SubprocessError) as e:
@@ -160,10 +162,9 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
 
 def _format_mtime(path: Path) -> str:
     """Format file modification time."""
-    from datetime import datetime
-
     mtime = path.stat().st_mtime
-    return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
+    local_time = datetime.fromtimestamp(mtime, tz=UTC).astimezone()
+    return local_time.strftime("%Y-%m-%d %H:%M")
 
 
 def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = False):
@@ -171,8 +172,8 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
     Uses ConfigManager for thread-safe, debounced writes with file locking.
     """
-    # Import ConfigManager for thread-safe config access
-    from server.config_manager import config as config_manager
+    # Import ConfigManager lazily for thread-safe config access
+    config_manager = importlib.import_module("server.config_manager").config
 
     # Get current slack config
     slack_config = config_manager.get("slack", default={})
@@ -210,6 +211,7 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
 
 def main():
+    """Extract Slack credentials from Chrome and store them in config.json."""
     parser = argparse.ArgumentParser(
         description="Extract Slack credentials and update config.json",
         formatter_class=argparse.RawDescriptionHelpFormatter,
