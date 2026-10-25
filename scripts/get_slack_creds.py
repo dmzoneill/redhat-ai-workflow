@@ -10,7 +10,7 @@ Usage:
     python scripts/get_slack_creds.py --xoxc "..." # Manually provide xoxc_token
 
 Requirements:
-    uv add pycookiecheat
+    cryptography and secretstorage (project dependencies)
 
 Both credentials are extracted directly from Chrome's storage:
 - d_cookie: From Chrome's encrypted Cookies database
@@ -19,6 +19,7 @@ Both credentials are extracted directly from Chrome's storage:
 
 import argparse
 import re
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -32,13 +33,13 @@ CONFIG_FILE = PROJECT_ROOT / "config.json"
 # Add scripts/common to path for shared utilities - must be before imports
 sys.path.insert(0, str(PROJECT_ROOT / "scripts" / "common"))
 
-# Try pycookiecheat for Chrome cookie extraction
+# Chrome cookie extraction (in-repo replacement for pycookiecheat)
 try:
-    from pycookiecheat import chrome_cookies
+    from chrome_cookies import chrome_cookies
 
-    HAS_PYCOOKIECHEAT = True
+    HAS_CHROME_COOKIES = True
 except ImportError:
-    HAS_PYCOOKIECHEAT = False
+    HAS_CHROME_COOKIES = False
 
 
 def get_slack_url() -> str:
@@ -64,17 +65,15 @@ def get_chrome_settings() -> tuple[Path, list[str]]:
     chrome_base = Path(chrome_dir).expanduser()
 
     # Profiles to try (in order)
-    profiles = creds_config.get(
-        "chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"]
-    )
+    profiles = creds_config.get("chrome_profiles", ["Profile 1", "Default", "Profile 2", "Profile 3"])
 
     return chrome_base, profiles
 
 
 def get_d_cookie_from_chrome(profile: str = "") -> str | None:
     """Get the d cookie from Chrome's cookie storage."""
-    if not HAS_PYCOOKIECHEAT:
-        print("❌ Missing: uv add pycookiecheat")
+    if not HAS_CHROME_COOKIES:
+        print("❌ Missing dependency: cryptography (run: uv sync)")
         return None
 
     chrome_base, default_profiles = get_chrome_settings()
@@ -93,7 +92,7 @@ def get_d_cookie_from_chrome(profile: str = "") -> str | None:
             if "d" in result:
                 print(f"📁 Found d_cookie in Chrome profile: {prof}")
                 return unquote(result["d"])
-        except Exception as e:
+        except (OSError, sqlite3.Error, ValueError) as e:
             print(f"⚠️  Error reading {prof}: {e}")
             continue
 
@@ -134,6 +133,7 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     ["strings", str(ldb_file)],
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
 
                 if result.returncode != 0:
@@ -148,12 +148,10 @@ def get_xoxc_token_from_local_storage(profile: str = "") -> str | None:
                     # Return the first (and likely only) valid token from newest file
                     token = matches[0]
                     print(f"📁 Found xoxc_token in Chrome profile: {prof}")
-                    print(
-                        f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})"
-                    )
+                    print(f"   (from {ldb_file.name}, modified {_format_mtime(ldb_file)})")
                     return token
 
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"⚠️  Error reading Local Storage from {prof}: {e}")
             continue
 
@@ -187,17 +185,15 @@ def update_config(d_cookie: str | None, xoxc_token: str | None, dry_run: bool = 
 
     updated = False
 
-    if d_cookie:
-        if auth_config.get("d_cookie") != d_cookie:
-            auth_config["d_cookie"] = d_cookie
-            updated = True
-            print("✅ Updated slack.auth.d_cookie in config.json")
+    if d_cookie and auth_config.get("d_cookie") != d_cookie:
+        auth_config["d_cookie"] = d_cookie
+        updated = True
+        print("✅ Updated slack.auth.d_cookie in config.json")
 
-    if xoxc_token:
-        if auth_config.get("xoxc_token") != xoxc_token:
-            auth_config["xoxc_token"] = xoxc_token
-            updated = True
-            print("✅ Updated slack.auth.xoxc_token in config.json")
+    if xoxc_token and auth_config.get("xoxc_token") != xoxc_token:
+        auth_config["xoxc_token"] = xoxc_token
+        updated = True
+        print("✅ Updated slack.auth.xoxc_token in config.json")
 
     if updated:
         if dry_run:
