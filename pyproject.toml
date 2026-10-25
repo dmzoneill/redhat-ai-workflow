@@ -3,7 +3,7 @@ name = "ai-workflow"
 version = "1.0.0"
 description = "AI-powered development workflow assistant with MCP tools"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Dave O'Neill", email = "daoneill@redhat.com"}
@@ -16,7 +16,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries",
@@ -58,7 +57,8 @@ dependencies = [
     "watchfiles>=0.21.0",
     # Meet bot browser automation and video
     "playwright>=1.40.0",
-    "pillow>=12.3.0",
+    "pillow>=13.0.0",
+    "certifi>=2026.10.19",
     # Meet bot GPU acceleration
     "pyopencl>=2023.1",
     "PyOpenGL>=3.1.0",
@@ -128,7 +128,7 @@ line_length = 88
 skip_gitignore = true
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
