@@ -297,7 +297,7 @@
     "@types/node": "^26.6.5",
     "@types/vscode": "^1.140.0",
     "@types/ws": "^8.18.2",
-    "@typescript-eslint/eslint-plugin": "^8.71.2",
+    "@typescript-eslint/eslint-plugin": "^8.72.0",
     "@typescript-eslint/parser": "^8.65.0",
     "eslint": "^10.13.0",
     "typescript": "^7.0.2"
