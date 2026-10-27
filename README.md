@@ -1,5 +1,9 @@
 # AI Workflow
 
+<p align="center">
+  <img src=".github/logo.png" alt="redhat-ai-workflow logo" width="128" />
+</p>
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Your%20AI-Powered%20Development%20Command%20Center&descSize=20&descAlignY=55">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0:667eea,100:764ba2&height=200&section=header&text=AI%20Workflow&fontSize=80&fontColor=fff&animation=twinkling&fontAlignY=35&desc=Your%20AI-Powered%20Development%20Command%20Center&descSize=20&descAlignY=55" alt="AI Workflow Header"/>
@@ -17,7 +21,7 @@
 
 **Transform Claude into your personal DevOps engineer, developer assistant, and incident responder.**
 
-*Works with both **Claude Code** and **Cursor IDE***
+_Works with both **Claude Code** and **Cursor IDE**_
 
 [Getting Started](#quick-start) •
 [Commands](docs/commands/README.md) •
@@ -34,14 +38,14 @@
 
 AI Workflow is a **comprehensive MCP (Model Context Protocol) server** that gives Claude AI superpowers for software development:
 
-| Capability | Description |
-|------------|-------------|
-| 🔧 **Execute Actions** | Create branches, update Jira, deploy code |
-| 🧠 **Remember Context** | Track your work across sessions |
-| 🎭 **Adopt Personas** | DevOps, Developer, Incident modes |
-| ⚡ **Run Workflows** | Multi-step skills that chain tools |
-| 🔄 **Auto-Heal** | Detect failures, fix auth/VPN, retry automatically |
-| 🔍 **Self-Debug** | Analyze and fix its own tools |
+| Capability              | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| 🔧 **Execute Actions**  | Create branches, update Jira, deploy code          |
+| 🧠 **Remember Context** | Track your work across sessions                    |
+| 🎭 **Adopt Personas**   | DevOps, Developer, Incident modes                  |
+| ⚡ **Run Workflows**    | Multi-step skills that chain tools                 |
+| 🔄 **Auto-Heal**        | Detect failures, fix auth/VPN, retry automatically |
+| 🔍 **Self-Debug**       | Analyze and fix its own tools                      |
 
 ---
 
@@ -61,6 +65,7 @@ uv sync
 > **Don't have UV?** Install it: `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
 For development tools (pytest, black, flake8, mypy), also run:
+
 ```bash
 uv sync --extra dev
 ```
@@ -95,7 +100,7 @@ Then restart Claude Code or run `/mcp` to reload.
 
 Create `.cursor/mcp.json` in your **project directory**:
 
-```json
+````json
 {
   "mcpServers": {
     "aa_workflow": {
@@ -131,7 +136,7 @@ Claude: [Runs start_work skill]
         ✅ Created branch: aap-12345-implement-api
         ✅ Updated Jira: In Progress
         Ready to code!
-```
+````
 
 ---
 
@@ -210,13 +215,13 @@ See [Slack Persona docs](docs/personas/slack.md) for full setup guide.
 
 Switch personas to get different tool sets. See [full persona reference](docs/personas/README.md).
 
-| Persona | Command | Tools | Focus |
-|---------|---------|-------|-------|
-| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~78 | Daily coding, PRs |
-| [🔧 devops](docs/personas/devops.md) | `Load devops persona` | ~74 | Deployments, K8s |
-| [🚨 incident](docs/personas/incident.md) | `Load incident persona` | ~78 | Production debugging |
-| [📦 release](docs/personas/release.md) | `Load release persona` | ~91 | Shipping releases |
-| [💬 slack](docs/personas/slack.md) | `Load slack persona` | ~85 | Slack bot daemon |
+| Persona                                    | Command                  | Tools | Focus                |
+| ------------------------------------------ | ------------------------ | ----- | -------------------- |
+| [👨‍💻 developer](docs/personas/developer.md) | `Load developer persona` | ~78   | Daily coding, PRs    |
+| [🔧 DevOps](docs/personas/devops.md)       | `Load devops persona`    | ~74   | Deployments, K8s     |
+| [🚨 incident](docs/personas/incident.md)   | `Load incident persona`  | ~78   | Production debugging |
+| [📦 release](docs/personas/release.md)     | `Load release persona`   | ~91   | Shipping releases    |
+| [💬 Slack](docs/personas/slack.md)         | `Load slack persona`     | ~85   | Slack bot daemon     |
 
 ```mermaid
 graph LR
@@ -237,30 +242,30 @@ Skills are reusable multi-step workflows with **built-in auto-healing**. See [fu
 
 ### Daily Workflow
 
-| Time | Command | What It Does |
-|------|---------|--------------|
-| ☕ Morning | `/coffee` | Email, PRs, calendar, Jira summary |
-| 💻 Work | `/start-work AAP-12345` | Create branch, update Jira |
-| 🚀 Submit | `/create-mr` | Validate, lint, create MR |
-| 🍺 Evening | `/beer` | Wrap-up, standup prep |
+| Time       | Command                 | What It Does                       |
+| ---------- | ----------------------- | ---------------------------------- |
+| ☕ Morning | `/coffee`               | Email, PRs, calendar, Jira summary |
+| 💻 Work    | `/start-work AAP-12345` | Create branch, update Jira         |
+| 🚀 Submit  | `/create-mr`            | Validate, lint, create MR          |
+| 🍺 Evening | `/beer`                 | Wrap-up, standup prep              |
 
 ### Popular Skills
 
-| Skill | Description | Auto-Heal |
-|-------|-------------|-----------|
-| [☕ coffee](docs/skills/coffee.md) | Morning briefing | ✅ |
-| [🍺 beer](docs/skills/beer.md) | End-of-day wrap-up | ✅ |
-| [⚡ start_work](docs/skills/start_work.md) | Begin Jira issue | ✅ VPN + Auth |
-| [🚀 create_mr](docs/skills/create_mr.md) | Create MR + Slack notify | ✅ VPN + Auth |
-| [✅ mark_mr_ready](docs/skills/mark_mr_ready.md) | Mark draft as ready | ✅ |
-| [👀 review_pr](docs/skills/review_pr.md) | Review MR | ✅ VPN + Auth |
-| [🔄 sync_branch](docs/skills/sync_branch.md) | Rebase onto main | ✅ VPN |
-| [📋 standup_summary](docs/skills/standup_summary.md) | Generate standup | ✅ |
-| [🧪 test_mr_ephemeral](docs/skills/test_mr_ephemeral.md) | Deploy to ephemeral | ✅ VPN + Auth |
-| [🚨 investigate_alert](docs/skills/investigate_alert.md) | Triage alerts | ✅ VPN + Auth |
-| [🎫 create_jira_issue](docs/skills/create_jira_issue.md) | Create Jira issue | ✅ |
-| [✅ close_issue](docs/skills/close_issue.md) | Close issue with summary | ✅ VPN |
-| [📚 update_docs](docs/skills/update_docs.md) | Check/update documentation | ✅ |
+| Skill                                                    | Description                | Auto-Heal     |
+| -------------------------------------------------------- | -------------------------- | ------------- |
+| [☕ coffee](docs/skills/coffee.md)                       | Morning briefing           | ✅            |
+| [🍺 beer](docs/skills/beer.md)                           | End-of-day wrap-up         | ✅            |
+| [⚡ start_work](docs/skills/start_work.md)               | Begin Jira issue           | ✅ VPN + Auth |
+| [🚀 create_mr](docs/skills/create_mr.md)                 | Create MR + Slack notify   | ✅ VPN + Auth |
+| [✅ mark_mr_ready](docs/skills/mark_mr_ready.md)         | Mark draft as ready        | ✅            |
+| [👀 review_pr](docs/skills/review_pr.md)                 | Review MR                  | ✅ VPN + Auth |
+| [🔄 sync_branch](docs/skills/sync_branch.md)             | Rebase onto main           | ✅ VPN        |
+| [📋 standup_summary](docs/skills/standup_summary.md)     | Generate standup           | ✅            |
+| [🧪 test_mr_ephemeral](docs/skills/test_mr_ephemeral.md) | Deploy to ephemeral        | ✅ VPN + Auth |
+| [🚨 investigate_alert](docs/skills/investigate_alert.md) | Triage alerts              | ✅ VPN + Auth |
+| [🎫 create_jira_issue](docs/skills/create_jira_issue.md) | Create Jira issue          | ✅            |
+| [✅ close_issue](docs/skills/close_issue.md)             | Close issue with summary   | ✅ VPN        |
+| [📚 update_docs](docs/skills/update_docs.md)             | Check/update documentation | ✅            |
 
 ### 🔄 Auto-Heal: Tools + Skills
 
@@ -285,12 +290,12 @@ async def git_push(repo: str, branch: str = "") -> str:
     ...
 ```
 
-| Decorator | Use Case | Coverage |
-|-----------|----------|----------|
-| `@auto_heal()` | All tools (auto-detect cluster) | Git, GitLab, Jira + all |
-| `@auto_heal_ephemeral()` | Bonfire namespace tools | Bonfire |
-| `@auto_heal_konflux()` | Tekton pipeline tools | Konflux |
-| `@auto_heal_k8s()` | Kubectl tools | K8s, Prometheus |
+| Decorator                | Use Case                        | Coverage                |
+| ------------------------ | ------------------------------- | ----------------------- |
+| `@auto_heal()`           | All tools (auto-detect cluster) | Git, GitLab, Jira + all |
+| `@auto_heal_ephemeral()` | Bonfire namespace tools         | Bonfire                 |
+| `@auto_heal_konflux()`   | Tekton pipeline tools           | Konflux                 |
+| `@auto_heal_k8s()`       | Kubectl tools                   | K8s, Prometheus         |
 
 #### Skill-Level Auto-Retry
 
@@ -309,18 +314,18 @@ This means skills like `start_work`, `create_mr`, and `deploy_ephemeral` self-he
 
 66 slash commands for quick access. See [full commands reference](docs/commands/README.md).
 
-| Category | Commands |
-|----------|----------|
-| ☀️ **Daily** | `/coffee` `/beer` `/standup` `/weekly-summary` |
-| 🔧 **Development** | `/start-work` `/create-mr` `/mark-ready` `/close-issue` `/sync-branch` `/rebase-pr` `/hotfix` |
-| 👀 **Review** | `/review-mr` `/review-all-open` `/check-feedback` `/check-prs` `/close-mr` |
-| 🧪 **Testing** | `/deploy-ephemeral` `/test-ephemeral` `/check-namespaces` `/extend-ephemeral` `/run-local-tests` |
-| 🚨 **Operations** | `/investigate-alert` `/debug-prod` `/release-prod` `/env-overview` `/rollout-restart` `/scale-deployment` `/silence-alert` |
-| 📋 **Jira** | `/jira-hygiene` `/create-issue` `/clone-issue` `/sprint-planning` |
-| 📚 **Documentation** | `/check-docs` `/update-docs` |
-| 🔍 **Discovery** | `/tools` `/personas` `/list-skills` `/smoke-tools` `/smoke-skills` `/memory` |
-| 📅 **Calendar** | `/my-calendar` `/schedule-meeting` `/setup-gmail` `/google-reauth` |
-| 🔐 **Infrastructure** | `/vpn` `/konflux-status` `/appinterface-check` `/ci-health` `/cancel-pipeline` `/check-secrets` `/scan-vulns` |
+| Category              | Commands                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| ☀️ **Daily**          | `/coffee` `/beer` `/standup` `/weekly-summary`                                                                             |
+| 🔧 **Development**    | `/start-work` `/create-mr` `/mark-ready` `/close-issue` `/sync-branch` `/rebase-pr` `/hotfix`                              |
+| 👀 **Review**         | `/review-mr` `/review-all-open` `/check-feedback` `/check-prs` `/close-mr`                                                 |
+| 🧪 **Testing**        | `/deploy-ephemeral` `/test-ephemeral` `/check-namespaces` `/extend-ephemeral` `/run-local-tests`                           |
+| 🚨 **Operations**     | `/investigate-alert` `/debug-prod` `/release-prod` `/env-overview` `/rollout-restart` `/scale-deployment` `/silence-alert` |
+| 📋 **Jira**           | `/jira-hygiene` `/create-issue` `/clone-issue` `/sprint-planning`                                                          |
+| 📚 **Documentation**  | `/check-docs` `/update-docs`                                                                                               |
+| 🔍 **Discovery**      | `/tools` `/personas` `/list-skills` `/smoke-tools` `/smoke-skills` `/memory`                                               |
+| 📅 **Calendar**       | `/my-calendar` `/schedule-meeting` `/setup-gmail` `/google-reauth`                                                         |
+| 🔐 **Infrastructure** | `/vpn` `/konflux-status` `/appinterface-check` `/ci-health` `/cancel-pipeline` `/check-secrets` `/scan-vulns`              |
 
 ### Example Workflow
 
@@ -343,7 +348,7 @@ This means skills like `start_work`, `create_mr`, and `deploy_ephemeral` self-he
 
 Repositories can have automatic documentation checks before creating MRs. Configure in `config.json`:
 
-```json
+````json
 "my-repo": {
   "docs": {
     "enabled": true,
@@ -485,7 +490,7 @@ python scripts/health_check.py
 
 # Control via CLI
 python scripts/service_control.py status
-```
+````
 
 ---
 
@@ -537,32 +542,32 @@ ai-workflow/
 
 ### Quick Reference
 
-| Document | Description |
-|----------|-------------|
-| [Commands Reference](docs/commands/README.md) | 66+ slash commands (Claude/Cursor) |
-| [Skills Reference](docs/skills/README.md) | 95+ workflow skills |
-| [Personas Reference](docs/personas/README.md) | 5 tool configuration profiles |
-| [Tool Modules Reference](docs/tool-modules/README.md) | 20+ tool plugins with 263 tools |
+| Document                                              | Description                        |
+| ----------------------------------------------------- | ---------------------------------- |
+| [Commands Reference](docs/commands/README.md)         | 66+ slash commands (Claude/Cursor) |
+| [Skills Reference](docs/skills/README.md)             | 95+ workflow skills                |
+| [Personas Reference](docs/personas/README.md)         | 5 tool configuration profiles      |
+| [Tool Modules Reference](docs/tool-modules/README.md) | 20+ tool plugins with 263 tools    |
 
 ### Architecture
 
-| Document | Description |
-|----------|-------------|
-| [Architecture Overview](docs/architecture/README.md) | System architecture with diagrams |
-| [MCP Implementation](docs/architecture/mcp-implementation.md) | Server code, persona switching, skills |
-| [Daemon Architecture](docs/architecture/daemons.md) | 6 background services with D-Bus IPC |
-| [VSCode Extension](docs/architecture/vscode-extension.md) | IDE integration details |
-| [Session Management](docs/architecture/session-management.md) | Multi-chat session handling |
-| [State Management](docs/architecture/state-management.md) | Persistence patterns |
-| [Usage Pattern Learning](docs/architecture/usage-pattern-learning.md) | Layer 5 auto-heal system |
+| Document                                                              | Description                            |
+| --------------------------------------------------------------------- | -------------------------------------- |
+| [Architecture Overview](docs/architecture/README.md)                  | System architecture with diagrams      |
+| [MCP Implementation](docs/architecture/mcp-implementation.md)         | Server code, persona switching, skills |
+| [Daemon Architecture](docs/architecture/daemons.md)                   | 6 background services with D-Bus IPC   |
+| [Visual Studio Code Extension](docs/architecture/vscode-extension.md) | IDE integration details                |
+| [Session Management](docs/architecture/session-management.md)         | Multi-chat session handling            |
+| [State Management](docs/architecture/state-management.md)             | Persistence patterns                   |
+| [Usage Pattern Learning](docs/architecture/usage-pattern-learning.md) | Layer 5 auto-heal system               |
 
 ### Operations
 
-| Document | Description |
-|----------|-------------|
-| [Daemons Guide](docs/daemons/README.md) | Background daemon operations |
-| [Learning Loop](docs/learning-loop.md) | Auto-remediation + memory |
-| [IDE Extension](docs/ide-extension.md) | VSCode/Cursor extension setup |
+| Document                                 | Description                        |
+| ---------------------------------------- | ---------------------------------- |
+| [Daemons Guide](docs/daemons/README.md)  | Background daemon operations       |
+| [Learning Loop](docs/learning-loop.md)   | Auto-remediation + memory          |
+| [IDE Extension](docs/ide-extension.md)   | VSCode/Cursor extension setup      |
 | [Development Guide](docs/DEVELOPMENT.md) | Contributing and development setup |
 
 ---
