@@ -325,7 +325,7 @@ export class SkillExecutionWatcher {
       // Include status, step index, and event count - these are what drive UI changes
       parts.push(`${execId}:${state.status}:${state.currentStepIndex}:${state.events?.length || 0}`);
     }
-    return parts.sort().join("|");
+    return parts.sort((a, b) => a.localeCompare(b)).join("|");
   }
 
   /**

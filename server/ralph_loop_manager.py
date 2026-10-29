@@ -26,13 +26,28 @@ def ensure_loops_dir() -> None:
     LOOPS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _safe_todo_path(todo_path_str: str) -> Optional[Path]:
+    """Resolve a TODO path from loop config, accepting only existing Markdown files.
+
+    The path comes from a JSON config file on disk, so it is normalised and
+    restricted to regular ``.md`` files before being read or written.
+    """
+    try:
+        todo_path = Path(todo_path_str).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if todo_path.suffix.lower() != ".md" or not todo_path.is_file():
+        return None
+    return todo_path
+
+
 def _add_todo_stats(config: dict) -> None:
     """Add computed todo stats (task counts, hard stop) to a loop config in-place."""
     todo_path_str = config.get("todo_path")
     if not todo_path_str:
         return
-    todo_path = Path(todo_path_str)
-    if not todo_path.exists():
+    todo_path = _safe_todo_path(todo_path_str)
+    if todo_path is None:
         return
     content = todo_path.read_text()
     config["incomplete_tasks"] = content.count("- [ ]")
@@ -193,8 +208,8 @@ def add_hard_stop(session_id: str) -> bool:
     if not config or not config.get("todo_path"):
         return False
 
-    todo_path = Path(config["todo_path"])
-    if not todo_path.exists():
+    todo_path = _safe_todo_path(config["todo_path"])
+    if todo_path is None:
         return False
 
     content = todo_path.read_text()
@@ -220,8 +235,8 @@ def remove_hard_stop(session_id: str) -> bool:
     if not config or not config.get("todo_path"):
         return False
 
-    todo_path = Path(config["todo_path"])
-    if not todo_path.exists():
+    todo_path = _safe_todo_path(config["todo_path"])
+    if todo_path is None:
         return False
 
     content = todo_path.read_text()

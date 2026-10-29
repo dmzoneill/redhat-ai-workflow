@@ -29,7 +29,7 @@ export async function testDeleteChat(): Promise<void> {
                    lower.includes("archive") ||
                    lower.includes("close") ||
                    lower.includes("clear");
-        }).sort();
+        }).sort((a, b) => a.localeCompare(b));
 
         results.push(`Found ${relevantCommands.length} relevant commands:`);
         for (const cmd of relevantCommands) {
@@ -122,7 +122,7 @@ export async function testChatRefresh(): Promise<void> {
             cmd.toLowerCase().includes("composer") ||
             cmd.toLowerCase().includes("chat") ||
             cmd.toLowerCase().includes("history")
-        ).sort();
+        ).sort((a, b) => a.localeCompare(b));
 
         results.push(`\nFound ${relevantCommands.length} relevant commands:`);
         for (const cmd of relevantCommands.slice(0, 30)) {

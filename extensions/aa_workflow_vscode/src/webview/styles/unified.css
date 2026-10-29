@@ -1200,7 +1200,7 @@ body[data-vscode-theme-kind="vscode-light"] {
 }
 
 .memory-tab-icon {
-  font-size: 1var (--text-lg);
+  font-size: var(--text-lg);
 }
 
 .tools-search input {

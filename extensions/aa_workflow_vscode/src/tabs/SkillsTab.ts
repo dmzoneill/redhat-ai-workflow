@@ -153,7 +153,7 @@ export class SkillsTab extends BaseTab {
   private _buildRunningSkillsStructuralFingerprint(): string {
     return this.runningSkills
       .map(s => `${s.executionId}:${s.status}`)
-      .sort()
+      .sort((a, b) => a.localeCompare(b))
       .join("|");
   }
 
@@ -164,7 +164,7 @@ export class SkillsTab extends BaseTab {
   private _buildRunningSkillsProgressFingerprint(): string {
     return this.runningSkills
       .map(s => `${s.executionId}:${s.status}:${s.progress}:${s.currentStep}`)
-      .sort()
+      .sort((a, b) => a.localeCompare(b))
       .join("|");
   }
 
