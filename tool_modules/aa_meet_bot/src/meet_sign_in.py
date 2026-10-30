@@ -14,11 +14,20 @@ Extracted from GoogleMeetController to separate auth concerns.
 import asyncio
 import logging
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
+
+
+def _is_meet_url(url: str) -> bool:
+    """True only if *url* is actually on meet.google.com (not just containing it)."""
+    try:
+        return urlparse(url).hostname == "meet.google.com"
+    except ValueError:
+        return False
 
 
 class MeetSignIn:
@@ -228,18 +237,18 @@ class MeetSignIn:
                                     logger.warning(f"Failed to click Continue: {e}")
 
                             # Check if we're back on Meet
-                            if "meet.google.com" in self.page.url:
+                            if _is_meet_url(self.page.url):
                                 logger.info("Successfully signed in via Red Hat SSO")
                                 return True
 
                         # Timeout - check final state
-                        if "meet.google.com" in self.page.url:
+                        if _is_meet_url(self.page.url):
                             logger.info("Already on Meet page after SSO")
                             return True
                         raise Exception("Timeout waiting for redirect to Meet")
                     except Exception:
                         # Check if we're already on meet
-                        if "meet.google.com" in self.page.url:
+                        if _is_meet_url(self.page.url):
                             logger.info("Already on Meet page after SSO")
                             return True
                         raise
@@ -251,7 +260,7 @@ class MeetSignIn:
 
             # Check if we're now signed in (back on Meet page)
             current_url = self.page.url
-            if "meet.google.com" in current_url:
+            if _is_meet_url(current_url):
                 # Check if sign-in link is gone
                 sign_in_link = await self.page.query_selector(
                     self._controller.SELECTORS["sign_in_link"]
