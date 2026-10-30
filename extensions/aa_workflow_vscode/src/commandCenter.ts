@@ -5508,13 +5508,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           const query = `SELECT speaker, text, timestamp FROM transcripts WHERE meeting_id = ${selected.meetingId} ORDER BY timestamp LIMIT 50`;
           // Use spawnSync to avoid shell/bashrc sourcing
           const sqlResult = spawnSync(
-            "sqlite3",
+            "/usr/bin/sqlite3",
             ["-separator", "|||", dbPath, query],
             {
               encoding: "utf8",
               timeout: 5000,
-              // Resolve sqlite3 from fixed system directories only.
-              env: { ...process.env, PATH: "/usr/bin:/bin" },
             },
           );
           const result = sqlResult.stdout || "";
