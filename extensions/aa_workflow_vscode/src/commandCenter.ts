@@ -5514,7 +5514,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               encoding: "utf8",
               timeout: 5000,
               // Resolve sqlite3 from fixed system directories only.
-              env: { ...process.env, PATH: "/usr/local/bin:/usr/bin:/bin" },
+              env: { ...process.env, PATH: "/usr/bin:/bin" },
             },
           );
           const result = sqlResult.stdout || "";
