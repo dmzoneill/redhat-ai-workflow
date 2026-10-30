@@ -32,10 +32,10 @@ Usage:
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import ClassVar, Optional
 
 import yaml
 
@@ -81,26 +81,27 @@ class WorkflowState(str, Enum):
 
 
 @dataclass
+# pylint: disable-next=too-many-instance-attributes
 class StepTrace:
     """A single step in the execution trace."""
 
     step_id: str
     name: str
     timestamp: str
-    duration_ms: Optional[int] = None
+    duration_ms: int | None = None
     status: StepStatus = StepStatus.PENDING
     inputs: dict = field(default_factory=dict)
     outputs: dict = field(default_factory=dict)
-    decision: Optional[str] = None
-    reason: Optional[str] = None
-    error: Optional[str] = None
-    skill_name: Optional[str] = None
-    tool_name: Optional[str] = None
-    chat_id: Optional[str] = None
+    decision: str | None = None
+    reason: str | None = None
+    error: str | None = None
+    skill_name: str | None = None
+    tool_name: str | None = None
+    chat_id: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        d = {
+        d: dict = {
             "step_id": self.step_id,
             "name": self.name,
             "timestamp": self.timestamp,
@@ -134,12 +135,12 @@ class StateTransition:
     from_state: str
     to_state: str
     timestamp: str
-    trigger: Optional[str] = None
+    trigger: str | None = None
     data: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
-        d = {
+        d: dict = {
             "from_state": self.from_state,
             "to_state": self.to_state,
             "timestamp": self.timestamp,
@@ -151,6 +152,7 @@ class StateTransition:
         return d
 
 
+# pylint: disable-next=too-many-instance-attributes
 class ExecutionTracer:
     """
     Traces execution of sprint bot workflows.
@@ -164,7 +166,7 @@ class ExecutionTracer:
     """
 
     # State machine definition - valid transitions
-    STATE_MACHINE = {
+    STATE_MACHINE: ClassVar[dict] = {
         WorkflowState.IDLE: [WorkflowState.LOADING],
         WorkflowState.LOADING: [WorkflowState.ANALYZING, WorkflowState.FAILED],
         WorkflowState.ANALYZING: [
@@ -241,7 +243,7 @@ class ExecutionTracer:
     }
 
     # Human-readable state descriptions
-    STATE_DESCRIPTIONS = {
+    STATE_DESCRIPTIONS: ClassVar[dict] = {
         WorkflowState.IDLE: "Not started",
         WorkflowState.LOADING: "Loading issue from Jira",
         WorkflowState.ANALYZING: "Analyzing issue details",
@@ -266,7 +268,7 @@ class ExecutionTracer:
     def __init__(
         self,
         issue_key: str,
-        workflow_type: Optional[str] = None,
+        workflow_type: str | None = None,
         execution_mode: str = "foreground",
     ):
         """
@@ -281,16 +283,16 @@ class ExecutionTracer:
         self.workflow_type = workflow_type
         self.execution_mode = execution_mode
 
-        self.started_at = datetime.utcnow().isoformat() + "Z"
-        self.completed_at: Optional[str] = None
+        self.started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        self.completed_at: str | None = None
 
         self.current_state = WorkflowState.IDLE
         self.steps: list[StepTrace] = []
         self.transitions: list[StateTransition] = []
 
         self._step_counter = 0
-        self._step_start_time: Optional[float] = None
-        self._current_step: Optional[StepTrace] = None
+        self._step_start_time: float | None = None
+        self._current_step: StepTrace | None = None
 
         # Ensure traces directory exists
         TRACES_DIR.mkdir(parents=True, exist_ok=True)
@@ -303,9 +305,9 @@ class ExecutionTracer:
     def start_step(
         self,
         name: str,
-        inputs: Optional[dict] = None,
-        skill_name: Optional[str] = None,
-        tool_name: Optional[str] = None,
+        inputs: dict | None = None,
+        skill_name: str | None = None,
+        tool_name: str | None = None,
     ) -> str:
         """
         Start a new execution step.
@@ -325,7 +327,7 @@ class ExecutionTracer:
         self._current_step = StepTrace(
             step_id=step_id,
             name=name,
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             status=StepStatus.RUNNING,
             inputs=inputs or {},
             skill_name=skill_name,
@@ -334,19 +336,20 @@ class ExecutionTracer:
         self._step_start_time = time.time()
 
         self.steps.append(self._current_step)
-        logger.debug(f"[Tracer] Started step: {name} ({step_id})")
+        logger.debug("[Tracer] Started step: %s (%s)", name, step_id)
 
         return step_id
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def end_step(
         self,
-        step_id: Optional[str] = None,
+        step_id: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        outputs: Optional[dict] = None,
-        decision: Optional[str] = None,
-        reason: Optional[str] = None,
-        error: Optional[str] = None,
-        chat_id: Optional[str] = None,
+        outputs: dict | None = None,
+        decision: str | None = None,
+        reason: str | None = None,
+        error: str | None = None,
+        chat_id: str | None = None,
     ) -> None:
         """
         End the current or specified step.
@@ -365,7 +368,7 @@ class ExecutionTracer:
             step = next((s for s in self.steps if s.step_id == step_id), None)
 
         if not step:
-            logger.warning(f"[Tracer] No step to end: {step_id}")
+            logger.warning("[Tracer] No step to end: %s", step_id)
             return
 
         # Calculate duration
@@ -385,24 +388,25 @@ class ExecutionTracer:
         if chat_id:
             step.chat_id = chat_id
 
-        logger.debug(f"[Tracer] Ended step: {step.name} -> {status.value}")
+        logger.debug("[Tracer] Ended step: %s -> %s", step.name, status.value)
 
         self._current_step = None
         self._step_start_time = None
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def log_step(
         self,
         name: str,
-        inputs: Optional[dict] = None,
-        outputs: Optional[dict] = None,
-        decision: Optional[str] = None,
-        reason: Optional[str] = None,
+        inputs: dict | None = None,
+        outputs: dict | None = None,
+        decision: str | None = None,
+        reason: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        skill_name: Optional[str] = None,
-        tool_name: Optional[str] = None,
-        duration_ms: Optional[int] = None,
-        error: Optional[str] = None,
-        chat_id: Optional[str] = None,
+        skill_name: str | None = None,
+        tool_name: str | None = None,
+        duration_ms: int | None = None,
+        error: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         """
         Log a complete step in one call.
@@ -430,8 +434,8 @@ class ExecutionTracer:
     def transition(
         self,
         to_state: WorkflowState | str,
-        trigger: Optional[str] = None,
-        data: Optional[dict] = None,
+        trigger: str | None = None,
+        data: dict | None = None,
     ) -> bool:
         """
         Transition to a new state.
@@ -448,22 +452,24 @@ class ExecutionTracer:
             try:
                 to_state = WorkflowState(to_state)
             except ValueError:
-                logger.error(f"[Tracer] Invalid state: {to_state}")
+                logger.error("[Tracer] Invalid state: %s", to_state)
                 return False
 
         # Validate transition
         valid_targets = self.STATE_MACHINE.get(self.current_state, [])
         if to_state not in valid_targets:
             logger.warning(
-                f"[Tracer] Invalid transition: {self.current_state.value} -> {to_state.value}. "
-                f"Valid targets: {[s.value for s in valid_targets]}"
+                "[Tracer] Invalid transition: %s -> %s. Valid targets: %s",
+                self.current_state.value,
+                to_state.value,
+                [s.value for s in valid_targets],
             )
             # Allow anyway but log warning
 
         transition = StateTransition(
             from_state=self.current_state.value,
             to_state=to_state.value,
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             trigger=trigger,
             data=data or {},
         )
@@ -471,15 +477,17 @@ class ExecutionTracer:
         self.transitions.append(transition)
 
         logger.info(
-            f"[Tracer] State transition: {self.current_state.value} -> {to_state.value}"
-            f"{f' (trigger: {trigger})' if trigger else ''}"
+            "[Tracer] State transition: %s -> %s%s",
+            self.current_state.value,
+            to_state.value,
+            f" (trigger: {trigger})" if trigger else "",
         )
 
         self.current_state = to_state
 
         # Mark completion
         if to_state in (WorkflowState.COMPLETED, WorkflowState.FAILED):
-            self.completed_at = datetime.utcnow().isoformat() + "Z"
+            self.completed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         return True
 
@@ -493,7 +501,7 @@ class ExecutionTracer:
             reason=reason,
         )
 
-    def mark_blocked(self, reason: str, waiting_for: Optional[str] = None) -> None:
+    def mark_blocked(self, reason: str, waiting_for: str | None = None) -> None:
         """Mark the workflow as blocked."""
         self.transition(
             WorkflowState.BLOCKED,
@@ -506,7 +514,7 @@ class ExecutionTracer:
             status=StepStatus.SUCCESS,
         )
 
-    def mark_completed(self, summary: Optional[str] = None) -> None:
+    def mark_completed(self, summary: str | None = None) -> None:
         """Mark the workflow as completed."""
         self.transition(WorkflowState.COMPLETED, trigger="completed")
         self.log_step(
@@ -558,13 +566,11 @@ class ExecutionTracer:
         """Save trace to YAML file."""
         try:
             data = self.to_dict()
-            self.trace_path.write_text(
-                yaml.dump(data, default_flow_style=False, sort_keys=False)
-            )
-            logger.info(f"[Tracer] Saved trace to {self.trace_path}")
+            self.trace_path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))
+            logger.info("[Tracer] Saved trace to %s", self.trace_path)
             return self.trace_path
         except Exception as e:
-            logger.error(f"[Tracer] Failed to save trace: {e}")
+            logger.error("[Tracer] Failed to save trace: %s", e)
             raise
 
     @classmethod
@@ -626,8 +632,8 @@ class ExecutionTracer:
 
             return tracer
 
-        except Exception as e:
-            logger.error(f"[Tracer] Failed to load trace: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("[Tracer] Failed to load trace")
             return None
 
     def to_mermaid(self, highlight_path: bool = True) -> str:
@@ -678,9 +684,7 @@ class ExecutionTracer:
             for state in visited_states:
                 if state == self.current_state:
                     # Current state - yellow/orange
-                    lines.append(
-                        f"    style {state.value} fill:#FFD700,stroke:#FF8C00,stroke-width:3px"
-                    )
+                    lines.append(f"    style {state.value} fill:#FFD700,stroke:#FF8C00,stroke-width:3px")
                 elif state in (WorkflowState.COMPLETED,):
                     # Completed - green
                     lines.append(f"    style {state.value} fill:#90EE90,stroke:#228B22")
@@ -735,7 +739,7 @@ class ExecutionTracer:
 
             # Connect to previous step
             if i > 0:
-                prev_id = f"step{i-1}"
+                prev_id = f"step{i - 1}"
                 lines.append(f"    {prev_id} --> {node_id}")
 
         return "\n".join(lines)
@@ -780,7 +784,7 @@ class ExecutionTracer:
                     <div class="timeline-header">
                         <span class="timeline-time">{time_str}</span>
                         <span class="timeline-name">{step.name}</span>
-                        {f'<span class="timeline-duration">{step.duration_ms}ms</span>' if step.duration_ms else ''}
+                        {f'<span class="timeline-duration">{step.duration_ms}ms</span>' if step.duration_ms else ""}
                     </div>
             """)
 
@@ -789,30 +793,20 @@ class ExecutionTracer:
                 html_parts.append(f"""
                     <div class="timeline-decision">
                         <strong>Decision:</strong> {step.decision}
-                        {f'<br><em>{step.reason}</em>' if step.reason else ''}
+                        {f"<br><em>{step.reason}</em>" if step.reason else ""}
                     </div>
                 """)
 
             if step.inputs:
-                inputs_str = ", ".join(
-                    f"{k}={v}" for k, v in list(step.inputs.items())[:3]
-                )
-                html_parts.append(
-                    f'<div class="timeline-inputs">Inputs: {inputs_str}</div>'
-                )
+                inputs_str = ", ".join(f"{k}={v}" for k, v in list(step.inputs.items())[:3])
+                html_parts.append(f'<div class="timeline-inputs">Inputs: {inputs_str}</div>')
 
             if step.outputs:
-                outputs_str = ", ".join(
-                    f"{k}={v}" for k, v in list(step.outputs.items())[:3]
-                )
-                html_parts.append(
-                    f'<div class="timeline-outputs">Outputs: {outputs_str}</div>'
-                )
+                outputs_str = ", ".join(f"{k}={v}" for k, v in list(step.outputs.items())[:3])
+                html_parts.append(f'<div class="timeline-outputs">Outputs: {outputs_str}</div>')
 
             if step.error:
-                html_parts.append(
-                    f'<div class="timeline-error">Error: {step.error}</div>'
-                )
+                html_parts.append(f'<div class="timeline-error">Error: {step.error}</div>')
 
             if step.chat_id:
                 html_parts.append(f"""
@@ -830,7 +824,7 @@ class ExecutionTracer:
 
 def list_traces() -> list[dict]:
     """List all available traces with summary info."""
-    traces = []
+    traces: list[dict] = []
 
     if not TRACES_DIR.exists():
         return traces
@@ -848,8 +842,8 @@ def list_traces() -> list[dict]:
                     "summary": data.get("summary", {}),
                 }
             )
-        except Exception as e:
-            logger.warning(f"Failed to read trace {trace_file}: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Failed to read trace %s: %s", trace_file, e, exc_info=True)
 
     # Sort by started_at descending
     traces.sort(key=lambda t: t.get("started_at", ""), reverse=True)
@@ -857,7 +851,7 @@ def list_traces() -> list[dict]:
     return traces
 
 
-def get_trace(issue_key: str) -> Optional[dict]:
+def get_trace(issue_key: str) -> dict | None:
     """Get a trace by issue key."""
     trace_path = TRACES_DIR / f"{issue_key}.yaml"
     if not trace_path.exists():
@@ -865,8 +859,8 @@ def get_trace(issue_key: str) -> Optional[dict]:
 
     try:
         return yaml.safe_load(trace_path.read_text())
-    except Exception as e:
-        logger.error(f"Failed to load trace for {issue_key}: {e}")
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to load trace for %s", issue_key)
         return None
 
 
