@@ -6,39 +6,42 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tool_modules.aa_google_slides.src.tools_basic import (  # noqa: E402
-    get_slides_service,
-)
 
 PRESENTATION_ID = "179sD9l3SNJIqvUMKlaF0An-ttAx7yLLTUoj-xKdjos8"
 
 
 def main():
+    """Print the title and slide list of the presentation."""
+    from tool_modules.aa_google_slides.src.tools_basic import (  # pylint: disable=import-outside-toplevel
+        get_slides_service,
+    )
+
     service, error = get_slides_service()
     if error:
-        print(f"Error: {error}")
+        # Do not print the raw error: it can include credential details.
+        print("Error: could not connect to Google Slides API (check OAuth credentials)")
         return 1
 
     print("Connected to Google Slides API")
-    pres = service.presentations().get(presentationId=PRESENTATION_ID).execute()
-    print(f'Title: {pres.get("title")}')
-    print(f'Slides: {len(pres.get("slides", []))}')
+    deck = service.presentations().get(presentationId=PRESENTATION_ID).execute()
+    print(f"Title: {deck.get('title')}")
+    print(f"Slides: {len(deck.get('slides', []))}")
 
-    for i, slide in enumerate(pres.get("slides", []), 1):
+    for i, slide in enumerate(deck.get("slides", []), 1):  # pylint: disable=too-many-nested-blocks
         elems = slide.get("pageElements", [])
         title = ""
         for elem in elems:
             if "shape" in elem and "text" in elem.get("shape", {}):
                 text_elems = elem["shape"]["text"].get("textElements", [])
-                for te in text_elems:
-                    if "textRun" in te:
-                        content = te["textRun"].get("content", "").strip()
+                for text_elem in text_elems:
+                    if "textRun" in text_elem:
+                        content = text_elem["textRun"].get("content", "").strip()
                         if content:
                             title = content[:60]
                             break
                 if title:
                     break
-        print(f'  {i}. {slide.get("objectId")} - {title}')
+        print(f"  {i}. {slide.get('objectId')} - {title}")
 
     return 0
 
