@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Slides Tab - Google Slides presentation management UI
  *
@@ -24,6 +25,7 @@
  */
 
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { createLogger } from "./logger";
@@ -32,12 +34,7 @@ const logger = createLogger("SlidesTab");
 
 // Tree item types for context menu handling
 type SlidesItemType =
-  | "category"
-  | "presentation"
-  | "slide"
-  | "action"
-  | "template"
-  | "detail";
+  "category" | "presentation" | "slide" | "action" | "template" | "detail";
 
 export class SlidesTreeItem extends vscode.TreeItem {
   public data?: any;
@@ -46,7 +43,7 @@ export class SlidesTreeItem extends vscode.TreeItem {
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly itemType: SlidesItemType,
-    data?: any
+    data?: any,
   ) {
     super(label, collapsibleState);
     this.contextValue = itemType;
@@ -70,9 +67,7 @@ interface SlidesStats {
   error: string | null;
 }
 
-export class SlidesTreeProvider
-  implements vscode.TreeDataProvider<SlidesTreeItem>
-{
+export class SlidesTreeProvider implements vscode.TreeDataProvider<SlidesTreeItem> {
   private _onDidChangeTreeData: vscode.EventEmitter<
     SlidesTreeItem | undefined | null | void
   > = new vscode.EventEmitter<SlidesTreeItem | undefined | null | void>();
@@ -137,16 +132,15 @@ export class SlidesTreeProvider
         os.homedir(),
         ".config",
         "aa-workflow",
-        "slides_cache.json"
+        "slides_cache.json",
       );
-      const fs = require("fs");
       if (fs.existsSync(configPath)) {
         const cached = JSON.parse(fs.readFileSync(configPath, "utf-8"));
         stats.presentations = cached.presentations || [];
         stats.templates = cached.templates || [];
         stats.isConnected = true;
       }
-    } catch (e) {
+    } catch {
       logger.debug("No cached slides data found");
     }
 
@@ -162,26 +156,27 @@ export class SlidesTreeProvider
     const presentationsItem = new SlidesTreeItem(
       "My Presentations",
       vscode.TreeItemCollapsibleState.Expanded,
-      "category"
+      "category",
     );
     presentationsItem.iconPath = new vscode.ThemeIcon(
       "preview",
-      new vscode.ThemeColor("charts.blue")
+      new vscode.ThemeColor("charts.blue"),
     );
-    presentationsItem.description = stats.presentations.length > 0
-      ? `${stats.presentations.length} found`
-      : "Click refresh to load";
+    presentationsItem.description =
+      stats.presentations.length > 0
+        ? `${stats.presentations.length} found`
+        : "Click refresh to load";
     items.push(presentationsItem);
 
     // Actions
     const actionsItem = new SlidesTreeItem(
       "Actions",
       vscode.TreeItemCollapsibleState.Expanded,
-      "category"
+      "category",
     );
     actionsItem.iconPath = new vscode.ThemeIcon(
       "tools",
-      new vscode.ThemeColor("charts.orange")
+      new vscode.ThemeColor("charts.orange"),
     );
     actionsItem.description = "Create & manage";
     items.push(actionsItem);
@@ -190,15 +185,16 @@ export class SlidesTreeProvider
     const templatesItem = new SlidesTreeItem(
       "Templates",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     templatesItem.iconPath = new vscode.ThemeIcon(
       "file-code",
-      new vscode.ThemeColor("charts.purple")
+      new vscode.ThemeColor("charts.purple"),
     );
-    templatesItem.description = stats.templates.length > 0
-      ? `${stats.templates.length} available`
-      : "No templates saved";
+    templatesItem.description =
+      stats.templates.length > 0
+        ? `${stats.templates.length} available`
+        : "No templates saved";
     items.push(templatesItem);
 
     return items;
@@ -213,7 +209,7 @@ export class SlidesTreeProvider
       const emptyItem = new SlidesTreeItem(
         "No presentations loaded",
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       emptyItem.iconPath = new vscode.ThemeIcon("info");
       emptyItem.description = "Use 'List Presentations' action";
@@ -222,7 +218,7 @@ export class SlidesTreeProvider
       const helpItem = new SlidesTreeItem(
         "Run: google_slides_list()",
         vscode.TreeItemCollapsibleState.None,
-        "action"
+        "action",
       );
       helpItem.iconPath = new vscode.ThemeIcon("terminal");
       helpItem.command = {
@@ -235,30 +231,30 @@ export class SlidesTreeProvider
       return items;
     }
 
-    for (const pres of stats.presentations) {
+    for (const deck of stats.presentations) {
       const presItem = new SlidesTreeItem(
-        pres.name,
+        deck.name,
         vscode.TreeItemCollapsibleState.Collapsed,
         "presentation",
-        pres
+        deck,
       );
       presItem.iconPath = new vscode.ThemeIcon(
         "file-media",
-        new vscode.ThemeColor("charts.blue")
+        new vscode.ThemeColor("charts.blue"),
       );
-      presItem.description = this.formatDate(pres.modifiedTime);
+      presItem.description = this.formatDate(deck.modifiedTime);
       presItem.tooltip = new vscode.MarkdownString(
-        `**${pres.name}**\n\n` +
-        `| | |\n|---|---|\n` +
-        `| ID | \`${pres.id}\` |\n` +
-        `| Modified | ${pres.modifiedTime} |\n` +
-        `| Slides | ${pres.slideCount || "Unknown"} |\n\n` +
-        `_Click to open in Google Slides_`
+        `**${deck.name}**\n\n` +
+          `| | |\n|---|---|\n` +
+          `| ID | \`${deck.id}\` |\n` +
+          `| Modified | ${deck.modifiedTime} |\n` +
+          `| Slides | ${deck.slideCount || "Unknown"} |\n\n` +
+          `_Click to open in Google Slides_`,
       );
       presItem.command = {
         command: "aa-workflow.openPresentation",
         title: "Open Presentation",
-        arguments: [pres.id, pres.webViewLink],
+        arguments: [deck.id, deck.webViewLink],
       };
       items.push(presItem);
     }
@@ -273,11 +269,11 @@ export class SlidesTreeProvider
     const createItem = new SlidesTreeItem(
       "Create New Presentation",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     createItem.iconPath = new vscode.ThemeIcon(
       "add",
-      new vscode.ThemeColor("charts.green")
+      new vscode.ThemeColor("charts.green"),
     );
     createItem.description = "skill: create_slide_deck";
     createItem.tooltip = "Create a new Google Slides presentation";
@@ -291,11 +287,11 @@ export class SlidesTreeProvider
     const listItem = new SlidesTreeItem(
       "List All Presentations",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     listItem.iconPath = new vscode.ThemeIcon(
       "list-flat",
-      new vscode.ThemeColor("charts.blue")
+      new vscode.ThemeColor("charts.blue"),
     );
     listItem.description = "skill: list_presentations";
     listItem.tooltip = "Refresh the list of presentations from Google Drive";
@@ -309,11 +305,11 @@ export class SlidesTreeProvider
     const statusItem = new SlidesTreeItem(
       "Check Google Slides Status",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     statusItem.iconPath = new vscode.ThemeIcon(
       "plug",
-      new vscode.ThemeColor("charts.yellow")
+      new vscode.ThemeColor("charts.yellow"),
     );
     statusItem.description = "google_slides_status()";
     statusItem.tooltip = "Check Google Slides API connection status";
@@ -327,11 +323,11 @@ export class SlidesTreeProvider
     const exportItem = new SlidesTreeItem(
       "Export to PDF",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     exportItem.iconPath = new vscode.ThemeIcon(
       "export",
-      new vscode.ThemeColor("charts.purple")
+      new vscode.ThemeColor("charts.purple"),
     );
     exportItem.description = "skill: export_presentation";
     exportItem.tooltip = "Export a presentation to PDF format";
@@ -345,11 +341,11 @@ export class SlidesTreeProvider
     const personaItem = new SlidesTreeItem(
       "Load Presentations Persona",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     personaItem.iconPath = new vscode.ThemeIcon(
       "account",
-      new vscode.ThemeColor("charts.cyan")
+      new vscode.ThemeColor("charts.cyan"),
     );
     personaItem.description = 'persona_load("presentations")';
     personaItem.tooltip = "Load the presentations persona with all slide tools";
@@ -371,7 +367,7 @@ export class SlidesTreeProvider
       const emptyItem = new SlidesTreeItem(
         "No templates saved",
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       emptyItem.iconPath = new vscode.ThemeIcon("info");
       emptyItem.description = "Save a presentation as template";
@@ -380,7 +376,7 @@ export class SlidesTreeProvider
       const helpItem = new SlidesTreeItem(
         "To save as template:",
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       helpItem.iconPath = new vscode.ThemeIcon("lightbulb");
       helpItem.description = "Use presentation ID in create_slide_deck";
@@ -394,20 +390,20 @@ export class SlidesTreeProvider
         template.name,
         vscode.TreeItemCollapsibleState.None,
         "template",
-        template
+        template,
       );
       templateItem.iconPath = new vscode.ThemeIcon(
         "file-code",
-        new vscode.ThemeColor("charts.purple")
+        new vscode.ThemeColor("charts.purple"),
       );
       templateItem.description = `ID: ${template.id.substring(0, 8)}...`;
       templateItem.tooltip = new vscode.MarkdownString(
         `**Template: ${template.name}**\n\n` +
-        `ID: \`${template.id}\`\n\n` +
-        `Use with:\n` +
-        `\`\`\`\n` +
-        `google_slides_create("New Presentation", template_id="${template.id}")\n` +
-        `\`\`\``
+          `ID: \`${template.id}\`\n\n` +
+          `Use with:\n` +
+          `\`\`\`\n` +
+          `google_slides_create("New Presentation", template_id="${template.id}")\n` +
+          `\`\`\``,
       );
       templateItem.command = {
         command: "aa-workflow.useTemplate",
@@ -429,7 +425,7 @@ export class SlidesTreeProvider
         `Slide ${i + 1}: ${slide.title || "Untitled"}`,
         vscode.TreeItemCollapsibleState.None,
         "slide",
-        slide
+        slide,
       );
       slideItem.iconPath = new vscode.ThemeIcon("file");
       slideItem.description = slide.layout || "";
@@ -459,7 +455,7 @@ export class SlidesTreeProvider
 }
 
 export function registerSlidesTab(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
 ): SlidesTreeProvider {
   const treeProvider = new SlidesTreeProvider();
 
@@ -474,7 +470,7 @@ export function registerSlidesTab(
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.refreshSlides", () => {
       treeProvider.refresh();
-    })
+    }),
   );
 
   // Open presentation in browser
@@ -487,12 +483,12 @@ export function registerSlidesTab(
         } else if (presentationId) {
           vscode.env.openExternal(
             vscode.Uri.parse(
-              `https://docs.google.com/presentation/d/${presentationId}/edit`
-            )
+              `https://docs.google.com/presentation/d/${presentationId}/edit`,
+            ),
           );
         }
-      }
-    )
+      },
+    ),
   );
 
   // Create new presentation
@@ -513,7 +509,7 @@ export function registerSlidesTab(
             { label: "$(list-tree) From outline", value: "outline" },
             { label: "$(search) From topic (auto-generate)", value: "topic" },
           ],
-          { placeHolder: "How would you like to create the presentation?" }
+          { placeHolder: "How would you like to create the presentation?" },
         );
 
         if (!hasOutline) return;
@@ -527,7 +523,9 @@ export function registerSlidesTab(
             placeHolder: "# Introduction\\n## Overview\\n- Point 1\\n- Point 2",
           });
           if (outline) {
-            const escapedOutline = outline.replace(/"/g, '\\"');
+            const escapedOutline = outline
+              .replace(/\\/g, "\\\\")
+              .replace(/"/g, '\\"');
             cmd = `skill_run("create_slide_deck", '{"title": "${title}", "outline": "${escapedOutline}"}')`;
           }
         } else if (hasOutline.value === "topic") {
@@ -543,33 +541,39 @@ export function registerSlidesTab(
         if (cmd) {
           await vscode.env.clipboard.writeText(cmd);
           vscode.window.showInformationMessage(
-            "Create presentation command copied. Paste in chat to execute."
+            "Create presentation command copied. Paste in chat to execute.",
           );
         }
-      }
-    )
+      },
+    ),
   );
 
   // List presentations
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.listPresentations", async () => {
-      const cmd = 'skill_run("list_presentations", "{}")';
-      await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage(
-        "List presentations command copied. Paste in chat to execute."
-      );
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.listPresentations",
+      async () => {
+        const cmd = 'skill_run("list_presentations", "{}")';
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage(
+          "List presentations command copied. Paste in chat to execute.",
+        );
+      },
+    ),
   );
 
   // Check slides status
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.checkSlidesStatus", async () => {
-      const cmd = "google_slides_status()";
-      await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage(
-        "Status command copied. Paste in chat to check connection."
-      );
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.checkSlidesStatus",
+      async () => {
+        const cmd = "google_slides_status()";
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage(
+          "Status command copied. Paste in chat to check connection.",
+        );
+      },
+    ),
   );
 
   // Export presentation
@@ -597,10 +601,10 @@ export function registerSlidesTab(
 
         await vscode.env.clipboard.writeText(cmd);
         vscode.window.showInformationMessage(
-          "Export command copied. Paste in chat to execute."
+          "Export command copied. Paste in chat to execute.",
         );
-      }
-    )
+      },
+    ),
   );
 
   // Load persona
@@ -611,10 +615,10 @@ export function registerSlidesTab(
         const cmd = `persona_load("${persona}")`;
         await vscode.env.clipboard.writeText(cmd);
         vscode.window.showInformationMessage(
-          `Load ${persona} persona command copied. Paste in chat to execute.`
+          `Load ${persona} persona command copied. Paste in chat to execute.`,
         );
-      }
-    )
+      },
+    ),
   );
 
   // Use template
@@ -633,10 +637,10 @@ export function registerSlidesTab(
         const cmd = `google_slides_create("${title}", template_id="${templateId}")`;
         await vscode.env.clipboard.writeText(cmd);
         vscode.window.showInformationMessage(
-          "Create from template command copied. Paste in chat to execute."
+          "Create from template command copied. Paste in chat to execute.",
         );
-      }
-    )
+      },
+    ),
   );
 
   return treeProvider;

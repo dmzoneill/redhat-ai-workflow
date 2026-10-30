@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Meetings Tab for Command Center
  *
@@ -9,11 +10,6 @@
  */
 
 import * as vscode from "vscode";
-import * as path from "path";
-import * as os from "os";
-import { createLogger } from "./logger";
-
-const logger = createLogger("MeetingsTabLegacy");
 
 // ARCHITECTURE: Meet state is loaded via D-Bus from the Meet daemon.
 // The commandCenter.ts uses dbus.meet_getState() for all meeting data.
@@ -26,7 +22,17 @@ export interface Meeting {
   endTime?: string;
   organizer: string;
   attendees: string[];
-  status: "pending" | "approved" | "joined" | "ended" | "rejected" | "missed" | "skipped" | "scheduled" | "failed" | "active";
+  status:
+    | "pending"
+    | "approved"
+    | "joined"
+    | "ended"
+    | "rejected"
+    | "missed"
+    | "skipped"
+    | "scheduled"
+    | "failed"
+    | "active";
   approvedAt?: string;
 }
 
@@ -61,8 +67,8 @@ export interface VirtualDevicesStatus {
 }
 
 export interface MeetBotState {
-  currentMeeting: Meeting | null;  // Backward compatibility
-  currentMeetings: ActiveMeeting[];  // Multiple active meetings
+  currentMeeting: Meeting | null; // Backward compatibility
+  currentMeetings: ActiveMeeting[]; // Multiple active meetings
   activeMeetingCount: number;
   upcomingMeetings: Meeting[];
   captions: Caption[];
@@ -107,7 +113,9 @@ export interface MeetingNote {
 /**
  * Parse virtual devices status from unified state data
  */
-function parseVirtualDevicesStatus(data: any): VirtualDevicesStatus | undefined {
+function parseVirtualDevicesStatus(
+  data: any,
+): VirtualDevicesStatus | undefined {
   if (!data) {
     return undefined;
   }
@@ -158,23 +166,27 @@ export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
   // If unified data is provided, use it (preferred - always fresh)
   if (unifiedMeetData && Object.keys(unifiedMeetData).length > 0) {
     // Parse virtual devices status if available
-    const virtualDevices = parseVirtualDevicesStatus(unifiedMeetData.virtualDevices);
+    const virtualDevices = parseVirtualDevicesStatus(
+      unifiedMeetData.virtualDevices,
+    );
 
     return {
       currentMeeting: unifiedMeetData.currentMeeting || null,
       currentMeetings: unifiedMeetData.currentMeetings || [],
       activeMeetingCount: unifiedMeetData.currentMeetings?.length || 0,
-      upcomingMeetings: (unifiedMeetData.upcomingMeetings || []).map((m: any) => ({
-        id: m.id || "",
-        title: m.title || "Untitled",
-        url: m.url || "",
-        startTime: m.startTime || "",
-        endTime: m.endTime || "",
-        organizer: m.organizer || "",
-        attendees: m.attendees || [],
-        status: m.status || "pending",
-        calendarName: m.calendarName || "",
-      })),
+      upcomingMeetings: (unifiedMeetData.upcomingMeetings || []).map(
+        (m: any) => ({
+          id: m.id || "",
+          title: m.title || "Untitled",
+          url: m.url || "",
+          startTime: m.startTime || "",
+          endTime: m.endTime || "",
+          organizer: m.organizer || "",
+          attendees: m.attendees || [],
+          status: m.status || "pending",
+          calendarName: m.calendarName || "",
+        }),
+      ),
       captions: (unifiedMeetData.captions || []).map((c: any) => ({
         speaker: c.speaker || "Unknown",
         text: c.text || "",
@@ -185,16 +197,21 @@ export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
       responseQueue: [],
       gpuUsage: 0,
       vramUsage: 0,
-      status: (unifiedMeetData.currentMeetings?.length || 0) > 0 ? "in_meeting" : "idle",
+      status:
+        (unifiedMeetData.currentMeetings?.length || 0) > 0
+          ? "in_meeting"
+          : "idle",
       error: null,
       schedulerRunning: unifiedMeetData.schedulerRunning || false,
-      monitoredCalendars: (unifiedMeetData.monitoredCalendars || []).map((c: any) => ({
-        id: c.id || c.calendar_id || "",
-        calendarId: c.calendarId || c.calendar_id || "",
-        name: c.name || "",
-        autoJoin: c.autoJoin || c.auto_join || false,
-        enabled: c.enabled || false,
-      })),
+      monitoredCalendars: (unifiedMeetData.monitoredCalendars || []).map(
+        (c: any) => ({
+          id: c.id || c.calendar_id || "",
+          calendarId: c.calendarId || c.calendar_id || "",
+          name: c.name || "",
+          autoJoin: c.autoJoin || c.auto_join || false,
+          enabled: c.enabled || false,
+        }),
+      ),
       recentNotes: (unifiedMeetData.recentNotes || []).map((note: any) => ({
         id: note.id || 0,
         title: note.title || "Untitled",
@@ -249,7 +266,6 @@ export function getMeetingsTabStyles(): string {
 // The following classes are defined there:
 // .meetings-container, .meetings-subtabs, .meeting-item, etc.
 
-
 /**
  * Render a single integration card
  */
@@ -259,14 +275,24 @@ function renderIntegrationCard(
   status: "ready" | "not_ready" | "error" | "unknown",
   details?: string,
   path?: string,
-  error?: string
+  error?: string,
 ): string {
-  const statusText = status === "ready" ? "Ready" :
-                     status === "not_ready" ? "Not Ready" :
-                     status === "error" ? "Error" : "Unknown";
-  const statusClass = status === "ready" ? "ready" :
-                      status === "not_ready" ? "not-ready" :
-                      status === "error" ? "error" : "unknown";
+  const statusText =
+    status === "ready"
+      ? "Ready"
+      : status === "not_ready"
+        ? "Not Ready"
+        : status === "error"
+          ? "Error"
+          : "Unknown";
+  const statusClass =
+    status === "ready"
+      ? "ready"
+      : status === "not_ready"
+        ? "not-ready"
+        : status === "error"
+          ? "error"
+          : "unknown";
 
   return `
     <div class="integration-card">
@@ -294,11 +320,26 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
   const defaultStatus: TechnicalIntegration = { name: "", status: "unknown" };
 
   // Get individual device statuses or defaults
-  const pulseaudio = devices?.pulseaudio || { ...defaultStatus, name: "PulseAudio" };
-  const audioSink = devices?.audioSink || { ...defaultStatus, name: "Virtual Audio Sink" };
-  const audioSource = devices?.audioSource || { ...defaultStatus, name: "Virtual Audio Source" };
-  const v4l2loopback = devices?.v4l2loopback || { ...defaultStatus, name: "v4l2loopback" };
-  const virtualCamera = devices?.virtualCamera || { ...defaultStatus, name: "Virtual Camera" };
+  const pulseaudio = devices?.pulseaudio || {
+    ...defaultStatus,
+    name: "PulseAudio",
+  };
+  const audioSink = devices?.audioSink || {
+    ...defaultStatus,
+    name: "Virtual Audio Sink",
+  };
+  const audioSource = devices?.audioSource || {
+    ...defaultStatus,
+    name: "Virtual Audio Source",
+  };
+  const v4l2loopback = devices?.v4l2loopback || {
+    ...defaultStatus,
+    name: "v4l2loopback",
+  };
+  const virtualCamera = devices?.virtualCamera || {
+    ...defaultStatus,
+    name: "Virtual Camera",
+  };
   const ffmpeg = devices?.ffmpeg || { ...defaultStatus, name: "FFmpeg" };
   const pipewire = devices?.pipewire;
 
@@ -313,7 +354,7 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           pulseaudio.status,
           "Audio server for virtual device routing",
           undefined,
-          pulseaudio.error
+          pulseaudio.error,
         )}
         ${renderIntegrationCard(
           "📥",
@@ -321,7 +362,7 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           audioSink.status,
           "Captures meeting audio for transcription (meet_bot_sink)",
           audioSink.path,
-          audioSink.error
+          audioSink.error,
         )}
         ${renderIntegrationCard(
           "📤",
@@ -329,16 +370,20 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           audioSource.status,
           "Bot voice output to meeting microphone (meet_bot_source)",
           audioSource.path,
-          audioSource.error
+          audioSource.error,
         )}
-        ${pipewire ? renderIntegrationCard(
-          "🔗",
-          "PipeWire",
-          pipewire.status,
-          "Modern audio/video routing (optional)",
-          pipewire.path,
-          pipewire.error
-        ) : ""}
+        ${
+          pipewire
+            ? renderIntegrationCard(
+                "🔗",
+                "PipeWire",
+                pipewire.status,
+                "Modern audio/video routing (optional)",
+                pipewire.path,
+                pipewire.error,
+              )
+            : ""
+        }
       </div>
 
       <div class="integration-info-box">
@@ -362,7 +407,7 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           v4l2loopback.status,
           "Kernel module for virtual camera support",
           undefined,
-          v4l2loopback.error
+          v4l2loopback.error,
         )}
         ${renderIntegrationCard(
           "📷",
@@ -370,7 +415,7 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           virtualCamera.status,
           "Virtual webcam device for avatar video",
           virtualCamera.path || "/dev/video10",
-          virtualCamera.error
+          virtualCamera.error,
         )}
         ${renderIntegrationCard(
           "🎥",
@@ -378,7 +423,7 @@ function renderTechnicalIntegrations(state: MeetBotState): string {
           ffmpeg.status,
           "Video encoding/streaming to virtual camera",
           undefined,
-          ffmpeg.error
+          ffmpeg.error,
         )}
       </div>
 
@@ -486,30 +531,35 @@ export function getUpcomingMeetingsHtml(state: MeetBotState): string {
     }
   }
 
-  return state.upcomingMeetings.map((meeting, index) => {
-    const meetingAny = meeting as any;
-    const calendarName = meetingAny.calendarName || "";
-    const startTime = new Date(meeting.startTime);
-    const endTime = meeting.endTime ? new Date(meeting.endTime) : null;
-    // Meeting is active if it has started but not ended
-    const isActive = startTime <= now && (!endTime || endTime > now);
-    // Meeting is next if it's the first one that hasn't started yet
-    const isNext = index === nextMeetingIndex && !isActive;
-    const meetUrlSafe = escapeHtml(meeting.url).replace(/'/g, "\\'");
-    const titleSafe = escapeHtml(meeting.title).replace(/'/g, "\\'");
-    const meetingMode = meetingAny.botMode || "notes"; // Default to notes
-    const isApproved = meeting.status === "approved";
-    const statusStr = meeting.status as string;
-    const isScheduled = statusStr === "scheduled" || statusStr === "pending";
-    return `
-    <div class="upcoming-meeting-row ${isActive ? 'active-meeting' : ''} ${isNext ? 'next-meeting' : ''}" data-meeting-id="${meeting.id}">
+  return state.upcomingMeetings
+    .map((meeting, index) => {
+      const meetingAny = meeting as any;
+      const calendarName = meetingAny.calendarName || "";
+      const startTime = new Date(meeting.startTime);
+      const endTime = meeting.endTime ? new Date(meeting.endTime) : null;
+      // Meeting is active if it has started but not ended
+      const isActive = startTime <= now && (!endTime || endTime > now);
+      // Meeting is next if it's the first one that hasn't started yet
+      const isNext = index === nextMeetingIndex && !isActive;
+      const meetUrlSafe = escapeHtml(meeting.url)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+      const titleSafe = escapeHtml(meeting.title)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+      const meetingMode = meetingAny.botMode || "notes"; // Default to notes
+      const isApproved = meeting.status === "approved";
+      const statusStr = meeting.status as string;
+      const isScheduled = statusStr === "scheduled" || statusStr === "pending";
+      return `
+    <div class="upcoming-meeting-row ${isActive ? "active-meeting" : ""} ${isNext ? "next-meeting" : ""}" data-meeting-id="${meeting.id}">
       <div class="upcoming-meeting-time">
         <div class="upcoming-time-main">${formatTime(meeting.startTime)}</div>
         <div class="upcoming-time-date">${formatDateShort(meeting.startTime)}</div>
       </div>
       <div class="upcoming-meeting-info">
         <div class="upcoming-meeting-title">
-          ${isActive ? '<span class="active-badge">ACTIVE</span>' : isNext ? '<span class="next-badge">NEXT</span>' : ''}
+          ${isActive ? '<span class="active-badge">ACTIVE</span>' : isNext ? '<span class="next-badge">NEXT</span>' : ""}
           ${escapeHtml(meeting.title)}
         </div>
         <div class="upcoming-meeting-meta">
@@ -520,31 +570,46 @@ export function getUpcomingMeetingsHtml(state: MeetBotState): string {
       <div class="upcoming-meeting-controls">
         <!-- Mode selector + Approval + Join all on same line -->
         <div class="meeting-mode-selector" data-meeting-id="${meeting.id}">
-          <button class="mode-btn ${meetingMode === 'notes' ? 'active' : ''}" data-mode="notes" data-id="${meeting.id}" title="Capture notes only">
+          <button class="mode-btn ${meetingMode === "notes" ? "active" : ""}" data-mode="notes" data-id="${meeting.id}" title="Capture notes only">
             📝 Notes
           </button>
-          <button class="mode-btn ${meetingMode === 'interactive' ? 'active' : ''}" data-mode="interactive" data-id="${meeting.id}" title="AI voice interaction">
+          <button class="mode-btn ${meetingMode === "interactive" ? "active" : ""}" data-mode="interactive" data-id="${meeting.id}" title="AI voice interaction">
             🎤 Interactive
           </button>
         </div>
-        ${isScheduled ? `
+        ${
+          isScheduled
+            ? `
           <button class="meeting-btn approve" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}">✓ Approve</button>
-        ` : isApproved ? `
+        `
+            : isApproved
+              ? `
           <span class="status-badge approved" data-action="unapprove" data-id="${meeting.id}" title="Click to skip this meeting">✓ Approved</span>
-        ` : (meeting.status === "rejected" || meeting.status === "missed" || meeting.status === "skipped") ? `
+        `
+              : meeting.status === "rejected" ||
+                  meeting.status === "missed" ||
+                  meeting.status === "skipped"
+                ? `
           <span class="status-badge skipped" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Click to approve this meeting">✗ Skipped</span>
-        ` : meeting.status === "failed" ? `
+        `
+                : meeting.status === "failed"
+                  ? `
           <span class="status-badge failed" data-action="approve" data-id="${meeting.id}" data-url="${meetUrlSafe}" data-mode="${meetingMode}" title="Join failed - click to retry">✗ Failed</span>
-        ` : meeting.status === "active" ? `
+        `
+                  : meeting.status === "active"
+                    ? `
           <span class="status-badge active">● Active</span>
-        ` : `
+        `
+                    : `
           <span class="status-badge ${meeting.status}">${meeting.status}</span>
-        `}
+        `
+        }
         <button class="meeting-btn join" data-action="join" data-url="${meetUrlSafe}" data-title="${titleSafe}" data-mode="${meetingMode}">🎥 Join Now</button>
       </div>
     </div>
   `;
-  }).join("");
+    })
+    .join("");
 }
 
 /**
@@ -552,14 +617,10 @@ export function getUpcomingMeetingsHtml(state: MeetBotState): string {
  * @param state - The meet bot state
  * @param webview - Optional webview for converting local file URIs (for screenshots)
  */
-export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webview): string {
-  const avatarImage = path.join(
-    os.homedir(),
-    "Documents",
-    "Identification",
-    "IMG_3249_.jpg"
-  );
-
+export function getMeetingsTabContent(
+  state: MeetBotState,
+  webview?: vscode.Webview,
+): string {
   const isNotesMode = state.botMode === "notes";
   const upcomingCount = state.upcomingMeetings?.length || 0;
   const historyCount = state.recentNotes?.length || 0;
@@ -567,94 +628,108 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
   // Format upcoming meetings for the Upcoming tab - use the shared function
   const upcomingMeetingsHtml = getUpcomingMeetingsHtml(state);
 
-  // Format captions
-  const captionsHtml = state.captions?.length > 0
-    ? state.captions.slice(-20).map(caption => `
-        <div class="caption-entry ${caption.text.toLowerCase().includes("david") ? "wake-word" : ""}">
-          <span class="caption-time">${formatTime(caption.timestamp)}</span>
-          <span class="caption-speaker">${escapeHtml(caption.speaker)}:</span>
-          <span class="caption-text">${escapeHtml(caption.text)}</span>
-        </div>
-      `).join("")
-    : `<div class="placeholder-centered">Captions will appear here when in a meeting</div>`;
-
   // Get active meetings (use new array or fall back to single meeting)
-  const activeMeetings = state.currentMeetings || (state.currentMeeting ? [state.currentMeeting] : []);
+  const activeMeetings =
+    state.currentMeetings ||
+    (state.currentMeeting ? [state.currentMeeting] : []);
   const activeMeetingCount = activeMeetings.length;
 
   // Active meeting panel content - supports multiple meetings
-  const activeMeetingContent = activeMeetingCount > 0
-    ? `
+  const activeMeetingContent =
+    activeMeetingCount > 0
+      ? `
       <!-- Active Meetings Header -->
       <div class="active-meetings-header">
         <div class="active-meetings-count">
           <span class="live-indicator"></span>
-          🎥 ${activeMeetingCount} Active Meeting${activeMeetingCount > 1 ? 's' : ''}
+          🎥 ${activeMeetingCount} Active Meeting${activeMeetingCount > 1 ? "s" : ""}
         </div>
-        ${activeMeetingCount > 1 ? `
+        ${
+          activeMeetingCount > 1
+            ? `
           <button class="btn-small danger" id="btn-leave-all">🚪 Leave All</button>
-        ` : ''}
+        `
+            : ""
+        }
       </div>
 
       <!-- Meeting Cards -->
       <div class="active-meetings-grid">
-        ${activeMeetings.map((meeting: any, index: number) => {
-          const timeRemaining = meeting.timeRemainingMinutes;
-          const hasScheduledEnd = timeRemaining !== null && timeRemaining !== undefined;
-          const isEndingSoon = hasScheduledEnd && timeRemaining < 10;
-          const screenshotPath = meeting.screenshotPath;
-          const screenshotUpdated = meeting.screenshotUpdated ? new Date(meeting.screenshotUpdated * 1000).toLocaleTimeString() : '';
-          // Convert local file path to webview URI if webview is available
-          let screenshotUri = '';
-          console.log(`[Screenshot] Path: ${screenshotPath}, Webview available: ${!!webview}`);
-          if (screenshotPath && webview) {
-            try {
-              const fileUri = vscode.Uri.file(screenshotPath);
-              screenshotUri = webview.asWebviewUri(fileUri).toString();
-              console.log(`[Screenshot] Converted URI: ${screenshotUri}`);
-            } catch (e) {
-              console.error('Failed to convert screenshot path:', e);
+        ${activeMeetings
+          .map((meeting: any) => {
+            const timeRemaining = meeting.timeRemainingMinutes;
+            const hasScheduledEnd =
+              timeRemaining !== null && timeRemaining !== undefined;
+            const isEndingSoon = hasScheduledEnd && timeRemaining < 10;
+            const screenshotPath = meeting.screenshotPath;
+            const screenshotUpdated = meeting.screenshotUpdated
+              ? new Date(meeting.screenshotUpdated * 1000).toLocaleTimeString()
+              : "";
+            // Convert local file path to webview URI if webview is available
+            let screenshotUri = "";
+            console.log(
+              `[Screenshot] Path: ${screenshotPath}, Webview available: ${!!webview}`,
+            );
+            if (screenshotPath && webview) {
+              try {
+                const fileUri = vscode.Uri.file(screenshotPath);
+                screenshotUri = webview.asWebviewUri(fileUri).toString();
+                console.log(`[Screenshot] Converted URI: ${screenshotUri}`);
+              } catch (e) {
+                console.error("Failed to convert screenshot path:", e);
+              }
+            } else if (screenshotPath && !webview) {
+              console.warn(
+                "[Screenshot] Webview not available for URI conversion",
+              );
             }
-          } else if (screenshotPath && !webview) {
-            console.warn('[Screenshot] Webview not available for URI conversion');
-          }
-          return `
-          <div class="active-meeting-card ${isEndingSoon ? 'ending-soon' : ''}" data-session-id="${meeting.sessionId || ''}">
-            ${screenshotUri ? `
+            return `
+          <div class="active-meeting-card ${isEndingSoon ? "ending-soon" : ""}" data-session-id="${meeting.sessionId || ""}">
+            ${
+              screenshotUri
+                ? `
               <div class="meeting-screenshot">
                 <img src="${screenshotUri}" alt="Meeting view" onerror="this.parentElement.innerHTML='<div class=\\'screenshot-placeholder-content\\'><span class=\\'screenshot-placeholder-icon\\'>📹</span><span class=\\'screenshot-placeholder-text\\'>Screenshot unavailable</span></div>'" />
                 <div class="screenshot-overlay">
                   <span class="screenshot-time">📷 ${screenshotUpdated}</span>
                 </div>
               </div>
-            ` : `
+            `
+                : `
               <div class="meeting-screenshot placeholder">
                 <div class="screenshot-placeholder-content">
                   <span class="screenshot-placeholder-icon">📹</span>
                   <span class="screenshot-placeholder-text">Waiting for screenshot...</span>
                 </div>
               </div>
-            `}
+            `
+            }
             <div class="active-meeting-card-header">
               <div class="active-meeting-title">${escapeHtml(meeting.title)}</div>
               <div class="active-meeting-actions">
-                <button class="btn-small audio-toggle" data-action="toggle-audio" data-session="${meeting.sessionId || ''}" title="Toggle meeting audio">
+                <button class="btn-small audio-toggle" data-action="toggle-audio" data-session="${meeting.sessionId || ""}" title="Toggle meeting audio">
                   🔇 Listen
                 </button>
-                <button class="btn-small danger" data-action="leave" data-session="${meeting.sessionId || ''}">🚪 Leave</button>
+                <button class="btn-small danger" data-action="leave" data-session="${meeting.sessionId || ""}">🚪 Leave</button>
               </div>
             </div>
             <div class="active-meeting-stats">
               <span>⏱️ ${(meeting.durationMinutes || 0).toFixed(1)} min</span>
               <span>💬 ${meeting.captionsCount || 0} captions</span>
-              ${hasScheduledEnd ? `
-                <span class="time-remaining ${isEndingSoon ? 'warning' : ''}">
-                  ${isEndingSoon ? '⚠️' : '🕐'} ${Math.round(timeRemaining)} min left
+              ${
+                hasScheduledEnd
+                  ? `
+                <span class="time-remaining ${isEndingSoon ? "warning" : ""}">
+                  ${isEndingSoon ? "⚠️" : "🕐"} ${Math.round(timeRemaining)} min left
                 </span>
-              ` : ''}
+              `
+                  : ""
+              }
             </div>
           </div>
-        `;}).join('')}
+        `;
+          })
+          .join("")}
       </div>
 
       <!-- Live Captions Panel - Combined from all meetings -->
@@ -664,7 +739,7 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <span class="live-indicator"></span>
             📝 Live Captions
             <span class="caption-count">${state.captions?.length || 0} entries</span>
-            ${activeMeetingCount > 1 ? '<span class="caption-hint">(all meetings)</span>' : ''}
+            ${activeMeetingCount > 1 ? '<span class="caption-hint">(all meetings)</span>' : ""}
           </div>
           <div class="live-captions-actions">
             <button class="btn-small" id="btn-copy-transcript">📋 Copy</button>
@@ -672,26 +747,34 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
           </div>
         </div>
         <div class="live-captions-feed" id="transcriptionFeed">
-          ${state.captions?.length > 0 ? state.captions.map((caption: any) => `
+          ${
+            state.captions?.length > 0
+              ? state.captions
+                  .map(
+                    (caption: any) => `
             <div class="live-caption-entry">
               <div class="caption-meta">
                 <span class="caption-speaker">${escapeHtml(caption.speaker)}</span>
-                ${caption.meetingTitle && activeMeetingCount > 1 ? `<span class="caption-meeting">${escapeHtml(caption.meetingTitle)}</span>` : ''}
+                ${caption.meetingTitle && activeMeetingCount > 1 ? `<span class="caption-meeting">${escapeHtml(caption.meetingTitle)}</span>` : ""}
                 <span class="caption-time">${formatTime(caption.timestamp)}</span>
               </div>
               <div class="caption-text">${escapeHtml(caption.text)}</div>
             </div>
-          `).join("") : `
+          `,
+                  )
+                  .join("")
+              : `
             <div class="captions-placeholder">
               <div class="captions-placeholder-icon">🎤</div>
               <div class="captions-placeholder-text">Waiting for captions...</div>
               <div class="captions-placeholder-hint">Captions will appear here as people speak</div>
             </div>
-          `}
+          `
+          }
         </div>
       </div>
     `
-    : `
+      : `
       <div class="no-meeting">
         <div class="no-meeting-icon">🤖</div>
         <div class="no-meeting-text">Not in a meeting</div>
@@ -700,26 +783,19 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
     `;
 
   // Generate calendars list for notes mode
-  const calendarsHtml = state.monitoredCalendars?.length > 0
-    ? state.monitoredCalendars.map(cal => `
+  const calendarsHtml =
+    state.monitoredCalendars?.length > 0
+      ? state.monitoredCalendars
+          .map(
+            (cal) => `
         <div class="calendar-item">
           <span class="name">${cal.enabled ? "✅" : "⏸️"} ${escapeHtml(cal.name)}</span>
           <span class="status">${cal.autoJoin ? "auto-join" : "manual"}</span>
         </div>
-      `).join("")
-    : `<div class="placeholder-text">No calendars configured</div>`;
-
-  // Generate recent notes list
-  const notesHtml = state.recentNotes?.length > 0
-    ? state.recentNotes.map(note => `
-        <div class="note-item" data-action="viewNote" data-note-id="${note.id}">
-          <div class="note-title">${escapeHtml(note.title)}</div>
-          <div class="note-meta">
-            ${note.date} • ${note.duration} min • ${note.transcriptCount} entries
-          </div>
-        </div>
-      `).join("")
-    : `<div class="placeholder-text">No meeting notes yet</div>`;
+      `,
+          )
+          .join("")
+      : `<div class="placeholder-text">No calendars configured</div>`;
 
   return `
     <div class="meetings-container">
@@ -793,11 +869,11 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
                 <div class="form-row">
                   <label class="form-label">Mode:</label>
                   <label class="input-label">
-                    <input type="radio" name="quickJoinMode" value="notes" ${isNotesMode ? 'checked' : ''}>
+                    <input type="radio" name="quickJoinMode" value="notes" ${isNotesMode ? "checked" : ""}>
                     <span class="text-base">📝 Notes</span>
                   </label>
                   <label class="input-label">
-                    <input type="radio" name="quickJoinMode" value="interactive" ${!isNotesMode ? 'checked' : ''}>
+                    <input type="radio" name="quickJoinMode" value="interactive" ${!isNotesMode ? "checked" : ""}>
                     <span class="text-base">🎤 Interactive</span>
                   </label>
                 </div>
@@ -839,26 +915,34 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
             <!-- Test Actions (useful when in a meeting) -->
             <div class="section">
               <h2 class="section-title">🔧 Test Actions</h2>
-              ${state.currentMeetings && state.currentMeetings.length > 0 ? `
+              ${
+                state.currentMeetings && state.currentMeetings.length > 0
+                  ? `
                 <div class="mb-12">
                   <label class="form-label d-block mb-4">
                     Target Meeting:
                   </label>
                   <select id="test-target-meeting" class="meeting-select w-full">
-                    ${state.currentMeetings.map((m: any) => `
-                      <option value="${m.sessionId || m.id || ''}">${escapeHtml(m.title || 'Untitled Meeting')}</option>
-                    `).join('')}
+                    ${state.currentMeetings
+                      .map(
+                        (m: any) => `
+                      <option value="${m.sessionId || m.id || ""}">${escapeHtml(m.title || "Untitled Meeting")}</option>
+                    `,
+                      )
+                      .join("")}
                   </select>
                 </div>
-              ` : `
+              `
+                  : `
                 <p class="text-sm text-secondary mb-12">
                   No active meetings. Join a meeting to test actions.
                 </p>
-              `}
+              `
+              }
               <div class="d-flex flex-col gap-8">
-                <button class="btn btn-sm" data-action="testTTS" ${!state.currentMeetings?.length ? 'disabled' : ''}>🔊 Test Voice</button>
-                <button class="btn btn-sm" data-action="testAvatar" ${!state.currentMeetings?.length ? 'disabled' : ''}>🎬 Test Avatar</button>
-                <button class="btn btn-sm" data-action="preloadJira" ${!state.currentMeetings?.length ? 'disabled' : ''}>📋 Preload Jira</button>
+                <button class="btn btn-sm" data-action="testTTS" ${!state.currentMeetings?.length ? "disabled" : ""}>🔊 Test Voice</button>
+                <button class="btn btn-sm" data-action="testAvatar" ${!state.currentMeetings?.length ? "disabled" : ""}>🎬 Test Avatar</button>
+                <button class="btn btn-sm" data-action="preloadJira" ${!state.currentMeetings?.length ? "disabled" : ""}>📋 Preload Jira</button>
               </div>
             </div>
           </div>
@@ -876,12 +960,16 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
         <div class="section mb-16">
           <div class="flex-between">
             <h2 class="section-title m-0">📅 Upcoming Meetings</h2>
-            ${state.nextMeeting ? `
-              <div class="countdown-display" id="countdown-display" data-start-time="${state.nextMeeting.startTime || ''}">
+            ${
+              state.nextMeeting
+                ? `
+              <div class="countdown-display" id="countdown-display" data-start-time="${state.nextMeeting.startTime || ""}">
                 <span class="countdown-label">Next meeting in:</span>
-                <span class="countdown-value" id="countdown-value">${state.countdown || 'calculating...'}</span>
+                <span class="countdown-value" id="countdown-value">${state.countdown || "calculating..."}</span>
               </div>
-            ` : ''}
+            `
+                : ""
+            }
           </div>
           <p class="text-secondary text-base mt-4">
             Pre-approve meetings to auto-join, or join immediately
@@ -904,7 +992,11 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
           </div>
         </div>
         <div class="history-list">
-          ${state.recentNotes?.length > 0 ? state.recentNotes.map((note: any) => `
+          ${
+            state.recentNotes?.length > 0
+              ? state.recentNotes
+                  .map(
+                    (note: any) => `
             <div class="history-item" data-note-id="${note.id}">
               <div class="history-item-header">
                 <div class="history-item-title">${escapeHtml(note.title)}</div>
@@ -913,23 +1005,27 @@ export function getMeetingsTabContent(state: MeetBotState, webview?: vscode.Webv
               <div class="history-item-meta">
                 <span>⏱️ ${note.duration} min</span>
                 <span>💬 ${note.transcriptCount} entries</span>
-                ${note.actionItems ? `<span>✅ ${note.actionItems} actions</span>` : ''}
-                ${note.linkedIssues ? `<span>🎫 ${note.linkedIssues} issues</span>` : ''}
+                ${note.actionItems ? `<span>✅ ${note.actionItems} actions</span>` : ""}
+                ${note.linkedIssues ? `<span>🎫 ${note.linkedIssues} issues</span>` : ""}
               </div>
               <div class="history-item-actions">
                 <button class="btn-small" data-action="viewNote" data-note-id="${note.id}">📄 View Notes</button>
                 <button class="btn-small" data-action="viewTranscript" data-note-id="${note.id}">📝 Transcript</button>
                 <button class="btn-small" data-action="viewBotLog" data-note-id="${note.id}">🤖 Bot Log</button>
-                ${note.linkedIssues ? `<button class="btn-small" data-action="viewLinkedIssues" data-note-id="${note.id}">🎫 Issues</button>` : ''}
+                ${note.linkedIssues ? `<button class="btn-small" data-action="viewLinkedIssues" data-note-id="${note.id}">🎫 Issues</button>` : ""}
               </div>
             </div>
-          `).join('') : `
+          `,
+                  )
+                  .join("")
+              : `
             <div class="empty-state">
               <div class="empty-state-icon">📝</div>
               <div class="empty-state-text">No meeting notes yet</div>
               <div class="hint-text">Meeting transcripts and notes will appear here after the bot joins meetings</div>
             </div>
-          `}
+          `
+          }
         </div>
       </div>
 
@@ -2077,29 +2173,6 @@ function formatTime(timestamp: string): string {
   try {
     const date = new Date(timestamp);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return timestamp;
-  }
-}
-
-function formatDateTime(timestamp: string): string {
-  try {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    let dayStr = "";
-    if (date.toDateString() === now.toDateString()) {
-      dayStr = "Today";
-    } else if (date.toDateString() === tomorrow.toDateString()) {
-      dayStr = "Tomorrow";
-    } else {
-      dayStr = date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-    }
-
-    const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return `${dayStr} ${timeStr}`;
   } catch {
     return timestamp;
   }
