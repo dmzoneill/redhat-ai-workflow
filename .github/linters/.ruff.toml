@@ -1,6 +1,6 @@
-# Match Black's 88-column layout from pyproject.toml.
-# Super-linter's default template uses 120, which Black then rewrites.
-line-length = 88
+# Match Black's 120-column layout from pyproject.toml.
+# Super-linter's default template also uses 120.
+line-length = 120
 cache-dir = "/tmp/.ruff_cache"
 
 [lint]

@@ -12,7 +12,7 @@ from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from mcp.types import TextContent
+from mcp.types import TextContent  # pylint: disable=wrong-import-order
 
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
@@ -34,11 +34,7 @@ async def _bonfire_apps_dependencies_impl(component: str) -> list[TextContent]:
     success, output = await run_bonfire(["apps", "what-depends-on", component])
 
     if not success:
-        return [
-            TextContent(
-                type="text", text=f"❌ Failed to check dependencies:\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to check dependencies:\n\n{output}")]
 
     return [
         TextContent(
@@ -48,6 +44,7 @@ async def _bonfire_apps_dependencies_impl(component: str) -> list[TextContent]:
     ]
 
 
+# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments
 async def _bonfire_deploy_impl(
     app: str,
     namespace: str = "",
@@ -90,11 +87,7 @@ async def _bonfire_deploy_impl(
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
     if not success:
-        return [
-            TextContent(
-                type="text", text=f"❌ Deployment failed:\n\n```\n{output}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Deployment failed:\n\n```\n{output}\n```")]
 
     display_output = truncate_output(output, 5000, mode="tail")
 
@@ -113,6 +106,7 @@ async def _bonfire_deploy_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
+# pylint: disable-next=too-many-locals,too-many-return-statements
 async def _bonfire_deploy_aa_impl(
     namespace: str,
     template_ref: str,
@@ -149,8 +143,7 @@ async def _bonfire_deploy_aa_impl(
 
     # Strip sha256: prefix if present
     digest = image_tag
-    if digest.startswith("sha256:"):
-        digest = digest[7:]
+    digest = digest.removeprefix("sha256:")
 
     # VALIDATE image_tag: Must be 64-char sha256 digest
     if len(digest) != 64:
@@ -188,7 +181,7 @@ Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
     repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
     image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
 
-    logger.info(f"Checking if image exists: {image_ref}")
+    logger.info("Checking if image exists: %s", image_ref)
 
     check_success, check_output = await run_cmd(
         ["skopeo", "inspect", "--raw", image_ref],
@@ -260,7 +253,8 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
     # Log the full command for debugging
     kubeconfig = get_ephemeral_kubeconfig()
     cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
-    logger.info(f"Deploying AA: {cmd_preview}")
+    # Log only the bonfire arguments; the kubeconfig path stays out of logs.
+    logger.info("Deploying AA: bonfire %s", " ".join(args))
 
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
@@ -269,7 +263,7 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
         return [
             TextContent(
                 type="text",
-                text=f"""❌ AA {'billing' if billing else 'main'} deployment failed
+                text=f"""❌ AA {"billing" if billing else "main"} deployment failed
 
 **Command:**
 ```bash
@@ -316,17 +310,9 @@ async def _bonfire_namespace_describe_impl(namespace: str) -> list[TextContent]:
     success, output = await run_bonfire(["namespace", "describe", namespace])
 
     if not success:
-        return [
-            TextContent(
-                type="text", text=f"❌ Failed to describe namespace:\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to describe namespace:\n\n{output}")]
 
-    return [
-        TextContent(
-            type="text", text=f"## Namespace: `{namespace}`\n\n```\n{output}\n```"
-        )
-    ]
+    return [TextContent(type="text", text=f"## Namespace: `{namespace}`\n\n```\n{output}\n```")]
 
 
 async def _bonfire_namespace_extend_impl(
@@ -334,14 +320,10 @@ async def _bonfire_namespace_extend_impl(
     duration: str = "1h",
 ) -> list[TextContent]:
     """Implementation of bonfire_namespace_extend tool."""
-    success, output = await run_bonfire(
-        ["namespace", "extend", namespace, "--duration", duration]
-    )
+    success, output = await run_bonfire(["namespace", "extend", namespace, "--duration", duration])
 
     if not success:
-        return [
-            TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to extend namespace:\n\n{output}")]
 
     return [
         TextContent(
@@ -360,17 +342,13 @@ async def _bonfire_namespace_list_impl(mine_only: bool = True) -> list[TextConte
     success, output = await run_bonfire(args)
 
     if not success:
-        return [
-            TextContent(type="text", text=f"❌ Failed to list namespaces:\n\n{output}")
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to list namespaces:\n\n{output}")]
 
     title = "My Ephemeral Namespaces" if mine_only else "All Ephemeral Namespaces"
     return [TextContent(type="text", text=f"## {title}\n\n```\n{output}\n```")]
 
 
-async def _bonfire_namespace_release_impl(
-    namespace: str, force: bool = False
-) -> list[TextContent]:
+async def _bonfire_namespace_release_impl(namespace: str, force: bool = False) -> list[TextContent]:
     """Implementation of bonfire_namespace_release tool."""
     # First verify ownership by checking --mine list
     if not force:
@@ -397,19 +375,12 @@ If you're sure you want to release it, call with `force=True` (not recommended).
     success, output = await run_bonfire(["namespace", "release", namespace, "--force"])
 
     if not success:
-        return [
-            TextContent(
-                type="text", text=f"❌ Failed to release namespace:\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to release namespace:\n\n{output}")]
 
-    return [
-        TextContent(
-            type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}"
-        )
-    ]
+    return [TextContent(type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}")]
 
 
+# pylint: disable-next=too-many-arguments,too-many-positional-arguments
 async def _bonfire_namespace_reserve_impl(
     duration: str = "1h",
     pool: str = "default",
@@ -434,11 +405,7 @@ async def _bonfire_namespace_reserve_impl(
     success, output = await run_bonfire(args, timeout=timeout + 60)
 
     if not success:
-        return [
-            TextContent(
-                type="text", text=f"❌ Failed to reserve namespace:\n\n{output}"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Failed to reserve namespace:\n\n{output}")]
 
     lines = [
         "## ✅ Namespace Reserved",
@@ -472,11 +439,7 @@ async def _bonfire_namespace_wait_impl(
     if not success:
         return [TextContent(type="text", text=f"❌ Wait failed:\n\n{output}")]
 
-    return [
-        TextContent(
-            type="text", text=f"✅ Resources ready in `{namespace}`\n\n{output}"
-        )
-    ]
+    return [TextContent(type="text", text=f"✅ Resources ready in `{namespace}`\n\n{output}")]
 
 
 async def _bonfire_pool_list_impl() -> list[TextContent]:
@@ -513,6 +476,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_deploy(
         app: str,
         namespace: str = "",
@@ -598,9 +562,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Deployment status.
         """
-        return await _bonfire_deploy_aa_impl(
-            namespace, template_ref, image_tag, billing, timeout
-        )
+        return await _bonfire_deploy_aa_impl(namespace, template_ref, image_tag, billing, timeout)
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -651,9 +613,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
-    async def bonfire_namespace_release(
-        namespace: str, force: bool = False
-    ) -> list[TextContent]:
+    async def bonfire_namespace_release(namespace: str, force: bool = False) -> list[TextContent]:
         """
         Release an ephemeral namespace reservation.
 
@@ -671,6 +631,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_namespace_reserve(
         duration: str = "1h",
         pool: str = "default",
@@ -693,9 +654,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Reserved namespace name.
         """
-        return await _bonfire_namespace_reserve_impl(
-            duration, pool, requester, name, timeout, force
-        )
+        return await _bonfire_namespace_reserve_impl(duration, pool, requester, name, timeout, force)
 
     @auto_heal_ephemeral()
     @registry.tool()
