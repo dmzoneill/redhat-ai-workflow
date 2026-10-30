@@ -1,0 +1,9 @@
+[MASTER]
+jobs=0
+
+[MESSAGES CONTROL]
+disable=import-error
+
+[FORMAT]
+# Match black/ruff (pyproject.toml, .ruff.toml).
+max-line-length=120
