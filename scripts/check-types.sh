@@ -15,7 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Check specific module or all
-if [ -n "$1" ]; then
+if [[ -n "$1" ]]; then
     MODULES=("$1")
 else
     MODULES=($(ls -d "$PROJECT_ROOT"/tool_modules/aa-*/ 2>/dev/null | xargs -n1 basename))
@@ -30,7 +30,7 @@ failed=0
 for module in "${MODULES[@]}"; do
     module_path="$PROJECT_ROOT/tool_modules/$module"
 
-    if [ ! -d "$module_path/src" ]; then
+    if [[ ! -d "$module_path/src" ]]; then
         echo -e "${YELLOW}⊘ $module${NC} - No src/ directory, skipping"
         continue
     fi
@@ -55,7 +55,7 @@ done
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "Total: $total | ${GREEN}Passed: $passed${NC} | ${RED}Failed: $failed${NC}"
 
-if [ $failed -eq 0 ]; then
+if [[ $failed -eq 0 ]]; then
     echo -e "${GREEN}All type checks passed!${NC}"
     exit 0
 else

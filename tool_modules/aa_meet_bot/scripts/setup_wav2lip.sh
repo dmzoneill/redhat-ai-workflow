@@ -30,7 +30,7 @@ check_gpu() {
 
 # Clone Wav2Lip
 clone_wav2lip() {
-    if [ -d "$WAV2LIP_DIR" ]; then
+    if [[ -d "$WAV2LIP_DIR" ]]; then
         echo -e "${YELLOW}Wav2Lip already exists at $WAV2LIP_DIR${NC}"
         return 0
     fi
@@ -45,7 +45,7 @@ download_models() {
     mkdir -p "$CHECKPOINT_DIR"
 
     # wav2lip_gan.pth - Best quality
-    if [ ! -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]; then
+    if [[ ! -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]]; then
         echo "Downloading wav2lip_gan.pth (best quality)..."
         echo -e "${YELLOW}Note: You need to download manually from:${NC}"
         echo "https://github.com/Rudrabha/Wav2Lip#getting-the-weights"
@@ -61,7 +61,7 @@ download_models() {
     fi
 
     # Face detection model
-    if [ ! -f "$WAV2LIP_DIR/face_detection/detection/sfd/s3fd.pth" ]; then
+    if [[ ! -f "$WAV2LIP_DIR/face_detection/detection/sfd/s3fd.pth" ]]; then
         echo "Downloading face detection model..."
         mkdir -p "$WAV2LIP_DIR/face_detection/detection/sfd"
         # This is usually auto-downloaded on first run
@@ -77,7 +77,7 @@ install_deps() {
     cd "$WAV2LIP_DIR"
 
     # Create venv if not exists
-    if [ ! -d "venv" ]; then
+    if [[ ! -d "venv" ]]; then
         python3 -m venv venv
     fi
 
@@ -107,7 +107,7 @@ if torch.cuda.is_available():
     print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB')
 "
 
-    if [ -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]; then
+    if [[ -f "$CHECKPOINT_DIR/wav2lip_gan.pth" ]]; then
         echo -e "${GREEN}✓ Wav2Lip ready for use${NC}"
     else
         echo -e "${YELLOW}⚠ Wav2Lip installed but checkpoint missing${NC}"

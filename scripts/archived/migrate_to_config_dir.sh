@@ -62,8 +62,8 @@ migrate_file() {
     local dst="$2"
     local name="$3"
 
-    if [ -f "$src" ]; then
-        if [ -f "$dst" ]; then
+    if [[ -f "$src" ]]; then
+        if [[ -f "$dst" ]]; then
             echo -e "${YELLOW}  $name: Target exists, backing up to ${dst}.bak${NC}"
             cp "$dst" "${dst}.bak"
         fi
@@ -80,7 +80,7 @@ migrate_dir() {
     local dst="$2"
     local name="$3"
 
-    if [ -d "$src" ] && [ "$(ls -A "$src" 2>/dev/null)" ]; then
+    if [[ -d "$src" ]] && [[ "$(ls -A "$src" 2>/dev/null)" ]]; then
         echo -e "${GREEN}  $name: Moving contents from $src -> $dst${NC}"
         cp -r "$src"/* "$dst"/ 2>/dev/null || true
         echo -e "${YELLOW}  $name: Source directory preserved at $src (remove manually if desired)${NC}"
@@ -114,17 +114,17 @@ echo ""
 echo -e "${GREEN}Cleaning up empty directories...${NC}"
 
 # Clean up old directories if empty
-if [ -d "$OLD_MCP_DIR" ] && [ -z "$(ls -A "$OLD_MCP_DIR" 2>/dev/null)" ]; then
+if [[ -d "$OLD_MCP_DIR" ]] && [[ -z "$(ls -A "$OLD_MCP_DIR" 2>/dev/null)" ]]; then
     echo "  Removing empty $OLD_MCP_DIR"
     rmdir "$OLD_MCP_DIR" 2>/dev/null || true
 fi
 
-if [ -d "$HOME/.mcp" ] && [ -z "$(ls -A "$HOME/.mcp" 2>/dev/null)" ]; then
+if [[ -d "$HOME/.mcp" ]] && [[ -z "$(ls -A "$HOME/.mcp" 2>/dev/null)" ]]; then
     echo "  Removing empty $HOME/.mcp"
     rmdir "$HOME/.mcp" 2>/dev/null || true
 fi
 
-if [ -d "$OLD_MEET_DIR" ] && [ -z "$(ls -A "$OLD_MEET_DIR" 2>/dev/null)" ]; then
+if [[ -d "$OLD_MEET_DIR" ]] && [[ -z "$(ls -A "$OLD_MEET_DIR" 2>/dev/null)" ]]; then
     echo "  Removing empty $OLD_MEET_DIR"
     rmdir "$OLD_MEET_DIR" 2>/dev/null || true
 fi

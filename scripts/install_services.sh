@@ -34,7 +34,7 @@ install_service() {
     local source_file="$PROJECT_ROOT/systemd/${service_name}.service"
     local dest_file="$SYSTEMD_USER_DIR/${service_name}.service"
 
-    if [ ! -f "$source_file" ]; then
+    if [[ ! -f "$source_file" ]]; then
         echo "⚠️  Service file not found: $source_file"
         return 1
     fi

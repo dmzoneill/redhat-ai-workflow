@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 
 # Check if running as root for v4l2loopback
 check_root_for_video() {
-    if [ "$EUID" -ne 0 ]; then
+    if [[ "$EUID" -ne 0 ]]; then
         echo -e "${YELLOW}Note: v4l2loopback setup may require sudo${NC}"
     fi
 }
@@ -84,7 +84,7 @@ setup_video() {
     fi
 
     # Check device exists
-    if [ -e /dev/video10 ]; then
+    if [[ -e /dev/video10 ]]; then
         echo -e "${GREEN}✓ Virtual camera available at /dev/video10${NC}"
     else
         echo -e "${YELLOW}Warning: /dev/video10 not found, checking other devices...${NC}"

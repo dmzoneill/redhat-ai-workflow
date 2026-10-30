@@ -25,10 +25,10 @@ for i in $(seq 1 $SAMPLES); do
     get_rss() {
         local name="$1"
         local pid=$(pgrep -f "python3 -m services\.${name}$" 2>/dev/null | head -1)
-        if [ -n "$pid" ]; then
+        if [[ -n "$pid" ]]; then
             # RSS from /proc in KB, convert to MB
             local rss_kb=$(awk '/^VmRSS:/ {print $2}' /proc/$pid/status 2>/dev/null)
-            if [ -n "$rss_kb" ]; then
+            if [[ -n "$rss_kb" ]]; then
                 echo $(( rss_kb / 1024 ))
             else
                 echo "0"
@@ -51,7 +51,7 @@ for i in $(seq 1 $SAMPLES); do
     # Calculate total (only numeric values)
     TOTAL=0
     for val in $SLACK $MEET $CONFIG $STATS $MEMORY $SPRINT $CRON $SLOP $VIDEO; do
-        if [ "$val" != "-" ]; then
+        if [[ "$val" != "-" ]]; then
             TOTAL=$((TOTAL + val))
         fi
     done
@@ -60,7 +60,7 @@ for i in $(seq 1 $SAMPLES); do
         "$TS" "$SLACK" "$MEET" "$CONFIG" "$STATS" "$MEMORY" "$SPRINT" "$CRON" "$SLOP" "$VIDEO" "$TOTAL" | tee -a "$LOG_FILE"
 
     # Don't sleep after the last sample
-    if [ $i -lt $SAMPLES ]; then
+    if [[ $i -lt $SAMPLES ]]; then
         sleep $INTERVAL
     fi
 done
