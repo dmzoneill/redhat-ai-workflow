@@ -1,3 +1,5 @@
+# pylint: disable=duplicate-code
+# ruff: noqa: DTZ005 - naive local timestamps match daemon.py and persisted state
 """
 Sprint Planner — Issue prioritization, Jira refresh, and review checking.
 
@@ -8,6 +10,8 @@ daemon lifecycle and D-Bus orchestration.
 import asyncio
 import logging
 import re
+import shutil
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -40,22 +44,22 @@ class SprintPlanner:
 
     # Legacy properties for backward compatibility - delegate to config
     @property
-    def ACTIONABLE_STATUSES(self) -> list[str]:
+    def ACTIONABLE_STATUSES(self) -> list[str]:  # pylint: disable=invalid-name
         """Get actionable statuses from config."""
         return self.workflow_config.get_actionable_statuses()
 
     @property
-    def JIRA_STATUS_IN_PROGRESS(self) -> str:
+    def JIRA_STATUS_IN_PROGRESS(self) -> str:  # pylint: disable=invalid-name
         """Get In Progress status name from config."""
         return self.workflow_config.get_jira_transition("in_progress")
 
     @property
-    def JIRA_STATUS_IN_REVIEW(self) -> str:
+    def JIRA_STATUS_IN_REVIEW(self) -> str:  # pylint: disable=invalid-name
         """Get In Review status name from config."""
         return self.workflow_config.get_jira_transition("in_review")
 
     @property
-    def JIRA_STATUS_DONE(self) -> str:
+    def JIRA_STATUS_DONE(self) -> str:  # pylint: disable=invalid-name
         """Get Done status name from config."""
         return self.workflow_config.get_jira_transition("done")
 
@@ -113,6 +117,7 @@ class SprintPlanner:
 
     # ==================== Jira Integration ====================
 
+    # pylint: disable-next=too-many-locals,too-many-statements
     async def refresh_from_jira(self, jira_project: str = "AAP") -> None:
         """Refresh sprint issues from Jira by calling the Jira API directly.
 
@@ -124,19 +129,21 @@ class SprintPlanner:
         logger.info("Refreshing sprint issues from Jira...")
 
         try:
-            from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint
-            from tool_modules.aa_workflow.src.sprint_bot import (
+            from tool_modules.aa_jira.src.tools_basic import (  # pylint: disable=import-outside-toplevel
+                jira_get_active_sprint,
+            )
+            from tool_modules.aa_workflow.src.sprint_bot import (  # pylint: disable=import-outside-toplevel
                 SprintBotConfig,
                 WorkingHours,
                 fetch_sprint_issues,
                 to_sprint_issue_format,
             )
-            from tool_modules.aa_workflow.src.sprint_history import (
+            from tool_modules.aa_workflow.src.sprint_history import (  # pylint: disable=import-outside-toplevel
                 SprintIssue,
                 load_sprint_state,
                 save_sprint_state,
             )
-            from tool_modules.aa_workflow.src.sprint_prioritizer import (
+            from tool_modules.aa_workflow.src.sprint_prioritizer import (  # pylint: disable=import-outside-toplevel
                 prioritize_issues,
             )
 
@@ -157,9 +164,9 @@ class SprintPlanner:
                     "totalPoints": 0,  # Will be calculated from issues
                     "completedPoints": 0,  # Will be calculated from issues
                 }
-                logger.info(f"Active sprint: {current_sprint.get('name')}")
+                logger.info("Active sprint: %s", current_sprint.get("name"))
             else:
-                logger.warning(f"Could not get active sprint info: {sprint_info}")
+                logger.warning("Could not get active sprint info: %s", sprint_info)
 
             # Fetch issues from Jira (async)
             jira_issues = await fetch_sprint_issues(config)
@@ -169,7 +176,7 @@ class SprintPlanner:
                 return
 
             # Filter to only show issues assigned to current user
-            from server.utils import load_config
+            from server.utils import load_config  # pylint: disable=import-outside-toplevel
 
             user_config = load_config()
             user_info = user_config.get("user", {})
@@ -179,13 +186,12 @@ class SprintPlanner:
                 original_count = len(jira_issues)
                 # Match against username OR full name (Jira may use either)
                 match_values = [v.lower() for v in [jira_username, full_name] if v]
-                jira_issues = [
-                    issue
-                    for issue in jira_issues
-                    if issue.get("assignee", "").lower() in match_values
-                ]
+                jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
                 logger.info(
-                    f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
+                    "Filtered to %s/%s issues assigned to %s",
+                    len(jira_issues),
+                    original_count,
+                    jira_username or full_name,
                 )
 
             if not jira_issues:
@@ -255,9 +261,7 @@ class SprintPlanner:
             # Calculate points for sprint info
             total_points = sum(i.story_points for i in new_issues)
             completed_points = sum(
-                i.story_points
-                for i in new_issues
-                if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
+                i.story_points for i in new_issues if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
             )
 
             # Update currentSprint with calculated points
@@ -272,13 +276,13 @@ class SprintPlanner:
             save_sprint_state(state)
 
             logger.info(
-                f"Sprint refresh completed: {len(new_issues)} issues, "
-                f"sprint: {current_sprint.get('name') if current_sprint else 'None'}"
+                "Sprint refresh completed: %s issues, sprint: %s",
+                len(new_issues),
+                current_sprint.get("name") if current_sprint else "None",
             )
 
-        except Exception as e:
-            logger.error(f"Failed to refresh sprint: {e}")
-            import traceback
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to refresh sprint")
 
             logger.debug(traceback.format_exc())
             # Don't block - use existing state
@@ -304,15 +308,13 @@ class SprintPlanner:
         issues = state.get("issues", [])
 
         # Find issues in Review status
-        review_issues = [
-            i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES
-        ]
+        review_issues = [i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES]
 
         if not review_issues:
             logger.info("No issues in Review status")
             return
 
-        logger.info(f"Found {len(review_issues)} issues in Review")
+        logger.info("Found %s issues in Review", len(review_issues))
 
         # Patterns that indicate "don't merge yet"
         dont_merge_patterns = [
@@ -336,23 +338,20 @@ class SprintPlanner:
 
             try:
                 await self._check_single_review_issue(issue, dont_merge_patterns, state)
-            except Exception as e:
-                logger.error(f"Error checking review issue {issue_key}: {e}")
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.exception("Error checking review issue %s", issue_key)
                 continue
 
         # Save any state changes
         save_state_fn(state)
 
-    async def _check_single_review_issue(
-        self, issue: dict, dont_merge_patterns: list, state: dict
-    ) -> None:
+    # pylint: disable-next=too-many-locals
+    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list, state: dict) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
-        logger.info(f"Checking review status for {issue_key}")
+        logger.info("Checking review status for %s", issue_key)
 
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
                 logger.warning("Claude CLI not found, skipping review check")
@@ -369,7 +368,7 @@ class SprintPlanner:
 2. If an MR exists, check its status:
    - Is it approved?
    - Has the pipeline passed?
-   - Are there any comments containing: {', '.join(dont_merge_patterns[:5])}
+   - Are there any comments containing: {", ".join(dont_merge_patterns[:5])}
 
 3. Report the status in this exact format:
    [MR_STATUS: READY_TO_MERGE] - MR is approved, CI passed, no hold comments
@@ -393,46 +392,44 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
+                stdout, _stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=120,  # 2 minute timeout
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning(f"Review check timed out for {issue_key}")
+                logger.warning("Review check timed out for %s", issue_key)
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
             # Parse the status
             status_match = re.search(
-                r"\[MR_STATUS:\s*(\w+(?:_\w+)*)\](?:\s*reason:\s*(.+))?",
+                r"\[MR_STATUS:\s*(\w+)\](?:\s*reason:\s*(.+))?",
                 output,
                 re.IGNORECASE,
             )
             mr_id_match = re.search(r"\[MR_ID:\s*(\d+)\]", output)
 
             if not status_match:
-                logger.warning(f"Could not parse MR status for {issue_key}")
+                logger.warning("Could not parse MR status for %s", issue_key)
                 return
 
             mr_status = status_match.group(1).upper()
-            hold_reason = (
-                status_match.group(2).strip() if status_match.group(2) else None
-            )
+            hold_reason = status_match.group(2).strip() if status_match.group(2) else None
             mr_id = int(mr_id_match.group(1)) if mr_id_match else None
 
-            logger.info(f"{issue_key}: MR status = {mr_status}, MR ID = {mr_id}")
+            logger.info("%s: MR status = %s, MR ID = %s", issue_key, mr_status, mr_id)
 
-            if mr_status == "READY_TO_MERGE" and mr_id:
+            if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
                 # Merge the MR and transition to Done
                 await self._merge_and_close(issue_key, mr_id, issue, state)
 
             elif mr_status == "APPROVED_WITH_HOLD":
                 # Log but don't merge
-                logger.info(f"{issue_key}: MR approved but on hold: {hold_reason}")
-                from services.sprint.daemon import _add_timeline_event
+                logger.info("%s: MR approved but on hold: %s", issue_key, hold_reason)
+                from services.sprint.daemon import _add_timeline_event  # pylint: disable=import-outside-toplevel
 
                 _add_timeline_event(
                     issue,
@@ -444,28 +441,26 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
             elif mr_status == "CHANGES_REQUESTED":
-                logger.info(f"{issue_key}: Changes requested on MR")
+                logger.info("%s: Changes requested on MR", issue_key)
                 # Could notify or take action here
 
             elif mr_status == "CI_FAILING":
-                logger.info(f"{issue_key}: CI is failing")
+                logger.info("%s: CI is failing", issue_key)
                 # Could notify or take action here
 
             elif mr_status == "NO_MR":
-                logger.warning(f"{issue_key}: No MR found but issue is in Review")
+                logger.warning("%s: No MR found but issue is in Review", issue_key)
 
-        except Exception as e:
-            logger.error(f"Error checking MR status for {issue_key}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error checking MR status for %s", issue_key)
 
-    async def _merge_and_close(
-        self, issue_key: str, mr_id: int, issue: dict, state: dict
-    ) -> None:
+    # pylint: disable-next=too-many-locals
+    # pylint: disable-next=unused-argument
+    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict, state: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
-        logger.info(f"Merging MR !{mr_id} and closing {issue_key}")
+        logger.info("Merging MR !%s and closing %s", mr_id, issue_key)
 
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
                 logger.warning("Claude CLI not found, cannot merge")
@@ -502,33 +497,29 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
+                stdout, _stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=180,  # 3 minute timeout for merge
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning(f"Merge/close timed out for {issue_key}")
+                logger.warning("Merge/close timed out for %s", issue_key)
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
             # Parse the result
-            result_match = re.search(
-                r"\[MERGE_RESULT:\s*(\w+)\](?:\s*error:\s*(.+))?", output, re.IGNORECASE
-            )
+            result_match = re.search(r"\[MERGE_RESULT:\s*(\w+)\](?:\s*error:\s*(.+))?", output, re.IGNORECASE)
 
             if result_match:
                 result = result_match.group(1).upper()
                 error = result_match.group(2).strip() if result_match.group(2) else None
 
-                from services.sprint.daemon import _add_timeline_event
+                from services.sprint.daemon import _add_timeline_event  # pylint: disable=import-outside-toplevel
 
-                if result == "SUCCESS":
-                    logger.info(
-                        f"Successfully merged MR !{mr_id} and closed {issue_key}"
-                    )
+                if result == "SUCCESS":  # pylint: disable=no-else-return
+                    logger.info("Successfully merged MR !%s and closed %s", mr_id, issue_key)
 
                     # Update local state
                     issue["jiraStatus"] = self.JIRA_STATUS_DONE
@@ -544,7 +535,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
                     return  # Signal success via issue state mutation
                 else:
-                    logger.warning(f"Merge/close failed for {issue_key}: {error}")
+                    logger.warning("Merge/close failed for %s: %s", issue_key, error)
                     _add_timeline_event(
                         issue,
                         {
@@ -554,7 +545,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                         },
                     )
             else:
-                logger.warning(f"Could not parse merge result for {issue_key}")
+                logger.warning("Could not parse merge result for %s", issue_key)
 
-        except Exception as e:
-            logger.error(f"Error merging/closing {issue_key}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error merging/closing %s", issue_key)

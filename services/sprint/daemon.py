@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines
+# ruff: noqa: DTZ005, DTZ901 - naive local timestamps are persisted/compared; tz-aware is a separate change
 """
 Sprint Bot Daemon
 
@@ -36,8 +38,16 @@ import asyncio
 import json
 import logging
 import os
+import re
+import shutil
+import tempfile
+import traceback
 from datetime import datetime, time
 from pathlib import Path
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import yaml
 
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
@@ -78,6 +88,7 @@ def _add_timeline_event(issue: dict, event: dict) -> None:
         issue["timeline"] = issue["timeline"][-MAX_TIMELINE_ENTRIES:]
 
 
+# pylint: disable-next=too-many-instance-attributes
 class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     """Main Sprint Bot daemon with D-Bus support."""
 
@@ -91,6 +102,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     interface_name = "com.aiworkflow.BotSprint"
 
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
+        self._workflow_config: WorkflowConfig | None = None
         BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
         DaemonDBusBase.__init__(self)
         SleepWakeAwareDaemon.__init__(self)
@@ -103,7 +115,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._last_review_check = datetime.min
 
         # Configuration - read from config.json sprint section
-        from server.utils import load_config
+        from server.utils import load_config  # pylint: disable=import-outside-toplevel
 
         full_config = load_config()
         sprint_config = full_config.get("sprint", {})
@@ -113,38 +125,23 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "jira_project": sprint_config.get("jira", {}).get("project", "AAP"),
             "jira_component": sprint_config.get("jira", {}).get("component"),
             "working_hours": sprint_config.get("working_hours", {}),
-            "check_interval_seconds": scheduling.get("issue_processing", {}).get(
-                "interval_seconds", 300
-            ),
-            "jira_refresh_interval_seconds": scheduling.get("jira_refresh", {}).get(
-                "interval_seconds", 1800
-            ),
-            "review_check_interval_seconds": scheduling.get("review_check", {}).get(
-                "interval_hours", 8
-            )
-            * 3600,
-            "skip_blocked_after_minutes": sprint_config.get(
-                "skip_blocked_after_minutes", 30
-            ),
-            "claude_cli_timeout_seconds": sprint_config.get(
-                "claude_cli_timeout_seconds", 1800
-            ),
+            "check_interval_seconds": scheduling.get("issue_processing", {}).get("interval_seconds", 300),
+            "jira_refresh_interval_seconds": scheduling.get("jira_refresh", {}).get("interval_seconds", 1800),
+            "review_check_interval_seconds": scheduling.get("review_check", {}).get("interval_hours", 8) * 3600,
+            "skip_blocked_after_minutes": sprint_config.get("skip_blocked_after_minutes", 30),
+            "claude_cli_timeout_seconds": sprint_config.get("claude_cli_timeout_seconds", 1800),
         }
 
         # Register custom D-Bus method handlers
         self.register_handler("list_issues", self._handle_list_issues)
         self.register_handler("approve_issue", self._handle_approve_issue)
         self.register_handler("reject_issue", self._handle_reject_issue)  # Unapprove
-        self.register_handler(
-            "abort_issue", self._handle_abort_issue
-        )  # Abort in-progress
+        self.register_handler("abort_issue", self._handle_abort_issue)  # Abort in-progress
         self.register_handler("skip_issue", self._handle_skip_issue)
         self.register_handler("refresh", self._handle_refresh)
         self.register_handler("enable", self._handle_enable)  # Enable automatic mode
         self.register_handler("disable", self._handle_disable)  # Disable automatic mode
-        self.register_handler(
-            "start", self._handle_start
-        )  # Manual start (ignores schedule)
+        self.register_handler("start", self._handle_start)  # Manual start (ignores schedule)
         self.register_handler("stop", self._handle_stop)  # Manual stop
         self.register_handler("get_config", self._handle_get_config)
         self.register_handler("set_config", self._handle_set_config)
@@ -159,9 +156,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self.register_handler("get_state", self._handle_get_state)  # Full state for UI
         self.register_handler("get_history", self._handle_get_history)  # Sprint history
         self.register_handler("get_trace", self._handle_get_trace)  # Execution trace
-        self.register_handler(
-            "list_traces", self._handle_list_traces
-        )  # List all traces
+        self.register_handler("list_traces", self._handle_list_traces)  # List all traces
 
     # ==================== Abstract Method Implementations ====================
 
@@ -200,7 +195,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         state = self._load_state()
 
         # Count issues by status
-        status_counts = {}
+        status_counts: dict[str, int] = {}
         for issue in state.get("issues", []):
             status = issue.get("approvalStatus", "pending")
             status_counts[status] = status_counts.get(status, 0) + 1
@@ -222,9 +217,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "within_working_hours": within_hours,
         }
 
-    async def _handle_list_issues(
-        self, status: str = None, actionable: bool = None, **kwargs
-    ) -> dict:
+    async def _handle_list_issues(self, status: str | None = None, actionable: bool | None = None, **_kwargs) -> dict:
         """List all sprint issues."""
         state = self._load_state()
         issues = state.get("issues", [])
@@ -251,7 +244,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "not_actionable_count": len(issues) - actionable_count,
         }
 
-    async def _handle_approve_issue(self, issue_key: str = None, **kwargs) -> dict:
+    async def _handle_approve_issue(self, issue_key: str | None = None, **_kwargs) -> dict:
         """Approve an issue for processing.
 
         Only allows approval of actionable issues (New/Refinement/Backlog).
@@ -282,12 +275,12 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     },
                 )
                 self._save_state(state)
-                logger.info(f"Approved issue: {issue_key}")
+                logger.info("Approved issue: %s", issue_key)
                 return {"success": True, "message": f"Issue {issue_key} approved"}
 
         return {"success": False, "error": f"Issue {issue_key} not found"}
 
-    async def _handle_reject_issue(self, issue_key: str = None, **kwargs) -> dict:
+    async def _handle_reject_issue(self, issue_key: str | None = None, **_kwargs) -> dict:
         """Reject/unapprove an issue - set back to pending.
 
         This is the opposite of approve - removes the issue from the bot queue.
@@ -308,12 +301,12 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     },
                 )
                 self._save_state(state)
-                logger.info(f"Rejected/unapproved issue: {issue_key}")
+                logger.info("Rejected/unapproved issue: %s", issue_key)
                 return {"success": True, "message": f"Issue {issue_key} unapproved"}
 
         return {"success": False, "error": f"Issue {issue_key} not found"}
 
-    async def _handle_abort_issue(self, issue_key: str = None, **kwargs) -> dict:
+    async def _handle_abort_issue(self, issue_key: str | None = None, **_kwargs) -> dict:
         """Abort an in-progress issue - user takes control.
 
         Sets the issue to blocked and clears processingIssue if it matches.
@@ -337,7 +330,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 if state.get("processingIssue") == issue_key:
                     state["processingIssue"] = None
                 self._save_state(state)
-                logger.info(f"Aborted issue: {issue_key}")
+                logger.info("Aborted issue: %s", issue_key)
                 return {
                     "success": True,
                     "message": f"Issue {issue_key} aborted - you can now work on it manually",
@@ -346,7 +339,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         return {"success": False, "error": f"Issue {issue_key} not found"}
 
     async def _handle_skip_issue(
-        self, issue_key: str = None, reason: str = "Manually skipped", **kwargs
+        self, issue_key: str | None = None, reason: str = "Manually skipped", **_kwargs
     ) -> dict:
         """Skip/block an issue."""
         if not issue_key:
@@ -366,20 +359,21 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     },
                 )
                 self._save_state(state)
-                logger.info(f"Skipped issue: {issue_key} - {reason}")
+                logger.info("Skipped issue: %s - %s", issue_key, reason)
                 return {"success": True, "message": f"Issue {issue_key} skipped"}
 
         return {"success": False, "error": f"Issue {issue_key} not found"}
 
-    async def _handle_refresh(self, **kwargs) -> dict:
+    async def _handle_refresh(self, **_kwargs) -> dict:
         """Force refresh from Jira."""
         try:
             await self._refresh_from_jira()
             return {"success": True, "message": "Refreshed from Jira"}
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to refresh from Jira via D-Bus")
             return {"success": False, "error": str(e)}
 
-    async def _handle_enable(self, **kwargs) -> dict:
+    async def _handle_enable(self, **_kwargs) -> dict:
         """Enable automatic mode (scheduled Mon-Fri 9-5)."""
         state = self._load_state()
         state["automaticMode"] = True
@@ -388,7 +382,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Sprint bot automatic mode enabled")
         return {"success": True, "message": "Sprint bot automatic mode enabled"}
 
-    async def _handle_disable(self, **kwargs) -> dict:
+    async def _handle_disable(self, **_kwargs) -> dict:
         """Disable automatic mode."""
         state = self._load_state()
         state["automaticMode"] = False
@@ -397,7 +391,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Sprint bot automatic mode disabled")
         return {"success": True, "message": "Sprint bot automatic mode disabled"}
 
-    async def _handle_start(self, **kwargs) -> dict:
+    async def _handle_start(self, **_kwargs) -> dict:
         """Manually start the bot (ignores schedule)."""
         state = self._load_state()
         state["manuallyStarted"] = True
@@ -406,7 +400,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Sprint bot manually started")
         return {"success": True, "message": "Sprint bot started manually"}
 
-    async def _handle_stop(self, **kwargs) -> dict:
+    async def _handle_stop(self, **_kwargs) -> dict:
         """Stop the bot (if manually started)."""
         state = self._load_state()
         state["manuallyStarted"] = False
@@ -416,7 +410,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Sprint bot stopped")
         return {"success": True, "message": "Sprint bot stopped"}
 
-    async def _handle_get_config(self, **kwargs) -> dict:
+    async def _handle_get_config(self, **_kwargs) -> dict:
         """Get current configuration."""
         return {"success": True, "config": self._config}
 
@@ -427,7 +421,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 self._config[key] = value
         return {"success": True, "config": self._config}
 
-    async def _handle_approve_all(self, **kwargs) -> dict:
+    async def _handle_approve_all(self, **_kwargs) -> dict:
         """Approve all pending actionable issues.
 
         Only approves issues that are in actionable Jira statuses
@@ -455,20 +449,18 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     issue["approvalStatus"] = "completed"
                     skipped_count += 1
                     logger.debug(
-                        f"Skipped non-actionable issue: {issue.get('key')} (status: {issue.get('jiraStatus')})"
+                        "Skipped non-actionable issue: %s (status: %s)", issue.get("key"), issue.get("jiraStatus")
                     )
 
         self._save_state(state)
-        logger.info(
-            f"Approved {approved_count} actionable issues, skipped {skipped_count} non-actionable"
-        )
+        logger.info("Approved %s actionable issues, skipped %s non-actionable", approved_count, skipped_count)
         return {
             "success": True,
             "approved_count": approved_count,
             "skipped_count": skipped_count,
         }
 
-    async def _handle_reject_all(self, **kwargs) -> dict:
+    async def _handle_reject_all(self, **_kwargs) -> dict:
         """Reject/unapprove all approved issues - set back to pending.
 
         This is the opposite of approve_all.
@@ -490,10 +482,10 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 rejected_count += 1
 
         self._save_state(state)
-        logger.info(f"Unapproved {rejected_count} issues")
+        logger.info("Unapproved %s issues", rejected_count)
         return {"success": True, "rejected_count": rejected_count}
 
-    async def _handle_toggle_background(self, enabled: bool = None, **kwargs) -> dict:
+    async def _handle_toggle_background(self, enabled: bool | None = None, **_kwargs) -> dict:
         """Toggle background tasks mode.
 
         When enabled, the bot processes issues in background without opening
@@ -510,14 +502,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._save_state(state)
 
         mode = "enabled" if state["backgroundTasks"] else "disabled"
-        logger.info(f"Background tasks {mode}")
+        logger.info("Background tasks %s", mode)
         return {
             "success": True,
             "backgroundTasks": state["backgroundTasks"],
             "message": f"Background tasks {mode}",
         }
 
-    async def _handle_get_state(self, **kwargs) -> dict:
+    async def _handle_get_state(self, **_kwargs) -> dict:
         """Get full sprint state for UI.
 
         Returns the complete sprint state including issues, config, and status.
@@ -537,15 +529,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "issues_processed": self._issues_processed,
             "issues_completed": self._issues_completed,
             "last_jira_refresh": (
-                self._last_jira_refresh.isoformat()
-                if self._last_jira_refresh != datetime.min
-                else None
+                self._last_jira_refresh.isoformat() if self._last_jira_refresh != datetime.min else None
             ),
         }
 
         return {"success": True, "state": state}
 
-    async def _handle_get_history(self, **kwargs) -> dict:
+    async def _handle_get_history(self, **_kwargs) -> dict:
         """Get sprint history (completed sprints).
 
         Returns a list of completed sprints with their issues and stats.
@@ -554,11 +544,11 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             state = self._load_state()
             history = state.get("sprint_history", [])
             return {"success": True, "history": history}
-        except Exception as e:
-            logger.error(f"Failed to get sprint history: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to get sprint history")
             return {"success": False, "error": str(e), "history": []}
 
-    async def _handle_get_trace(self, issue_key: str = None, **kwargs) -> dict:
+    async def _handle_get_trace(self, issue_key: str | None = None, **_kwargs) -> dict:
         """Get execution trace for an issue.
 
         Parameters:
@@ -574,17 +564,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if not trace_file.exists():
                 return {"success": False, "error": f"No trace found for {issue_key}"}
 
-            import yaml
-
-            with open(trace_file, encoding="utf-8") as f:
-                trace = yaml.safe_load(f)
+            trace = yaml.safe_load(trace_file.read_text(encoding="utf-8"))
 
             return {"success": True, "trace": trace}
-        except Exception as e:
-            logger.error(f"Failed to get trace for {issue_key}: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to get trace for %s", issue_key)
             return {"success": False, "error": str(e)}
 
-    async def _handle_list_traces(self, **kwargs) -> dict:
+    async def _handle_list_traces(self, **_kwargs) -> dict:
         """List all available execution traces.
 
         Returns a list of trace summaries (issue key, state, started_at).
@@ -594,33 +581,28 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             traces = []
 
             if traces_dir.exists():
-                import yaml
-
                 for trace_file in traces_dir.glob("*.yaml"):
                     try:
-                        with open(trace_file, encoding="utf-8") as f:
-                            trace = yaml.safe_load(f)
+                        trace = yaml.safe_load(trace_file.read_text(encoding="utf-8"))
                         if trace:
                             traces.append(
                                 {
-                                    "issue_key": trace.get(
-                                        "issue_key", trace_file.stem
-                                    ),
+                                    "issue_key": trace.get("issue_key", trace_file.stem),
                                     "state": trace.get("current_state", "unknown"),
                                     "started_at": trace.get("started_at", ""),
                                 }
                             )
-                    except Exception as e:
-                        logger.warning(f"Failed to parse trace {trace_file}: {e}")
+                    except (OSError, yaml.YAMLError) as e:
+                        logger.warning("Failed to parse trace %s: %s", trace_file, e)
 
             # Sort by started_at descending
             traces.sort(key=lambda t: t.get("started_at", ""), reverse=True)
             return {"success": True, "traces": traces}
-        except Exception as e:
-            logger.error(f"Failed to list traces: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to list traces")
             return {"success": False, "error": str(e), "traces": []}
 
-    async def _handle_process_next(self, **kwargs) -> dict:
+    async def _handle_process_next(self, **_kwargs) -> dict:
         """Manually trigger processing of next issue."""
         result = await self._process_next_issue()
         return result
@@ -637,15 +619,17 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         return {"success": True, "work_log": work_log}
 
-    async def _handle_write_state(self, params: dict) -> dict:
+    async def _handle_write_state(self, params: dict) -> dict:  # pylint: disable=unused-argument
         """Write state to file immediately (for UI refresh requests)."""
         try:
             state = self._load_state()
             self._save_state(state)
             return {"success": True, "file": str(SPRINT_STATE_FILE)}
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to save sprint state via D-Bus")
             return {"success": False, "error": str(e)}
 
+    # pylint: disable-next=too-many-statements
     async def _handle_start_issue(self, params: dict) -> dict:
         """Start processing an issue immediately, bypassing all checks.
 
@@ -679,9 +663,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if not target_issue:
             return {"success": False, "error": f"Issue {issue_key} not found in sprint"}
 
-        logger.info(
-            f"Starting issue immediately: {issue_key} (background={background_mode})"
-        )
+        logger.info("Starting issue immediately: %s (background=%s)", issue_key, background_mode)
 
         # Mark as in_progress and set as processing
         target_issue["approvalStatus"] = "in_progress"
@@ -713,9 +695,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if not cursor_available:
                 # Can't do foreground without Cursor - inform user
                 target_issue["approvalStatus"] = "blocked"
-                target_issue["waitingReason"] = (
-                    "Cursor not available for foreground mode"
-                )
+                target_issue["waitingReason"] = "Cursor not available for foreground mode"
                 state["processingIssue"] = None
                 self._save_state(state)
                 return {
@@ -729,12 +709,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         # BACKGROUND MODE: Run via Claude CLI
         # Transition Jira to In Progress
-        self._trace_transition(
-            tracer, WorkflowState.TRANSITIONING_JIRA, trigger="force_start_background"
-        )
-        jira_success = await self._transition_jira_issue(
-            issue_key, self.JIRA_STATUS_IN_PROGRESS
-        )
+        self._trace_transition(tracer, WorkflowState.TRANSITIONING_JIRA, trigger="force_start_background")
+        jira_success = await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_PROGRESS)
         self._trace_step(
             tracer,
             "transition_jira_in_progress",
@@ -761,29 +737,19 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._save_state(state)
 
         # Build prompt and run
-        self._trace_transition(
-            tracer, WorkflowState.BUILDING_PROMPT, trigger="jira_transitioned"
-        )
-        self._trace_transition(
-            tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background"
-        )
+        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="jira_transitioned")
+        self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background")
 
         result = await self._run_issue_in_background_traced(target_issue, tracer)
 
         # Reload state and update
         state = self._load_state()
-        target_issue = next(
-            (i for i in state.get("issues", []) if i["key"] == issue_key), target_issue
-        )
+        target_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), target_issue)
 
-        if result.get("success"):
-            self._trace_transition(
-                tracer, WorkflowState.CREATING_MR, trigger="implementation_complete"
-            )
+        if result.get("success"):  # pylint: disable=no-else-return
+            self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
             await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_REVIEW)
-            self._trace_transition(
-                tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created"
-            )
+            self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
             tracer.mark_completed(summary=f"MR created for {issue_key}")
 
             _add_timeline_event(
@@ -830,6 +796,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             return {"success": False, "error": error_reason, "mode": "background"}
 
+    # pylint: disable-next=too-many-locals
     async def _handle_open_in_cursor(self, params: dict) -> dict:
         """Open an issue's work log in Cursor for interactive continuation.
 
@@ -858,15 +825,11 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         # Create a Cursor chat with this context
         try:
-            from dbus_next.aio import MessageBus
+            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
 
             bus = await MessageBus().connect()
-            introspection = await bus.introspect(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat"
-            )
-            proxy = bus.get_proxy_object(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection
-            )
+            introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
+            proxy = bus.get_proxy_object("com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection)
             chat_interface = proxy.get_interface("com.aiworkflow.Chat")
 
             # Launch the chat with context
@@ -900,7 +863,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                             break
                     self._save_state(state)
 
-                    logger.info(f"Opened {issue_key} in Cursor: {chat_id}")
+                    logger.info("Opened %s in Cursor: %s", issue_key, chat_id)
                     return {
                         "success": True,
                         "message": f"Opened {issue_key} in Cursor",
@@ -910,10 +873,11 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             return {"success": False, "error": "Failed to create Cursor chat"}
 
-        except Exception as e:
-            logger.error(f"Failed to open {issue_key} in Cursor: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to open %s in Cursor", issue_key)
             return {"success": False, "error": str(e)}
 
+    # pylint: disable-next=too-many-statements
     def _build_cursor_context_prompt(self, issue_key: str, work_log: dict) -> str:
         """Build a comprehensive context prompt for continuing work in Cursor."""
         parts = []
@@ -944,17 +908,11 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             if outcome.get("commits"):
                 parts.append(f"- **Commits**: {', '.join(outcome['commits'][:5])}")
             if outcome.get("merge_requests"):
-                parts.append(
-                    f"- **Merge Requests**: {', '.join(outcome['merge_requests'])}"
-                )
+                parts.append(f"- **Merge Requests**: {', '.join(outcome['merge_requests'])}")
             if outcome.get("files_changed"):
-                parts.append(
-                    f"- **Files Changed**: {', '.join(outcome['files_changed'][:10])}"
-                )
+                parts.append(f"- **Files Changed**: {', '.join(outcome['files_changed'][:10])}")
             if outcome.get("branches_created"):
-                parts.append(
-                    f"- **Branches**: {', '.join(outcome['branches_created'])}"
-                )
+                parts.append(f"- **Branches**: {', '.join(outcome['branches_created'])}")
             parts.append("")
 
         # Actions log (last 10)
@@ -990,12 +948,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         # Instructions
         parts.append("---")
-        parts.append(
-            "Please review the above context and continue working on this issue."
-        )
-        parts.append(
-            'Load the developer persona if needed: `persona_load("developer")`'
-        )
+        parts.append("Please review the above context and continue working on this issue.")
+        parts.append('Load the developer persona if needed: `persona_load("developer")`')
 
         return "\n".join(parts)
 
@@ -1024,8 +978,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     state["nextSprint"] = None
 
                 return state
-        except Exception as e:
-            logger.error(f"Failed to load state: {e}")
+        except (OSError, ValueError, TypeError, AttributeError) as e:
+            logger.error("Failed to load state: %s", e)
         return self._default_state()
 
     def _save_state(self, sprint_state: dict) -> None:
@@ -1035,17 +989,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         all state files on refresh. No shared file = no race conditions.
         """
         try:
-            import tempfile
-
             SPRINT_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
 
             # Add workflow config to state for UI consumption
             sprint_state["workflowConfig"] = self._export_workflow_config()
 
             # Write atomically (temp file + rename)
-            temp_fd, temp_path = tempfile.mkstemp(
-                suffix=".tmp", prefix="sprint_state_", dir=SPRINT_STATE_FILE.parent
-            )
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".tmp", prefix="sprint_state_", dir=SPRINT_STATE_FILE.parent)
             try:
                 with os.fdopen(temp_fd, "w") as f:
                     json.dump(sprint_state, f, indent=2, default=str)
@@ -1057,8 +1007,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     logger.debug("OS operation failed: %s", exc)
                 raise
 
-        except Exception as e:
-            logger.error(f"Failed to save state: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to save state")
 
     def _export_workflow_config(self) -> dict:
         """Export workflow configuration for UI consumption.
@@ -1117,8 +1067,6 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         wh = self._config["working_hours"]
 
         try:
-            from zoneinfo import ZoneInfo
-
             tz = ZoneInfo(wh["timezone"])
             now = datetime.now(tz)
         except ImportError:
@@ -1137,6 +1085,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
     # ==================== Jira Integration ====================
 
+    # pylint: disable-next=too-many-locals,too-many-statements
     async def _refresh_from_jira(self) -> None:
         """Refresh sprint issues from Jira by calling the Jira API directly.
 
@@ -1145,19 +1094,21 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Refreshing sprint issues from Jira...")
 
         try:
-            from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint
-            from tool_modules.aa_workflow.src.sprint_bot import (
+            from tool_modules.aa_jira.src.tools_basic import (  # pylint: disable=import-outside-toplevel
+                jira_get_active_sprint,
+            )
+            from tool_modules.aa_workflow.src.sprint_bot import (  # pylint: disable=import-outside-toplevel
                 SprintBotConfig,
                 WorkingHours,
                 fetch_sprint_issues,
                 to_sprint_issue_format,
             )
-            from tool_modules.aa_workflow.src.sprint_history import (
+            from tool_modules.aa_workflow.src.sprint_history import (  # pylint: disable=import-outside-toplevel
                 SprintIssue,
                 load_sprint_state,
                 save_sprint_state,
             )
-            from tool_modules.aa_workflow.src.sprint_prioritizer import (
+            from tool_modules.aa_workflow.src.sprint_prioritizer import (  # pylint: disable=import-outside-toplevel
                 prioritize_issues,
             )
 
@@ -1178,9 +1129,9 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     "totalPoints": 0,  # Will be calculated from issues
                     "completedPoints": 0,  # Will be calculated from issues
                 }
-                logger.info(f"Active sprint: {current_sprint.get('name')}")
+                logger.info("Active sprint: %s", current_sprint.get("name"))
             else:
-                logger.warning(f"Could not get active sprint info: {sprint_info}")
+                logger.warning("Could not get active sprint info: %s", sprint_info)
 
             # Fetch issues from Jira (async)
             jira_issues = await fetch_sprint_issues(config)
@@ -1191,7 +1142,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 return
 
             # Filter to only show issues assigned to current user
-            from server.utils import load_config
+            from server.utils import load_config  # pylint: disable=import-outside-toplevel
 
             user_config = load_config()
             user_info = user_config.get("user", {})
@@ -1201,13 +1152,12 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 original_count = len(jira_issues)
                 # Match against username OR full name (Jira may use either)
                 match_values = [v.lower() for v in [jira_username, full_name] if v]
-                jira_issues = [
-                    issue
-                    for issue in jira_issues
-                    if issue.get("assignee", "").lower() in match_values
-                ]
+                jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
                 logger.info(
-                    f"Filtered to {len(jira_issues)}/{original_count} issues assigned to {jira_username or full_name}"
+                    "Filtered to %s/%s issues assigned to %s",
+                    len(jira_issues),
+                    original_count,
+                    jira_username or full_name,
                 )
 
             if not jira_issues:
@@ -1278,9 +1228,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # Calculate points for sprint info
             total_points = sum(i.story_points for i in new_issues)
             completed_points = sum(
-                i.story_points
-                for i in new_issues
-                if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
+                i.story_points for i in new_issues if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
             )
 
             # Update currentSprint with calculated points
@@ -1295,14 +1243,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             save_sprint_state(state)
 
             logger.info(
-                f"Sprint refresh completed: {len(new_issues)} issues, "
-                f"sprint: {current_sprint.get('name') if current_sprint else 'None'}"
+                "Sprint refresh completed: %s issues, sprint: %s",
+                len(new_issues),
+                current_sprint.get("name") if current_sprint else "None",
             )
             self._last_jira_refresh = datetime.now()
 
-        except Exception as e:
-            logger.error(f"Failed to refresh sprint: {e}")
-            import traceback
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to refresh sprint")
 
             logger.debug(traceback.format_exc())
             # Don't block - use existing state
@@ -1326,15 +1274,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         issues = state.get("issues", [])
 
         # Find issues in Review status
-        review_issues = [
-            i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES
-        ]
+        review_issues = [i for i in issues if i.get("jiraStatus", "").lower() in REVIEW_STATUSES]
 
         if not review_issues:
             logger.info("No issues in Review status")
             return
 
-        logger.info(f"Found {len(review_issues)} issues in Review")
+        logger.info("Found %s issues in Review", len(review_issues))
 
         # Patterns that indicate "don't merge yet"
         dont_merge_patterns = [
@@ -1358,23 +1304,20 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             try:
                 await self._check_single_review_issue(issue, dont_merge_patterns, state)
-            except Exception as e:
-                logger.error(f"Error checking review issue {issue_key}: {e}")
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.exception("Error checking review issue %s", issue_key)
                 continue
 
         # Save any state changes
         self._save_state(state)
 
-    async def _check_single_review_issue(
-        self, issue: dict, dont_merge_patterns: list, state: dict
-    ) -> None:
+    # pylint: disable-next=too-many-locals
+    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list, state: dict) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
-        logger.info(f"Checking review status for {issue_key}")
+        logger.info("Checking review status for %s", issue_key)
 
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
                 logger.warning("Claude CLI not found, skipping review check")
@@ -1391,7 +1334,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 2. If an MR exists, check its status:
    - Is it approved?
    - Has the pipeline passed?
-   - Are there any comments containing: {', '.join(dont_merge_patterns[:5])}
+   - Are there any comments containing: {", ".join(dont_merge_patterns[:5])}
 
 3. Report the status in this exact format:
    [MR_STATUS: READY_TO_MERGE] - MR is approved, CI passed, no hold comments
@@ -1415,47 +1358,44 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
+                stdout, _stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=120,  # 2 minute timeout
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning(f"Review check timed out for {issue_key}")
+                logger.warning("Review check timed out for %s", issue_key)
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
             # Parse the status
-            import re
 
             status_match = re.search(
-                r"\[MR_STATUS:\s*(\w+(?:_\w+)*)\](?:\s*reason:\s*(.+))?",
+                r"\[MR_STATUS:\s*(\w+)\](?:\s*reason:\s*(.+))?",
                 output,
                 re.IGNORECASE,
             )
             mr_id_match = re.search(r"\[MR_ID:\s*(\d+)\]", output)
 
             if not status_match:
-                logger.warning(f"Could not parse MR status for {issue_key}")
+                logger.warning("Could not parse MR status for %s", issue_key)
                 return
 
             mr_status = status_match.group(1).upper()
-            hold_reason = (
-                status_match.group(2).strip() if status_match.group(2) else None
-            )
+            hold_reason = status_match.group(2).strip() if status_match.group(2) else None
             mr_id = int(mr_id_match.group(1)) if mr_id_match else None
 
-            logger.info(f"{issue_key}: MR status = {mr_status}, MR ID = {mr_id}")
+            logger.info("%s: MR status = %s, MR ID = %s", issue_key, mr_status, mr_id)
 
-            if mr_status == "READY_TO_MERGE" and mr_id:
+            if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
                 # Merge the MR and transition to Done
                 await self._merge_and_close(issue_key, mr_id, issue, state)
 
             elif mr_status == "APPROVED_WITH_HOLD":
                 # Log but don't merge
-                logger.info(f"{issue_key}: MR approved but on hold: {hold_reason}")
+                logger.info("%s: MR approved but on hold: %s", issue_key, hold_reason)
                 _add_timeline_event(
                     issue,
                     {
@@ -1466,28 +1406,25 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
             elif mr_status == "CHANGES_REQUESTED":
-                logger.info(f"{issue_key}: Changes requested on MR")
+                logger.info("%s: Changes requested on MR", issue_key)
                 # Could notify or take action here
 
             elif mr_status == "CI_FAILING":
-                logger.info(f"{issue_key}: CI is failing")
+                logger.info("%s: CI is failing", issue_key)
                 # Could notify or take action here
 
             elif mr_status == "NO_MR":
-                logger.warning(f"{issue_key}: No MR found but issue is in Review")
+                logger.warning("%s: No MR found but issue is in Review", issue_key)
 
-        except Exception as e:
-            logger.error(f"Error checking MR status for {issue_key}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error checking MR status for %s", issue_key)
 
-    async def _merge_and_close(
-        self, issue_key: str, mr_id: int, issue: dict, state: dict
-    ) -> None:
+    # pylint: disable-next=unused-argument
+    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict, state: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
-        logger.info(f"Merging MR !{mr_id} and closing {issue_key}")
+        logger.info("Merging MR !%s and closing %s", mr_id, issue_key)
 
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
                 logger.warning("Claude CLI not found, cannot merge")
@@ -1524,33 +1461,28 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
+                stdout, _stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=180,  # 3 minute timeout for merge
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning(f"Merge/close timed out for {issue_key}")
+                logger.warning("Merge/close timed out for %s", issue_key)
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
 
             # Parse the result
-            import re
 
-            result_match = re.search(
-                r"\[MERGE_RESULT:\s*(\w+)\](?:\s*error:\s*(.+))?", output, re.IGNORECASE
-            )
+            result_match = re.search(r"\[MERGE_RESULT:\s*(\w+)\](?:\s*error:\s*(.+))?", output, re.IGNORECASE)
 
             if result_match:
                 result = result_match.group(1).upper()
                 error = result_match.group(2).strip() if result_match.group(2) else None
 
                 if result == "SUCCESS":
-                    logger.info(
-                        f"Successfully merged MR !{mr_id} and closed {issue_key}"
-                    )
+                    logger.info("Successfully merged MR !%s and closed %s", mr_id, issue_key)
 
                     # Update local state
                     issue["jiraStatus"] = self.JIRA_STATUS_DONE
@@ -1566,7 +1498,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
                     self._issues_completed += 1
                 else:
-                    logger.warning(f"Merge/close failed for {issue_key}: {error}")
+                    logger.warning("Merge/close failed for %s: %s", issue_key, error)
                     _add_timeline_event(
                         issue,
                         {
@@ -1576,10 +1508,10 @@ Also output the MR ID if found: [MR_ID: <number>]
                         },
                     )
             else:
-                logger.warning(f"Could not parse merge result for {issue_key}")
+                logger.warning("Could not parse merge result for %s", issue_key)
 
-        except Exception as e:
-            logger.error(f"Error merging/closing {issue_key}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error merging/closing %s", issue_key)
 
     # ==================== Issue Processing ====================
 
@@ -1590,28 +1522,28 @@ Also output the MR ID if found: [MR_ID: <number>]
     @property
     def workflow_config(self) -> WorkflowConfig:
         """Get the workflow configuration (lazy loaded)."""
-        if not hasattr(self, "_workflow_config") or self._workflow_config is None:
+        if self._workflow_config is None:
             self._workflow_config = get_workflow_config()
         return self._workflow_config
 
     # Legacy properties for backward compatibility - delegate to config
     @property
-    def ACTIONABLE_STATUSES(self) -> list[str]:
+    def ACTIONABLE_STATUSES(self) -> list[str]:  # pylint: disable=invalid-name
         """Get actionable statuses from config."""
         return self.workflow_config.get_actionable_statuses()
 
     @property
-    def JIRA_STATUS_IN_PROGRESS(self) -> str:
+    def JIRA_STATUS_IN_PROGRESS(self) -> str:  # pylint: disable=invalid-name
         """Get In Progress status name from config."""
         return self.workflow_config.get_jira_transition("in_progress")
 
     @property
-    def JIRA_STATUS_IN_REVIEW(self) -> str:
+    def JIRA_STATUS_IN_REVIEW(self) -> str:  # pylint: disable=invalid-name
         """Get In Review status name from config."""
         return self.workflow_config.get_jira_transition("in_review")
 
     @property
-    def JIRA_STATUS_DONE(self) -> str:
+    def JIRA_STATUS_DONE(self) -> str:  # pylint: disable=invalid-name
         """Get Done status name from config."""
         return self.workflow_config.get_jira_transition("done")
 
@@ -1628,7 +1560,7 @@ Also output the MR ID if found: [MR_ID: <number>]
     # ==================== EXECUTION TRACING ====================
     # Tracks state machine transitions and step execution for observability
 
-    def _get_tracer(self, issue_key: str, issue: dict = None) -> ExecutionTracer:
+    def _get_tracer(self, issue_key: str, issue: dict | None = None) -> ExecutionTracer:
         """Get or create an execution tracer for an issue.
 
         Loads existing trace if available, otherwise creates a new one.
@@ -1644,9 +1576,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             if issue:
                 workflow_type = self.workflow_config.classify_issue(issue)
                 state = self._load_state()
-                execution_mode = (
-                    "background" if state.get("backgroundTasks", True) else "foreground"
-                )
+                execution_mode = "background" if state.get("backgroundTasks", True) else "foreground"
 
             tracer = ExecutionTracer(
                 issue_key=issue_key,
@@ -1656,19 +1586,20 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         return tracer
 
+    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def _trace_step(
         self,
         tracer: ExecutionTracer,
         name: str,
-        inputs: dict = None,
-        outputs: dict = None,
-        decision: str = None,
-        reason: str = None,
-        skill_name: str = None,
-        tool_name: str = None,
+        inputs: dict | None = None,
+        outputs: dict | None = None,
+        decision: str | None = None,
+        reason: str | None = None,
+        skill_name: str | None = None,
+        tool_name: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        error: str = None,
-        chat_id: str = None,
+        error: str | None = None,
+        chat_id: str | None = None,
     ) -> None:
         """Log a step to the tracer and save."""
         tracer.log_step(
@@ -1689,8 +1620,8 @@ Also output the MR ID if found: [MR_ID: <number>]
         self,
         tracer: ExecutionTracer,
         to_state: WorkflowState,
-        trigger: str = None,
-        data: dict = None,
+        trigger: str | None = None,
+        data: dict | None = None,
     ) -> None:
         """Log a state transition and save."""
         tracer.transition(to_state, trigger, data)
@@ -1702,11 +1633,9 @@ Also output the MR ID if found: [MR_ID: <number>]
         Returns True if successful, False otherwise.
         """
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
-                logger.warning(f"Claude CLI not found, cannot transition {issue_key}")
+                logger.warning("Claude CLI not found, cannot transition %s", issue_key)
                 return False
 
             prompt = f'Call jira_transition("{issue_key}", "{target_status}") to move the issue to {target_status}.'
@@ -1722,26 +1651,26 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             try:
-                stdout, stderr = await asyncio.wait_for(
+                _stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
                     timeout=60,  # 1 minute timeout for transition
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning(f"Jira transition timed out for {issue_key}")
+                logger.warning("Jira transition timed out for %s", issue_key)
                 return False
 
-            if process.returncode == 0:
-                logger.info(f"Transitioned {issue_key} to {target_status}")
+            if process.returncode == 0:  # pylint: disable=no-else-return
+                logger.info("Transitioned %s to %s", issue_key, target_status)
                 return True
             else:
                 error = stderr.decode("utf-8", errors="replace") if stderr else ""
-                logger.warning(f"Failed to transition {issue_key}: {error[:200]}")
+                logger.warning("Failed to transition %s: %s", issue_key, error[:200])
                 return False
 
-        except Exception as e:
-            logger.error(f"Error transitioning {issue_key}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error transitioning %s", issue_key)
             return False
 
     def _is_actionable(self, issue: dict) -> bool:
@@ -1752,6 +1681,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         """
         return self.workflow_config.is_actionable(issue)
 
+    # pylint: disable-next=too-many-statements
     async def _process_next_issue(self) -> dict:
         """Process the next approved issue that is actionable.
 
@@ -1779,13 +1709,11 @@ Also output the MR ID if found: [MR_ID: <number>]
         issue_key = next_issue["key"]
         background_mode = state.get("backgroundTasks", True)
 
-        logger.info(f"Processing issue: {issue_key} (background={background_mode})")
+        logger.info("Processing issue: %s (background=%s)", issue_key, background_mode)
 
         # Initialize execution tracer
         tracer = self._get_tracer(issue_key, next_issue)
-        self._trace_transition(
-            tracer, WorkflowState.LOADING, trigger="start_processing"
-        )
+        self._trace_transition(tracer, WorkflowState.LOADING, trigger="start_processing")
 
         # Log issue loading step
         self._trace_step(
@@ -1808,9 +1736,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             workflow_type,
             reason=f"Issue type: {next_issue.get('issueType', 'Story')}, keywords matched: {workflow_type}",
         )
-        self._trace_transition(
-            tracer, WorkflowState.CLASSIFYING, trigger="analysis_complete"
-        )
+        self._trace_transition(tracer, WorkflowState.CLASSIFYING, trigger="analysis_complete")
 
         # Check actionability
         is_actionable = self._is_actionable(next_issue)
@@ -1825,9 +1751,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 f"{'actionable' if is_actionable else 'not actionable'} per workflow config"
             ),
         )
-        self._trace_transition(
-            tracer, WorkflowState.CHECKING_ACTIONABLE, trigger="classified"
-        )
+        self._trace_transition(tracer, WorkflowState.CHECKING_ACTIONABLE, trigger="classified")
 
         # Check Cursor availability
         cursor_available = await self._is_cursor_available()
@@ -1860,7 +1784,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             return await self._process_in_cursor_traced(next_issue, state, tracer)
 
         # BACKGROUND MODE: Run via Claude CLI (no Cursor dependency)
-        logger.info(f"Background mode: Running {issue_key} via Claude CLI")
+        logger.info("Background mode: Running %s via Claude CLI", issue_key)
         self._trace_step(
             tracer,
             "select_execution_mode",
@@ -1870,14 +1794,10 @@ Also output the MR ID if found: [MR_ID: <number>]
         )
 
         # Transition to starting work
-        self._trace_transition(
-            tracer, WorkflowState.TRANSITIONING_JIRA, trigger="is_actionable"
-        )
+        self._trace_transition(tracer, WorkflowState.TRANSITIONING_JIRA, trigger="is_actionable")
 
         # Transition Jira issue to "In Progress"
-        jira_success = await self._transition_jira_issue(
-            issue_key, self.JIRA_STATUS_IN_PROGRESS
-        )
+        jira_success = await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_PROGRESS)
         self._trace_step(
             tracer,
             "transition_jira_in_progress",
@@ -1891,13 +1811,9 @@ Also output the MR ID if found: [MR_ID: <number>]
         )
 
         if workflow_type == "spike":
-            self._trace_transition(
-                tracer, WorkflowState.RESEARCHING, trigger="transitioned_spike"
-            )
+            self._trace_transition(tracer, WorkflowState.RESEARCHING, trigger="transitioned_spike")
         else:
-            self._trace_transition(
-                tracer, WorkflowState.STARTING_WORK, trigger="transitioned_code_change"
-            )
+            self._trace_transition(tracer, WorkflowState.STARTING_WORK, trigger="transitioned_code_change")
 
         # Update local status
         next_issue["approvalStatus"] = "in_progress"
@@ -1918,9 +1834,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         self._save_state(state)
 
         # Build prompt
-        self._trace_transition(
-            tracer, WorkflowState.BUILDING_PROMPT, trigger="branch_created"
-        )
+        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="branch_created")
         self._trace_step(
             tracer,
             "build_work_prompt",
@@ -1929,22 +1843,16 @@ Also output the MR ID if found: [MR_ID: <number>]
         )
 
         # Run in background
-        self._trace_transition(
-            tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background"
-        )
+        self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background")
         result = await self._run_issue_in_background_traced(next_issue, tracer)
 
         # Reload state in case it changed
         state = self._load_state()
-        next_issue = next(
-            (i for i in state.get("issues", []) if i["key"] == issue_key), next_issue
-        )
+        next_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), next_issue)
 
-        if result.get("success"):
+        if result.get("success"):  # pylint: disable=no-else-return
             # Transition Jira issue to "In Review" (work completed, MR created)
-            self._trace_transition(
-                tracer, WorkflowState.CREATING_MR, trigger="implementation_complete"
-            )
+            self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
 
             await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_REVIEW)
             self._trace_step(
@@ -1958,9 +1866,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 tool_name="jira_transition",
             )
 
-            self._trace_transition(
-                tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created"
-            )
+            self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
             tracer.mark_completed(summary=f"MR created for {issue_key}")
 
             _add_timeline_event(
@@ -2021,21 +1927,15 @@ Also output the MR ID if found: [MR_ID: <number>]
         tracer = self._get_tracer(issue["key"], issue)
         return await self._process_in_cursor_traced(issue, state, tracer)
 
-    async def _process_in_cursor_traced(
-        self, issue: dict, state: dict, tracer: ExecutionTracer
-    ) -> dict:
+    async def _process_in_cursor_traced(self, issue: dict, state: dict, tracer: ExecutionTracer) -> dict:
         """Process an issue in Cursor with full execution tracing."""
         issue_key = issue["key"]
 
         # Transition to starting work
-        self._trace_transition(
-            tracer, WorkflowState.TRANSITIONING_JIRA, trigger="is_actionable"
-        )
+        self._trace_transition(tracer, WorkflowState.TRANSITIONING_JIRA, trigger="is_actionable")
 
         # Transition Jira issue to "In Progress"
-        jira_success = await self._transition_jira_issue(
-            issue_key, self.JIRA_STATUS_IN_PROGRESS
-        )
+        jira_success = await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_PROGRESS)
         self._trace_step(
             tracer,
             "transition_jira_in_progress",
@@ -2048,9 +1948,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             status=StepStatus.SUCCESS if jira_success else StepStatus.FAILED,
         )
 
-        self._trace_transition(
-            tracer, WorkflowState.STARTING_WORK, trigger="transitioned_code_change"
-        )
+        self._trace_transition(tracer, WorkflowState.STARTING_WORK, trigger="transitioned_code_change")
 
         # Update local status
         issue["approvalStatus"] = "in_progress"
@@ -2070,9 +1968,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         self._save_state(state)
 
         # Build prompt
-        self._trace_transition(
-            tracer, WorkflowState.BUILDING_PROMPT, trigger="branch_created"
-        )
+        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="branch_created")
         prompt = self._build_work_prompt(issue)
         self._trace_step(
             tracer,
@@ -2082,23 +1978,19 @@ Also output the MR ID if found: [MR_ID: <number>]
         )
 
         # Launch Cursor chat
-        self._trace_transition(
-            tracer, WorkflowState.LAUNCHING_CHAT, trigger="prompt_ready_foreground"
-        )
+        self._trace_transition(tracer, WorkflowState.LAUNCHING_CHAT, trigger="prompt_ready_foreground")
         self._trace_step(tracer, "launch_cursor_chat", inputs={"issue_key": issue_key})
 
         chat_id = await self._launch_cursor_chat(issue)
 
-        if chat_id:
+        if chat_id:  # pylint: disable=no-else-return
             self._trace_step(
                 tracer,
                 "chat_created",
                 outputs={"chat_id": chat_id},
                 chat_id=chat_id,
             )
-            self._trace_transition(
-                tracer, WorkflowState.IMPLEMENTING, trigger="chat_launched"
-            )
+            self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="chat_launched")
 
             issue["chatId"] = chat_id
             _add_timeline_event(
@@ -2112,7 +2004,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
             self._save_state(state)
             self._issues_processed += 1
-            logger.info(f"Chat created for {issue_key}: {chat_id}")
+            logger.info("Chat created for %s: %s", issue_key, chat_id)
 
             # Note: In foreground mode, the tracer stays in IMPLEMENTING state
             # The chat itself will complete the work and transition Jira
@@ -2137,7 +2029,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             issue["waitingReason"] = "Failed to create Cursor chat"
             state["processingIssue"] = None
             self._save_state(state)
-            logger.warning(f"Could not create chat for {issue_key}")
+            logger.warning("Could not create chat for %s", issue_key)
             return {"success": False, "error": f"Failed to create chat for {issue_key}"}
 
     async def _launch_cursor_chat(self, issue: dict) -> str | None:
@@ -2159,18 +2051,14 @@ Also output the MR ID if found: [MR_ID: <number>]
         prompt = self._build_work_prompt(issue)
 
         try:
-            from dbus_next.aio import MessageBus
+            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
 
             bus = await MessageBus().connect()
 
             # Get the VS Code extension's chat service
-            introspection = await bus.introspect(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat"
-            )
+            introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
 
-            proxy = bus.get_proxy_object(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection
-            )
+            proxy = bus.get_proxy_object("com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection)
 
             chat_interface = proxy.get_interface("com.aiworkflow.Chat")
 
@@ -2187,17 +2075,15 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             if result:
                 result_dict = json.loads(str(result))
-                if result_dict.get("success"):
+                if result_dict.get("success"):  # pylint: disable=no-else-return
                     return result_dict.get("chatId")
                 else:
-                    logger.warning(
-                        f"LaunchIssueChatWithPrompt returned error: {result_dict.get('error')}"
-                    )
+                    logger.warning("LaunchIssueChatWithPrompt returned error: %s", result_dict.get("error"))
 
             return None
 
-        except Exception as e:
-            logger.error(f"Failed to launch chat via D-Bus: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to launch chat via D-Bus")
             logger.debug("Is VS Code running with the AA Workflow extension active?")
             return None
 
@@ -2211,14 +2097,11 @@ Also output the MR ID if found: [MR_ID: <number>]
         """Load the work log for an issue."""
         path = self._get_work_log_path(issue_key)
         if path.exists():
-            import yaml
-
             return yaml.safe_load(path.read_text()) or {}
         return {}
 
     def _save_work_log(self, issue_key: str, work_log: dict) -> None:
         """Save the work log for an issue."""
-        import yaml
 
         SPRINT_WORK_DIR.mkdir(parents=True, exist_ok=True)
         path = self._get_work_log_path(issue_key)
@@ -2253,15 +2136,13 @@ Also output the MR ID if found: [MR_ID: <number>]
             },
         }
 
-    def _log_action(
-        self, issue_key: str, action_type: str, details: str, data: dict = None
-    ) -> None:
+    def _log_action(self, issue_key: str, action_type: str, details: str, data: dict | None = None) -> None:
         """Log an action to the work log."""
         work_log = self._load_work_log(issue_key)
         if not work_log:
             return
 
-        action = {
+        action: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "type": action_type,
             "details": details,
@@ -2287,16 +2168,15 @@ Also output the MR ID if found: [MR_ID: <number>]
         tracer = self._get_tracer(issue["key"], issue)
         return await self._run_issue_in_background_traced(issue, tracer)
 
-    async def _run_issue_in_background_traced(
-        self, issue: dict, tracer: ExecutionTracer
-    ) -> dict:
+    # pylint: disable-next=too-many-locals,too-many-return-statements,too-many-statements
+    async def _run_issue_in_background_traced(self, issue: dict, tracer: ExecutionTracer) -> dict:
         """Run issue processing via Claude CLI with full execution tracing.
 
         Returns dict with success status and details.
         """
         issue_key = issue["key"]
 
-        logger.info(f"Running {issue_key} in background mode (Claude CLI)")
+        logger.info("Running %s in background mode (Claude CLI)", issue_key)
 
         # Initialize work log
         work_log = self._init_work_log(issue)
@@ -2311,17 +2191,15 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         # Emit toast notification for issue started
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import (
+            from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
                 notify_sprint_issue_started,
             )
 
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception as exc:
-            logger.debug("Suppressed error: %s", exc)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error: %s", exc, exc_info=True)
 
         try:
-            import shutil
-
             claude_path = shutil.which("claude")
             if not claude_path:
                 self._log_action(issue_key, "error", "Claude CLI not found")
@@ -2337,9 +2215,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 self._save_work_log(issue_key, work_log)
                 return {"success": False, "error": "Claude CLI not found"}
 
-            self._trace_step(
-                tracer, "check_claude_cli", outputs={"claude_path": claude_path}
-            )
+            self._trace_step(tracer, "check_claude_cli", outputs={"claude_path": claude_path})
 
             # Build the unified work prompt
             prompt = self._build_work_prompt(issue)
@@ -2354,9 +2230,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
             # Start step for Claude execution
-            step_id = tracer.start_step(
-                "execute_claude_cli", inputs={"prompt_length": len(prompt)}
-            )
+            step_id = tracer.start_step("execute_claude_cli", inputs={"prompt_length": len(prompt)})
 
             # Run Claude CLI with extended timeout for actual work
             process = await asyncio.create_subprocess_exec(
@@ -2419,24 +2293,19 @@ Also output the MR ID if found: [MR_ID: <number>]
                 step_id,
                 status=(
                     StepStatus.SUCCESS
-                    if bot_status["status"] in ("COMPLETED", "UNKNOWN")
-                    and process.returncode == 0
+                    if bot_status["status"] in ("COMPLETED", "UNKNOWN") and process.returncode == 0
                     else StepStatus.FAILED
                 ),
                 outputs={
                     "return_code": process.returncode,
                     "bot_status": bot_status["status"],
                     "output_length": len(output),
-                    "commits_found": len(
-                        work_log.get("outcome", {}).get("commits", [])
-                    ),
-                    "mrs_found": len(
-                        work_log.get("outcome", {}).get("merge_requests", [])
-                    ),
+                    "commits_found": len(work_log.get("outcome", {}).get("commits", [])),
+                    "mrs_found": len(work_log.get("outcome", {}).get("merge_requests", [])),
                 },
             )
 
-            if bot_status["status"] == "COMPLETED":
+            if bot_status["status"] == "COMPLETED":  # pylint: disable=no-else-return
                 work_log["status"] = "completed"
                 self._log_action(
                     issue_key,
@@ -2446,13 +2315,14 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Emit toast notification for issue completed
                 try:
+                    # pylint: disable-next=import-outside-toplevel
                     from tool_modules.aa_workflow.src.notification_emitter import (
                         notify_sprint_issue_completed,
                     )
 
                     notify_sprint_issue_completed(issue_key)
-                except Exception as exc:
-                    logger.debug("Suppressed error: %s", exc)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2463,12 +2333,10 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Create context for continuing in Cursor
                 work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = (
-                    self._generate_continuation_prompt(issue_key, work_log)
-                )
+                work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(issue_key, work_log)
 
                 self._save_work_log(issue_key, work_log)
-                logger.info(f"Background processing completed for {issue_key}")
+                logger.info("Background processing completed for %s", issue_key)
                 return {
                     "success": True,
                     "message": f"Completed {issue_key} in background",
@@ -2483,13 +2351,14 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Emit toast notification for issue blocked
                 try:
+                    # pylint: disable-next=import-outside-toplevel
                     from tool_modules.aa_workflow.src.notification_emitter import (
                         notify_sprint_issue_blocked,
                     )
 
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception as exc:
-                    logger.debug("Suppressed error: %s", exc)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
                     "parse_result",
@@ -2505,9 +2374,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 self._save_work_log(issue_key, work_log)
-                logger.warning(
-                    f"Background processing blocked for {issue_key}: {blocked_reason}"
-                )
+                logger.warning("Background processing blocked for %s: %s", issue_key, blocked_reason)
                 return {
                     "success": False,
                     "error": f"Blocked: {blocked_reason}",
@@ -2539,14 +2406,12 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 self._save_work_log(issue_key, work_log)
-                logger.warning(
-                    f"Background processing failed for {issue_key}: {error_reason[:200]}"
-                )
+                logger.warning("Background processing failed for %s: %s", issue_key, error_reason[:200])
                 return {"success": False, "error": f"Failed: {error_reason[:200]}"}
 
             else:
                 # No explicit status - assume completed if return code is 0
-                if process.returncode == 0:
+                if process.returncode == 0:  # pylint: disable=no-else-return
                     work_log["status"] = "completed"
                     self._log_action(
                         issue_key,
@@ -2554,11 +2419,11 @@ Also output the MR ID if found: [MR_ID: <number>]
                         "Background processing completed (no explicit status)",
                     )
                     work_log["cursor_context"]["can_continue"] = True
-                    work_log["cursor_context"]["suggested_prompt"] = (
-                        self._generate_continuation_prompt(issue_key, work_log)
+                    work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(
+                        issue_key, work_log
                     )
                     self._save_work_log(issue_key, work_log)
-                    logger.info(f"Background processing completed for {issue_key}")
+                    logger.info("Background processing completed for %s", issue_key)
                     return {
                         "success": True,
                         "message": f"Completed {issue_key} in background",
@@ -2566,35 +2431,32 @@ Also output the MR ID if found: [MR_ID: <number>]
                 else:
                     work_log["status"] = "failed"
                     work_log["error"] = error_output[:500]
-                    self._log_action(
-                        issue_key, "failed", f"Claude CLI failed: {error_output[:200]}"
-                    )
+                    self._log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
                     work_log["cursor_context"]["can_continue"] = True
-                    work_log["cursor_context"][
-                        "suggested_prompt"
-                    ] = f"The background process for {issue_key} failed. Please investigate and continue the work."
-                    self._save_work_log(issue_key, work_log)
-                    logger.warning(
-                        f"Background processing failed for {issue_key}: {error_output[:200]}"
+                    retry_prompt = (
+                        f"The background process for {issue_key} failed. Please investigate and continue the work."
                     )
+                    work_log["cursor_context"]["suggested_prompt"] = retry_prompt
+                    self._save_work_log(issue_key, work_log)
+                    logger.warning("Background processing failed for %s: %s", issue_key, error_output[:200])
                     return {
                         "success": False,
                         "error": f"Claude CLI failed: {error_output[:200]}",
                     }
 
-        except Exception as e:
-            self._log_action(issue_key, "error", f"Exception: {str(e)}")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self._log_action(issue_key, "error", f"Exception: {e!s}")
             work_log = self._load_work_log(issue_key)
             work_log["status"] = "failed"
             work_log["error"] = str(e)
             work_log["completed"] = datetime.now().isoformat()
             work_log["cursor_context"]["can_continue"] = True
             work_log["cursor_context"]["suggested_prompt"] = (
-                f"The background process for {issue_key} encountered an error: {str(e)}. "
+                f"The background process for {issue_key} encountered an error: {e!s}. "
                 "Please investigate and continue the work."
             )
             self._save_work_log(issue_key, work_log)
-            logger.error(f"Background processing error for {issue_key}: {e}")
+            logger.exception("Background processing error for %s", issue_key)
             return {"success": False, "error": str(e)}
 
     def _parse_bot_status(self, output: str) -> dict:
@@ -2607,7 +2469,6 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         Returns dict with 'status' and optional 'reason' or 'error'.
         """
-        import re
 
         # Look for status marker
         status_pattern = r"\[SPRINT_BOT_STATUS:\s*(COMPLETED|BLOCKED|FAILED)\](?:\s*(?:reason|error):\s*(.+))?"
@@ -2627,11 +2488,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         return {"status": "UNKNOWN"}
 
-    def _parse_background_output(
-        self, issue_key: str, output: str, work_log: dict
-    ) -> None:
+    def _parse_background_output(self, issue_key: str, output: str, work_log: dict) -> None:
         """Parse Claude CLI output to extract commits, MRs, files changed, etc."""
-        import re
 
         # Store full output (truncated for large outputs)
         work_log["output_summary"] = output[:5000] if len(output) > 5000 else output
@@ -2649,7 +2507,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
 
         # Extract MR/PR URLs or IDs
-        mr_pattern = r"[Mm]erge [Rr]equest[:\s]+[#!]?(\d+)|MR[:\s]+[#!]?(\d+)|!(\d+)"
+        mr_pattern = r"(?:Merge|merge) (?:Request|request)[:\s]+[#!]?(\d+)|MR[:\s]+[#!]?(\d+)|!(\d+)"
         mr_matches = re.findall(mr_pattern, output)
         mrs = [m for match in mr_matches for m in match if m]
         if mrs:
@@ -2666,9 +2524,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         files = re.findall(file_pattern, output, re.IGNORECASE)
         if files:
             work_log["outcome"]["files_changed"].extend(list(set(files)))
-            work_log["cursor_context"]["files_to_review"] = list(set(files))[
-                :10
-            ]  # Top 10 files
+            work_log["cursor_context"]["files_to_review"] = list(set(files))[:10]  # Top 10 files
 
         # Extract branch names
         branch_pattern = r"(?:branch|checkout -b|created branch)[\s:]+([a-zA-Z0-9_/-]+)"
@@ -2717,16 +2573,12 @@ Also output the MR ID if found: [MR_ID: <number>]
     async def _is_cursor_available(self) -> bool:
         """Check if Cursor/VS Code is available via D-Bus."""
         try:
-            from dbus_next.aio import MessageBus
+            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
 
             bus = await MessageBus().connect()
-            introspection = await bus.introspect(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat"
-            )
+            introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
 
-            proxy = bus.get_proxy_object(
-                "com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection
-            )
+            proxy = bus.get_proxy_object("com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection)
 
             chat_interface = proxy.get_interface("com.aiworkflow.Chat")
             result = await chat_interface.call_ping()
@@ -2734,7 +2586,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             return result and "pong" in result
 
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Ping failed", exc_info=True)
             return False
 
     # ==================== Main Loop ====================
@@ -2772,8 +2625,9 @@ Also output the MR ID if found: [MR_ID: <number>]
         state = self._load_state()
         self._save_state(state)
         self.is_running = True
-        logger.info(f"Sprint daemon ready: {len(state.get('issues', []))} issues")
+        logger.info("Sprint daemon ready: %s issues", len(state.get("issues", [])))
 
+    # pylint: disable-next=too-many-branches
     async def run_daemon(self):
         """Main daemon loop."""
         while not self._shutdown_event.is_set():
@@ -2791,29 +2645,21 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 if not should_run:
                     if automatic_mode and not within_hours:
-                        logger.debug(
-                            "Automatic mode enabled but outside working hours, waiting..."
-                        )
+                        logger.debug("Automatic mode enabled but outside working hours, waiting...")
                     elif not automatic_mode and not manually_started:
-                        logger.debug(
-                            "Bot not active (automatic mode off, not manually started), waiting..."
-                        )
+                        logger.debug("Bot not active (automatic mode off, not manually started), waiting...")
                     if await self._wait_with_shutdown(60):
                         break
                     continue
 
                 # Refresh from Jira periodically
                 refresh_interval = self._config["jira_refresh_interval_seconds"]
-                if (
-                    datetime.now() - self._last_jira_refresh
-                ).total_seconds() > refresh_interval:
+                if (datetime.now() - self._last_jira_refresh).total_seconds() > refresh_interval:
                     await self._refresh_from_jira()
 
                 # Check issues in Review for merge readiness (interval from config)
                 review_check_interval = self._config["review_check_interval_seconds"]
-                if (
-                    datetime.now() - self._last_review_check
-                ).total_seconds() > review_check_interval:
+                if (datetime.now() - self._last_review_check).total_seconds() > review_check_interval:
                     await self._check_review_issues()
 
                 # Check if we should process next issue
@@ -2823,20 +2669,17 @@ Also output the MR ID if found: [MR_ID: <number>]
                     approved_actionable = [
                         i
                         for i in state.get("issues", [])
-                        if i.get("approvalStatus") == "approved"
-                        and self._is_actionable(i)
+                        if i.get("approvalStatus") == "approved" and self._is_actionable(i)
                     ]
                     if approved_actionable:
-                        logger.info(
-                            f"Found {len(approved_actionable)} approved actionable issues"
-                        )
+                        logger.info("Found %s approved actionable issues", len(approved_actionable))
                         await self._process_next_issue()
                     else:
                         # Log status periodically
                         issues = state.get("issues", [])
                         actionable = [i for i in issues if self._is_actionable(i)]
                         logger.debug(
-                            f"Issues: {len(issues)} total, {len(actionable)} actionable, 0 approved+actionable"
+                            "Issues: %s total, %s actionable, 0 approved+actionable", len(issues), len(actionable)
                         )
 
                 # Save state periodically (for UI to read)
@@ -2850,8 +2693,8 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.CancelledError:
                 logger.info("Main loop cancelled")
                 break
-            except Exception as e:
-                logger.exception(f"Error in main loop: {e}")
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.exception("Error in main loop")
                 if await self._wait_with_shutdown(60):
                     break
 
