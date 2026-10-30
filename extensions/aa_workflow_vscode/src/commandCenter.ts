@@ -252,7 +252,7 @@ export class CommandCenterPanel {
     debugLog(
       `updateSkillExecution: ${execution.skillName} step ${execution.currentStepIndex}/${execution.totalSteps}`,
     );
-    this._tabManager
+    void this._tabManager
       .handleMessage({
         command: "skillExecutionUpdate",
         execution,
@@ -286,7 +286,7 @@ export class CommandCenterPanel {
     debugLog(
       `updateRunningSkills: ${runningSkills.length} skills, ${staleCount} stale`,
     );
-    this._tabManager
+    void this._tabManager
       .handleMessage({
         command: "runningSkillsUpdate",
         runningSkills,
@@ -490,13 +490,15 @@ export class CommandCenterPanel {
         new MeetingHistoryMessageHandler({
           // Using MeetingService for decoupled business logic
           onViewNote: (noteId: string) =>
-            this._handleViewNoteWithService(parseInt(noteId, 10)),
+            this._handleViewNoteWithService(Number.parseInt(noteId, 10)),
           onViewTranscript: (noteId: string) =>
-            this._handleViewTranscriptWithService(parseInt(noteId, 10)),
+            this._handleViewTranscriptWithService(Number.parseInt(noteId, 10)),
           onViewBotLog: (noteId: string) =>
-            this._handleViewBotLogWithService(parseInt(noteId, 10)),
+            this._handleViewBotLogWithService(Number.parseInt(noteId, 10)),
           onViewLinkedIssues: (noteId: string) =>
-            this._handleViewLinkedIssuesWithService(parseInt(noteId, 10)),
+            this._handleViewLinkedIssuesWithService(
+              Number.parseInt(noteId, 10),
+            ),
           onSearchNotes: async (query: string) => {
             await this._meetingService!.searchNotes(query);
           },
@@ -1168,7 +1170,7 @@ export class CommandCenterPanel {
         // Update SlackTab state
         const slackTab = this._tabManager.getTab("slack");
         if (slackTab) {
-          slackTab.handleMessage({
+          void slackTab.handleMessage({
             command: "contextTestResult",
             data: timeoutData,
           });
@@ -1202,7 +1204,7 @@ export class CommandCenterPanel {
         // Update SlackTab state
         const slackTab = this._tabManager.getTab("slack");
         if (slackTab) {
-          slackTab.handleMessage({
+          void slackTab.handleMessage({
             command: "contextTestResult",
             data: errorData,
           });
@@ -1254,7 +1256,7 @@ export class CommandCenterPanel {
           // Update SlackTab state
           const slackTab = this._tabManager.getTab("slack");
           if (slackTab) {
-            slackTab.handleMessage({
+            void slackTab.handleMessage({
               command: "contextTestResult",
               data: errorData,
             });
@@ -1276,7 +1278,7 @@ export class CommandCenterPanel {
       // Update SlackTab state
       const slackTab = this._tabManager.getTab("slack");
       if (slackTab) {
-        slackTab.handleMessage({
+        void slackTab.handleMessage({
           command: "contextTestResult",
           data: errorData,
         });
@@ -1874,7 +1876,7 @@ print(result[0].text if result else '[]')
             assignee: cols[5] || "",
             reporter: cols[6] || "",
             sprint: cols[7] || "", // Capture sprint name
-            storyPoints: parseInt(cols[8]) || 0,
+            storyPoints: Number.parseInt(cols[8]) || 0,
             blocked: cols[9] === "Yes" || cols[9] === "true",
           });
         }
@@ -2584,7 +2586,6 @@ print(result[0].text if result else '[]')
           // Escape double quotes and backslashes for shell
           const escapedValue = arg.value
             .replace(/\\/g, "\\\\") // Escape backslashes first
-            .replace(/\\/g, "\\\\")
             .replace(/"/g, '\\"'); // Escape double quotes
           cmd += ` ${arg.type}:"${escapedValue}"`;
         }
@@ -2624,7 +2625,7 @@ print(result[0].text if result else '[]')
         }
         const intMatch = line.match(/int32\s+(\d+)/);
         if (intMatch) {
-          return parseInt(intMatch[1], 10);
+          return Number.parseInt(intMatch[1], 10);
         }
         const boolMatch = line.match(/boolean\s+(true|false)/);
         if (boolMatch) {
@@ -2689,7 +2690,7 @@ print(result[0].text if result else '[]')
       );
       const pids = stdout.trim().split("\n").filter(Boolean);
       if (pids.length > 0) {
-        const pid = parseInt(pids[0], 10);
+        const pid = Number.parseInt(pids[0], 10);
         const status = { running: !isNaN(pid), pid };
         // Update internal cache for tab badge calculation
         this._services.mcp = status;
@@ -3648,7 +3649,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     } else {
-      getNotificationService().warning(
+      void getNotificationService().warning(
         `Transcript for meeting ${noteId} not found`,
       );
     }
@@ -3664,7 +3665,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     } else {
-      getNotificationService().warning(
+      void getNotificationService().warning(
         `Bot log for meeting ${noteId} not found`,
       );
     }
@@ -3689,7 +3690,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         vscode.env.openExternal(vscode.Uri.parse(selected.url));
       }
     } else {
-      getNotificationService().info("No linked issues found for this meeting");
+      void getNotificationService().info(
+        "No linked issues found for this meeting",
+      );
     }
   }
 
@@ -5507,7 +5510,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           const sqlResult = spawnSync(
             "sqlite3",
             ["-separator", "|||", dbPath, query],
-            { encoding: "utf8", timeout: 5000 },
+            {
+              encoding: "utf8",
+              timeout: 5000,
+              // Resolve sqlite3 from fixed system directories only.
+              env: { ...process.env, PATH: "/usr/local/bin:/usr/bin:/bin" },
+            },
           );
           const result = sqlResult.stdout || "";
 
