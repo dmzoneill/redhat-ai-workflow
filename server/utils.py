@@ -24,6 +24,7 @@ def truncate_output(
     max_length: int = 5000,
     suffix: str = "\n\n... (truncated)",
     mode: str = "head",
+    max_lines: int | None = None,
 ) -> str:
     """Truncate long output with a suffix/prefix message.
 
@@ -32,11 +33,25 @@ def truncate_output(
         max_length: Maximum length before truncation (default: 5000)
         suffix: Message to append/prepend when truncated
         mode: "head" keeps first N chars (default), "tail" keeps last N chars
+        max_lines: Optional maximum number of lines to keep (applied first)
 
     Returns:
         Original text if within limit, otherwise truncated with message
     """
-    if not text or len(text) <= max_length:
+    if not text:
+        return text
+
+    if max_lines is not None:
+        lines = text.splitlines(keepends=True)
+        if len(lines) > max_lines:
+            kept = lines[-max_lines:] if mode == "tail" else lines[:max_lines]
+            text = "".join(kept)
+            if len(text) <= max_length:
+                if mode == "tail":
+                    return suffix.lstrip() + "\n\n" + text if suffix else text
+                return text + suffix
+
+    if len(text) <= max_length:
         return text
 
     if mode == "tail":
@@ -499,6 +514,7 @@ async def run_cmd(
     timeout: int = 60,
     check: bool = False,
     use_shell: bool = True,
+    input_data: str | None = None,
 ) -> tuple[bool, str]:
     """Run a command asynchronously through user's shell environment.
 
@@ -515,6 +531,7 @@ async def run_cmd(
         check: Raise exception on non-zero exit
         use_shell: If True (default), run through bash with sourced configs.
                    Set to False only for simple commands that don't need shell env.
+        input_data: Optional text passed to the command's stdin
 
     Returns:
         Tuple of (success, output) - stderr is merged with stdout on failure
@@ -568,6 +585,7 @@ async def run_cmd(
             timeout=timeout,
             cwd=run_cwd,
             env=run_env,
+            input=input_data,
         )
 
         output = result.stdout

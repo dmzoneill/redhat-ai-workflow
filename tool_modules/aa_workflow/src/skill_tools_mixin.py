@@ -76,7 +76,8 @@ class SkillToolMixin:  # pylint: disable=too-few-public-methods
         import time  # pylint: disable=import-outside-toplevel
 
         try:
-            assert self.server is not None, "No server available for tool execution"
+            if self.server is None:
+                raise RuntimeError("No server available for tool execution")
             result = await self.server.call_tool(tool_name, args)
             duration = time.time() - start_time
             duration_ms = int(duration * 1000)
