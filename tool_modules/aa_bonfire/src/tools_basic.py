@@ -13,6 +13,7 @@ from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 __project_root__ = PROJECT_ROOT  # Module initialization
 
 from mcp.types import TextContent  # pylint: disable=wrong-import-order
+
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
 from server.utils import run_cmd, truncate_output
