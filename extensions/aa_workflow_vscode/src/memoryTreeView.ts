@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Memory Tab - Comprehensive view of the AI Workflow memory system
  *
@@ -43,7 +44,6 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import * as yaml from "js-yaml";
 import { getMemoryDir } from "./paths";
 import { createLogger } from "./logger";
 import { dbus } from "./dbusClient";
@@ -52,12 +52,7 @@ const logger = createLogger("MemoryTab");
 
 // Tree item types for context menu handling
 type MemoryItemType =
-  | "category"
-  | "subcategory"
-  | "item"
-  | "detail"
-  | "action"
-  | "file";
+  "category" | "subcategory" | "item" | "detail" | "action" | "file";
 
 export class MemoryTreeItem extends vscode.TreeItem {
   public data?: any;
@@ -68,7 +63,7 @@ export class MemoryTreeItem extends vscode.TreeItem {
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly itemType: MemoryItemType,
     data?: any,
-    filePath?: string
+    filePath?: string,
   ) {
     super(label, collapsibleState);
     this.contextValue = itemType;
@@ -140,9 +135,7 @@ interface MemoryStats {
   slackMemory: SlackMemoryStats;
 }
 
-export class MemoryTreeProvider
-  implements vscode.TreeDataProvider<MemoryTreeItem>
-{
+export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeItem> {
   private _onDidChangeTreeData: vscode.EventEmitter<
     MemoryTreeItem | undefined | null | void
   > = new vscode.EventEmitter<MemoryTreeItem | undefined | null | void>();
@@ -213,12 +206,13 @@ export class MemoryTreeProvider
 
     try {
       // D-Bus parallel calls
-      const [healthResult, workResult, envResult, patternsResult] = await Promise.all([
-        dbus.memory_getHealth(),
-        dbus.memory_getCurrentWork(),
-        dbus.memory_getEnvironments(),
-        dbus.memory_getPatterns(),
-      ]);
+      const [healthResult, workResult, envResult, patternsResult] =
+        await Promise.all([
+          dbus.memory_getHealth(),
+          dbus.memory_getCurrentWork(),
+          dbus.memory_getEnvironments(),
+          dbus.memory_getPatterns(),
+        ]);
 
       // Process health
       if (healthResult.success && healthResult.data) {
@@ -252,8 +246,10 @@ export class MemoryTreeProvider
         for (const p of patterns) {
           if (p.type === "error_patterns") stats.learned.errorPatterns++;
           else if (p.type === "auth_patterns") stats.learned.authPatterns++;
-          else if (p.type === "pipeline_patterns") stats.learned.pipelinePatterns++;
-          else if (p.type === "pipeline_failures") stats.learned.pipelinePatterns++;
+          else if (p.type === "pipeline_patterns")
+            stats.learned.pipelinePatterns++;
+          else if (p.type === "pipeline_failures")
+            stats.learned.pipelinePatterns++;
         }
       }
 
@@ -302,7 +298,8 @@ export class MemoryTreeProvider
         try {
           const metaContent = fs.readFileSync(syncMetaPath, "utf-8");
           const meta = JSON.parse(metaContent);
-          slackStats.syncInProgress = meta.sync_in_progress || slackStats.syncInProgress;
+          slackStats.syncInProgress =
+            meta.sync_in_progress || slackStats.syncInProgress;
           if (meta.last_sync_completed) {
             slackStats.lastSync = meta.last_sync_completed;
           }
@@ -360,7 +357,7 @@ export class MemoryTreeProvider
           totalSize += stat.size;
         }
       }
-    } catch (e) {
+    } catch {
       // Ignore errors
     }
     return totalSize;
@@ -384,7 +381,11 @@ export class MemoryTreeProvider
         dailyPatterns: 0,
       },
       knowledge: { projects: [], personas: [], lastBootstrap: null },
-      statistics: { vectorReindexes: 0, knowledgeBootstraps: 0, workAnalyses: 0 },
+      statistics: {
+        vectorReindexes: 0,
+        knowledgeBootstraps: 0,
+        workAnalyses: 0,
+      },
       sessions: { total: 0, active: 0, recentSessions: [] },
       slackMemory: {
         totalMessages: 0,
@@ -416,14 +417,17 @@ export class MemoryTreeProvider
     const stateItem = new MemoryTreeItem(
       "State",
       vscode.TreeItemCollapsibleState.Expanded,
-      "category"
+      "category",
     );
     stateItem.iconPath = new vscode.ThemeIcon(
       "database",
-      new vscode.ThemeColor("charts.blue")
+      new vscode.ThemeColor("charts.blue"),
     );
-    const totalState = stats.state.activeIssues + stats.state.openMrs +
-                       stats.state.followUps + stats.state.discoveredWork;
+    const totalState =
+      stats.state.activeIssues +
+      stats.state.openMrs +
+      stats.state.followUps +
+      stats.state.discoveredWork;
     stateItem.description = `${totalState} items`;
     stateItem.tooltip = "Current work state: active issues, MRs, follow-ups";
     items.push(stateItem);
@@ -432,13 +436,16 @@ export class MemoryTreeProvider
     const envItem = new MemoryTreeItem(
       "Environments",
       vscode.TreeItemCollapsibleState.Expanded,
-      "category"
+      "category",
     );
-    const hasAlerts = stats.environments.stage.alerts > 0 ||
-                      stats.environments.production.alerts > 0;
+    const hasAlerts =
+      stats.environments.stage.alerts > 0 ||
+      stats.environments.production.alerts > 0;
     envItem.iconPath = new vscode.ThemeIcon(
       hasAlerts ? "server-environment" : "server",
-      hasAlerts ? new vscode.ThemeColor("charts.red") : new vscode.ThemeColor("charts.green")
+      hasAlerts
+        ? new vscode.ThemeColor("charts.red")
+        : new vscode.ThemeColor("charts.green"),
     );
     envItem.description = hasAlerts
       ? `${stats.environments.stage.alerts + stats.environments.production.alerts} alerts`
@@ -451,15 +458,18 @@ export class MemoryTreeProvider
       stats.sessions.total > 0
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
-      "category"
+      "category",
     );
     sessionsItem.iconPath = new vscode.ThemeIcon(
       "history",
-      stats.sessions.active > 0 ? new vscode.ThemeColor("charts.green") : undefined
+      stats.sessions.active > 0
+        ? new vscode.ThemeColor("charts.green")
+        : undefined,
     );
-    sessionsItem.description = stats.sessions.total > 0
-      ? `${stats.sessions.total} total, ${stats.sessions.active} active`
-      : "No sessions";
+    sessionsItem.description =
+      stats.sessions.total > 0
+        ? `${stats.sessions.total} total, ${stats.sessions.active} active`
+        : "No sessions";
     sessionsItem.tooltip = "Recent AI assistant sessions from MCP server";
     items.push(sessionsItem);
 
@@ -467,14 +477,17 @@ export class MemoryTreeProvider
     const learnedItem = new MemoryTreeItem(
       "Learned Patterns",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     learnedItem.iconPath = new vscode.ThemeIcon(
       "lightbulb",
-      new vscode.ThemeColor("charts.yellow")
+      new vscode.ThemeColor("charts.yellow"),
     );
-    const totalLearned = stats.learned.errorPatterns + stats.learned.authPatterns +
-                         stats.learned.pipelinePatterns + stats.learned.toolFailures;
+    const totalLearned =
+      stats.learned.errorPatterns +
+      stats.learned.authPatterns +
+      stats.learned.pipelinePatterns +
+      stats.learned.toolFailures;
     learnedItem.description = `${totalLearned} patterns`;
     items.push(learnedItem);
 
@@ -482,11 +495,11 @@ export class MemoryTreeProvider
     const knowledgeItem = new MemoryTreeItem(
       "Knowledge Base",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     knowledgeItem.iconPath = new vscode.ThemeIcon(
       "book",
-      new vscode.ThemeColor("charts.purple")
+      new vscode.ThemeColor("charts.purple"),
     );
     knowledgeItem.description = `${stats.knowledge.projects.length} projects`;
     items.push(knowledgeItem);
@@ -495,15 +508,15 @@ export class MemoryTreeProvider
     const slackMemoryItem = new MemoryTreeItem(
       "Slack Memory",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     slackMemoryItem.iconPath = new vscode.ThemeIcon(
       "comment-discussion",
       stats.slackMemory.syncInProgress
         ? new vscode.ThemeColor("charts.yellow")
         : stats.slackMemory.totalMessages > 0
-        ? new vscode.ThemeColor("charts.green")
-        : undefined
+          ? new vscode.ThemeColor("charts.green")
+          : undefined,
     );
     if (stats.slackMemory.syncInProgress) {
       slackMemoryItem.description = "Syncing...";
@@ -512,18 +525,19 @@ export class MemoryTreeProvider
     } else {
       slackMemoryItem.description = "Not synced";
     }
-    slackMemoryItem.tooltip = "Slack message history for persona context injection";
+    slackMemoryItem.tooltip =
+      "Slack message history for persona context injection";
     items.push(slackMemoryItem);
 
     // Statistics
     const statsItem = new MemoryTreeItem(
       "Statistics",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     statsItem.iconPath = new vscode.ThemeIcon(
       "graph",
-      new vscode.ThemeColor("charts.cyan")
+      new vscode.ThemeColor("charts.cyan"),
     );
     statsItem.description = "Usage & indexing";
     items.push(statsItem);
@@ -532,11 +546,11 @@ export class MemoryTreeProvider
     const actionsItem = new MemoryTreeItem(
       "Memory Actions",
       vscode.TreeItemCollapsibleState.Collapsed,
-      "category"
+      "category",
     );
     actionsItem.iconPath = new vscode.ThemeIcon(
       "tools",
-      new vscode.ThemeColor("charts.orange")
+      new vscode.ThemeColor("charts.orange"),
     );
     actionsItem.description = "View, edit, cleanup";
     items.push(actionsItem);
@@ -547,7 +561,11 @@ export class MemoryTreeProvider
   private getStateItems(): MemoryTreeItem[] {
     const stats = this.loadStats();
     const items: MemoryTreeItem[] = [];
-    const currentWorkPath = path.join(this.memoryDir, "state", "current_work.yaml");
+    const currentWorkPath = path.join(
+      this.memoryDir,
+      "state",
+      "current_work.yaml",
+    );
     // Use cached data from D-Bus (already loaded in loadStatsAsync)
     // The stats object contains the counts, but we need the actual items
     // These are available from the last D-Bus call to memory_getCurrentWork
@@ -566,11 +584,13 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: currentWork.active_issues || [], type: "issue" }
+      { items: currentWork.active_issues || [], type: "issue" },
     );
     issuesItem.iconPath = new vscode.ThemeIcon(
       "issues",
-      stats.state.activeIssues > 0 ? new vscode.ThemeColor("charts.blue") : undefined
+      stats.state.activeIssues > 0
+        ? new vscode.ThemeColor("charts.blue")
+        : undefined,
     );
     items.push(issuesItem);
 
@@ -581,11 +601,13 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: currentWork.open_mrs || [], type: "mr" }
+      { items: currentWork.open_mrs || [], type: "mr" },
     );
     mrsItem.iconPath = new vscode.ThemeIcon(
       "git-pull-request",
-      stats.state.openMrs > 0 ? new vscode.ThemeColor("charts.green") : undefined
+      stats.state.openMrs > 0
+        ? new vscode.ThemeColor("charts.green")
+        : undefined,
     );
     items.push(mrsItem);
 
@@ -596,11 +618,13 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: currentWork.follow_ups || [], type: "followup" }
+      { items: currentWork.follow_ups || [], type: "followup" },
     );
     followUpsItem.iconPath = new vscode.ThemeIcon(
       "checklist",
-      stats.state.followUps > 0 ? new vscode.ThemeColor("charts.yellow") : undefined
+      stats.state.followUps > 0
+        ? new vscode.ThemeColor("charts.yellow")
+        : undefined,
     );
     items.push(followUpsItem);
 
@@ -611,11 +635,13 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: currentWork.discovered_work || [], type: "discovered" }
+      { items: currentWork.discovered_work || [], type: "discovered" },
     );
     discoveredItem.iconPath = new vscode.ThemeIcon(
       "search",
-      stats.state.discoveredWork > 0 ? new vscode.ThemeColor("charts.purple") : undefined
+      stats.state.discoveredWork > 0
+        ? new vscode.ThemeColor("charts.purple")
+        : undefined,
     );
     items.push(discoveredItem);
 
@@ -624,7 +650,7 @@ export class MemoryTreeProvider
       const lastUpdated = new MemoryTreeItem(
         `Last updated: ${this.formatDate(currentWork.last_updated)}`,
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       lastUpdated.iconPath = new vscode.ThemeIcon("clock");
       items.push(lastUpdated);
@@ -636,7 +662,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      currentWorkPath
+      currentWorkPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openFileItem.command = {
@@ -660,13 +686,13 @@ export class MemoryTreeProvider
     const stageItem = new MemoryTreeItem(
       `Stage: ${stats.environments.stage.status}`,
       vscode.TreeItemCollapsibleState.None,
-      "item"
+      "item",
     );
     stageItem.iconPath = new vscode.ThemeIcon(
       stats.environments.stage.alerts > 0 ? "warning" : "pass",
       stats.environments.stage.alerts > 0
         ? new vscode.ThemeColor("charts.yellow")
-        : new vscode.ThemeColor("charts.green")
+        : new vscode.ThemeColor("charts.green"),
     );
     if (stats.environments.stage.alerts > 0) {
       stageItem.description = `${stats.environments.stage.alerts} alert(s)`;
@@ -682,13 +708,13 @@ export class MemoryTreeProvider
     const prodItem = new MemoryTreeItem(
       `Production: ${stats.environments.production.status}`,
       vscode.TreeItemCollapsibleState.None,
-      "item"
+      "item",
     );
     prodItem.iconPath = new vscode.ThemeIcon(
       stats.environments.production.alerts > 0 ? "flame" : "pass",
       stats.environments.production.alerts > 0
         ? new vscode.ThemeColor("charts.red")
-        : new vscode.ThemeColor("charts.green")
+        : new vscode.ThemeColor("charts.green"),
     );
     if (stats.environments.production.alerts > 0) {
       prodItem.description = `${stats.environments.production.alerts} alert(s)`;
@@ -707,13 +733,16 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: envData?.environments?.ephemeral?.active_namespaces || [], type: "namespace" }
+      {
+        items: envData?.environments?.ephemeral?.active_namespaces || [],
+        type: "namespace",
+      },
     );
     ephemeralItem.iconPath = new vscode.ThemeIcon(
       "cloud",
       stats.environments.ephemeral.namespaces > 0
         ? new vscode.ThemeColor("charts.purple")
-        : undefined
+        : undefined,
     );
     ephemeralItem.description = `${stats.environments.ephemeral.namespaces} active`;
     items.push(ephemeralItem);
@@ -722,13 +751,13 @@ export class MemoryTreeProvider
     const konfluxItem = new MemoryTreeItem(
       `Konflux: ${stats.environments.konflux.status}`,
       vscode.TreeItemCollapsibleState.None,
-      "item"
+      "item",
     );
     konfluxItem.iconPath = new vscode.ThemeIcon(
       "package",
       stats.environments.konflux.status === "active"
         ? new vscode.ThemeColor("charts.green")
-        : undefined
+        : undefined,
     );
     items.push(konfluxItem);
 
@@ -738,7 +767,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      envPath
+      envPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openFileItem.command = {
@@ -759,7 +788,7 @@ export class MemoryTreeProvider
       const emptyItem = new MemoryTreeItem(
         "No sessions found",
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       emptyItem.iconPath = new vscode.ThemeIcon("info");
       emptyItem.description = "Start a session with session_start()";
@@ -774,32 +803,34 @@ export class MemoryTreeProvider
         this.truncate(displayName, 40),
         vscode.TreeItemCollapsibleState.None,
         "item",
-        session
+        session,
       );
 
       // Icon based on active status
       sessionItem.iconPath = new vscode.ThemeIcon(
         session.is_active ? "debug-start" : "history",
-        session.is_active ? new vscode.ThemeColor("charts.green") : undefined
+        session.is_active ? new vscode.ThemeColor("charts.green") : undefined,
       );
 
       // Description shows persona and time
-      const timeAgo = session.last_activity ? this.formatDate(session.last_activity) : "unknown";
+      const timeAgo = session.last_activity
+        ? this.formatDate(session.last_activity)
+        : "unknown";
       sessionItem.description = `${session.persona} • ${timeAgo}`;
 
       // Rich tooltip
       sessionItem.tooltip = new vscode.MarkdownString(
         `**${session.name || "Unnamed Session"}**\n\n` +
-        `| | |\n|---|---|\n` +
-        `| Status | ${session.is_active ? "🟢 Active" : "⚪ Inactive"} |\n` +
-        `| Persona | ${session.persona} |\n` +
-        `| Project | ${session.project || "N/A"} |\n` +
-        `| Issue | ${session.issue_key || "N/A"} |\n` +
-        `| Tool Calls | ${session.tool_call_count} |\n` +
-        `| Started | ${session.started_at ? this.formatDate(session.started_at) : "N/A"} |\n` +
-        `| Last Activity | ${timeAgo} |\n\n` +
-        `Session ID: \`${session.session_id}\`\n\n` +
-        `_Click to ${session.is_active ? "view session info" : "resume this session"}_`
+          `| | |\n|---|---|\n` +
+          `| Status | ${session.is_active ? "🟢 Active" : "⚪ Inactive"} |\n` +
+          `| Persona | ${session.persona} |\n` +
+          `| Project | ${session.project || "N/A"} |\n` +
+          `| Issue | ${session.issue_key || "N/A"} |\n` +
+          `| Tool Calls | ${session.tool_call_count} |\n` +
+          `| Started | ${session.started_at ? this.formatDate(session.started_at) : "N/A"} |\n` +
+          `| Last Activity | ${timeAgo} |\n\n` +
+          `Session ID: \`${session.session_id}\`\n\n` +
+          `_Click to ${session.is_active ? "view session info" : "resume this session"}_`,
       );
 
       // Click to resume or view session
@@ -817,7 +848,7 @@ export class MemoryTreeProvider
       const moreItem = new MemoryTreeItem(
         `... and ${stats.sessions.total - stats.sessions.recentSessions.length} more sessions`,
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       moreItem.iconPath = new vscode.ThemeIcon("ellipsis");
       moreItem.command = {
@@ -831,9 +862,12 @@ export class MemoryTreeProvider
     const newSessionItem = new MemoryTreeItem(
       "Start New Session",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    newSessionItem.iconPath = new vscode.ThemeIcon("add", new vscode.ThemeColor("charts.green"));
+    newSessionItem.iconPath = new vscode.ThemeIcon(
+      "add",
+      new vscode.ThemeColor("charts.green"),
+    );
     newSessionItem.description = "session_start()";
     newSessionItem.command = {
       command: "aa-workflow.startNewSession",
@@ -842,13 +876,18 @@ export class MemoryTreeProvider
     items.push(newSessionItem);
 
     // Open workspace_states.json (centralized in ~/.config/aa-workflow/)
-    const workspaceStatesPath = path.join(os.homedir(), ".config", "aa-workflow", "workspace_states.json");
+    const workspaceStatesPath = path.join(
+      os.homedir(),
+      ".config",
+      "aa-workflow",
+      "workspace_states.json",
+    );
     const openFileItem = new MemoryTreeItem(
       "Open workspace_states.json",
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      workspaceStatesPath
+      workspaceStatesPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openFileItem.command = {
@@ -868,7 +907,11 @@ export class MemoryTreeProvider
     const patterns: any = {};
     const failures: any = {};
     const patternsPath = path.join(this.memoryDir, "learned", "patterns.yaml");
-    const failuresPath = path.join(this.memoryDir, "learned", "tool_failures.yaml");
+    const failuresPath = path.join(
+      this.memoryDir,
+      "learned",
+      "tool_failures.yaml",
+    );
 
     // Error Patterns
     const errorItem = new MemoryTreeItem(
@@ -877,9 +920,12 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: patterns.error_patterns || [], type: "pattern" }
+      { items: patterns.error_patterns || [], type: "pattern" },
     );
-    errorItem.iconPath = new vscode.ThemeIcon("bug", new vscode.ThemeColor("charts.red"));
+    errorItem.iconPath = new vscode.ThemeIcon(
+      "bug",
+      new vscode.ThemeColor("charts.red"),
+    );
     items.push(errorItem);
 
     // Auth Patterns
@@ -889,9 +935,12 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: patterns.auth_patterns || [], type: "pattern" }
+      { items: patterns.auth_patterns || [], type: "pattern" },
     );
-    authItem.iconPath = new vscode.ThemeIcon("key", new vscode.ThemeColor("charts.yellow"));
+    authItem.iconPath = new vscode.ThemeIcon(
+      "key",
+      new vscode.ThemeColor("charts.yellow"),
+    );
     items.push(authItem);
 
     // Pipeline Patterns
@@ -901,9 +950,12 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: patterns.pipeline_patterns || [], type: "pattern" }
+      { items: patterns.pipeline_patterns || [], type: "pattern" },
     );
-    pipelineItem.iconPath = new vscode.ThemeIcon("play-circle", new vscode.ThemeColor("charts.blue"));
+    pipelineItem.iconPath = new vscode.ThemeIcon(
+      "play-circle",
+      new vscode.ThemeColor("charts.blue"),
+    );
     items.push(pipelineItem);
 
     // Tool Failures (with auto-fix stats)
@@ -913,9 +965,12 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: failures.failures || [], type: "failure" }
+      { items: failures.failures || [], type: "failure" },
     );
-    failuresItem.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.orange"));
+    failuresItem.iconPath = new vscode.ThemeIcon(
+      "error",
+      new vscode.ThemeColor("charts.orange"),
+    );
     if (failures.stats?.auto_fixed) {
       failuresItem.description = `${failures.stats.auto_fixed} auto-fixed`;
     }
@@ -928,9 +983,12 @@ export class MemoryTreeProvider
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
       "subcategory",
-      { items: failures.learned_fixes || [], type: "fix" }
+      { items: failures.learned_fixes || [], type: "fix" },
     );
-    fixesItem.iconPath = new vscode.ThemeIcon("wrench", new vscode.ThemeColor("charts.green"));
+    fixesItem.iconPath = new vscode.ThemeIcon(
+      "wrench",
+      new vscode.ThemeColor("charts.green"),
+    );
     items.push(fixesItem);
 
     // Open files
@@ -939,7 +997,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      patternsPath
+      patternsPath,
     );
     openPatternsItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openPatternsItem.command = {
@@ -954,7 +1012,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      failuresPath
+      failuresPath,
     );
     openFailuresItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openFailuresItem.command = {
@@ -970,7 +1028,6 @@ export class MemoryTreeProvider
   private getKnowledgeItems(): MemoryTreeItem[] {
     const stats = this.loadStats();
     const items: MemoryTreeItem[] = [];
-    const personasDir = path.join(this.memoryDir, "knowledge", "personas");
 
     // Projects with personas - data comes from D-Bus
     for (const persona of stats.knowledge.personas) {
@@ -978,11 +1035,11 @@ export class MemoryTreeProvider
         `${this.capitalize(persona)} Knowledge`,
         vscode.TreeItemCollapsibleState.None,
         "subcategory",
-        { items: [], type: "knowledge_file" }
+        { items: [], type: "knowledge_file" },
       );
       personaItem.iconPath = new vscode.ThemeIcon(
         this.getPersonaIcon(persona),
-        new vscode.ThemeColor(this.getPersonaColor(persona))
+        new vscode.ThemeColor(this.getPersonaColor(persona)),
       );
       items.push(personaItem);
     }
@@ -992,7 +1049,7 @@ export class MemoryTreeProvider
       const bootstrapItem = new MemoryTreeItem(
         `Last Bootstrap: ${this.formatDate(stats.knowledge.lastBootstrap)}`,
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       bootstrapItem.iconPath = new vscode.ThemeIcon("sync");
       items.push(bootstrapItem);
@@ -1005,7 +1062,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      knowledgePath
+      knowledgePath,
     );
     openKnowledgeItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openKnowledgeItem.command = {
@@ -1021,24 +1078,36 @@ export class MemoryTreeProvider
   private getSlackMemoryItems(): MemoryTreeItem[] {
     const stats = this.loadStats();
     const items: MemoryTreeItem[] = [];
-    const slackDbPath = path.join(os.homedir(), ".config", "aa-workflow", "vectors", "slack-persona");
-    const syncMetaPath = path.join(os.homedir(), ".config", "aa-workflow", "slack-persona-sync.json");
+    const slackDbPath = path.join(
+      os.homedir(),
+      ".config",
+      "aa-workflow",
+      "vectors",
+      "slack-persona",
+    );
+    const syncMetaPath = path.join(
+      os.homedir(),
+      ".config",
+      "aa-workflow",
+      "slack-persona-sync.json",
+    );
 
     // Sync Status
     const statusItem = new MemoryTreeItem(
       stats.slackMemory.syncInProgress ? "Sync in Progress" : "Sync Status",
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
     statusItem.iconPath = new vscode.ThemeIcon(
       stats.slackMemory.syncInProgress ? "sync~spin" : "check",
       stats.slackMemory.syncInProgress
         ? new vscode.ThemeColor("charts.yellow")
-        : new vscode.ThemeColor("charts.green")
+        : new vscode.ThemeColor("charts.green"),
     );
     if (stats.slackMemory.syncInProgress) {
       statusItem.description = "Running...";
-      statusItem.tooltip = "Slack message sync is currently running in the background";
+      statusItem.tooltip =
+        "Slack message sync is currently running in the background";
     } else if (stats.slackMemory.lastSync) {
       statusItem.description = `Last: ${this.formatDate(stats.slackMemory.lastSync)}`;
       statusItem.tooltip = `Last successful sync: ${stats.slackMemory.lastSync}`;
@@ -1052,17 +1121,21 @@ export class MemoryTreeProvider
     const messagesItem = new MemoryTreeItem(
       `Total Messages: ${stats.slackMemory.totalMessages.toLocaleString()}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    messagesItem.iconPath = new vscode.ThemeIcon("mail", new vscode.ThemeColor("charts.blue"));
-    messagesItem.tooltip = "Total number of messages indexed in the vector database";
+    messagesItem.iconPath = new vscode.ThemeIcon(
+      "mail",
+      new vscode.ThemeColor("charts.blue"),
+    );
+    messagesItem.tooltip =
+      "Total number of messages indexed in the vector database";
     items.push(messagesItem);
 
     // Breakdown by type
     const channelsItem = new MemoryTreeItem(
       `Channels: ${stats.slackMemory.channels}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
     channelsItem.iconPath = new vscode.ThemeIcon("symbol-namespace");
     items.push(channelsItem);
@@ -1070,7 +1143,7 @@ export class MemoryTreeProvider
     const dmsItem = new MemoryTreeItem(
       `Direct Messages: ${stats.slackMemory.dms}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
     dmsItem.iconPath = new vscode.ThemeIcon("person");
     items.push(dmsItem);
@@ -1078,7 +1151,7 @@ export class MemoryTreeProvider
     const groupDmsItem = new MemoryTreeItem(
       `Group DMs: ${stats.slackMemory.groupDms}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
     groupDmsItem.iconPath = new vscode.ThemeIcon("organization");
     items.push(groupDmsItem);
@@ -1087,9 +1160,12 @@ export class MemoryTreeProvider
     const sizeItem = new MemoryTreeItem(
       `Database Size: ${stats.slackMemory.dbSizeMB.toFixed(1)} MB`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    sizeItem.iconPath = new vscode.ThemeIcon("database", new vscode.ThemeColor("charts.purple"));
+    sizeItem.iconPath = new vscode.ThemeIcon(
+      "database",
+      new vscode.ThemeColor("charts.purple"),
+    );
     sizeItem.tooltip = "Size of the LanceDB vector database on disk";
     items.push(sizeItem);
 
@@ -1098,9 +1174,12 @@ export class MemoryTreeProvider
       const rangeItem = new MemoryTreeItem(
         `Date Range: ${stats.slackMemory.oldestMessage} → ${stats.slackMemory.newestMessage}`,
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
-      rangeItem.iconPath = new vscode.ThemeIcon("calendar", new vscode.ThemeColor("charts.green"));
+      rangeItem.iconPath = new vscode.ThemeIcon(
+        "calendar",
+        new vscode.ThemeColor("charts.green"),
+      );
       rangeItem.tooltip = "Date range of indexed messages";
       items.push(rangeItem);
     }
@@ -1109,9 +1188,12 @@ export class MemoryTreeProvider
     const searchItem = new MemoryTreeItem(
       "Search Slack History",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    searchItem.iconPath = new vscode.ThemeIcon("search", new vscode.ThemeColor("charts.blue"));
+    searchItem.iconPath = new vscode.ThemeIcon(
+      "search",
+      new vscode.ThemeColor("charts.blue"),
+    );
     searchItem.description = "slack_persona_context()";
     searchItem.tooltip = "Search past Slack conversations for context";
     searchItem.command = {
@@ -1123,18 +1205,22 @@ export class MemoryTreeProvider
     const syncItem = new MemoryTreeItem(
       stats.slackMemory.syncInProgress ? "View Sync Log" : "Run Full Sync",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
     syncItem.iconPath = new vscode.ThemeIcon(
       stats.slackMemory.syncInProgress ? "output" : "sync",
-      new vscode.ThemeColor("charts.yellow")
+      new vscode.ThemeColor("charts.yellow"),
     );
-    syncItem.description = stats.slackMemory.syncInProgress ? "tail sync log" : "48 months";
+    syncItem.description = stats.slackMemory.syncInProgress
+      ? "tail sync log"
+      : "48 months";
     syncItem.tooltip = stats.slackMemory.syncInProgress
       ? "View the sync progress log"
       : "Sync all Slack messages from the last 4 years";
     syncItem.command = {
-      command: stats.slackMemory.syncInProgress ? "aa-workflow.viewSlackSyncLog" : "aa-workflow.runSlackSync",
+      command: stats.slackMemory.syncInProgress
+        ? "aa-workflow.viewSlackSyncLog"
+        : "aa-workflow.runSlackSync",
       title: stats.slackMemory.syncInProgress ? "View Log" : "Run Sync",
     };
     items.push(syncItem);
@@ -1145,9 +1231,12 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      slackDbPath
+      slackDbPath,
     );
-    openDbItem.iconPath = new vscode.ThemeIcon("folder-opened", new vscode.ThemeColor("charts.orange"));
+    openDbItem.iconPath = new vscode.ThemeIcon(
+      "folder-opened",
+      new vscode.ThemeColor("charts.orange"),
+    );
     openDbItem.description = slackDbPath;
     openDbItem.command = {
       command: "revealFileInOS",
@@ -1162,7 +1251,7 @@ export class MemoryTreeProvider
       vscode.TreeItemCollapsibleState.None,
       "action",
       null,
-      syncMetaPath
+      syncMetaPath,
     );
     openMetaItem.iconPath = new vscode.ThemeIcon("go-to-file");
     openMetaItem.command = {
@@ -1184,10 +1273,14 @@ export class MemoryTreeProvider
     const reindexItem = new MemoryTreeItem(
       `Vector Reindexes: ${stats.statistics.vectorReindexes}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    reindexItem.iconPath = new vscode.ThemeIcon("search", new vscode.ThemeColor("charts.blue"));
-    reindexItem.tooltip = "Number of times the vector index has been rebuilt. Click to view patterns.yaml";
+    reindexItem.iconPath = new vscode.ThemeIcon(
+      "search",
+      new vscode.ThemeColor("charts.blue"),
+    );
+    reindexItem.tooltip =
+      "Number of times the vector index has been rebuilt. Click to view patterns.yaml";
     reindexItem.command = {
       command: "aa-workflow.openMemoryFile",
       title: "Open patterns.yaml",
@@ -1199,10 +1292,14 @@ export class MemoryTreeProvider
     const bootstrapItem = new MemoryTreeItem(
       `Knowledge Bootstraps: ${stats.statistics.knowledgeBootstraps}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    bootstrapItem.iconPath = new vscode.ThemeIcon("book", new vscode.ThemeColor("charts.purple"));
-    bootstrapItem.tooltip = "Number of knowledge bootstrap operations. Click to run bootstrap skill";
+    bootstrapItem.iconPath = new vscode.ThemeIcon(
+      "book",
+      new vscode.ThemeColor("charts.purple"),
+    );
+    bootstrapItem.tooltip =
+      "Number of knowledge bootstrap operations. Click to run bootstrap skill";
     bootstrapItem.command = {
       command: "aa-workflow.runSkillByName",
       title: "Run Bootstrap",
@@ -1214,10 +1311,14 @@ export class MemoryTreeProvider
     const analysesItem = new MemoryTreeItem(
       `Work Analyses: ${stats.statistics.workAnalyses}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    analysesItem.iconPath = new vscode.ThemeIcon("graph", new vscode.ThemeColor("charts.green"));
-    analysesItem.tooltip = "Number of work analysis reports generated. Click to run work analysis";
+    analysesItem.iconPath = new vscode.ThemeIcon(
+      "graph",
+      new vscode.ThemeColor("charts.green"),
+    );
+    analysesItem.tooltip =
+      "Number of work analysis reports generated. Click to run work analysis";
     analysesItem.command = {
       command: "aa-workflow.workAnalysis",
       title: "Run Work Analysis",
@@ -1228,10 +1329,14 @@ export class MemoryTreeProvider
     const dailyItem = new MemoryTreeItem(
       `Daily Patterns: ${stats.learned.dailyPatterns}`,
       vscode.TreeItemCollapsibleState.None,
-      "detail"
+      "detail",
     );
-    dailyItem.iconPath = new vscode.ThemeIcon("calendar", new vscode.ThemeColor("charts.yellow"));
-    dailyItem.tooltip = "Number of daily activity patterns recorded. Click to view patterns.yaml";
+    dailyItem.iconPath = new vscode.ThemeIcon(
+      "calendar",
+      new vscode.ThemeColor("charts.yellow"),
+    );
+    dailyItem.tooltip =
+      "Number of daily activity patterns recorded. Click to view patterns.yaml";
     dailyItem.command = {
       command: "aa-workflow.openMemoryFile",
       title: "Open patterns.yaml",
@@ -1249,9 +1354,12 @@ export class MemoryTreeProvider
     const viewItem = new MemoryTreeItem(
       "View Memory Summary",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    viewItem.iconPath = new vscode.ThemeIcon("eye", new vscode.ThemeColor("charts.blue"));
+    viewItem.iconPath = new vscode.ThemeIcon(
+      "eye",
+      new vscode.ThemeColor("charts.blue"),
+    );
     viewItem.description = "Run memory_view skill";
     viewItem.tooltip = "Get a comprehensive summary of all memory contents";
     viewItem.command = {
@@ -1265,9 +1373,12 @@ export class MemoryTreeProvider
     const editItem = new MemoryTreeItem(
       "Edit Memory",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    editItem.iconPath = new vscode.ThemeIcon("edit", new vscode.ThemeColor("charts.yellow"));
+    editItem.iconPath = new vscode.ThemeIcon(
+      "edit",
+      new vscode.ThemeColor("charts.yellow"),
+    );
     editItem.description = "Run memory_edit skill";
     editItem.tooltip = "Interactively edit memory entries";
     editItem.command = {
@@ -1281,9 +1392,12 @@ export class MemoryTreeProvider
     const cleanupItem = new MemoryTreeItem(
       "Cleanup Memory",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    cleanupItem.iconPath = new vscode.ThemeIcon("trash", new vscode.ThemeColor("charts.red"));
+    cleanupItem.iconPath = new vscode.ThemeIcon(
+      "trash",
+      new vscode.ThemeColor("charts.red"),
+    );
     cleanupItem.description = "Run memory_cleanup skill";
     cleanupItem.tooltip = "Remove stale entries and optimize memory";
     cleanupItem.command = {
@@ -1297,9 +1411,12 @@ export class MemoryTreeProvider
     const learnItem = new MemoryTreeItem(
       "Learn New Pattern",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    learnItem.iconPath = new vscode.ThemeIcon("lightbulb", new vscode.ThemeColor("charts.green"));
+    learnItem.iconPath = new vscode.ThemeIcon(
+      "lightbulb",
+      new vscode.ThemeColor("charts.green"),
+    );
     learnItem.description = "Run learn_pattern skill";
     learnItem.tooltip = "Teach the system a new error pattern and fix";
     learnItem.command = {
@@ -1313,11 +1430,15 @@ export class MemoryTreeProvider
     const bootstrapItem = new MemoryTreeItem(
       "Bootstrap Knowledge",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    bootstrapItem.iconPath = new vscode.ThemeIcon("book", new vscode.ThemeColor("charts.purple"));
+    bootstrapItem.iconPath = new vscode.ThemeIcon(
+      "book",
+      new vscode.ThemeColor("charts.purple"),
+    );
     bootstrapItem.description = "Run bootstrap_knowledge skill";
-    bootstrapItem.tooltip = "Generate knowledge files for all projects and personas";
+    bootstrapItem.tooltip =
+      "Generate knowledge files for all projects and personas";
     bootstrapItem.command = {
       command: "aa-workflow.runSkillByName",
       title: "Bootstrap Knowledge",
@@ -1329,9 +1450,12 @@ export class MemoryTreeProvider
     const openDirItem = new MemoryTreeItem(
       "Open Memory Directory",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    openDirItem.iconPath = new vscode.ThemeIcon("folder-opened", new vscode.ThemeColor("charts.orange"));
+    openDirItem.iconPath = new vscode.ThemeIcon(
+      "folder-opened",
+      new vscode.ThemeColor("charts.orange"),
+    );
     openDirItem.description = this.memoryDir;
     openDirItem.tooltip = "Open the memory directory in the file explorer";
     openDirItem.command = {
@@ -1345,9 +1469,12 @@ export class MemoryTreeProvider
     const refreshItem = new MemoryTreeItem(
       "Refresh Memory View",
       vscode.TreeItemCollapsibleState.None,
-      "action"
+      "action",
     );
-    refreshItem.iconPath = new vscode.ThemeIcon("refresh", new vscode.ThemeColor("charts.cyan"));
+    refreshItem.iconPath = new vscode.ThemeIcon(
+      "refresh",
+      new vscode.ThemeColor("charts.cyan"),
+    );
     refreshItem.description = "Reload all memory data";
     refreshItem.tooltip = "Refresh the memory tree view";
     refreshItem.command = {
@@ -1362,7 +1489,8 @@ export class MemoryTreeProvider
   private getItemDetails(items: any[], type: string): MemoryTreeItem[] {
     const result: MemoryTreeItem[] = [];
 
-    for (const item of items.slice(0, 20)) { // Limit to 20 items
+    for (const item of items.slice(0, 20)) {
+      // Limit to 20 items
       let treeItem: MemoryTreeItem;
 
       switch (type) {
@@ -1371,16 +1499,16 @@ export class MemoryTreeProvider
             item.key || "Unknown",
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("issues");
           treeItem.description = this.truncate(item.summary || "", 40);
           treeItem.tooltip = new vscode.MarkdownString(
             `**${item.key}**\n\n${item.summary}\n\n` +
-            `Status: ${item.status || "Unknown"}\n` +
-            `Branch: ${item.branch || "N/A"}\n` +
-            `Repo: ${item.repo || "N/A"}\n\n` +
-            `_Click to open in Jira_`
+              `Status: ${item.status || "Unknown"}\n` +
+              `Branch: ${item.branch || "N/A"}\n` +
+              `Repo: ${item.repo || "N/A"}\n\n` +
+              `_Click to open in Jira_`,
           );
           // Click to open in Jira
           treeItem.command = {
@@ -1395,12 +1523,12 @@ export class MemoryTreeProvider
             `!${item.id}`,
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("git-pull-request");
           treeItem.description = this.truncate(item.title || "", 40);
           treeItem.tooltip = new vscode.MarkdownString(
-            `**!${item.id}**\n\n${item.title}\n\nStatus: ${item.status || "open"}\n\n_Click to open in GitLab_`
+            `**!${item.id}**\n\n${item.title}\n\nStatus: ${item.status || "open"}\n\n_Click to open in GitLab_`,
           );
           // Click to open in GitLab
           treeItem.command = {
@@ -1415,19 +1543,21 @@ export class MemoryTreeProvider
             this.truncate(item.task || "Unknown", 50),
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon(
             item.priority === "high" ? "circle-filled" : "circle-outline",
-            item.priority === "high" ? new vscode.ThemeColor("charts.red") : undefined
+            item.priority === "high"
+              ? new vscode.ThemeColor("charts.red")
+              : undefined,
           );
           treeItem.description = item.priority || "normal";
           treeItem.tooltip = new vscode.MarkdownString(
             `**Follow-up:** ${item.task}\n\n` +
-            `Priority: ${item.priority || "normal"}\n` +
-            (item.issue_key ? `Issue: ${item.issue_key}\n` : "") +
-            (item.mr_id ? `MR: !${item.mr_id}\n` : "") +
-            `\n_Click to copy task to clipboard_`
+              `Priority: ${item.priority || "normal"}\n` +
+              (item.issue_key ? `Issue: ${item.issue_key}\n` : "") +
+              (item.mr_id ? `MR: !${item.mr_id}\n` : "") +
+              `\n_Click to copy task to clipboard_`,
           );
           // Click to copy task
           treeItem.command = {
@@ -1442,17 +1572,19 @@ export class MemoryTreeProvider
             this.truncate(item.task || "Unknown", 50),
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("search");
           treeItem.description = item.work_type || "discovered_work";
           treeItem.tooltip = new vscode.MarkdownString(
             `**${item.task}**\n\n` +
-            `Type: ${item.work_type || "discovered_work"}\n` +
-            `Priority: ${item.priority || "medium"}\n` +
-            `Source: ${item.source_skill || "unknown"}\n` +
-            `Synced to Jira: ${item.jira_synced ? `Yes (${item.jira_key})` : "No"}\n\n` +
-            (item.jira_synced ? `_Click to open Jira issue_` : `_Click to sync to Jira_`)
+              `Type: ${item.work_type || "discovered_work"}\n` +
+              `Priority: ${item.priority || "medium"}\n` +
+              `Source: ${item.source_skill || "unknown"}\n` +
+              `Synced to Jira: ${item.jira_synced ? `Yes (${item.jira_key})` : "No"}\n\n` +
+              (item.jira_synced
+                ? `_Click to open Jira issue_`
+                : `_Click to sync to Jira_`),
           );
           // Click to open Jira if synced, or sync if not
           if (item.jira_synced && item.jira_key) {
@@ -1475,16 +1607,16 @@ export class MemoryTreeProvider
             item.name || "Unknown",
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("cloud");
           treeItem.description = item.mr_id ? `MR !${item.mr_id}` : "";
           treeItem.tooltip = new vscode.MarkdownString(
             `**${item.name}**\n\n` +
-            `MR: ${item.mr_id || "N/A"}\n` +
-            `Commit: ${item.commit || "N/A"}\n` +
-            `Expires: ${item.expires || "N/A"}\n\n` +
-            `_Click to show namespace actions_`
+              `MR: ${item.mr_id || "N/A"}\n` +
+              `Commit: ${item.commit || "N/A"}\n` +
+              `Expires: ${item.expires || "N/A"}\n\n` +
+              `_Click to show namespace actions_`,
           );
           // Click to show namespace actions
           treeItem.command = {
@@ -1499,23 +1631,30 @@ export class MemoryTreeProvider
             item.pattern || "Unknown pattern",
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("regex");
-          treeItem.description = this.truncate(item.meaning || item.fix || "", 30);
+          treeItem.description = this.truncate(
+            item.meaning || item.fix || "",
+            30,
+          );
           treeItem.tooltip = new vscode.MarkdownString(
             `**Pattern:** \`${item.pattern}\`\n\n` +
-            `**Meaning:** ${item.meaning || "N/A"}\n\n` +
-            `**Fix:** ${item.fix || "N/A"}\n\n` +
-            (item.commands ? `**Commands:**\n${item.commands.map((c: string) => `- \`${c}\``).join("\n")}\n\n` : "") +
-            `_Click to copy fix command_`
+              `**Meaning:** ${item.meaning || "N/A"}\n\n` +
+              `**Fix:** ${item.fix || "N/A"}\n\n` +
+              (item.commands
+                ? `**Commands:**\n${item.commands.map((c: string) => `- \`${c}\``).join("\n")}\n\n`
+                : "") +
+              `_Click to copy fix command_`,
           );
           // Click to copy fix or first command
-          const copyText = item.commands?.[0] || item.fix || item.pattern;
           treeItem.command = {
             command: "aa-workflow.copyToClipboard",
             title: "Copy Fix",
-            arguments: [copyText, "Fix command copied to clipboard"],
+            arguments: [
+              item.commands?.[0] || item.fix || item.pattern,
+              "Fix command copied to clipboard",
+            ],
           };
           break;
 
@@ -1524,20 +1663,22 @@ export class MemoryTreeProvider
             item.tool || "Unknown tool",
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon(
             item.success ? "pass" : "error",
-            item.success ? new vscode.ThemeColor("charts.green") : new vscode.ThemeColor("charts.red")
+            item.success
+              ? new vscode.ThemeColor("charts.green")
+              : new vscode.ThemeColor("charts.red"),
           );
           treeItem.description = item.error_type || "";
           treeItem.tooltip = new vscode.MarkdownString(
             `**Tool:** ${item.tool}\n\n` +
-            `**Error Type:** ${item.error_type || "unknown"}\n\n` +
-            `**Fix Applied:** ${item.fix_applied || "N/A"}\n\n` +
-            `**Success:** ${item.success ? "Yes" : "No"}\n\n` +
-            `**Time:** ${item.timestamp || "N/A"}\n\n` +
-            `_Click to debug this tool_`
+              `**Error Type:** ${item.error_type || "unknown"}\n\n` +
+              `**Fix Applied:** ${item.fix_applied || "N/A"}\n\n` +
+              `**Success:** ${item.success ? "Yes" : "No"}\n\n` +
+              `**Time:** ${item.timestamp || "N/A"}\n\n` +
+              `_Click to debug this tool_`,
           );
           // Click to run debug_tool
           treeItem.command = {
@@ -1552,23 +1693,29 @@ export class MemoryTreeProvider
             item.tool || "Unknown tool",
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
-          treeItem.iconPath = new vscode.ThemeIcon("wrench", new vscode.ThemeColor("charts.green"));
+          treeItem.iconPath = new vscode.ThemeIcon(
+            "wrench",
+            new vscode.ThemeColor("charts.green"),
+          );
           treeItem.description = this.truncate(item.error_pattern || "", 30);
           treeItem.tooltip = new vscode.MarkdownString(
             `**Tool:** ${item.tool}\n\n` +
-            `**Error Pattern:** \`${item.error_pattern}\`\n\n` +
-            `**Root Cause:** ${item.root_cause || "N/A"}\n\n` +
-            `**Fix:** ${item.fix || "N/A"}\n\n` +
-            `**Verified:** ${item.verified ? "Yes" : "No"}\n\n` +
-            `_Click to copy fix description_`
+              `**Error Pattern:** \`${item.error_pattern}\`\n\n` +
+              `**Root Cause:** ${item.root_cause || "N/A"}\n\n` +
+              `**Fix:** ${item.fix || "N/A"}\n\n` +
+              `**Verified:** ${item.verified ? "Yes" : "No"}\n\n` +
+              `_Click to copy fix description_`,
           );
           // Click to copy fix description
           treeItem.command = {
             command: "aa-workflow.copyToClipboard",
             title: "Copy Fix",
-            arguments: [item.fix || item.root_cause || "", "Fix description copied to clipboard"],
+            arguments: [
+              item.fix || item.root_cause || "",
+              "Fix description copied to clipboard",
+            ],
           };
           break;
 
@@ -1578,7 +1725,7 @@ export class MemoryTreeProvider
             vscode.TreeItemCollapsibleState.None,
             "file",
             item,
-            item.path
+            item.path,
           );
           treeItem.iconPath = new vscode.ThemeIcon("file-code");
           treeItem.tooltip = `Click to open ${item.name}.yaml`;
@@ -1594,7 +1741,7 @@ export class MemoryTreeProvider
             JSON.stringify(item).substring(0, 50),
             vscode.TreeItemCollapsibleState.None,
             "item",
-            item
+            item,
           );
           treeItem.iconPath = new vscode.ThemeIcon("json");
           // Click to show raw JSON
@@ -1612,7 +1759,7 @@ export class MemoryTreeProvider
       const moreItem = new MemoryTreeItem(
         `... and ${items.length - 20} more`,
         vscode.TreeItemCollapsibleState.None,
-        "detail"
+        "detail",
       );
       moreItem.iconPath = new vscode.ThemeIcon("ellipsis");
       // Click to open the source file
@@ -1675,7 +1822,7 @@ export class MemoryTreeProvider
 }
 
 export function registerMemoryTab(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
 ): MemoryTreeProvider {
   const treeProvider = new MemoryTreeProvider();
 
@@ -1690,170 +1837,225 @@ export function registerMemoryTab(
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.refreshMemory", () => {
       treeProvider.refresh();
-    })
+    }),
   );
 
   // Register open file command
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openMemoryFile", (filePath: string) => {
-      if (filePath && fs.existsSync(filePath)) {
-        vscode.workspace.openTextDocument(filePath).then((doc) => {
-          vscode.window.showTextDocument(doc);
-        });
-      }
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.openMemoryFile",
+      (filePath: string) => {
+        if (filePath && fs.existsSync(filePath)) {
+          vscode.workspace.openTextDocument(filePath).then((doc) => {
+            vscode.window.showTextDocument(doc);
+          });
+        }
+      },
+    ),
   );
 
   // Register memory skill commands
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.memoryView", () => {
-      vscode.commands.executeCommand("aa-workflow.runSkillByName", "memory_view");
-    })
+      vscode.commands.executeCommand(
+        "aa-workflow.runSkillByName",
+        "memory_view",
+      );
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.memoryEdit", () => {
-      vscode.commands.executeCommand("aa-workflow.runSkillByName", "memory_edit");
-    })
+      vscode.commands.executeCommand(
+        "aa-workflow.runSkillByName",
+        "memory_edit",
+      );
+    }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.memoryCleanup", () => {
-      vscode.commands.executeCommand("aa-workflow.runSkillByName", "memory_cleanup");
-    })
+      vscode.commands.executeCommand(
+        "aa-workflow.runSkillByName",
+        "memory_cleanup",
+      );
+    }),
   );
 
   // Open Jira issue by key (for memory items)
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openJiraIssueByKey", (issueKey: string) => {
-      if (issueKey) {
-        const jiraUrl = "https://issues.redhat.com";
-        vscode.env.openExternal(vscode.Uri.parse(`${jiraUrl}/browse/${issueKey}`));
-      }
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.openJiraIssueByKey",
+      (issueKey: string) => {
+        if (issueKey) {
+          const jiraUrl = "https://issues.redhat.com";
+          vscode.env.openExternal(
+            vscode.Uri.parse(`${jiraUrl}/browse/${issueKey}`),
+          );
+        }
+      },
+    ),
   );
 
   // Open MR by ID (for memory items)
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openMRById", (mrId: number, project?: string) => {
-      if (mrId) {
-        const gitlabUrl = "https://gitlab.cee.redhat.com";
-        // If project is provided, use it; otherwise use default
-        const projectPath = project || "automation-analytics/automation-analytics-backend";
-        vscode.env.openExternal(vscode.Uri.parse(`${gitlabUrl}/${projectPath}/-/merge_requests/${mrId}`));
-      }
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.openMRById",
+      (mrId: number, project?: string) => {
+        if (mrId) {
+          const gitlabUrl = "https://gitlab.cee.redhat.com";
+          // If project is provided, use it; otherwise use default
+          const projectPath =
+            project || "automation-analytics/automation-analytics-backend";
+          vscode.env.openExternal(
+            vscode.Uri.parse(
+              `${gitlabUrl}/${projectPath}/-/merge_requests/${mrId}`,
+            ),
+          );
+        }
+      },
+    ),
   );
 
   // Copy to clipboard helper
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.copyToClipboard", async (text: string, message: string) => {
-      if (text) {
-        await vscode.env.clipboard.writeText(text);
-        vscode.window.showInformationMessage(message || "Copied to clipboard");
-      }
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.copyToClipboard",
+      async (text: string, message: string) => {
+        if (text) {
+          await vscode.env.clipboard.writeText(text);
+          vscode.window.showInformationMessage(
+            message || "Copied to clipboard",
+          );
+        }
+      },
+    ),
   );
 
   // Show namespace actions
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.showNamespaceActions", async (namespaceName: string) => {
-      const action = await vscode.window.showQuickPick(
-        [
-          { label: "$(terminal) Copy kubectl command", value: "kubectl" },
-          { label: "$(list-flat) Copy get pods command", value: "pods" },
-          { label: "$(output) Copy logs command", value: "logs" },
-          { label: "$(clock) Extend namespace", value: "extend" },
-          { label: "$(trash) Release namespace", value: "release" },
-        ],
-        { placeHolder: `Actions for ${namespaceName}` }
-      );
+    vscode.commands.registerCommand(
+      "aa-workflow.showNamespaceActions",
+      async (namespaceName: string) => {
+        const action = await vscode.window.showQuickPick(
+          [
+            { label: "$(terminal) Copy kubectl command", value: "kubectl" },
+            { label: "$(list-flat) Copy get pods command", value: "pods" },
+            { label: "$(output) Copy logs command", value: "logs" },
+            { label: "$(clock) Extend namespace", value: "extend" },
+            { label: "$(trash) Release namespace", value: "release" },
+          ],
+          { placeHolder: `Actions for ${namespaceName}` },
+        );
 
-      if (!action) return;
+        if (!action) return;
 
-      let cmd = "";
-      switch (action.value) {
-        case "kubectl":
-          cmd = `kubectl --kubeconfig=~/.kube/config.e -n ${namespaceName}`;
-          break;
-        case "pods":
-          cmd = `kubectl --kubeconfig=~/.kube/config.e get pods -n ${namespaceName}`;
-          break;
-        case "logs":
-          cmd = `kubectl --kubeconfig=~/.kube/config.e logs -n ${namespaceName} -l app=<pod-label> --tail=100`;
-          break;
-        case "extend":
-          cmd = `skill_run("extend_ephemeral", '{"namespace": "${namespaceName}"}')`;
-          break;
-        case "release":
-          cmd = `KUBECONFIG=~/.kube/config.e bonfire namespace release ${namespaceName} --force`;
-          break;
-      }
+        let cmd = "";
+        switch (action.value) {
+          case "kubectl":
+            cmd = `kubectl --kubeconfig=~/.kube/config.e -n ${namespaceName}`;
+            break;
+          case "pods":
+            cmd = `kubectl --kubeconfig=~/.kube/config.e get pods -n ${namespaceName}`;
+            break;
+          case "logs":
+            cmd = `kubectl --kubeconfig=~/.kube/config.e logs -n ${namespaceName} -l app=<pod-label> --tail=100`;
+            break;
+          case "extend":
+            cmd = `skill_run("extend_ephemeral", '{"namespace": "${namespaceName}"}')`;
+            break;
+          case "release":
+            cmd = `KUBECONFIG=~/.kube/config.e bonfire namespace release ${namespaceName} --force`;
+            break;
+        }
 
-      if (cmd) {
-        await vscode.env.clipboard.writeText(cmd);
-        vscode.window.showInformationMessage(`Command copied: ${cmd.substring(0, 50)}...`);
-      }
-    })
+        if (cmd) {
+          await vscode.env.clipboard.writeText(cmd);
+          vscode.window.showInformationMessage(
+            `Command copied: ${cmd.substring(0, 50)}...`,
+          );
+        }
+      },
+    ),
   );
 
   // Sync discovered work to Jira
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.syncDiscoveredWork", async (task: string) => {
-      const confirm = await vscode.window.showInformationMessage(
-        `Create Jira issue for: "${task.substring(0, 50)}..."?`,
-        "Create Issue",
-        "Cancel"
-      );
+    vscode.commands.registerCommand(
+      "aa-workflow.syncDiscoveredWork",
+      async (task: string) => {
+        const confirm = await vscode.window.showInformationMessage(
+          `Create Jira issue for: "${task.substring(0, 50)}..."?`,
+          "Create Issue",
+          "Cancel",
+        );
 
-      if (confirm === "Create Issue") {
-        // Copy the skill command to run
-        const cmd = `skill_run("sync_discovered_work", '{"task": "${task.replace(/"/g, '\\"')}"}')`;
-        await vscode.env.clipboard.writeText(cmd);
-        vscode.window.showInformationMessage("Sync command copied. Paste in chat to create Jira issue.");
-      }
-    })
+        if (confirm === "Create Issue") {
+          // Copy the skill command to run
+          const cmd = `skill_run("sync_discovered_work", '{"task": "${task.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"}')`;
+          await vscode.env.clipboard.writeText(cmd);
+          vscode.window.showInformationMessage(
+            "Sync command copied. Paste in chat to create Jira issue.",
+          );
+        }
+      },
+    ),
   );
 
   // Debug tool command
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.debugTool", async (toolName: string, errorSnippet?: string) => {
-      const cmd = errorSnippet
-        ? `debug_tool("${toolName}", "${errorSnippet.substring(0, 100).replace(/"/g, '\\"')}")`
-        : `debug_tool("${toolName}")`;
+    vscode.commands.registerCommand(
+      "aa-workflow.debugTool",
+      async (toolName: string, errorSnippet?: string) => {
+        const cmd = errorSnippet
+          ? `debug_tool("${toolName}", "${errorSnippet.substring(0, 100).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")`
+          : `debug_tool("${toolName}")`;
 
-      await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage(`Debug command copied for ${toolName}. Paste in chat to debug.`);
-    })
+        await vscode.env.clipboard.writeText(cmd);
+        vscode.window.showInformationMessage(
+          `Debug command copied for ${toolName}. Paste in chat to debug.`,
+        );
+      },
+    ),
   );
 
   // Show item details (for unknown types)
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.showItemDetails", async (item: any) => {
-      const output = vscode.window.createOutputChannel("Memory Item Details");
-      output.clear();
-      output.appendLine("=== Memory Item Details ===");
-      output.appendLine("");
-      output.appendLine(JSON.stringify(item, null, 2));
-      output.show();
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.showItemDetails",
+      async (item: any) => {
+        const output = vscode.window.createOutputChannel("Memory Item Details");
+        output.clear();
+        output.appendLine("=== Memory Item Details ===");
+        output.appendLine("");
+        output.appendLine(JSON.stringify(item, null, 2));
+        output.show();
+      },
+    ),
   );
 
   // Session action (resume or view)
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.sessionAction", async (sessionId: string, isActive: boolean) => {
-      if (isActive) {
-        // Show session info
-        const cmd = `session_info(session_id="${sessionId}")`;
-        await vscode.env.clipboard.writeText(cmd);
-        vscode.window.showInformationMessage("Session info command copied. Paste in chat to view details.");
-      } else {
-        // Resume session
-        const cmd = `session_start(session_id="${sessionId}")`;
-        await vscode.env.clipboard.writeText(cmd);
-        vscode.window.showInformationMessage("Resume session command copied. Paste in chat to resume.");
-      }
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.sessionAction",
+      async (sessionId: string, isActive: boolean) => {
+        if (isActive) {
+          // Show session info
+          const cmd = `session_info(session_id="${sessionId}")`;
+          await vscode.env.clipboard.writeText(cmd);
+          vscode.window.showInformationMessage(
+            "Session info command copied. Paste in chat to view details.",
+          );
+        } else {
+          // Resume session
+          const cmd = `session_start(session_id="${sessionId}")`;
+          await vscode.env.clipboard.writeText(cmd);
+          vscode.window.showInformationMessage(
+            "Resume session command copied. Paste in chat to resume.",
+          );
+        }
+      },
+    ),
   );
 
   // List all sessions
@@ -1861,19 +2063,41 @@ export function registerMemoryTab(
     vscode.commands.registerCommand("aa-workflow.listAllSessions", async () => {
       const cmd = `session_list()`;
       await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage("Session list command copied. Paste in chat to see all sessions.");
-    })
+      vscode.window.showInformationMessage(
+        "Session list command copied. Paste in chat to see all sessions.",
+      );
+    }),
   );
 
   // Start new session
   context.subscriptions.push(
     vscode.commands.registerCommand("aa-workflow.startNewSession", async () => {
       const agents = [
-        { label: "$(robot) Default", value: "", description: "Auto-detect persona" },
-        { label: "$(code) Developer", value: "developer", description: "Coding, PRs, code review" },
-        { label: "$(server-process) DevOps", value: "devops", description: "Deployments, k8s, ephemeral" },
-        { label: "$(flame) Incident", value: "incident", description: "Production issues, alerts" },
-        { label: "$(package) Release", value: "release", description: "Shipping, Konflux, Quay" },
+        {
+          label: "$(robot) Default",
+          value: "",
+          description: "Auto-detect persona",
+        },
+        {
+          label: "$(code) Developer",
+          value: "developer",
+          description: "Coding, PRs, code review",
+        },
+        {
+          label: "$(server-process) DevOps",
+          value: "devops",
+          description: "Deployments, k8s, ephemeral",
+        },
+        {
+          label: "$(flame) Incident",
+          value: "incident",
+          description: "Production issues, alerts",
+        },
+        {
+          label: "$(package) Release",
+          value: "release",
+          description: "Shipping, Konflux, Quay",
+        },
       ];
 
       const selected = await vscode.window.showQuickPick(agents, {
@@ -1898,8 +2122,10 @@ export function registerMemoryTab(
       cmd += args.join(", ") + ")";
 
       await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage("Start session command copied. Paste in chat to begin.");
-    })
+      vscode.window.showInformationMessage(
+        "Start session command copied. Paste in chat to begin.",
+      );
+    }),
   );
 
   // Slack Memory: Search command
@@ -1912,10 +2138,12 @@ export function registerMemoryTab(
 
       if (!query) return;
 
-      const cmd = `slack_persona_context("${query.replace(/"/g, '\\"')}")`;
+      const cmd = `slack_persona_context("${query.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")`;
       await vscode.env.clipboard.writeText(cmd);
-      vscode.window.showInformationMessage("Search command copied. Paste in chat to search Slack history.");
-    })
+      vscode.window.showInformationMessage(
+        "Search command copied. Paste in chat to search Slack history.",
+      );
+    }),
   );
 
   // Slack Memory: Run full sync
@@ -1924,7 +2152,7 @@ export function registerMemoryTab(
       const confirm = await vscode.window.showWarningMessage(
         "Run full Slack sync? This will download 4 years of messages and may take several hours.",
         "Run Sync",
-        "Cancel"
+        "Cancel",
       );
 
       if (confirm !== "Run Sync") return;
@@ -1933,30 +2161,42 @@ export function registerMemoryTab(
       const cmd = `cd ~/src/redhat-ai-workflow && nohup python scripts/slack_persona_sync.py --full --months 48 > /tmp/slack_persona_sync.log 2>&1 &`;
       await vscode.env.clipboard.writeText(cmd);
       vscode.window.showInformationMessage(
-        "Sync command copied. Paste in terminal to start the sync. Check /tmp/slack_persona_sync.log for progress."
+        "Sync command copied. Paste in terminal to start the sync. Check /tmp/slack_persona_sync.log for progress.",
       );
-    })
+    }),
   );
 
   // Slack Memory: View sync log
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.viewSlackSyncLog", async () => {
-      const logPath = "/tmp/slack_persona_sync.log";
-      if (fs.existsSync(logPath)) {
-        const doc = await vscode.workspace.openTextDocument(logPath);
-        await vscode.window.showTextDocument(doc);
-        // Scroll to bottom
-        const editor = vscode.window.activeTextEditor;
-        if (editor) {
-          const lastLine = doc.lineCount - 1;
-          const lastChar = doc.lineAt(lastLine).text.length;
-          editor.selection = new vscode.Selection(lastLine, lastChar, lastLine, lastChar);
-          editor.revealRange(new vscode.Range(lastLine, 0, lastLine, lastChar));
+    vscode.commands.registerCommand(
+      "aa-workflow.viewSlackSyncLog",
+      async () => {
+        const logPath = "/tmp/slack_persona_sync.log";
+        if (fs.existsSync(logPath)) {
+          const doc = await vscode.workspace.openTextDocument(logPath);
+          await vscode.window.showTextDocument(doc);
+          // Scroll to bottom
+          const editor = vscode.window.activeTextEditor;
+          if (editor) {
+            const lastLine = doc.lineCount - 1;
+            const lastChar = doc.lineAt(lastLine).text.length;
+            editor.selection = new vscode.Selection(
+              lastLine,
+              lastChar,
+              lastLine,
+              lastChar,
+            );
+            editor.revealRange(
+              new vscode.Range(lastLine, 0, lastLine, lastChar),
+            );
+          }
+        } else {
+          vscode.window.showWarningMessage(
+            "Sync log not found. No sync has been run yet.",
+          );
         }
-      } else {
-        vscode.window.showWarningMessage("Sync log not found. No sync has been run yet.");
-      }
-    })
+      },
+    ),
   );
 
   return treeProvider;
