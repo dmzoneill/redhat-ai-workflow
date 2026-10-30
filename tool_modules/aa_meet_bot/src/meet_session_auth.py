@@ -10,23 +10,15 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
-from urllib.parse import urlparse
 
 from tool_modules.aa_meet_bot.src.browser_errors import BROWSER_ERRORS
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
+from tool_modules.aa_meet_bot.src.meet_sign_in import MeetSignIn
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
-
-
-def _is_meet_url(url: str) -> bool:
-    """True only if *url* is actually on meet.google.com (not just containing it)."""
-    try:
-        return urlparse(url).hostname == "meet.google.com"
-    except ValueError:
-        return False
 
 
 class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
@@ -58,213 +50,16 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     state: Any
     stop_caption_capture: Any
 
-    # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
     async def sign_in_google(self) -> bool:
         """
         Sign in to Google using Red Hat SSO.
 
-        Handles the OAuth flow:
-        1. Click "Sign in" on Meet page
-        2. Enter email on Google login
-        3. Redirect to Red Hat SSO
-        4. Enter username/password
-        5. Return to Meet
+        Delegates to :class:`MeetSignIn`, which implements the OAuth + SSO flow.
 
         Returns:
             True if sign-in successful, False otherwise.
         """
-        from tool_modules.aa_meet_bot.src.config import (  # pylint: disable=import-outside-toplevel
-            get_google_credentials,
-        )
-
-        if not self.page:
-            logger.error("Browser not initialized")
-            return False
-
-        try:
-            # Get credentials from redhatter API
-            logger.info("Fetching credentials from redhatter API...")
-            username, password = await get_google_credentials(self.config.bot_account.email)
-
-            # Check if we need to sign in - look for Sign in button on Meet page
-            # Google Meet uses a div[role="button"] with "Sign in" text
-            sign_in_button = None
-
-            # Try to find the Sign in button using Playwright locator (better for text matching)
-            try:
-                # Use locator for better text matching
-                locator = self.page.locator('div[role="button"]:has-text("Sign in")')
-                if await locator.count() > 0:
-                    sign_in_button = locator.first
-                    logger.info("Found Sign in button (div role=button)")
-            except BROWSER_ERRORS as e:
-                logger.debug("Locator search failed: %s", e)
-
-            # Fallback: try span with Sign in text
-            if not sign_in_button:
-                try:
-                    locator = self.page.locator('span:has-text("Sign in")').first
-                    if await locator.count() > 0:
-                        sign_in_button = locator
-                        logger.info("Found Sign in span")
-                except BROWSER_ERRORS:
-                    logger.debug("Ignoring browser error", exc_info=True)
-
-            if sign_in_button:
-                logger.info("Clicking Sign in button...")
-                await sign_in_button.click()
-                await asyncio.sleep(3)
-
-            # Step 1: Wait for Google login page and enter email
-            try:
-                logger.info("Waiting for Google login page...")
-                email_input = await self.page.wait_for_selector(
-                    "#identifierId",
-                    timeout=15000,  # Specific Google email input ID
-                )
-                if email_input:
-                    logger.info("Entering email: %s", self.config.bot_account.email)
-                    await email_input.fill(self.config.bot_account.email)
-                    await asyncio.sleep(1)
-
-                    # Click Next button
-                    next_button = await self.page.wait_for_selector("#identifierNext", timeout=5000)
-                    if next_button:
-                        logger.info("Clicking Next...")
-                        await next_button.click()
-                        await asyncio.sleep(5)  # Wait for redirect to SSO
-            except BROWSER_ERRORS as e:
-                logger.warning("Google email input not found: %s", e)
-                return False
-
-            # Step 2: Wait for Red Hat SSO page and enter credentials
-            try:
-                logger.info("Waiting for Red Hat SSO page...")
-                saml_username = await self.page.wait_for_selector(
-                    "#username",
-                    timeout=15000,  # Red Hat SSO username field
-                )
-                if saml_username:
-                    logger.info("Red Hat SSO page detected - using aa_sso helper")
-
-                    # Use the centralized SSO form filler from aa_sso module
-                    try:
-                        from tool_modules.aa_sso.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                            fill_sso_form,
-                        )
-
-                        await fill_sso_form(self.page, username, password)
-                    except ImportError:
-                        # Fallback to inline implementation if aa_sso not available
-                        logger.warning("aa_sso module not available, using inline SSO form fill")
-                        await saml_username.fill(username)
-                        await asyncio.sleep(0.5)
-                        saml_password = await self.page.wait_for_selector("#password", timeout=5000)
-                        if saml_password:
-                            await saml_password.fill(password)
-                            await asyncio.sleep(0.5)
-                        submit_button = await self.page.wait_for_selector("#submit", timeout=5000)
-                        if submit_button:
-                            await submit_button.click()
-
-                    await asyncio.sleep(10)  # Wait for SSO processing and redirect
-                    logger.info("SSO login submitted, waiting for redirect to Meet...")
-
-                    # Wait for redirect back to Meet (or intermediate verification page)
-                    try:  # pylint: disable=too-many-nested-blocks
-                        # Wait up to 30s for either Meet or a verification page
-                        for _ in range(30):
-                            await asyncio.sleep(1)
-                            current_url = self.page.url
-
-                            # Check for Google "Verify it's you" / account confirmation page
-                            if "speedbump" in current_url or "samlconfirmaccount" in current_url:
-                                logger.info("Google verification page detected, clicking Continue...")
-                                try:
-                                    # pylint: disable-next=line-too-long
-                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
-                                    # Try multiple selectors to find the actual clickable button
-                                    continue_selectors = [
-                                        # pylint: disable-next=line-too-long
-                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
-                                        # pylint: disable-next=line-too-long
-                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
-                                        # pylint: disable-next=line-too-long
-                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
-                                        # pylint: disable-next=line-too-long
-                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
-                                    ]
-
-                                    clicked = False
-                                    for selector in continue_selectors:
-                                        try:
-                                            btn = self.page.locator(selector).first
-                                            if await btn.count() > 0:
-                                                logger.info(
-                                                    "Found Continue button with selector: %s",
-                                                    selector,
-                                                )
-                                                await btn.click(force=True, timeout=5000)
-                                                logger.info("Clicked Continue on verification page")
-                                                clicked = True
-                                                await asyncio.sleep(3)
-                                                break
-                                        except BROWSER_ERRORS as exc:
-                                            logger.debug(
-                                                "Selector %s failed: %s",
-                                                selector,
-                                                exc,
-                                            )
-
-                                    if not clicked:
-                                        # Last resort: find by role and text
-                                        logger.info("Trying role-based selector for Continue...")
-                                        await self.page.get_by_role("button", name="Continue").click(timeout=5000)
-                                        logger.info("Clicked Continue via role selector")
-                                        await asyncio.sleep(3)
-
-                                except BROWSER_ERRORS as e:
-                                    logger.warning("Failed to click Continue: %s", e)
-
-                            # Check if we're back on Meet
-                            if _is_meet_url(self.page.url):
-                                logger.info("Successfully signed in via Red Hat SSO")
-                                return True
-
-                        # Timeout - check final state
-                        if _is_meet_url(self.page.url):
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise TimeoutError("Timeout waiting for redirect to Meet")
-                    except Exception:
-                        # Check if we're already on meet
-                        if _is_meet_url(self.page.url):
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise
-
-            except BROWSER_ERRORS as e:
-                logger.warning("Red Hat SSO login failed: %s", e)
-                self.state.errors.append(f"SSO login failed: {e}")
-                return False
-
-            # Check if we're now signed in (back on Meet page)
-            current_url = self.page.url
-            if _is_meet_url(current_url):
-                # Check if sign-in link is gone
-                sign_in_link = await self.page.query_selector(self.SELECTORS["sign_in_link"])
-                if not sign_in_link:
-                    logger.info("Sign-in appears successful")
-                    return True
-
-            logger.warning("Sign-in flow completed but status unclear")
-            return True
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            error_msg = f"Sign-in failed: {e}"
-            logger.exception(error_msg)
-            self.state.errors.append(error_msg)
-            return False
+        return await MeetSignIn(self).sign_in_google()
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
     async def join_meeting(self, meet_url: str) -> bool:
