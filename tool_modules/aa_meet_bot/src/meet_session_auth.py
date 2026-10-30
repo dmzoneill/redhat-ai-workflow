@@ -9,9 +9,11 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Optional
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
+from tool_modules.aa_meet_bot.src.browser_errors import BROWSER_ERRORS
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
+from tool_modules.aa_meet_bot.src.meet_sign_in import MeetSignIn
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
@@ -40,256 +42,27 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     config: Any
     enable_captions: Any
     initialize: Any
-    _device_manager: Optional[Any]
-    _devices: Optional[Any]
+    _device_manager: Any | None
+    _devices: Any | None
     _playwright: Any
     browser: Any
     page: Any
     state: Any
     stop_caption_capture: Any
 
-    # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
-    async def sign_in_google(self) -> bool:  # noqa: C901
+    async def sign_in_google(self) -> bool:
         """
         Sign in to Google using Red Hat SSO.
 
-        Handles the OAuth flow:
-        1. Click "Sign in" on Meet page
-        2. Enter email on Google login
-        3. Redirect to Red Hat SSO
-        4. Enter username/password
-        5. Return to Meet
+        Delegates to :class:`MeetSignIn`, which implements the OAuth + SSO flow.
 
         Returns:
             True if sign-in successful, False otherwise.
         """
-        from tool_modules.aa_meet_bot.src.config import (  # pylint: disable=import-outside-toplevel
-            get_google_credentials,
-        )
-
-        if not self.page:
-            logger.error("Browser not initialized")
-            return False
-
-        try:
-            # Get credentials from redhatter API
-            logger.info("Fetching credentials from redhatter API...")
-            username, password = await get_google_credentials(
-                self.config.bot_account.email
-            )
-
-            # Check if we need to sign in - look for Sign in button on Meet page
-            # Google Meet uses a div[role="button"] with "Sign in" text
-            sign_in_button = None
-
-            # Try to find the Sign in button using Playwright locator (better for text matching)
-            try:
-                # Use locator for better text matching
-                locator = self.page.locator('div[role="button"]:has-text("Sign in")')
-                if await locator.count() > 0:
-                    sign_in_button = locator.first
-                    logger.info("Found Sign in button (div role=button)")
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("Locator search failed: %s", e)
-
-            # Fallback: try span with Sign in text
-            if not sign_in_button:
-                try:
-                    locator = self.page.locator('span:has-text("Sign in")').first
-                    if await locator.count() > 0:
-                        sign_in_button = locator
-                        logger.info("Found Sign in span")
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
-
-            if sign_in_button:
-                logger.info("Clicking Sign in button...")
-                await sign_in_button.click()
-                await asyncio.sleep(3)
-
-            # Step 1: Wait for Google login page and enter email
-            try:
-                logger.info("Waiting for Google login page...")
-                email_input = await self.page.wait_for_selector(
-                    "#identifierId",
-                    timeout=15000,  # Specific Google email input ID
-                )
-                if email_input:
-                    logger.info("Entering email: %s", self.config.bot_account.email)
-                    await email_input.fill(self.config.bot_account.email)
-                    await asyncio.sleep(1)
-
-                    # Click Next button
-                    next_button = await self.page.wait_for_selector(
-                        "#identifierNext", timeout=5000
-                    )
-                    if next_button:
-                        logger.info("Clicking Next...")
-                        await next_button.click()
-                        await asyncio.sleep(5)  # Wait for redirect to SSO
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("Google email input not found: %s", e)
-                return False
-
-            # Step 2: Wait for Red Hat SSO page and enter credentials
-            try:
-                logger.info("Waiting for Red Hat SSO page...")
-                saml_username = await self.page.wait_for_selector(
-                    "#username",
-                    timeout=15000,  # Red Hat SSO username field
-                )
-                if saml_username:
-                    logger.info("Red Hat SSO page detected - using aa_sso helper")
-
-                    # Use the centralized SSO form filler from aa_sso module
-                    try:
-                        from tool_modules.aa_sso.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                            fill_sso_form,
-                        )
-
-                        await fill_sso_form(self.page, username, password)
-                    except ImportError:
-                        # Fallback to inline implementation if aa_sso not available
-                        logger.warning(
-                            "aa_sso module not available, using inline SSO form fill"
-                        )
-                        await saml_username.fill(username)
-                        await asyncio.sleep(0.5)
-                        saml_password = await self.page.wait_for_selector(
-                            "#password", timeout=5000
-                        )
-                        if saml_password:
-                            await saml_password.fill(password)
-                            await asyncio.sleep(0.5)
-                        submit_button = await self.page.wait_for_selector(
-                            "#submit", timeout=5000
-                        )
-                        if submit_button:
-                            await submit_button.click()
-
-                    await asyncio.sleep(10)  # Wait for SSO processing and redirect
-                    logger.info("SSO login submitted, waiting for redirect to Meet...")
-
-                    # Wait for redirect back to Meet (or intermediate verification page)
-                    try:  # pylint: disable=too-many-nested-blocks
-                        # Wait up to 30s for either Meet or a verification page
-                        for _ in range(30):
-                            await asyncio.sleep(1)
-                            current_url = self.page.url
-
-                            # Check for Google "Verify it's you" / account confirmation page
-                            if (
-                                "speedbump" in current_url
-                                or "samlconfirmaccount" in current_url
-                            ):
-                                logger.info(
-                                    "Google verification page detected, clicking Continue..."
-                                )
-                                try:
-                                    # pylint: disable-next=line-too-long
-                                    # The Continue button has nested structure: button > span.VfPpkd-vQzf8d with text
-                                    # Try multiple selectors to find the actual clickable button
-                                    continue_selectors = [
-                                        # pylint: disable-next=line-too-long
-                                        'button:has(span:text-is("Continue"))',  # Button with span exact text
-                                        # pylint: disable-next=line-too-long
-                                        'button.VfPpkd-LgbsSe:has-text("Continue")',  # Google's Material button class
-                                        # pylint: disable-next=line-too-long
-                                        'button[jsname="LgbsSe"]:has-text("Continue")',  # Button with jsname
-                                        # pylint: disable-next=line-too-long
-                                        'span.VfPpkd-vQzf8d:text-is("Continue")',  # The span itself (click it)
-                                    ]
-
-                                    clicked = False
-                                    for selector in continue_selectors:
-                                        try:
-                                            btn = self.page.locator(selector).first
-                                            if await btn.count() > 0:
-                                                logger.info(
-                                                    "Found Continue button with selector: %s",
-                                                    selector,
-                                                )
-                                                await btn.click(
-                                                    force=True, timeout=5000
-                                                )
-                                                logger.info(
-                                                    "Clicked Continue on verification page"
-                                                )
-                                                clicked = True
-                                                await asyncio.sleep(3)
-                                                break
-                                        except (
-                                            # pylint: disable-next=broad-exception-caught
-                                            Exception
-                                        ) as exc:
-                                            logger.debug(
-                                                "Selector %s failed: %s",
-                                                selector,
-                                                exc,
-                                            )
-
-                                    if not clicked:
-                                        # Last resort: find by role and text
-                                        logger.info(
-                                            "Trying role-based selector for Continue..."
-                                        )
-                                        await self.page.get_by_role(
-                                            "button", name="Continue"
-                                        ).click(timeout=5000)
-                                        logger.info(
-                                            "Clicked Continue via role selector"
-                                        )
-                                        await asyncio.sleep(3)
-
-                                except (
-                                    Exception  # pylint: disable=broad-exception-caught
-                                ) as e:  # pylint: disable=broad-exception-caught
-                                    logger.warning("Failed to click Continue: %s", e)
-
-                            # Check if we're back on Meet
-                            if "meet.google.com" in self.page.url:
-                                logger.info("Successfully signed in via Red Hat SSO")
-                                return True
-
-                        # Timeout - check final state
-                        if "meet.google.com" in self.page.url:
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise TimeoutError("Timeout waiting for redirect to Meet")
-                    except Exception:
-                        # Check if we're already on meet
-                        if "meet.google.com" in self.page.url:
-                            logger.info("Already on Meet page after SSO")
-                            return True
-                        raise
-
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("Red Hat SSO login failed: %s", e)
-                self.state.errors.append(f"SSO login failed: {e}")
-                return False
-
-            # Check if we're now signed in (back on Meet page)
-            current_url = self.page.url
-            if "meet.google.com" in current_url:
-                # Check if sign-in link is gone
-                sign_in_link = await self.page.query_selector(
-                    self.SELECTORS["sign_in_link"]
-                )
-                if not sign_in_link:
-                    logger.info("Sign-in appears successful")
-                    return True
-
-            logger.warning("Sign-in flow completed but status unclear")
-            return True
-
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            error_msg = f"Sign-in failed: {e}"
-            logger.error(error_msg)
-            self.state.errors.append(error_msg)
-            return False
+        return await MeetSignIn(cast("GoogleMeetController", self)).sign_in_google()
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
-    async def join_meeting(self, meet_url: str) -> bool:  # noqa: C901
+    async def join_meeting(self, meet_url: str) -> bool:
         """
         Join a Google Meet meeting.
 
@@ -321,9 +94,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             # Close any existing browser resources
             await self.close()
             # Reinitialize the browser
-            if not await self.initialize(
-                video_enabled=getattr(self, "_video_enabled", False)
-            ):
+            if not await self.initialize(video_enabled=getattr(self, "_video_enabled", False)):
                 error_msg = "Failed to reinitialize browser after closure"
                 logger.error("[JOIN] ERROR: %s", error_msg)
                 if self.state:
@@ -369,7 +140,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 title = await self.page.title()
                 logger.info("[JOIN] Page title: %s", title)
                 logger.info("[JOIN] Current URL after wait: %s", self.page.url)
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except BROWSER_ERRORS as e:
                 logger.warning("[JOIN] Could not get page title: %s", e)
 
             # Handle permissions dialog - "Do you want people to hear you in the meeting?"
@@ -380,24 +151,17 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             # Handle "Got it" dialog if present
             logger.info("[JOIN] Checking for 'Got it' dialog...")
             try:
-                got_it = await self.page.wait_for_selector(
-                    self.SELECTORS["got_it_button"], timeout=3000
-                )
+                got_it = await self.page.wait_for_selector(self.SELECTORS["got_it_button"], timeout=3000)
                 if got_it:
                     logger.info("[JOIN] Found 'Got it' dialog - clicking")
                     await got_it.click()
                     await asyncio.sleep(1)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except BROWSER_ERRORS:
                 logger.info("[JOIN] No 'Got it' dialog found")
 
             # Check if we need to sign in (look for Sign in button or name input for guest)
             logger.info("[JOIN] Checking if sign-in is required...")
-            sign_in_button = (
-                await self.page.locator(
-                    'div[role="button"]:has-text("Sign in")'
-                ).count()
-                > 0
-            )
+            sign_in_button = await self.page.locator('div[role="button"]:has-text("Sign in")').count() > 0
             name_input = await self.page.query_selector(self.SELECTORS["name_input"])
             logger.info(
                 "[JOIN] Sign-in button present: %s, Name input present: %s",
@@ -426,9 +190,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                         "[JOIN] Re-navigating to meeting after sign-in (current: %s)",
                         self.page.url,
                     )
-                    await self.page.goto(
-                        meet_url, wait_until="domcontentloaded", timeout=30000
-                    )
+                    await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
                     await asyncio.sleep(2)
             else:
                 logger.info("[JOIN] No sign-in required, proceeding to join")
@@ -439,9 +201,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
 
             # UNMUTE microphone (it's a virtual pipe - only produces sound when we write to it)
             # Turn off camera before joining (we use virtual avatar instead)
-            logger.info(
-                "[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)..."
-            )
+            logger.info("[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)...")
             # Always unmute - the bot's mic is a virtual pipe, not a real microphone
             # It only produces sound when TTS writes audio to it
             await self._toggle_mute(mute=False)
@@ -505,33 +265,27 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                                 selector,
                             )
                             break
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except BROWSER_ERRORS as e:
                     logger.debug("Error finding '%s': %s", btn_text, e)
 
             # If no button found, wait and retry once
             if not join_button:
-                logger.info(
-                    "[JOIN] No join button found on first try, waiting 3s and retrying..."
-                )
+                logger.info("[JOIN] No join button found on first try, waiting 3s and retrying...")
 
                 # Take a screenshot for debugging
                 try:
-                    screenshot_path = str(
-                        Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png"
-                    )
+                    screenshot_path = str(Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png")
                     await self.page.screenshot(path=screenshot_path)
                     logger.info("[JOIN] Debug screenshot saved to: %s", screenshot_path)
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except BROWSER_ERRORS as e:
                     logger.warning("[JOIN] Could not save debug screenshot: %s", e)
 
                 # Log visible text on page for debugging
                 try:
                     body_text = await self.page.inner_text("body")
                     # Truncate to first 500 chars
-                    logger.info(
-                        "[JOIN] Page body text (first 500 chars): %s", body_text[:500]
-                    )
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                    logger.info("[JOIN] Page body text (first 500 chars): %s", body_text[:500])
+                except BROWSER_ERRORS as e:
                     logger.warning("[JOIN] Could not get page text: %s", e)
 
                 await asyncio.sleep(3)
@@ -547,12 +301,10 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                             locator = self.page.locator(selector)
                             if await locator.count() > 0:
                                 join_button = locator.first
-                                logger.info(
-                                    "[JOIN] Found '%s' button on retry", btn_text
-                                )
+                                logger.info("[JOIN] Found '%s' button on retry", btn_text)
                                 break
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        pass
+                    except BROWSER_ERRORS:
+                        logger.debug("Ignoring browser error", exc_info=True)
 
             if join_button:
                 logger.info("[JOIN] Clicking join button...")
@@ -565,16 +317,12 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 # Handle permissions dialog if it appears
                 # "Do you want people to hear you in the meeting?"
                 try:
-                    mic_button = self.page.locator(
-                        'button:has-text("Microphone allowed")'
-                    )
+                    mic_button = self.page.locator('button:has-text("Microphone allowed")')
                     if await mic_button.count() > 0:
-                        logger.info(
-                            "Permissions dialog detected - clicking 'Microphone allowed'"
-                        )
+                        logger.info("Permissions dialog detected - clicking 'Microphone allowed'")
                         await mic_button.click(force=True)
                         await asyncio.sleep(2)
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except BROWSER_ERRORS as e:
                     logger.debug("No permissions dialog or error: %s", e)
 
                 # Handle device selection dialog if it appears
@@ -582,9 +330,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 # We use this opportunity to select the MeetBot virtual camera
                 # NOTE: Do NOT press Escape here - in Google Meet it can toggle camera!
                 try:
-                    device_dialog = self.page.locator(
-                        '[aria-label="Settings"], [aria-label="Audio settings"]'
-                    )
+                    device_dialog = self.page.locator('[aria-label="Settings"], [aria-label="Audio settings"]')
                     if await device_dialog.count() > 0:
                         logger.info("Device selection dialog detected")
                         # Try to select the MeetBot camera before dismissing
@@ -595,9 +341,9 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                             # Click on the main meeting area to close dialog
                             await self.page.click("body", position={"x": 100, "y": 100})
                             await asyncio.sleep(0.5)
-                        except Exception:  # pylint: disable=broad-exception-caught
-                            pass
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                        except BROWSER_ERRORS:
+                            logger.debug("Ignoring browser error", exc_info=True)
+                except BROWSER_ERRORS as e:
                     logger.debug("No device dialog or error: %s", e)
 
                 # After permissions dialog, we may need to click Join again
@@ -606,13 +352,11 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                     for btn_text in ["Join anyway", "Join now"]:
                         join_again = self.page.locator(f'button:has-text("{btn_text}")')
                         if await join_again.count() > 0:
-                            logger.info(
-                                "Found '%s' after permissions - clicking", btn_text
-                            )
+                            logger.info("Found '%s' after permissions - clicking", btn_text)
                             await join_again.first.click()
                             await asyncio.sleep(3)
                             break
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except BROWSER_ERRORS as e:
                     logger.debug("No second join button needed: %s", e)
 
                 # Brief wait for meeting UI to stabilize
@@ -657,7 +401,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             error_msg = f"Failed to join meeting: {e}"
-            logger.error("[JOIN] ========== EXCEPTION: %s ==========", error_msg)
+            logger.exception("[JOIN] ========== EXCEPTION: %s ==========", error_msg)
             self.state.errors.append(error_msg)
             return False
 
@@ -671,9 +415,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             await self.stop_caption_capture()
 
             # Click leave button
-            leave_button = await self.page.wait_for_selector(
-                self.SELECTORS["leave_button"], timeout=5000
-            )
+            leave_button = await self.page.wait_for_selector(self.SELECTORS["leave_button"], timeout=5000)
 
             if leave_button:
                 await leave_button.click()
@@ -681,8 +423,8 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 logger.info("Left meeting")
                 return True
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to leave meeting: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to leave meeting")
 
         return False
 
@@ -711,12 +453,10 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             try:
                 await asyncio.wait_for(self.browser.close(), timeout=10.0)
             except asyncio.TimeoutError:
-                logger.warning(
-                    "[%s] Timeout closing browser, forcing...", self._instance_id
-                )
+                logger.warning("[%s] Timeout closing browser, forcing...", self._instance_id)
                 await self.force_kill()
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("[%s] Error closing browser: %s", self._instance_id, e)
+                logger.warning("[%s] Error closing browser: %s", self._instance_id, e, exc_info=True)
             self.browser = None
 
         if hasattr(self, "_playwright") and self._playwright:
@@ -725,16 +465,12 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             except asyncio.TimeoutError:
                 logger.warning("[%s] Timeout stopping playwright", self._instance_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning(
-                    "[%s] Error stopping playwright: %s", self._instance_id, e
-                )
+                logger.warning("[%s] Error stopping playwright: %s", self._instance_id, e, exc_info=True)
             self._playwright = None
 
         # Clean up per-instance audio devices (new method)
         if self._device_manager:
-            await self._device_manager.cleanup(
-                restore_browser_audio=restore_browser_audio
-            )
+            await self._device_manager.cleanup(restore_browser_audio=restore_browser_audio)
             self._device_manager = None
             self._devices = None
         else:
@@ -787,7 +523,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 await self._device_manager.cleanup(restore_browser_audio=True)
                 logger.info("[%s] Device cleanup completed", self._instance_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("[%s] Device cleanup error: %s", self._instance_id, e)
+                logger.warning("[%s] Device cleanup error: %s", self._instance_id, e, exc_info=True)
             finally:
                 self._device_manager = None
                 self._devices = None
@@ -807,7 +543,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                     len(results.get("killed_processes", [])),
                 )
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("[%s] Orphan cleanup error: %s", self._instance_id, e)
+            logger.warning("[%s] Orphan cleanup error: %s", self._instance_id, e, exc_info=True)
 
         # Unregister this instance
         if self._instance_id in type(self)._instances:
@@ -831,9 +567,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 import signal  # pylint: disable=import-outside-toplevel
 
                 os.kill(self._browser_pid, signal.SIGKILL)
-                logger.info(
-                    "[%s] Killed browser PID %s", self._instance_id, self._browser_pid
-                )
+                logger.info("[%s] Killed browser PID %s", self._instance_id, self._browser_pid)
                 killed = True
             except (ProcessLookupError, PermissionError) as e:
                 logger.debug(
@@ -876,7 +610,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        self._last_activity = datetime.now()
+        self._last_activity = datetime.now()  # noqa: DTZ005 - naive local time, matches meet_runtime
 
     def get_instance_info(self) -> dict:
         """Get information about this instance."""
@@ -897,7 +631,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     @classmethod
     async def cleanup_hung_instances(cls, max_age_minutes: int = 120) -> list[str]:
         """Find and kill instances that haven't had activity for too long."""
-        now = datetime.now()
+        now = datetime.now()  # noqa: DTZ005 - compared with naive _last_activity
         killed = []
 
         for instance_id, controller in list(cls._instances.items()):
