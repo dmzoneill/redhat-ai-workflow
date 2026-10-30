@@ -13,6 +13,20 @@ const logger = createLogger("SkillWS");
 
 // ==================== Types ====================
 
+/**
+ * Upper bound on steps per skill. Step indices/counts come from WebSocket
+ * messages, so they are validated to be small non-negative integers. This
+ * prevents prototype pollution (e.g. step_index "__proto__") and unbounded
+ * array allocation from a malformed or hostile message.
+ */
+const MAX_STEPS = 1000;
+
+function toStepIndex(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < MAX_STEPS
+    ? value
+    : undefined;
+}
+
 export interface SkillState {
   skillId: string;
   skillName: string;
@@ -269,7 +283,7 @@ export class SkillWebSocketClient {
   }
 
   private createSkillState(data: Record<string, unknown>): SkillState {
-    const totalSteps = (data.total_steps as number) || 0;
+    const totalSteps = toStepIndex(data.total_steps) ?? 0;
 
     return {
       skillId: data.skill_id as string,
@@ -299,7 +313,10 @@ export class SkillWebSocketClient {
       return;
     }
 
-    const stepIndex = data.step_index as number;
+    const stepIndex = toStepIndex(data.step_index);
+    if (stepIndex === undefined) {
+      return;
+    }
     const stepName = data.step_name as string;
     const description = (data.description as string) || '';
 
@@ -335,7 +352,10 @@ export class SkillWebSocketClient {
       return;
     }
 
-    const stepIndex = data.step_index as number;
+    const stepIndex = toStepIndex(data.step_index);
+    if (stepIndex === undefined) {
+      return;
+    }
     const durationMs = data.duration_ms as number;
 
     if (skill.steps[stepIndex]) {
@@ -353,7 +373,10 @@ export class SkillWebSocketClient {
       return;
     }
 
-    const stepIndex = data.step_index as number;
+    const stepIndex = toStepIndex(data.step_index);
+    if (stepIndex === undefined) {
+      return;
+    }
     const error = data.error as string;
 
     if (skill.steps[stepIndex]) {
