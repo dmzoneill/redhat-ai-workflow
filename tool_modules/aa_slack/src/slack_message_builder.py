@@ -9,6 +9,7 @@ import logging
 import os
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -119,17 +120,13 @@ def text_to_rich_blocks(text: str) -> list[dict[str, Any]]:
 
     # Wrap in rich_text block
     if not elements:
-        elements = [
-            {"type": "rich_text_section", "elements": [{"type": "text", "text": text}]}
-        ]
+        elements = [{"type": "rich_text_section", "elements": [{"type": "text", "text": text}]}]
 
     return [{"type": "rich_text", "elements": elements}]
 
 
 _INLINE_PATTERN = (
-    r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|"
-    r"<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|"
-    r"\*[^*\n]+\*|_[^_\n]+_)"
+    r"(<@U[A-Z0-9]+>|<#C[A-Z0-9]+(?:\|[^>]*)?>|<https?://[^|>]+(?:\|[^>]*)?>|`[^`]+`|\*[^*\n]+\*|_[^_\n]+_)"
 )
 
 
@@ -334,8 +331,7 @@ def get_channel_sections_summary(data: dict[str, Any]) -> dict[str, Any]:
         sections.append(
             {
                 "id": section.get("channel_section_id", ""),
-                "name": section.get("name", "")
-                or section_type.replace("_", " ").title(),
+                "name": section.get("name", "") or section_type.replace("_", " ").title(),
                 "type": section_type,
                 "emoji": section.get("emoji", ""),
                 "channel_count": len(channel_ids),
@@ -420,9 +416,7 @@ def _shared_get_app_commands_summary(data: dict[str, Any]) -> dict[str, Any]:
         "service_commands": service_commands,
         "global_actions": global_actions,
         "message_actions": message_actions,
-        "total_commands": len(core_commands)
-        + len(app_commands)
-        + len(service_commands),
+        "total_commands": len(core_commands) + len(app_commands) + len(service_commands),
         "total_actions": len(global_actions) + len(message_actions),
     }
 
@@ -473,6 +467,12 @@ def get_avatar_url(
     return f"https://ca.slack-edge.com/{eid}-{user_id}-{avatar_hash}-{size}"
 
 
+def _is_slack_edge_url(url: str) -> bool:
+    """Return True if url is hosted on slack-edge.com or one of its subdomains."""
+    host = urlparse(url).hostname or ""
+    return host == "slack-edge.com" or host.endswith(".slack-edge.com")
+
+
 def extract_avatar_hash(profile: dict[str, Any]) -> str:
     """
     Extract avatar hash from a user profile.
@@ -495,7 +495,7 @@ def extract_avatar_hash(profile: dict[str, Any]) -> str:
     # Try to extract from image URLs
     for key in ["image_original", "image_512", "image_192", "image_72", "image_48"]:
         url = profile.get(key, "")
-        if url and "slack-edge.com" in url:
+        if url and _is_slack_edge_url(url):
             parts = url.split("/")
             if parts:
                 last_part = parts[-1]
@@ -504,9 +504,7 @@ def extract_avatar_hash(profile: dict[str, Any]) -> str:
                     if len(segments) >= 3:
                         return segments[-2]
                 elif "_" in last_part:
-                    segments = (
-                        last_part.replace(".jpg", "").replace(".png", "").split("_")
-                    )
+                    segments = last_part.replace(".jpg", "").replace(".png", "").split("_")
                     if len(segments) >= 2:
                         return segments[1]
 
