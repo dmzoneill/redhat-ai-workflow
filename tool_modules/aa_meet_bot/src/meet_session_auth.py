@@ -9,7 +9,7 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from tool_modules.aa_meet_bot.src.browser_errors import BROWSER_ERRORS
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
@@ -59,7 +59,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         Returns:
             True if sign-in successful, False otherwise.
         """
-        return await MeetSignIn(self).sign_in_google()
+        return await MeetSignIn(cast("GoogleMeetController", self)).sign_in_google()
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
     async def join_meeting(self, meet_url: str) -> bool:
