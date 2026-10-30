@@ -29,7 +29,7 @@ for i in $(seq 1 $SAMPLES); do
 		if [[ -n "$pid" ]]; then
 			# RSS from /proc in KB, convert to MB
 			local rss_kb
-			rss_kb=$(awk '/^VmRSS:/ {print $2}' /proc/$pid/status 2>/dev/null)
+			rss_kb=$(awk '/^VmRSS:/ {print $2}' /proc/"$pid"/status 2>/dev/null)
 			if [[ -n "$rss_kb" ]]; then
 				echo $((rss_kb / 1024))
 			else
