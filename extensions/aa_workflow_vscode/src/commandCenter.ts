@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Command Center - Unified Tabbed Interface
  *
@@ -18,11 +19,11 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as http from "http";
-import { spawn } from "child_process";
+import { execSync, spawn, spawnSync } from "child_process";
 import { WorkflowDataProvider } from "./dataProvider";
 import { getSkillsDir, getMemoryDir } from "./paths";
-import { CONFIG_FILE, AA_CONFIG_DIR, DBUS_SERVICES } from "./constants";
-import { getStateStore, StateStore } from "./state";
+import { CONFIG_FILE, DBUS_SERVICES } from "./constants";
+import { getStateStore, StateStore } from "./state/index";
 import {
   Container,
   createContainer,
@@ -34,32 +35,26 @@ import {
   CronService,
   SprintService,
   VideoService,
-  NotificationType,
-} from "./services";
+} from "./services/index";
 import type {
   ChatSession,
   WorkspaceState,
   WorkspaceExportedState,
-  SkillStep,
   SkillExecution,
   RunningSkillSummary,
-  ToolDefinitionCC as ToolDefinition,
   ToolModuleCC as ToolModule,
   PersonaCC as Persona,
   MeetingReference,
   SkillDefinition,
-  CronJob,
-  CronExecution,
   AgentStats,
 } from "./data/types";
-import { loadMeetBotState, getUpcomingMeetingsHtml, MeetBotState } from "./meetingsRenderer";
-import { loadSprintHistory, loadToolGapRequests, getSprintTabContent, SprintState } from "./sprintRenderer";
-import { loadPerformanceState, PerformanceState } from "./performanceRenderer";
+import { SprintState } from "./sprintRenderer";
 import { createLogger } from "./logger";
+import { getSkillExecutionWatcher } from "./skillExecutionWatcher";
 // NOTE: RefreshCoordinator removed - it was sending messages that were never handled in the webview.
 // UI updates now go through TabManager and tabContentUpdate messages.
 import { dbus } from "./dbusClient";
-import { execAsync, getNonce } from "./utils";
+import { execAsync } from "./utils/index";
 import {
   MessageRouter,
   MessageContext,
@@ -84,7 +79,7 @@ import {
   PerformanceMessageHandler,
   TabManager,
   HtmlGenerator,
-} from "./panels";
+} from "./panels/index";
 
 const logger = createLogger("CommandCenter");
 
@@ -95,7 +90,6 @@ function debugLog(msg: string) {
 
 // Constants imported from ./constants.ts
 // Types imported from ./data/types.ts
-
 
 // ============================================================================
 // Command Center Panel
@@ -111,13 +105,13 @@ export class CommandCenterPanel {
   private _executionWatcher: fs.FSWatcher | undefined;
   private _workspaceWatcher: fs.FSWatcher | undefined;
   private _currentExecution: SkillExecution | undefined;
-  private _runningSkills: RunningSkillSummary[] = [];  // All running skills
+  private _runningSkills: RunningSkillSummary[] = []; // All running skills
   private _currentTab: string = "overview";
   private _workspaceState: WorkspaceExportedState | null = null;
   private _workspaceCount: number = 0;
-  private _sessionGroupBy: 'none' | 'project' | 'persona' = 'project';
-  private _sessionViewMode: 'card' | 'table' = 'card';
-  private _personaViewMode: 'card' | 'table' = 'card';
+  private _sessionGroupBy: "none" | "project" | "persona" = "project";
+  private _sessionViewMode: "card" | "table" = "card";
+  private _personaViewMode: "card" | "table" = "card";
 
   // Cached personas for skill lookup
   private _personasCache: Persona[] | null = null;
@@ -173,13 +167,15 @@ export class CommandCenterPanel {
   public static createOrShow(
     extensionUri: vscode.Uri,
     dataProvider: WorkflowDataProvider,
-    initialTab?: string
+    initialTab?: string,
   ) {
-    debugLog(`createOrShow() called - initialTab: ${initialTab || 'none'}`);
+    debugLog(`createOrShow() called - initialTab: ${initialTab || "none"}`);
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
-    debugLog(`createOrShow() - column: ${column}, currentPanel exists: ${!!CommandCenterPanel.currentPanel}`);
+    debugLog(
+      `createOrShow() - column: ${column}, currentPanel exists: ${!!CommandCenterPanel.currentPanel}`,
+    );
 
     if (CommandCenterPanel.currentPanel) {
       debugLog("createOrShow() - reusing existing panel, revealing...");
@@ -193,8 +189,10 @@ export class CommandCenterPanel {
 
     debugLog("createOrShow() - creating NEW panel");
     // Allow access to screenshot directory for meeting images
-    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-    const screenshotDir = vscode.Uri.file(`${homeDir}/.config/aa-workflow/meet_bot/screenshots`);
+    const homeDir = process.env.HOME || process.env.USERPROFILE || "";
+    const screenshotDir = vscode.Uri.file(
+      `${homeDir}/.config/aa-workflow/meet_bot/screenshots`,
+    );
     debugLog(`createOrShow() - screenshotDir: ${screenshotDir.fsPath}`);
 
     const panel = vscode.window.createWebviewPanel(
@@ -205,7 +203,7 @@ export class CommandCenterPanel {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [extensionUri, screenshotDir],
-      }
+      },
     );
     debugLog("createOrShow() - webview panel created");
 
@@ -213,16 +211,24 @@ export class CommandCenterPanel {
       panel,
       extensionUri,
       dataProvider,
-      initialTab
+      initialTab,
     );
     debugLog("createOrShow() - CommandCenterPanel instance created");
 
     return CommandCenterPanel.currentPanel;
   }
 
-  public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, dataProvider: WorkflowDataProvider) {
+  public static revive(
+    panel: vscode.WebviewPanel,
+    extensionUri: vscode.Uri,
+    dataProvider: WorkflowDataProvider,
+  ) {
     debugLog("revive() called - restoring panel from VS Code");
-    CommandCenterPanel.currentPanel = new CommandCenterPanel(panel, extensionUri, dataProvider);
+    CommandCenterPanel.currentPanel = new CommandCenterPanel(
+      panel,
+      extensionUri,
+      dataProvider,
+    );
     // Also update the module-level variable so getCommandCenterPanel() works after revive
     commandCenterPanel = CommandCenterPanel.currentPanel;
   }
@@ -243,13 +249,17 @@ export class CommandCenterPanel {
     this._currentExecution = execution;
 
     // Route through TabManager so SkillsTab can update the workflow view
-    debugLog(`updateSkillExecution: ${execution.skillName} step ${execution.currentStepIndex}/${execution.totalSteps}`);
-    this._tabManager.handleMessage({
-      command: "skillExecutionUpdate",
-      execution,
-    }).then(handled => {
-      debugLog(`updateSkillExecution: handled=${handled}`);
-    });
+    debugLog(
+      `updateSkillExecution: ${execution.skillName} step ${execution.currentStepIndex}/${execution.totalSteps}`,
+    );
+    this._tabManager
+      .handleMessage({
+        command: "skillExecutionUpdate",
+        execution,
+      })
+      .then((handled) => {
+        debugLog(`updateSkillExecution: handled=${handled}`);
+      });
   }
 
   /**
@@ -262,36 +272,39 @@ export class CommandCenterPanel {
     // Get stale count from watcher
     let staleCount = 0;
     try {
-      const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
       const watcher = getSkillExecutionWatcher();
       if (watcher) {
         staleCount = watcher.getStaleExecutionCount();
       }
-    } catch (e) {
+    } catch {
       // Ignore errors getting stale count
     }
 
     // Directly update the SkillsTab through TabManager
     // This is more reliable than postMessage since the webview message handler
     // doesn't forward runningSkillsUpdate to tabs
-    debugLog(`updateRunningSkills: ${runningSkills.length} skills, ${staleCount} stale`);
-    this._tabManager.handleMessage({
-      command: "runningSkillsUpdate",
-      runningSkills,
-      staleCount,
-    }).then(handled => {
-      debugLog(`updateRunningSkills: handled=${handled}`);
-    });
+    debugLog(
+      `updateRunningSkills: ${runningSkills.length} skills, ${staleCount} stale`,
+    );
+    this._tabManager
+      .handleMessage({
+        command: "runningSkillsUpdate",
+        runningSkills,
+        staleCount,
+      })
+      .then((handled) => {
+        debugLog(`updateRunningSkills: handled=${handled}`);
+      });
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     extensionUri: vscode.Uri,
     dataProvider: WorkflowDataProvider,
-    initialTab?: string
+    initialTab?: string,
   ) {
     debugLog("Constructor called - setting up panel");
-    debugLog(`Constructor - initialTab: ${initialTab || 'overview'}`);
+    debugLog(`Constructor - initialTab: ${initialTab || "overview"}`);
     this._panel = panel;
     this._extensionUri = extensionUri;
     this._dataProvider = dataProvider;
@@ -357,7 +370,8 @@ export class CommandCenterPanel {
       state: this._stateStore,
       messages: messageBus,
       notifications: getNotificationService(),
-      queryDBus: (service, path, iface, method, args) => this.queryDBus(service, path, iface, method, args),
+      queryDBus: (service, path, iface, method, args) =>
+        this.queryDBus(service, path, iface, method, args),
     });
     debugLog("Constructor - SprintService initialized");
 
@@ -369,7 +383,8 @@ export class CommandCenterPanel {
       state: this._stateStore,
       messages: messageBus,
       notifications: getNotificationService(),
-      queryDBus: (service, path, iface, method, args) => this.queryDBus(service, path, iface, method, args),
+      queryDBus: (service, path, iface, method, args) =>
+        this.queryDBus(service, path, iface, method, args),
     });
     debugLog("Constructor - VideoService initialized");
 
@@ -379,167 +394,231 @@ export class CommandCenterPanel {
     this._messageRouter = new MessageRouter()
       .register(new UtilityMessageHandler())
       .register(new CommandMessageHandler())
-      .register(new SessionMessageHandler({
-        // NOTE: copySessionId, searchSessions removed - SessionsTab handles them directly
-        onRefresh: () => this._syncAndRefreshSessions(),
-        onOpenChatSession: async (sessionId: string, sessionName?: string) => {
-          await this._sessionService!.openChatSession(sessionId, sessionName);
-        },
-        onViewMeetingNotes: async (sessionId: string) => {
-          await this._sessionService!.viewMeetingNotes(sessionId);
-        },
-      }))
+      .register(
+        new SessionMessageHandler({
+          // NOTE: copySessionId, searchSessions removed - SessionsTab handles them directly
+          onRefresh: () => this._syncAndRefreshSessions(),
+          onOpenChatSession: async (
+            sessionId: string,
+            sessionName?: string,
+          ) => {
+            await this._sessionService!.openChatSession(sessionId, sessionName);
+          },
+          onViewMeetingNotes: async (sessionId: string) => {
+            await this._sessionService!.viewMeetingNotes(sessionId);
+          },
+        }),
+      )
       // NOTE: SprintMessageHandler removed - SprintTab handles sprintAction directly via D-Bus
       // NOTE: MeetingMessageHandler removed - MeetingsTab handles meeting messages directly via D-Bus
-      .register(new SlackMessageHandler({
-        // NOTE: sendSlackMessage, approveSlackMessage, rejectSlackMessage, approveAllSlack removed
-        // - SlackTab handles them directly via D-Bus
-        onLoadHistory: async () => {
-          await this._slackService!.loadHistory();
-        },
-        onReplyToThread: async (channel: string, text: string, threadTs?: string) => {
-          await this._slackService!.sendMessage(channel, text, threadTs || "");
-        },
-        onRefreshChannels: async () => {
-          await this._slackService!.getMyChannels();
-        },
-        onSearchUsers: async (query: string) => {
-          await this._slackService!.searchUsers(query);
-        },
-        onRefreshTargets: async () => {
-          await this._slackService!.getMyChannels();
-        },
-        onSearchMessages: async (query: string) => {
-          await this._slackService!.searchMessages(query);
-        },
-        onRefreshPending: async () => {
-          await this._slackService!.getPending();
-        },
-        onRefreshCache: async () => {
-          await this._slackService!.refreshCache();
-        },
-        onRefreshCacheStats: async () => {
-          await this._slackService!.getCacheStats();
-        },
-        onLoadChannelBrowser: async (query: string) => {
-          await this._slackService!.findChannel(query);
-        },
-        onLoadUserBrowser: async (query: string) => {
-          await this._slackService!.findUser(query);
-        },
-        onLoadCommands: async () => {
-          await this._slackService!.getCommands();
-        },
-        onSendCommand: async (commandName: string, args: any) => {
-          await this._slackService!.sendCommand(commandName, args);
-        },
-        onLoadConfig: async () => {
-          await this._slackService!.getConfig();
-        },
-        onSetDebugMode: async (enabled: boolean) => {
-          await this._slackService!.setDebugMode(enabled);
-        },
-      }))
+      .register(
+        new SlackMessageHandler({
+          // NOTE: sendSlackMessage, approveSlackMessage, rejectSlackMessage, approveAllSlack removed
+          // - SlackTab handles them directly via D-Bus
+          onLoadHistory: async () => {
+            await this._slackService!.loadHistory();
+          },
+          onReplyToThread: async (
+            channel: string,
+            text: string,
+            threadTs?: string,
+          ) => {
+            await this._slackService!.sendMessage(
+              channel,
+              text,
+              threadTs || "",
+            );
+          },
+          onRefreshChannels: async () => {
+            await this._slackService!.getMyChannels();
+          },
+          onSearchUsers: async (query: string) => {
+            await this._slackService!.searchUsers(query);
+          },
+          onRefreshTargets: async () => {
+            await this._slackService!.getMyChannels();
+          },
+          onSearchMessages: async (query: string) => {
+            await this._slackService!.searchMessages(query);
+          },
+          onRefreshPending: async () => {
+            await this._slackService!.getPending();
+          },
+          onRefreshCache: async () => {
+            await this._slackService!.refreshCache();
+          },
+          onRefreshCacheStats: async () => {
+            await this._slackService!.getCacheStats();
+          },
+          onLoadChannelBrowser: async (query: string) => {
+            await this._slackService!.findChannel(query);
+          },
+          onLoadUserBrowser: async (query: string) => {
+            await this._slackService!.findUser(query);
+          },
+          onLoadCommands: async () => {
+            await this._slackService!.getCommands();
+          },
+          onSendCommand: async (commandName: string, args: any) => {
+            await this._slackService!.sendCommand(commandName, args);
+          },
+          onLoadConfig: async () => {
+            await this._slackService!.getConfig();
+          },
+          onSetDebugMode: async (enabled: boolean) => {
+            await this._slackService!.setDebugMode(enabled);
+          },
+        }),
+      )
       // NOTE: SkillMessageHandler removed - SkillsTab handles skill messages directly
-      .register(new ServiceMessageHandler({
-        // NOTE: refreshServices, serviceControl, testOllamaInstance removed - ServicesTab handles them directly
-        onQueryDBus: (service: string, method: string, args: any[]) => this.handleDBusQuery(service, method, args as unknown as Record<string, string>),
-        onRefreshOllamaStatus: async () => { this._backgroundSync(); },
-      }))
+      .register(
+        new ServiceMessageHandler({
+          // NOTE: refreshServices, serviceControl, testOllamaInstance removed - ServicesTab handles them directly
+          onQueryDBus: (service: string, method: string, args: any[]) =>
+            this.handleDBusQuery(
+              service,
+              method,
+              args as unknown as Record<string, string>,
+            ),
+          onRefreshOllamaStatus: async () => {
+            this._backgroundSync();
+          },
+        }),
+      )
       // NOTE: CronMessageHandler removed - CronTab handles cron messages directly via D-Bus
-      .register(new MeetingHistoryMessageHandler({
-        // Using MeetingService for decoupled business logic
-        onViewNote: (noteId: string) => this._handleViewNoteWithService(parseInt(noteId, 10)),
-        onViewTranscript: (noteId: string) => this._handleViewTranscriptWithService(parseInt(noteId, 10)),
-        onViewBotLog: (noteId: string) => this._handleViewBotLogWithService(parseInt(noteId, 10)),
-        onViewLinkedIssues: (noteId: string) => this._handleViewLinkedIssuesWithService(parseInt(noteId, 10)),
-        onSearchNotes: async (query: string) => {
-          await this._meetingService!.searchNotes(query);
-        },
-        onCopyTranscript: async () => {
-          await this._meetingService!.copyTranscript();
-        },
-        onClearCaptions: async () => {
-          await this._meetingService!.clearCaptions();
-        },
-      }))
-      .register(new VideoPreviewMessageHandler({
-        // Using VideoService for decoupled business logic
-        onStartVideoPreview: async (device: string, mode: string) => {
-          await this._videoService!.startPreview(device, mode as any);
-        },
-        onStopVideoPreview: async () => {
-          await this._videoService!.stopPreview();
-        },
-        onGetVideoPreviewFrame: async () => {
-          await this._videoService!.captureAndPublishFrame();
-        },
-      }))
-      .register(new MeetingAudioMessageHandler({
-        // Using MeetingService for decoupled business logic
-        onMuteAudio: async (sessionId: string) => {
-          await this._meetingService!.muteAudio(sessionId);
-        },
-        onUnmuteAudio: async (sessionId: string) => {
-          await this._meetingService!.unmuteAudio(sessionId);
-        },
-        onTestTTS: async (sessionId: string) => {
-          await this._meetingService!.testTTS(sessionId);
-        },
-        onTestAvatar: async (sessionId: string) => {
-          await this._meetingService!.testAvatar(sessionId);
-        },
-        onPreloadJira: async (sessionId: string) => {
-          await this._meetingService!.preloadJira(sessionId);
-        },
-        onSetDefaultMode: async (mode: string) => {
-          await this._meetingService!.setDefaultMode(mode);
-        },
-      }))
-      .register(new InferenceMessageHandler({
-        onRunInferenceTest: (message: string, persona: string, skill: string) => this.runInferenceTest(message, persona, skill),
-        onGetInferenceStats: () => this.getInferenceStats(),
-        onUpdateInferenceConfig: (key: string, value: any) => this.updateInferenceConfig(key, value),
-        onSemanticSearch: (query: string, project: string) => this.executeSemanticSearch(query, project),
-        onResetInferenceConfig: () => this.resetInferenceConfig(),
-        onSaveInferenceConfig: () => this.saveInferenceConfig(),
-      }))
-      .register(new SlackPersonaTestHandler({
-        onRunPersonaTest: (query: string) => this.runContextTest(query),
-        onFetchContextStatus: () => this.fetchContextStatus(),
-      }))
+      .register(
+        new MeetingHistoryMessageHandler({
+          // Using MeetingService for decoupled business logic
+          onViewNote: (noteId: string) =>
+            this._handleViewNoteWithService(parseInt(noteId, 10)),
+          onViewTranscript: (noteId: string) =>
+            this._handleViewTranscriptWithService(parseInt(noteId, 10)),
+          onViewBotLog: (noteId: string) =>
+            this._handleViewBotLogWithService(parseInt(noteId, 10)),
+          onViewLinkedIssues: (noteId: string) =>
+            this._handleViewLinkedIssuesWithService(parseInt(noteId, 10)),
+          onSearchNotes: async (query: string) => {
+            await this._meetingService!.searchNotes(query);
+          },
+          onCopyTranscript: async () => {
+            await this._meetingService!.copyTranscript();
+          },
+          onClearCaptions: async () => {
+            await this._meetingService!.clearCaptions();
+          },
+        }),
+      )
+      .register(
+        new VideoPreviewMessageHandler({
+          // Using VideoService for decoupled business logic
+          onStartVideoPreview: async (device: string, mode: string) => {
+            await this._videoService!.startPreview(device, mode as any);
+          },
+          onStopVideoPreview: async () => {
+            await this._videoService!.stopPreview();
+          },
+          onGetVideoPreviewFrame: async () => {
+            await this._videoService!.captureAndPublishFrame();
+          },
+        }),
+      )
+      .register(
+        new MeetingAudioMessageHandler({
+          // Using MeetingService for decoupled business logic
+          onMuteAudio: async (sessionId: string) => {
+            await this._meetingService!.muteAudio(sessionId);
+          },
+          onUnmuteAudio: async (sessionId: string) => {
+            await this._meetingService!.unmuteAudio(sessionId);
+          },
+          onTestTTS: async (sessionId: string) => {
+            await this._meetingService!.testTTS(sessionId);
+          },
+          onTestAvatar: async (sessionId: string) => {
+            await this._meetingService!.testAvatar(sessionId);
+          },
+          onPreloadJira: async (sessionId: string) => {
+            await this._meetingService!.preloadJira(sessionId);
+          },
+          onSetDefaultMode: async (mode: string) => {
+            await this._meetingService!.setDefaultMode(mode);
+          },
+        }),
+      )
+      .register(
+        new InferenceMessageHandler({
+          onRunInferenceTest: (
+            message: string,
+            persona: string,
+            skill: string,
+          ) => this.runInferenceTest(message, persona, skill),
+          onGetInferenceStats: () => this.getInferenceStats(),
+          onUpdateInferenceConfig: (key: string, value: any) =>
+            this.updateInferenceConfig(key, value),
+          onSemanticSearch: (query: string, project: string) =>
+            this.executeSemanticSearch(query, project),
+          onResetInferenceConfig: () => this.resetInferenceConfig(),
+          onSaveInferenceConfig: () => this.saveInferenceConfig(),
+        }),
+      )
+      .register(
+        new SlackPersonaTestHandler({
+          onRunPersonaTest: (query: string) => this.runContextTest(query),
+          onFetchContextStatus: () => this.fetchContextStatus(),
+        }),
+      )
       // NOTE: PersonaMessageHandler removed - PersonasTab handles persona messages directly
-      .register(new WorkspaceMessageHandler({
-        // NOTE: changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow removed - SessionsTab handles them directly
-        onViewWorkspaceTools: (uri: string) => this._viewWorkspaceTools(uri),
-        onSwitchToWorkspace: (uri: string) => this._switchToWorkspace(uri),
-        onChangeWorkspacePersona: (uri: string, persona: string) => this._changeWorkspacePersona(uri, persona),
-        onRemoveWorkspace: (uri: string) => this._removeWorkspace(uri),
-      }))
-      .register(new TabMessageHandler({
-        onSwitchTab: (tab: string) => {
-          this._currentTab = tab;
-          // Also update the TabManager's active tab so getActiveTab() returns the correct tab
-          this._tabManager.switchTab(tab);
-          logger.log(`Switched to tab: ${tab}`);
-          if (tab === "sprint") {
-            logger.log("Sprint tab selected - loading from file (no sync)");
-            this._loadSprintFromFile();
-          }
-          // Re-render the tab content to show latest data
-          // This is needed because tab data may have changed while viewing another tab
-          this._triggerTabRerender();
-        },
-        onOpenConfigFile: () => this.openConfigFile(),
-        onRefreshIssues: () => this._backgroundSync(),
-      }))
-      .register(new CreateSessionMessageHandler({
-        onCreateSessionAction: (action: string, message: any) => this.handleCreateSessionAction(action, message),
-      }))
-      .register(new PerformanceMessageHandler({
-        onPerformanceAction: (action: string, questionId?: string, category?: string, description?: string) =>
-          this.handlePerformanceAction(action, questionId, category, description),
-      }));
+      .register(
+        new WorkspaceMessageHandler({
+          // NOTE: changeSessionGroupBy, changeSessionViewMode, refreshSessionsNow removed - SessionsTab handles them directly
+          onViewWorkspaceTools: (uri: string) => this._viewWorkspaceTools(uri),
+          onSwitchToWorkspace: (uri: string) => this._switchToWorkspace(uri),
+          onChangeWorkspacePersona: (uri: string, persona: string) =>
+            this._changeWorkspacePersona(uri, persona),
+          onRemoveWorkspace: (uri: string) => this._removeWorkspace(uri),
+        }),
+      )
+      .register(
+        new TabMessageHandler({
+          onSwitchTab: (tab: string) => {
+            this._currentTab = tab;
+            // Also update the TabManager's active tab so getActiveTab() returns the correct tab
+            this._tabManager.switchTab(tab);
+            logger.log(`Switched to tab: ${tab}`);
+            if (tab === "sprint") {
+              logger.log("Sprint tab selected - loading from file (no sync)");
+              this._loadSprintFromFile();
+            }
+            // Re-render the tab content to show latest data
+            // This is needed because tab data may have changed while viewing another tab
+            this._triggerTabRerender();
+          },
+          onOpenConfigFile: () => this.openConfigFile(),
+          onRefreshIssues: () => this._backgroundSync(),
+        }),
+      )
+      .register(
+        new CreateSessionMessageHandler({
+          onCreateSessionAction: (action: string, message: any) =>
+            this.handleCreateSessionAction(action, message),
+        }),
+      )
+      .register(
+        new PerformanceMessageHandler({
+          onPerformanceAction: (
+            action: string,
+            questionId?: string,
+            category?: string,
+            description?: string,
+          ) =>
+            this.handlePerformanceAction(
+              action,
+              questionId,
+              category,
+              description,
+            ),
+        }),
+      );
 
     debugLog("Constructor - initializing TabManager...");
     // Initialize the tab manager
@@ -561,7 +640,8 @@ export class CommandCenterPanel {
     this._tabManager.setRenderCallback(() => {
       // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
       const skillsTab = this._tabManager.getTab("skills") as any;
-      const skipRerender = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+      const skipRerender =
+        this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
 
       if (skipRerender) {
         debugLog("Tab requested re-render - SKIPPED (mind map active)");
@@ -594,8 +674,8 @@ export class CommandCenterPanel {
         debugLog(`Received message: ${msgType} - ${JSON.stringify(message)}`);
 
         // Bridge webview console logs to Output panel
-        if (msgType === 'webviewLog') {
-          const level = message.level || 'log';
+        if (msgType === "webviewLog") {
+          const level = message.level || "log";
           debugLog(`[Webview ${level}] ${message.message}`);
           return;
         }
@@ -613,7 +693,10 @@ export class CommandCenterPanel {
           extensionUri: this._extensionUri,
           postMessage: (msg) => this._panel.webview.postMessage(msg),
         };
-        const handledByRouter = await this._messageRouter.route(message, routerContext);
+        const handledByRouter = await this._messageRouter.route(
+          message,
+          routerContext,
+        );
         if (handledByRouter) {
           debugLog(`Message handled by MessageRouter: ${msgType}`);
           return;
@@ -624,7 +707,7 @@ export class CommandCenterPanel {
         debugLog(`Unhandled message type: ${msgType}`);
       },
       null,
-      this._disposables
+      this._disposables,
     );
 
     // Now set up the rest of the panel after message handler is ready
@@ -642,7 +725,7 @@ export class CommandCenterPanel {
         }
       },
       null,
-      this._disposables
+      this._disposables,
     );
 
     // Load workspace state before first render
@@ -669,27 +752,27 @@ export class CommandCenterPanel {
       this.checkEnvironmentHealth();
       this.getInferenceStats();
       // Also refresh service status via D-Bus on initial load
-      this._refreshServicesViaDBus().catch(e => {
+      this._refreshServicesViaDBus().catch((e) => {
         debugLog(`Failed to refresh services via D-Bus on init: ${e}`);
       });
       // Load Slack discovery data via SlackService
       if (this._slackService) {
-        this._slackService.getCacheStats().catch(e => {
+        this._slackService.getCacheStats().catch((e) => {
           debugLog(`Failed to load Slack cache stats on init: ${e}`);
         });
-        this._slackService.findChannel("").catch(e => {
+        this._slackService.findChannel("").catch((e) => {
           debugLog(`Failed to load Slack channel browser on init: ${e}`);
         });
-        this._slackService.findUser("").catch(e => {
+        this._slackService.findUser("").catch((e) => {
           debugLog(`Failed to load Slack user browser on init: ${e}`);
         });
-        this._slackService.getPending().catch(e => {
+        this._slackService.getPending().catch((e) => {
           debugLog(`Failed to load Slack pending on init: ${e}`);
         });
-        this._slackService.getConfig().catch(e => {
+        this._slackService.getConfig().catch((e) => {
           debugLog(`Failed to load Slack config on init: ${e}`);
         });
-        this._slackService.getMyChannels().catch(e => {
+        this._slackService.getMyChannels().catch((e) => {
           debugLog(`Failed to load Slack targets on init: ${e}`);
         });
       }
@@ -723,7 +806,7 @@ export class CommandCenterPanel {
 
       // Check all instances via single systemctl call
       const { stdout } = await execAsync(
-        "systemctl is-active ollama-npu.service ollama-igpu.service ollama-nvidia.service ollama-cpu.service 2>/dev/null || true"
+        "systemctl is-active ollama-npu.service ollama-igpu.service ollama-nvidia.service ollama-cpu.service 2>/dev/null || true",
       );
       const states = stdout.trim().split("\n");
 
@@ -793,7 +876,11 @@ export class CommandCenterPanel {
               this._panel.webview.postMessage({
                 command: "ollamaTestResult",
                 instance,
-                data: { success: true, response: parsed.response || "", latency },
+                data: {
+                  success: true,
+                  response: parsed.response || "",
+                  latency,
+                },
               });
             } catch {
               this._panel.webview.postMessage({
@@ -810,7 +897,7 @@ export class CommandCenterPanel {
             });
           }
         });
-      }
+      },
     );
 
     req.on("error", (error) => {
@@ -835,8 +922,14 @@ export class CommandCenterPanel {
     req.end();
   }
 
-  private async runInferenceTest(message: string, persona: string, skill: string): Promise<void> {
-    debugLog(`runInferenceTest called: message="${message}", persona="${persona}", skill="${skill}"`);
+  private async runInferenceTest(
+    message: string,
+    persona: string,
+    skill: string,
+  ): Promise<void> {
+    debugLog(
+      `runInferenceTest called: message="${message}", persona="${persona}", skill="${skill}"`,
+    );
 
     if (!message) {
       debugLog("runInferenceTest: No message provided, aborting");
@@ -847,17 +940,25 @@ export class CommandCenterPanel {
     try {
       // Get the project root from workspace folders (not extension install location)
       const workspaceFolders = vscode.workspace.workspaceFolders;
-      const projectRoot = workspaceFolders && workspaceFolders.length > 0
-        ? workspaceFolders[0].uri.fsPath
-        : path.join(os.homedir(), "src", "redhat-ai-workflow");
+      const projectRoot =
+        workspaceFolders && workspaceFolders.length > 0
+          ? workspaceFolders[0].uri.fsPath
+          : path.join(os.homedir(), "src", "redhat-ai-workflow");
 
       // Use external Python script instead of inline script
-      const scriptPath = path.join(this._extensionUri.fsPath, "scripts", "inference_test.py");
+      const scriptPath = path.join(
+        this._extensionUri.fsPath,
+        "scripts",
+        "inference_test.py",
+      );
       const args = [
         scriptPath,
-        "--message", message,
-        "--persona", persona,
-        "--project-root", projectRoot,
+        "--message",
+        message,
+        "--persona",
+        persona,
+        "--project-root",
+        projectRoot,
       ];
       if (skill) {
         args.push("--skill", skill);
@@ -890,7 +991,8 @@ export class CommandCenterPanel {
             skill_detected: skill || null,
             latency_ms: 120000,
             message_preview: message.substring(0, 50),
-            error: "Inference timed out after 120 seconds (NPU may need warming up)",
+            error:
+              "Inference timed out after 120 seconds (NPU may need warming up)",
           },
         });
       }, 120000);
@@ -926,9 +1028,13 @@ export class CommandCenterPanel {
 
       python.on("close", (code: number) => {
         clearTimeout(timeoutId);
-        debugLog(`Python closed with code: ${code}, output length: ${output.length}, stderr length: ${errorOutput.length}`);
+        debugLog(
+          `Python closed with code: ${code}, output length: ${output.length}, stderr length: ${errorOutput.length}`,
+        );
         debugLog(`Raw output first 500 chars: ${output.substring(0, 500)}`);
-        debugLog(`Raw output last 200 chars: ${output.substring(Math.max(0, output.length - 200))}`);
+        debugLog(
+          `Raw output last 200 chars: ${output.substring(Math.max(0, output.length - 200))}`,
+        );
         if (errorOutput) {
           debugLog(`Stderr: ${errorOutput.substring(0, 500)}`);
         }
@@ -936,7 +1042,9 @@ export class CommandCenterPanel {
           const trimmedOutput = output.trim();
           debugLog(`Trimmed output length: ${trimmedOutput.length}`);
           const data = JSON.parse(trimmedOutput);
-          debugLog(`Posting inferenceTestResult with ${data.tool_count} tools, persona: ${data.persona}`);
+          debugLog(
+            `Posting inferenceTestResult with ${data.tool_count} tools, persona: ${data.persona}`,
+          );
           this._panel.webview.postMessage({
             command: "inferenceTestResult",
             data,
@@ -957,7 +1065,8 @@ export class CommandCenterPanel {
               skill_detected: skill || null,
               latency_ms: 2,
               message_preview: message.substring(0, 50),
-              error: errorOutput || "Failed to parse response: " + String(parseErr),
+              error:
+                errorOutput || "Failed to parse response: " + String(parseErr),
             },
           });
         }
@@ -1011,16 +1120,23 @@ export class CommandCenterPanel {
 
       // Get the project root from workspace folders
       const workspaceFolders = vscode.workspace.workspaceFolders;
-      const projectRoot = workspaceFolders && workspaceFolders.length > 0
-        ? workspaceFolders[0].uri.fsPath
-        : path.join(os.homedir(), "src", "redhat-ai-workflow");
+      const projectRoot =
+        workspaceFolders && workspaceFolders.length > 0
+          ? workspaceFolders[0].uri.fsPath
+          : path.join(os.homedir(), "src", "redhat-ai-workflow");
 
       // Use external Python script
-      const scriptPath = path.join(this._extensionUri.fsPath, "scripts", "slack_persona_test.py");
+      const scriptPath = path.join(
+        this._extensionUri.fsPath,
+        "scripts",
+        "slack_persona_test.py",
+      );
       const args = [
         scriptPath,
-        "--query", query,
-        "--project-root", projectRoot,
+        "--query",
+        query,
+        "--project-root",
+        projectRoot,
         "--include-jira",
         "--include-code",
         "--include-memory",
@@ -1052,7 +1168,10 @@ export class CommandCenterPanel {
         // Update SlackTab state
         const slackTab = this._tabManager.getTab("slack");
         if (slackTab) {
-          slackTab.handleMessage({ command: "contextTestResult", data: timeoutData });
+          slackTab.handleMessage({
+            command: "contextTestResult",
+            data: timeoutData,
+          });
         }
         this._panel.webview.postMessage({
           command: "contextTestResult",
@@ -1083,7 +1202,10 @@ export class CommandCenterPanel {
         // Update SlackTab state
         const slackTab = this._tabManager.getTab("slack");
         if (slackTab) {
-          slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+          slackTab.handleMessage({
+            command: "contextTestResult",
+            data: errorData,
+          });
         }
         this._panel.webview.postMessage({
           command: "contextTestResult",
@@ -1093,11 +1215,15 @@ export class CommandCenterPanel {
 
       python.on("close", (code: number) => {
         clearTimeout(timeoutId);
-        debugLog(`Python closed with code: ${code}, output length: ${output.length}`);
+        debugLog(
+          `Python closed with code: ${code}, output length: ${output.length}`,
+        );
         try {
           const trimmedOutput = output.trim();
           const data = JSON.parse(trimmedOutput);
-          debugLog(`Posting contextTestResult with ${data.total_results} results`);
+          debugLog(
+            `Posting contextTestResult with ${data.total_results} results`,
+          );
 
           // Update the SlackTab's state directly and trigger re-render
           const slackTab = this._tabManager.getTab("slack");
@@ -1119,7 +1245,8 @@ export class CommandCenterPanel {
           debugLog(`Failed to parse output: ${parseErr}`);
           const errorData = {
             query: query,
-            error: errorOutput || "Failed to parse response: " + String(parseErr),
+            error:
+              errorOutput || "Failed to parse response: " + String(parseErr),
             sources: [],
             sources_used: [],
             total_results: 0,
@@ -1127,7 +1254,10 @@ export class CommandCenterPanel {
           // Update SlackTab state
           const slackTab = this._tabManager.getTab("slack");
           if (slackTab) {
-            slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+            slackTab.handleMessage({
+              command: "contextTestResult",
+              data: errorData,
+            });
           }
           this._panel.webview.postMessage({
             command: "personaTestResult",
@@ -1146,7 +1276,10 @@ export class CommandCenterPanel {
       // Update SlackTab state
       const slackTab = this._tabManager.getTab("slack");
       if (slackTab) {
-        slackTab.handleMessage({ command: "contextTestResult", data: errorData });
+        slackTab.handleMessage({
+          command: "contextTestResult",
+          data: errorData,
+        });
       }
       this._panel.webview.postMessage({
         command: "personaTestResult",
@@ -1165,17 +1298,18 @@ export class CommandCenterPanel {
     try {
       // Get the project root from workspace folders
       const workspaceFolders = vscode.workspace.workspaceFolders;
-      const projectRoot = workspaceFolders && workspaceFolders.length > 0
-        ? workspaceFolders[0].uri.fsPath
-        : path.join(os.homedir(), "src", "redhat-ai-workflow");
+      const projectRoot =
+        workspaceFolders && workspaceFolders.length > 0
+          ? workspaceFolders[0].uri.fsPath
+          : path.join(os.homedir(), "src", "redhat-ai-workflow");
 
       // Use external Python script with --status-only flag
-      const scriptPath = path.join(this._extensionUri.fsPath, "scripts", "slack_persona_test.py");
-      const args = [
-        scriptPath,
-        "--status-only",
-        "--project-root", projectRoot,
-      ];
+      const scriptPath = path.join(
+        this._extensionUri.fsPath,
+        "scripts",
+        "slack_persona_test.py",
+      );
+      const args = [scriptPath, "--status-only", "--project-root", projectRoot];
 
       debugLog(`Running status fetch with scriptPath: ${scriptPath}`);
 
@@ -1183,8 +1317,6 @@ export class CommandCenterPanel {
         cwd: projectRoot,
       });
       let output = "";
-      let errorOutput = "";
-
       // Set a shorter timeout for status-only (10 seconds)
       const timeoutId = setTimeout(() => {
         debugLog("Status fetch timed out after 10s, killing...");
@@ -1196,7 +1328,6 @@ export class CommandCenterPanel {
       });
 
       python.stderr.on("data", (data: Buffer) => {
-        errorOutput += data.toString();
         // Only log actual errors, not warnings
         if (!data.toString().includes("DeprecationWarning")) {
           debugLog(`Status fetch stderr: ${data.toString().substring(0, 200)}`);
@@ -1214,7 +1345,9 @@ export class CommandCenterPanel {
         try {
           const trimmedOutput = output.trim();
           const data = JSON.parse(trimmedOutput);
-          debugLog(`Posting contextTestResult (status only) with status: ${JSON.stringify(data.status)}`);
+          debugLog(
+            `Posting contextTestResult (status only) with status: ${JSON.stringify(data.status)}`,
+          );
           // Update SlackTab state directly
           const slackTab = this._tabManager.getTab("slack");
           if (slackTab) {
@@ -1238,8 +1371,8 @@ export class CommandCenterPanel {
     try {
       // Get all available personas from the personas directory
       const allPersonas = this.getCachedPersonas()
-        .filter(p => !p.isInternal && !p.isSlim)  // Filter out internal and slim variants
-        .map(p => p.name);
+        .filter((p) => !p.isInternal && !p.isSlim) // Filter out internal and slim variants
+        .map((p) => p.name);
 
       // Load inference stats via D-Bus from Stats daemon
       const result = await dbus.stats_getInferenceStats();
@@ -1279,18 +1412,24 @@ export class CommandCenterPanel {
       const section = parts[0];
       const subKey = parts.slice(1).join(".");
 
-      debugLog(`updateInferenceConfig via D-Bus: ${section}, ${subKey}, ${value}`);
+      debugLog(
+        `updateInferenceConfig via D-Bus: ${section}, ${subKey}, ${value}`,
+      );
 
       const result = await dbus.cron_updateConfig(section, subKey, value);
 
       const data = result.data as any;
       if (result.success && data?.success) {
         debugLog(`D-Bus update_config result: ${JSON.stringify(data)}`);
-        vscode.window.showInformationMessage(`Updated inference config: ${key}`);
+        vscode.window.showInformationMessage(
+          `Updated inference config: ${key}`,
+        );
       } else {
         const errorMsg = data?.error || result.error || "Unknown error";
         debugLog(`D-Bus update_config failed: ${errorMsg}`);
-        vscode.window.showErrorMessage(`Failed to update config via D-Bus: ${errorMsg}`);
+        vscode.window.showErrorMessage(
+          `Failed to update config via D-Bus: ${errorMsg}`,
+        );
       }
     } catch (error) {
       debugLog(`Failed to update inference config: ${error}`);
@@ -1314,7 +1453,9 @@ export class CommandCenterPanel {
         await this.updateInferenceConfig(key, value);
       }
 
-      vscode.window.showInformationMessage("Inference config reset to defaults");
+      vscode.window.showInformationMessage(
+        "Inference config reset to defaults",
+      );
     } catch (error) {
       debugLog(`Failed to reset inference config: ${error}`);
       vscode.window.showErrorMessage(`Failed to reset config: ${error}`);
@@ -1338,7 +1479,10 @@ export class CommandCenterPanel {
     }
   }
 
-  private async executeSemanticSearch(query: string, project: string): Promise<void> {
+  private async executeSemanticSearch(
+    query: string,
+    project: string,
+  ): Promise<void> {
     if (!query || !project) {
       this._panel.webview.postMessage({
         command: "semanticSearchResult",
@@ -1354,12 +1498,12 @@ export class CommandCenterPanel {
 
     try {
       // Execute the code_search tool via the MCP server using Python subprocess
-      const { spawn } = require("child_process");
 
       // Handle "search all projects" option
       const searchAllProjects = project === "__all__";
 
-      const pythonScript = searchAllProjects ? `
+      const pythonScript = searchAllProjects
+        ? `
 import sys
 import json
 sys.path.insert(0, '${path.join(__dirname, "..", "..", "..", "tool_modules", "aa_code_search", "src")}')
@@ -1374,7 +1518,7 @@ try:
     for proj in indexed_projects:
         try:
             results = _search_code(
-                query="${query.replace(/"/g, '\\"')}",
+                query="${query.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}",
                 project=proj,
                 limit=5,  # Fewer per project when searching all
                 auto_update=False
@@ -1393,7 +1537,8 @@ try:
     print(json.dumps({"success": True, "results": all_results, "searched_projects": indexed_projects}))
 except Exception as e:
     print(json.dumps({"success": False, "error": str(e)}))
-` : `
+`
+        : `
 import sys
 import json
 sys.path.insert(0, '${path.join(__dirname, "..", "..", "..", "tool_modules", "aa_code_search", "src")}')
@@ -1401,8 +1546,8 @@ from tools_basic import _search_code
 
 try:
     results = _search_code(
-        query="${query.replace(/"/g, '\\"')}",
-        project="${project.replace(/"/g, '\\"')}",
+        query="${query.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}",
+        project="${project.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}",
         limit=10,
         auto_update=False
     )
@@ -1413,7 +1558,18 @@ except Exception as e:
 
       const python = spawn("python3", ["-c", pythonScript], {
         cwd: path.join(__dirname, "..", "..", ".."),
-        env: { ...process.env, PYTHONPATH: path.join(__dirname, "..", "..", "..", "tool_modules", "aa_code_search", "src") },
+        env: {
+          ...process.env,
+          PYTHONPATH: path.join(
+            __dirname,
+            "..",
+            "..",
+            "..",
+            "tool_modules",
+            "aa_code_search",
+            "src",
+          ),
+        },
       });
 
       let stdout = "";
@@ -1475,10 +1631,12 @@ except Exception as e:
   private startExecutionWatcher() {
     // File watching removed - skill execution state comes from D-Bus via stats daemon
     // The 10-second auto-refresh interval handles updates via D-Bus polling
-    debugLog("Skill execution state loaded via D-Bus - no file watching needed");
+    debugLog(
+      "Skill execution state loaded via D-Bus - no file watching needed",
+    );
 
     // Load initial state via D-Bus
-    this.loadExecutionStateAsync().catch(e => {
+    this.loadExecutionStateAsync().catch((e) => {
       debugLog(`Initial skill execution load failed: ${e}`);
     });
 
@@ -1493,12 +1651,13 @@ except Exception as e:
    */
   private _loadRunningSkillsFromWatcher() {
     try {
-      const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
       const watcher = getSkillExecutionWatcher();
       if (watcher) {
         const runningExecutions = watcher.getRunningExecutions();
         const staleCount = watcher.getStaleExecutionCount();
-        debugLog(`Loading ${runningExecutions.length} running skills from watcher (${staleCount} stale)`);
+        debugLog(
+          `Loading ${runningExecutions.length} running skills from watcher (${staleCount} stale)`,
+        );
         this.updateRunningSkills(runningExecutions);
       }
     } catch (e) {
@@ -1512,7 +1671,7 @@ except Exception as e:
    */
   private triggerExecutionStateLoad() {
     // Trigger async load - results will update UI when ready
-    this.loadExecutionStateAsync().catch(e => {
+    this.loadExecutionStateAsync().catch(() => {
       // Silently ignore errors - D-Bus may not be available
     });
   }
@@ -1527,7 +1686,7 @@ except Exception as e:
         const data = (result.data as any).execution || result.data;
         this.updateSkillExecution(data);
       }
-    } catch (e) {
+    } catch {
       // D-Bus may not be available
     }
   }
@@ -1606,20 +1765,32 @@ except Exception as e:
     activeRepo: string | null;
     totalActiveIssues: number;
     totalActiveMRs: number;
-    allActiveIssues: { key: string; summary: string; project: string; workspace: string }[];
-    allActiveMRs: { id: string; title: string; project: string; workspace: string }[];
+    allActiveIssues: {
+      key: string;
+      summary: string;
+      project: string;
+      workspace: string;
+    }[];
+    allActiveMRs: {
+      id: string;
+      title: string;
+      project: string;
+      workspace: string;
+    }[];
   } {
-    return this._cachedCurrentWork || {
-      activeIssue: null,
-      activeMR: null,
-      followUps: [],
-      sprintIssues: [],
-      activeRepo: null,
-      totalActiveIssues: 0,
-      totalActiveMRs: 0,
-      allActiveIssues: [],
-      allActiveMRs: []
-    };
+    return (
+      this._cachedCurrentWork || {
+        activeIssue: null,
+        activeMR: null,
+        followUps: [],
+        sprintIssues: [],
+        activeRepo: null,
+        totalActiveIssues: 0,
+        totalActiveMRs: 0,
+        allActiveIssues: [],
+        allActiveMRs: [],
+      }
+    );
   }
 
   /**
@@ -1634,7 +1805,7 @@ from tool_modules.aa_gitlab.src.tools_basic import _gitlab_mr_list_impl
 result = asyncio.run(_gitlab_mr_list_impl('automation-analytics/automation-analytics-backend', 'opened', '', '', '', ''))
 print(result[0].text if result else '[]')
 " 2>/dev/null | head -50`,
-        { timeout: 15000 }
+        { timeout: 15000 },
       );
       // Parse the output - it's markdown table format
       const lines = stdout.trim().split("\n");
@@ -1669,10 +1840,12 @@ print(result[0].text if result else '[]')
       // JIRA_AFFECTS_VERSION can be empty but the CLI requires it to be set to something
       const { stdout } = await execAsync(
         `/bin/bash -c 'source ~/.bashrc 2>/dev/null; export JIRA_AFFECTS_VERSION="\${JIRA_AFFECTS_VERSION:-N/A}"; cd "${jiraCreatorDir}" && ${rhIssuePath} search "assignee = currentUser() AND sprint in openSprints()" --max-results 20'`,
-        { timeout: 30000 }
+        { timeout: 30000 },
       );
 
-      logger.log(`Jira search output (first 300 chars): ${stdout.substring(0, 300)}`);
+      logger.log(
+        `Jira search output (first 300 chars): ${stdout.substring(0, 300)}`,
+      );
 
       // Parse the output - it's markdown table format
       // Format: Key | Issuetype | Status | Priority | Summary | Assignee | Reporter | Sprint | Story Points | Blocked
@@ -1680,23 +1853,29 @@ print(result[0].text if result else '[]')
       const issues: any[] = [];
       for (const line of lines) {
         // Skip header and separator lines
-        if (line.startsWith("Key") || line.startsWith("-") || line.startsWith("📊") || line.trim() === "") {
+        if (
+          line.startsWith("Key") ||
+          line.startsWith("-") ||
+          line.startsWith("📊") ||
+          line.trim() === ""
+        ) {
           continue;
         }
         // Split by | and parse all columns
-        const cols = line.split("|").map(c => c.trim());
+        const cols = line.split("|").map((c) => c.trim());
         if (cols.length >= 8 && cols[0].match(/^AAP-\d+$/)) {
           issues.push({
             key: cols[0],
             type: cols[1],
             status: cols[2],
             priority: cols[3],
-            summary: cols[4].substring(0, 60) + (cols[4].length > 60 ? '...' : ''),
-            assignee: cols[5] || '',
-            reporter: cols[6] || '',
-            sprint: cols[7] || '',  // Capture sprint name
+            summary:
+              cols[4].substring(0, 60) + (cols[4].length > 60 ? "..." : ""),
+            assignee: cols[5] || "",
+            reporter: cols[6] || "",
+            sprint: cols[7] || "", // Capture sprint name
             storyPoints: parseInt(cols[8]) || 0,
-            blocked: cols[9] === 'Yes' || cols[9] === 'true'
+            blocked: cols[9] === "Yes" || cols[9] === "true",
           });
         }
       }
@@ -1735,7 +1914,7 @@ print(result[0].text if result else '[]')
   private _loadSprintFromFile(): void {
     logger.log("_loadSprintFromFile() called - loading via D-Bus");
     // Trigger async D-Bus load
-    this._loadSprintViaDBusAndUpdateUI().catch(e => {
+    this._loadSprintViaDBusAndUpdateUI().catch((e) => {
       console.error("Failed to load sprint via D-Bus:", e);
     });
   }
@@ -1788,14 +1967,14 @@ print(result[0].text if result else '[]')
     try {
       const { stdout: stageOut } = await execAsync(
         `kubectl --kubeconfig=/home/daoneill/.kube/config.s get pods -n tower-analytics-stage --no-headers 2>&1 | head -1`,
-        { timeout: 10000 }
+        { timeout: 10000 },
       );
       const stageHealthy = stageOut.includes("Running");
 
       // Check prod
       const { stdout: prodOut } = await execAsync(
         `kubectl --kubeconfig=/home/daoneill/.kube/config.p get pods -n tower-analytics-prod --no-headers 2>&1 | head -1`,
-        { timeout: 10000 }
+        { timeout: 10000 },
       );
       const prodHealthy = prodOut.includes("Running");
 
@@ -1807,21 +1986,21 @@ print(result[0].text if result else '[]')
         // Update stage status
         content = content.replace(
           /(stage:[\s\S]*?status:\s*)\w+/,
-          `$1${stageHealthy ? "healthy" : "degraded"}`
+          `$1${stageHealthy ? "healthy" : "degraded"}`,
         );
         content = content.replace(
           /(stage:[\s\S]*?last_check:\s*)'[^']*'/,
-          `$1'${now}'`
+          `$1'${now}'`,
         );
 
         // Update prod status
         content = content.replace(
           /(production:[\s\S]*?status:\s*)\w+/,
-          `$1${prodHealthy ? "healthy" : "degraded"}`
+          `$1${prodHealthy ? "healthy" : "degraded"}`,
         );
         content = content.replace(
           /(production:[\s\S]*?last_check:\s*)'[^']*'/,
-          `$1'${now}'`
+          `$1'${now}'`,
         );
 
         fs.writeFileSync(envFile, content);
@@ -1903,7 +2082,6 @@ print(result[0].text if result else '[]')
    */
   private _selectRunningSkill(executionId: string) {
     // Import the watcher to select the execution
-    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
     const watcher = getSkillExecutionWatcher();
     if (watcher) {
       watcher.selectExecution(executionId);
@@ -1914,14 +2092,17 @@ print(result[0].text if result else '[]')
    * Clear all stale/dead skill executions
    */
   private async _clearStaleSkills() {
-    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
     const watcher = getSkillExecutionWatcher();
     if (watcher) {
       const cleared = await watcher.clearStaleExecutions();
       if (cleared > 0) {
-        vscode.window.showInformationMessage(`Cleared ${cleared} stale skill execution(s)`);
+        vscode.window.showInformationMessage(
+          `Cleared ${cleared} stale skill execution(s)`,
+        );
       } else {
-        vscode.window.showInformationMessage("No stale skill executions to clear");
+        vscode.window.showInformationMessage(
+          "No stale skill executions to clear",
+        );
       }
     }
   }
@@ -1930,7 +2111,6 @@ print(result[0].text if result else '[]')
    * Clear a specific skill execution
    */
   private async _clearSkillExecution(executionId: string) {
-    const { getSkillExecutionWatcher } = require("./skillExecutionWatcher");
     const watcher = getSkillExecutionWatcher();
     if (watcher) {
       const success = await watcher.clearExecution(executionId);
@@ -1960,25 +2140,59 @@ print(result[0].text if result else '[]')
    * Returns cached memory health (synchronous access).
    * Call getMemoryHealthAsync() to refresh the cache.
    */
-  private getCachedMemoryHealth(): { totalSize: string; sessionLogs: number; lastSession: string; patterns: number } {
-    return this._cachedMemoryHealth || { totalSize: "Unknown", sessionLogs: 0, lastSession: "Unknown", patterns: 0 };
+  private getCachedMemoryHealth(): {
+    totalSize: string;
+    sessionLogs: number;
+    lastSession: string;
+    patterns: number;
+  } {
+    return (
+      this._cachedMemoryHealth || {
+        totalSize: "Unknown",
+        sessionLogs: 0,
+        lastSession: "Unknown",
+        patterns: 0,
+      }
+    );
   }
 
   /**
    * Returns cached memory files (synchronous access).
    * Call loadMemoryFilesAsync() to refresh the cache.
    */
-  private getCachedMemoryFiles(): { state: string[]; learned: string[]; sessions: string[]; knowledge: { project: string; persona: string; confidence: number }[] } {
-    return this._cachedMemoryFiles || { state: [], learned: [], sessions: [], knowledge: [] };
+  private getCachedMemoryFiles(): {
+    state: string[];
+    learned: string[];
+    sessions: string[];
+    knowledge: { project: string; persona: string; confidence: number }[];
+  } {
+    return (
+      this._cachedMemoryFiles || {
+        state: [],
+        learned: [],
+        sessions: [],
+        knowledge: [],
+      }
+    );
   }
 
   // Cache for memory health
-  private _cachedMemoryHealth: { totalSize: string; sessionLogs: number; lastSession: string; patterns: number } | null = null;
+  private _cachedMemoryHealth: {
+    totalSize: string;
+    sessionLogs: number;
+    lastSession: string;
+    patterns: number;
+  } | null = null;
 
   /**
    * Load memory health via MemoryDaemon D-Bus.
    */
-  private async getMemoryHealthAsync(): Promise<{ totalSize: string; sessionLogs: number; lastSession: string; patterns: number }> {
+  private async getMemoryHealthAsync(): Promise<{
+    totalSize: string;
+    sessionLogs: number;
+    lastSession: string;
+    patterns: number;
+  }> {
     try {
       const result = await dbus.memory_getHealth();
       if (result.success && result.data?.health) {
@@ -1994,16 +2208,33 @@ print(result[0].text if result else '[]')
     } catch (e) {
       console.error("Failed to load memory health via D-Bus:", e);
     }
-    return this._cachedMemoryHealth || { totalSize: "Unknown", sessionLogs: 0, lastSession: "Unknown", patterns: 0 };
+    return (
+      this._cachedMemoryHealth || {
+        totalSize: "Unknown",
+        sessionLogs: 0,
+        lastSession: "Unknown",
+        patterns: 0,
+      }
+    );
   }
 
   // Cache for memory files
-  private _cachedMemoryFiles: { state: string[]; learned: string[]; sessions: string[]; knowledge: { project: string; persona: string; confidence: number }[] } | null = null;
+  private _cachedMemoryFiles: {
+    state: string[];
+    learned: string[];
+    sessions: string[];
+    knowledge: { project: string; persona: string; confidence: number }[];
+  } | null = null;
 
   /**
    * Load memory files via MemoryDaemon D-Bus.
    */
-  private async loadMemoryFilesAsync(): Promise<{ state: string[]; learned: string[]; sessions: string[]; knowledge: { project: string; persona: string; confidence: number }[] }> {
+  private async loadMemoryFilesAsync(): Promise<{
+    state: string[];
+    learned: string[];
+    sessions: string[];
+    knowledge: { project: string; persona: string; confidence: number }[];
+  }> {
     try {
       const result = await dbus.memory_getFiles();
       if (result.success && result.data?.files) {
@@ -2023,7 +2254,14 @@ print(result[0].text if result else '[]')
     } catch (e) {
       console.error("Failed to load memory files via D-Bus:", e);
     }
-    return this._cachedMemoryFiles || { state: [], learned: [], sessions: [], knowledge: [] };
+    return (
+      this._cachedMemoryFiles || {
+        state: [],
+        learned: [],
+        sessions: [],
+        knowledge: [],
+      }
+    );
   }
 
   // Cache for current work
@@ -2035,8 +2273,18 @@ print(result[0].text if result else '[]')
     activeRepo: string | null;
     totalActiveIssues: number;
     totalActiveMRs: number;
-    allActiveIssues: { key: string; summary: string; project: string; workspace: string }[];
-    allActiveMRs: { id: string; title: string; project: string; workspace: string }[];
+    allActiveIssues: {
+      key: string;
+      summary: string;
+      project: string;
+      workspace: string;
+    }[];
+    allActiveMRs: {
+      id: string;
+      title: string;
+      project: string;
+      workspace: string;
+    }[];
   } | null = null;
 
   /**
@@ -2050,16 +2298,26 @@ print(result[0].text if result else '[]')
     activeRepo: string | null;
     totalActiveIssues: number;
     totalActiveMRs: number;
-    allActiveIssues: { key: string; summary: string; project: string; workspace: string }[];
-    allActiveMRs: { id: string; title: string; project: string; workspace: string }[];
+    allActiveIssues: {
+      key: string;
+      summary: string;
+      project: string;
+      workspace: string;
+    }[];
+    allActiveMRs: {
+      id: string;
+      title: string;
+      project: string;
+      workspace: string;
+    }[];
   }> {
     try {
       const result = await dbus.memory_getCurrentWork();
       if (result.success && result.data?.work) {
         const work = result.data.work;
         // Map D-Bus response to expected format
-        const activeIssue = work.activeIssue || (work.activeIssues?.[0]) || null;
-        const activeMR = work.activeMR || (work.openMRs?.[0]) || null;
+        const activeIssue = work.activeIssue || work.activeIssues?.[0] || null;
+        const activeMR = work.activeMR || work.openMRs?.[0] || null;
         const activeRepo = activeIssue?.repo || null;
 
         this._cachedCurrentWork = {
@@ -2088,22 +2346,42 @@ print(result[0].text if result else '[]')
     } catch (e) {
       console.error("Failed to load current work via D-Bus:", e);
     }
-    return this._cachedCurrentWork || {
-      activeIssue: null,
-      activeMR: null,
-      followUps: [],
-      sprintIssues: [],
-      activeRepo: null,
-      totalActiveIssues: 0,
-      totalActiveMRs: 0,
-      allActiveIssues: [],
-      allActiveMRs: []
-    };
+    return (
+      this._cachedCurrentWork || {
+        activeIssue: null,
+        activeMR: null,
+        followUps: [],
+        sprintIssues: [],
+        activeRepo: null,
+        totalActiveIssues: 0,
+        totalActiveMRs: 0,
+        allActiveIssues: [],
+        allActiveMRs: [],
+      }
+    );
   }
 
   private loadVectorStats(): {
-    projects: { project: string; indexed: boolean; files?: number; chunks?: number; diskSize?: string; indexAge?: string; isStale?: boolean; searches?: number; avgSearchMs?: number; watcherActive?: boolean }[];
-    totals: { indexedCount: number; totalChunks: number; totalFiles: number; totalSize: string; totalSearches: number; watchersActive: number };
+    projects: {
+      project: string;
+      indexed: boolean;
+      files?: number;
+      chunks?: number;
+      diskSize?: string;
+      indexAge?: string;
+      isStale?: boolean;
+      searches?: number;
+      avgSearchMs?: number;
+      watcherActive?: boolean;
+    }[];
+    totals: {
+      indexedCount: number;
+      totalChunks: number;
+      totalFiles: number;
+      totalSize: string;
+      totalSearches: number;
+      watchersActive: number;
+    };
   } {
     const result = {
       projects: [] as any[],
@@ -2114,16 +2392,21 @@ print(result[0].text if result else '[]')
         totalSize: "0 B",
         totalSearches: 0,
         watchersActive: 0,
-      }
+      },
     };
 
     try {
-      const vectorDir = path.join(os.homedir(), ".cache", "aa-workflow", "vectors");
+      const vectorDir = path.join(
+        os.homedir(),
+        ".cache",
+        "aa-workflow",
+        "vectors",
+      );
       if (!fs.existsSync(vectorDir)) {
         return result;
       }
 
-      const projects = fs.readdirSync(vectorDir).filter(f => {
+      const projects = fs.readdirSync(vectorDir).filter((f) => {
         const stat = fs.statSync(path.join(vectorDir, f));
         return stat.isDirectory();
       });
@@ -2214,7 +2497,7 @@ print(result[0].text if result else '[]')
           result.totals.totalChunks += chunks;
           result.totals.totalFiles += files;
           result.totals.totalSearches += searchStats.total_searches || 0;
-        } catch (e) {
+        } catch {
           result.projects.push({ project, indexed: false });
         }
       }
@@ -2238,7 +2521,11 @@ print(result[0].text if result else '[]')
   // D-Bus / Services
   // ============================================================================
 
-  private async handleDBusQuery(serviceName: string, methodName: string, methodArgs?: Record<string, string>) {
+  private async handleDBusQuery(
+    serviceName: string,
+    methodName: string,
+    methodArgs?: Record<string, string>,
+  ) {
     const service = DBUS_SERVICES.find((s) => s.name === serviceName);
     if (!service) {
       this._panel.webview.postMessage({
@@ -2249,12 +2536,12 @@ print(result[0].text if result else '[]')
       return;
     }
 
-    const methodDef = service.methods.find(m => m.name === methodName);
+    const methodDef = service.methods.find((m) => m.name === methodName);
 
     // Build D-Bus arguments from method definition
     let dbusArgs: { type: string; value: string }[] | undefined;
     if (methodDef?.args && methodDef.args.length > 0) {
-      dbusArgs = methodDef.args.map(arg => ({
+      dbusArgs = methodDef.args.map((arg) => ({
         type: arg.type === "int32" ? "int32" : "string",
         value: methodArgs?.[arg.name] ?? arg.default ?? "",
       }));
@@ -2265,7 +2552,7 @@ print(result[0].text if result else '[]')
       service.path,
       service.interface,
       methodName,
-      dbusArgs
+      dbusArgs,
     );
 
     this._panel.webview.postMessage({
@@ -2281,12 +2568,14 @@ print(result[0].text if result else '[]')
     objectPath: string,
     iface: string,
     method: string,
-    args?: { type: string; value: string }[]
+    args?: { type: string; value: string }[],
   ): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
       // Explicitly set DBUS_SESSION_BUS_ADDRESS in case Cursor doesn't inherit it
       const uid = process.getuid ? process.getuid() : 1000;
-      const dbusAddr = process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=/run/user/${uid}/bus`;
+      const dbusAddr =
+        process.env.DBUS_SESSION_BUS_ADDRESS ||
+        `unix:path=/run/user/${uid}/bus`;
       let cmd = `DBUS_SESSION_BUS_ADDRESS="${dbusAddr}" dbus-send --session --print-reply --dest=${service} ${objectPath} ${iface}.${method}`;
 
       // Add arguments if provided
@@ -2294,14 +2583,15 @@ print(result[0].text if result else '[]')
         for (const arg of args) {
           // Escape double quotes and backslashes for shell
           const escapedValue = arg.value
-            .replace(/\\/g, '\\\\')  // Escape backslashes first
-            .replace(/"/g, '\\"');    // Escape double quotes
+            .replace(/\\/g, "\\\\") // Escape backslashes first
+            .replace(/\\/g, "\\\\")
+            .replace(/"/g, '\\"'); // Escape double quotes
           cmd += ` ${arg.type}:"${escapedValue}"`;
         }
       }
 
       debugLog(`D-Bus command: ${cmd}`);
-      const { stdout } = await execAsync(cmd, { timeout: 30000 });  // 30s timeout for join operations
+      const { stdout } = await execAsync(cmd, { timeout: 30000 }); // 30s timeout for join operations
 
       // Parse D-Bus output
       const data = this.parseDBusOutput(stdout);
@@ -2326,9 +2616,7 @@ print(result[0].text if result else '[]')
       }
 
       // Parse simple values
-      const lines = output.split("\n").filter(l => l.trim());
-      const result: Record<string, any> = {};
-
+      const lines = output.split("\n").filter((l) => l.trim());
       for (const line of lines) {
         const stringMatch = line.match(/string\s+"([^"]*)"/);
         if (stringMatch) {
@@ -2370,13 +2658,15 @@ print(result[0].text if result else '[]')
     });
   }
 
-  private async checkServiceStatus(service: typeof DBUS_SERVICES[0]): Promise<any> {
+  private async checkServiceStatus(
+    service: (typeof DBUS_SERVICES)[0],
+  ): Promise<any> {
     try {
       const result = await this.queryDBus(
         service.service,
         service.path,
         service.interface,
-        "GetStatus"
+        "GetStatus",
       );
 
       if (result.success) {
@@ -2388,10 +2678,15 @@ print(result[0].text if result else '[]')
     }
   }
 
-  private async checkMCPServerStatus(): Promise<{ running: boolean; pid?: number }> {
+  private async checkMCPServerStatus(): Promise<{
+    running: boolean;
+    pid?: number;
+  }> {
     try {
       // Check for MCP server running - could be via mcp_proxy.py or directly via "python -m server"
-      const { stdout } = await execAsync("pgrep -f 'mcp_proxy.py|python.*-m server'");
+      const { stdout } = await execAsync(
+        "pgrep -f 'mcp_proxy.py|python.*-m server'",
+      );
       const pids = stdout.trim().split("\n").filter(Boolean);
       if (pids.length > 0) {
         const pid = parseInt(pids[0], 10);
@@ -2441,22 +2736,28 @@ print(result[0].text if result else '[]')
           }, 1000);
           break;
 
-        case "stop":
-          // Try D-Bus shutdown first for graceful stop
-          const dbusService = DBUS_SERVICES.find(s => s.name.toLowerCase().includes(service));
+        case "stop": // Try D-Bus shutdown first for graceful stop
+        {
+          const dbusService = DBUS_SERVICES.find((s) =>
+            s.name.toLowerCase().includes(service),
+          );
           if (dbusService) {
             try {
               await this.queryDBus(
                 dbusService.service,
                 dbusService.path,
                 dbusService.interface,
-                "Shutdown"
+                "Shutdown",
               );
-              vscode.window.showInformationMessage(`Stopping ${service} service...`);
+              vscode.window.showInformationMessage(
+                `Stopping ${service} service...`,
+              );
             } catch {
               // Fall back to systemctl
               await execAsync(`systemctl --user stop ${unit}`);
-              vscode.window.showInformationMessage(`Stopped ${service} service`);
+              vscode.window.showInformationMessage(
+                `Stopped ${service} service`,
+              );
             }
           } else {
             await execAsync(`systemctl --user stop ${unit}`);
@@ -2468,13 +2769,15 @@ print(result[0].text if result else '[]')
             this._dispatchAllUIUpdates();
           }, 1000);
           break;
+        }
 
-        case "logs":
-          // Always use journalctl -f in a terminal for live log streaming
+        case "logs": // Always use journalctl -f in a terminal for live log streaming
+        {
           const terminal = vscode.window.createTerminal(`${service} logs`);
           terminal.show();
           terminal.sendText(`journalctl --user -u ${unit} -f`);
           break;
+        }
       }
     } catch (e: any) {
       vscode.window.showErrorMessage(`Service control failed: ${e.message}`);
@@ -2492,26 +2795,29 @@ print(result[0].text if result else '[]')
     try {
       const response = await new Promise<any>((resolve, reject) => {
         const postData = JSON.stringify({ tool: toolName, args });
-        const req = http.request({
-          hostname: "localhost",
-          port: 8765,
-          path: "/api/tool",
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(postData)
-          }
-        }, (res) => {
-          let data = "";
-          res.on("data", chunk => data += chunk);
-          res.on("end", () => {
-            try {
-              resolve(JSON.parse(data));
-            } catch {
-              resolve({ result: data });
-            }
-          });
-        });
+        const req = http.request(
+          {
+            hostname: "localhost",
+            port: 8765,
+            path: "/api/tool",
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Length": Buffer.byteLength(postData),
+            },
+          },
+          (res) => {
+            let data = "";
+            res.on("data", (chunk) => (data += chunk));
+            res.on("end", () => {
+              try {
+                resolve(JSON.parse(data));
+              } catch {
+                resolve({ result: data });
+              }
+            });
+          },
+        );
         req.on("error", reject);
         req.setTimeout(30000, () => {
           req.destroy();
@@ -2540,11 +2846,14 @@ print(result[0].text if result else '[]')
 
       const workspaceUri = workspaceFolder.uri.toString();
 
-      // Import the function from workspace_state module (it's already used elsewhere)
-      const { list_cursor_chats, get_cursor_chat_issue_keys, get_cursor_chat_personas } = require("./workspaceStateProvider");
-
       // Use the existing list_cursor_chats function pattern
-      const workspaceStorageDir = path.join(os.homedir(), ".config", "Cursor", "User", "workspaceStorage");
+      const workspaceStorageDir = path.join(
+        os.homedir(),
+        ".config",
+        "Cursor",
+        "User",
+        "workspaceStorage",
+      );
 
       if (!fs.existsSync(workspaceStorageDir)) return sessions;
 
@@ -2557,7 +2866,9 @@ print(result[0].text if result else '[]')
         if (!fs.existsSync(workspaceJson)) continue;
 
         try {
-          const workspaceData = JSON.parse(fs.readFileSync(workspaceJson, "utf-8"));
+          const workspaceData = JSON.parse(
+            fs.readFileSync(workspaceJson, "utf-8"),
+          );
           const folderUri = workspaceData.folder || "";
 
           if (folderUri === workspaceUri) {
@@ -2565,9 +2876,12 @@ print(result[0].text if result else '[]')
             if (!fs.existsSync(dbPath)) continue;
 
             // Query the database
-            const { execSync } = require("child_process");
-            const query = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'";
-            const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: "utf-8", timeout: 5000 });
+            const query =
+              "SELECT value FROM ItemTable WHERE key = 'composer.composerData'";
+            const result = execSync(`sqlite3 "${dbPath}" "${query}"`, {
+              encoding: "utf-8",
+              timeout: 5000,
+            });
 
             if (result.trim()) {
               const composerData = JSON.parse(result.trim());
@@ -2575,8 +2889,14 @@ print(result[0].text if result else '[]')
 
               // Filter and sort chats
               const activeChats = allComposers
-                .filter((c: any) => !c.isArchived && !c.isDraft && (c.name || c.lastUpdatedAt))
-                .sort((a: any, b: any) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
+                .filter(
+                  (c: any) =>
+                    !c.isArchived && !c.isDraft && (c.name || c.lastUpdatedAt),
+                )
+                .sort(
+                  (a: any, b: any) =>
+                    (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0),
+                )
                 .slice(0, 10);
 
               for (const chat of activeChats) {
@@ -2587,7 +2907,7 @@ print(result[0].text if result else '[]')
                   source: "cursor",
                   // These would need additional DB queries to populate
                   issueKey: null,
-                  persona: null
+                  persona: null,
                 });
               }
             }
@@ -2622,13 +2942,16 @@ print(result[0].text if result else '[]')
           for (const project of projects) {
             if (project.isDirectory()) {
               const projectPath = path.join(projectsDir, project.name);
-              const sessionFiles = fs.readdirSync(projectPath).filter(f => f.endsWith(".jsonl"));
-              for (const sessionFile of sessionFiles.slice(0, 5)) { // Limit per project
+              const sessionFiles = fs
+                .readdirSync(projectPath)
+                .filter((f) => f.endsWith(".jsonl"));
+              for (const sessionFile of sessionFiles.slice(0, 5)) {
+                // Limit per project
                 sessions.push({
                   id: sessionFile.replace(".jsonl", ""),
                   name: project.name,
                   path: path.join(projectPath, sessionFile),
-                  source: "claude"
+                  source: "claude",
                 });
               }
             }
@@ -2647,17 +2970,24 @@ print(result[0].text if result else '[]')
    */
   private loadGeminiSessions(): any[] {
     const sessions: any[] = [];
-    const geminiDir = path.join(os.homedir(), ".config", "aa-workflow", "gemini_sessions");
+    const geminiDir = path.join(
+      os.homedir(),
+      ".config",
+      "aa-workflow",
+      "gemini_sessions",
+    );
 
     if (fs.existsSync(geminiDir)) {
       try {
-        const files = fs.readdirSync(geminiDir).filter(f => f.endsWith(".json"));
+        const files = fs
+          .readdirSync(geminiDir)
+          .filter((f) => f.endsWith(".json"));
         for (const file of files.slice(0, 10)) {
           sessions.push({
             id: file.replace(".json", ""),
             name: file.replace(".json", ""),
             path: path.join(geminiDir, file),
-            source: "gemini"
+            source: "gemini",
           });
         }
       } catch (e) {
@@ -2676,31 +3006,33 @@ print(result[0].text if result else '[]')
           if (message.issueKey) {
             // Send loading state to webview
             this._panel?.webview.postMessage({
-              command: 'jiraLoading',
-              issueKey: message.issueKey
+              command: "jiraLoading",
+              issueKey: message.issueKey,
             });
 
             try {
               // Call Jira tool via MCP to get issue details
-              const result = await this.callMcpTool("jira_get_issue", { issue_key: message.issueKey });
+              const result = await this.callMcpTool("jira_get_issue", {
+                issue_key: message.issueKey,
+              });
               if (result && !result.error) {
                 this._panel?.webview.postMessage({
-                  command: 'jiraData',
+                  command: "jiraData",
                   issueKey: message.issueKey,
-                  data: result
+                  data: result,
                 });
               } else {
                 this._panel?.webview.postMessage({
-                  command: 'jiraError',
+                  command: "jiraError",
                   issueKey: message.issueKey,
-                  error: result?.error || 'Failed to fetch issue'
+                  error: result?.error || "Failed to fetch issue",
                 });
               }
             } catch (e: any) {
               this._panel?.webview.postMessage({
-                command: 'jiraError',
+                command: "jiraError",
                 issueKey: message.issueKey,
-                error: e.message
+                error: e.message,
               });
             }
           }
@@ -2710,14 +3042,19 @@ print(result[0].text if result else '[]')
           // Search Slack messages
           if (message.query) {
             try {
-              const result = await this.callMcpTool("slack_search_messages", { query: message.query, limit: 10 });
-              this._panel?.webview.postMessage({
-                command: 'slackResults',
+              const result = await this.callMcpTool("slack_search_messages", {
                 query: message.query,
-                results: result?.messages || []
+                limit: 10,
+              });
+              this._panel?.webview.postMessage({
+                command: "slackResults",
+                query: message.query,
+                results: result?.messages || [],
               });
             } catch (e: any) {
-              vscode.window.showErrorMessage(`Slack search failed: ${e.message}`);
+              vscode.window.showErrorMessage(
+                `Slack search failed: ${e.message}`,
+              );
             }
           }
           break;
@@ -2726,14 +3063,19 @@ print(result[0].text if result else '[]')
           // Search code using vector search
           if (message.query) {
             try {
-              const result = await this.callMcpTool("code_search", { query: message.query, limit: 5 });
-              this._panel?.webview.postMessage({
-                command: 'codeResults',
+              const result = await this.callMcpTool("code_search", {
                 query: message.query,
-                results: result?.results || []
+                limit: 5,
+              });
+              this._panel?.webview.postMessage({
+                command: "codeResults",
+                query: message.query,
+                results: result?.results || [],
               });
             } catch (e: any) {
-              vscode.window.showErrorMessage(`Code search failed: ${e.message}`);
+              vscode.window.showErrorMessage(
+                `Code search failed: ${e.message}`,
+              );
             }
           }
           break;
@@ -2743,18 +3085,22 @@ print(result[0].text if result else '[]')
           if (message.personaId) {
             debugLog(`[CreateSession] Persona selected: ${message.personaId}`);
             try {
-              const result = await dbus.config_getPersonaDefinition(message.personaId);
+              const result = await dbus.config_getPersonaDefinition(
+                message.personaId,
+              );
               if (result.success && result.data) {
                 const personaData = (result.data as any).persona || result.data;
                 const tools = personaData?.tools || [];
                 this._panel?.webview.postMessage({
-                  command: 'personaTools',
+                  command: "personaTools",
                   personaId: message.personaId,
-                  tools: tools
+                  tools: tools,
                 });
               }
             } catch (e: any) {
-              debugLog(`[CreateSession] Failed to load persona tools: ${e.message}`);
+              debugLog(
+                `[CreateSession] Failed to load persona tools: ${e.message}`,
+              );
             }
           }
           break;
@@ -2766,10 +3112,10 @@ print(result[0].text if result else '[]')
             const claudeSessions = this.loadClaudeSessions();
             const geminiSessions = this.loadGeminiSessions();
             this._panel?.webview.postMessage({
-              command: 'externalSessions',
+              command: "externalSessions",
               cursor: cursorSessions,
               claude: claudeSessions,
-              gemini: geminiSessions
+              gemini: geminiSessions,
             });
           } catch (e: any) {
             debugLog(`[CreateSession] Failed to load sessions: ${e.message}`);
@@ -2784,11 +3130,13 @@ print(result[0].text if result else '[]')
               ".config",
               "aa-workflow",
               "ralph_loops",
-              `session_${message.sessionId}.json`
+              `session_${message.sessionId}.json`,
             );
             if (fs.existsSync(loopConfigPath)) {
               fs.unlinkSync(loopConfigPath);
-              vscode.window.showInformationMessage(`Stopped loop for session ${message.sessionId}`);
+              vscode.window.showInformationMessage(
+                `Stopped loop for session ${message.sessionId}`,
+              );
               this._dispatchAllUIUpdates();
             }
           }
@@ -2798,11 +3146,18 @@ print(result[0].text if result else '[]')
           // Create a new session with the configured context
           if (message.config) {
             const config = message.config;
-            debugLog(`[CreateSession] Creating session with config: ${JSON.stringify(config)}`);
+            debugLog(
+              `[CreateSession] Creating session with config: ${JSON.stringify(config)}`,
+            );
 
             // If Ralph Wiggum is enabled, set up the loop
             if (config.ralph?.enabled) {
-              const loopsDir = path.join(os.homedir(), ".config", "aa-workflow", "ralph_loops");
+              const loopsDir = path.join(
+                os.homedir(),
+                ".config",
+                "aa-workflow",
+                "ralph_loops",
+              );
               if (!fs.existsSync(loopsDir)) {
                 fs.mkdirSync(loopsDir, { recursive: true });
               }
@@ -2813,25 +3168,49 @@ print(result[0].text if result else '[]')
                 session_id: sessionId,
                 max_iterations: config.ralph.maxIterations || 10,
                 current_iteration: 0,
-                todo_path: path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir(), "TODO.md"),
-                completion_criteria: config.ralph.criteria ? [config.ralph.criteria] : [],
+                todo_path: path.join(
+                  vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+                    os.homedir(),
+                  "TODO.md",
+                ),
+                completion_criteria: config.ralph.criteria
+                  ? [config.ralph.criteria]
+                  : [],
                 started_at: new Date().toISOString(),
               };
 
               // Write loop config
-              const loopConfigPath = path.join(loopsDir, `session_${sessionId}.json`);
-              fs.writeFileSync(loopConfigPath, JSON.stringify(loopConfig, null, 2));
+              const loopConfigPath = path.join(
+                loopsDir,
+                `session_${sessionId}.json`,
+              );
+              fs.writeFileSync(
+                loopConfigPath,
+                JSON.stringify(loopConfig, null, 2),
+              );
 
               // Generate TODO.md from goals
               if (config.ralph.goals) {
                 const todoPath = loopConfig.todo_path;
-                const todoContent = `# TODO - Session ${sessionId}\n\n${config.ralph.goals.split('\n').map((g: string) => g.trim()).filter((g: string) => g).map((g: string) => `- [ ] ${g}`).join('\n')}\n`;
+                const todoContent = `# TODO - Session ${sessionId}\n\n${config.ralph.goals
+                  .split("\n")
+                  .map((g: string) => g.trim())
+                  .filter((g: string) => g)
+                  .map((g: string) => `- [ ] ${g}`)
+                  .join("\n")}\n`;
                 fs.writeFileSync(todoPath, todoContent);
-                vscode.window.showInformationMessage(`Created TODO.md with ${config.ralph.goals.split('\n').filter((g: string) => g.trim()).length} tasks`);
+                vscode.window.showInformationMessage(
+                  `Created TODO.md with ${config.ralph.goals.split("\n").filter((g: string) => g.trim()).length} tasks`,
+                );
               }
 
               // Set up Cursor hooks if not already configured
-              const hooksPath = path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir(), ".cursor", "hooks.json");
+              const hooksPath = path.join(
+                vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+                  os.homedir(),
+                ".cursor",
+                "hooks.json",
+              );
               if (!fs.existsSync(hooksPath)) {
                 const hooksDir = path.dirname(hooksPath);
                 if (!fs.existsSync(hooksDir)) {
@@ -2840,17 +3219,26 @@ print(result[0].text if result else '[]')
                 const hooksConfig = {
                   version: 1,
                   hooks: {
-                    stop: [{
-                      command: `python ${path.join(os.homedir(), ".config", "aa-workflow", "ralph_wiggum_hook.py")}`
-                    }]
-                  }
+                    stop: [
+                      {
+                        command: `python ${path.join(os.homedir(), ".config", "aa-workflow", "ralph_wiggum_hook.py")}`,
+                      },
+                    ],
+                  },
                 };
-                fs.writeFileSync(hooksPath, JSON.stringify(hooksConfig, null, 2));
-                vscode.window.showInformationMessage("Created .cursor/hooks.json for Ralph Wiggum loop");
+                fs.writeFileSync(
+                  hooksPath,
+                  JSON.stringify(hooksConfig, null, 2),
+                );
+                vscode.window.showInformationMessage(
+                  "Created .cursor/hooks.json for Ralph Wiggum loop",
+                );
               }
             }
 
-            vscode.window.showInformationMessage("Session created! Open a new Cursor chat to start.");
+            vscode.window.showInformationMessage(
+              "Session created! Open a new Cursor chat to start.",
+            );
             this._dispatchAllUIUpdates();
           }
           break;
@@ -2858,23 +3246,28 @@ print(result[0].text if result else '[]')
         case "saveTemplate":
           // Save the current configuration as a template
           if (message.config) {
-            vscode.window.showInformationMessage("Template saving - feature coming soon");
+            vscode.window.showInformationMessage(
+              "Template saving - feature coming soon",
+            );
           }
           break;
 
-        case "importGemini":
-          // Import Gemini session
+        case "importGemini": // Import Gemini session
+        {
           const options: vscode.OpenDialogOptions = {
             canSelectMany: false,
             openLabel: "Import Gemini Session",
-            filters: { "JSON files": ["json"] }
+            filters: { "JSON files": ["json"] },
           };
           const fileUri = await vscode.window.showOpenDialog(options);
           if (fileUri && fileUri[0]) {
-            vscode.window.showInformationMessage(`Importing Gemini session from ${fileUri[0].fsPath}`);
+            vscode.window.showInformationMessage(
+              `Importing Gemini session from ${fileUri[0].fsPath}`,
+            );
             // TODO: Parse and import the session
           }
           break;
+        }
 
         default:
           debugLog(`[CreateSession] Unknown action: ${action}`);
@@ -2889,13 +3282,23 @@ print(result[0].text if result else '[]')
   // Performance Tracking Control Methods
   // ============================================================================
 
-  private async handlePerformanceAction(action: string, questionId?: string, category?: string, description?: string) {
+  private async handlePerformanceAction(
+    action: string,
+    questionId?: string,
+    category?: string,
+    description?: string,
+  ) {
     try {
       switch (action) {
-        case "collectDaily":
-          // Run the daily collection skill
-          vscode.window.showInformationMessage("Starting daily performance collection...");
-          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+        case "collectDaily": // Run the daily collection skill
+        {
+          vscode.window.showInformationMessage(
+            "Starting daily performance collection...",
+          );
+          await vscode.commands.executeCommand(
+            "composer.startComposerPrompt2",
+            "agent",
+          );
           await this.sleep(500);
           await vscode.commands.executeCommand("composer.focusComposer");
           await this.sleep(200);
@@ -2907,15 +3310,23 @@ skill_run("performance/collect_daily")
 This will fetch today's work from Jira, GitLab, and local git repos, map to competencies, and save the daily data.`;
 
           await vscode.env.clipboard.writeText(collectCommand);
-          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await vscode.commands.executeCommand(
+            "editor.action.clipboardPasteAction",
+          );
           await this.sleep(200);
           await vscode.commands.executeCommand("composer.submitChat");
           break;
+        }
 
-        case "backfill":
-          // Run the backfill skill
-          vscode.window.showInformationMessage("Starting performance backfill...");
-          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+        case "backfill": // Run the backfill skill
+        {
+          vscode.window.showInformationMessage(
+            "Starting performance backfill...",
+          );
+          await vscode.commands.executeCommand(
+            "composer.startComposerPrompt2",
+            "agent",
+          );
           await this.sleep(500);
           await vscode.commands.executeCommand("composer.focusComposer");
           await this.sleep(200);
@@ -2927,22 +3338,34 @@ skill_run("performance/backfill_missing")
 This will find any missing weekdays this quarter and collect data for them.`;
 
           await vscode.env.clipboard.writeText(backfillCommand);
-          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await vscode.commands.executeCommand(
+            "editor.action.clipboardPasteAction",
+          );
           await this.sleep(200);
           await vscode.commands.executeCommand("composer.submitChat");
           break;
+        }
 
         case "evaluateAll":
-        case "evaluate":
-          // Run the evaluation skill
-          const evalTarget = questionId ? `question "${questionId}"` : "all questions";
-          vscode.window.showInformationMessage(`Evaluating ${evalTarget} with AI...`);
-          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+        case "evaluate": // Run the evaluation skill
+        {
+          const evalTarget = questionId
+            ? `question "${questionId}"`
+            : "all questions";
+          vscode.window.showInformationMessage(
+            `Evaluating ${evalTarget} with AI...`,
+          );
+          await vscode.commands.executeCommand(
+            "composer.startComposerPrompt2",
+            "agent",
+          );
           await this.sleep(500);
           await vscode.commands.executeCommand("composer.focusComposer");
           await this.sleep(200);
 
-          const evalInput = questionId ? `'{"question_id": "${questionId}"}'` : "";
+          const evalInput = questionId
+            ? `'{"question_id": "${questionId}"}'`
+            : "";
           const evalCommand = `Run the question evaluation skill:
 
 skill_run("performance/evaluate_questions"${evalInput ? `, ${evalInput}` : ""})
@@ -2950,15 +3373,23 @@ skill_run("performance/evaluate_questions"${evalInput ? `, ${evalInput}` : ""})
 This will use AI to generate summaries for ${evalTarget} based on collected evidence.`;
 
           await vscode.env.clipboard.writeText(evalCommand);
-          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await vscode.commands.executeCommand(
+            "editor.action.clipboardPasteAction",
+          );
           await this.sleep(200);
           await vscode.commands.executeCommand("composer.submitChat");
           break;
+        }
 
-        case "exportReport":
-          // Run the export skill
-          vscode.window.showInformationMessage("Generating performance report...");
-          await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+        case "exportReport": // Run the export skill
+        {
+          vscode.window.showInformationMessage(
+            "Generating performance report...",
+          );
+          await vscode.commands.executeCommand(
+            "composer.startComposerPrompt2",
+            "agent",
+          );
           await this.sleep(500);
           await vscode.commands.executeCommand("composer.focusComposer");
           await this.sleep(200);
@@ -2970,28 +3401,38 @@ skill_run("performance/export_report")
 This will generate a comprehensive quarterly report in markdown format.`;
 
           await vscode.env.clipboard.writeText(exportCommand);
-          await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+          await vscode.commands.executeCommand(
+            "editor.action.clipboardPasteAction",
+          );
           await this.sleep(200);
           await vscode.commands.executeCommand("composer.submitChat");
           break;
+        }
 
         case "logActivity":
           if (category && description) {
             // Log manual activity via MCP tool
-            vscode.window.showInformationMessage(`Logging ${category} activity...`);
-            await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+            vscode.window.showInformationMessage(
+              `Logging ${category} activity...`,
+            );
+            await vscode.commands.executeCommand(
+              "composer.startComposerPrompt2",
+              "agent",
+            );
             await this.sleep(500);
             await vscode.commands.executeCommand("composer.focusComposer");
             await this.sleep(200);
 
             const logCommand = `Log this manual performance activity:
 
-performance_log_activity("${category}", "${description.replace(/"/g, '\\"')}")
+performance_log_activity("${category}", "${description.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")
 
 This will add the activity to today's performance data.`;
 
             await vscode.env.clipboard.writeText(logCommand);
-            await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+            await vscode.commands.executeCommand(
+              "editor.action.clipboardPasteAction",
+            );
             await this.sleep(200);
             await vscode.commands.executeCommand("composer.submitChat");
           }
@@ -3006,20 +3447,27 @@ This will add the activity to today's performance data.`;
             });
 
             if (noteText) {
-              vscode.window.showInformationMessage(`Adding note to ${questionId}...`);
-              await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+              vscode.window.showInformationMessage(
+                `Adding note to ${questionId}...`,
+              );
+              await vscode.commands.executeCommand(
+                "composer.startComposerPrompt2",
+                "agent",
+              );
               await this.sleep(500);
               await vscode.commands.executeCommand("composer.focusComposer");
               await this.sleep(200);
 
               const noteCommand = `Add this note to the quarterly question:
 
-performance_question_note("${questionId}", "${noteText.replace(/"/g, '\\"')}")
+performance_question_note("${questionId}", "${noteText.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")
 
 This will add the note as evidence for the question.`;
 
               await vscode.env.clipboard.writeText(noteCommand);
-              await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+              await vscode.commands.executeCommand(
+                "editor.action.clipboardPasteAction",
+              );
               await this.sleep(200);
               await vscode.commands.executeCommand("composer.submitChat");
             }
@@ -3029,8 +3477,13 @@ This will add the note as evidence for the question.`;
         case "viewSummary":
           if (questionId) {
             // Show the question summary in a new document
-            vscode.window.showInformationMessage(`Loading summary for ${questionId}...`);
-            await vscode.commands.executeCommand("composer.startComposerPrompt2", "agent");
+            vscode.window.showInformationMessage(
+              `Loading summary for ${questionId}...`,
+            );
+            await vscode.commands.executeCommand(
+              "composer.startComposerPrompt2",
+              "agent",
+            );
             await this.sleep(500);
             await vscode.commands.executeCommand("composer.focusComposer");
             await this.sleep(200);
@@ -3042,7 +3495,9 @@ performance_questions("${questionId}")
 Display the question text, evidence, notes, and AI-generated summary.`;
 
             await vscode.env.clipboard.writeText(viewCommand);
-            await vscode.commands.executeCommand("editor.action.clipboardPasteAction");
+            await vscode.commands.executeCommand(
+              "editor.action.clipboardPasteAction",
+            );
             await this.sleep(200);
             await vscode.commands.executeCommand("composer.submitChat");
           }
@@ -3061,13 +3516,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * @param issueKey Optional issue key - if not provided, prompts user
    * @param returnToCurrentChat If true, returns to the previously active chat after launching
    */
-  private async testChatLauncher(issueKey?: string, returnToCurrentChat: boolean = false) {
-    logger.log("testChatLauncher() called, returnToCurrentChat: " + returnToCurrentChat);
+  private async testChatLauncher(
+    issueKey?: string,
+    returnToCurrentChat: boolean = false,
+  ) {
+    logger.log(
+      "testChatLauncher() called, returnToCurrentChat: " + returnToCurrentChat,
+    );
 
     try {
       // Import chat utilities
-      const chatUtils = await import('./chatUtils');
-      const { launchIssueChat, sendEnter, getActiveChatId, getComposerData } = chatUtils;
+      const chatUtils = await import("./chatUtils");
+      const { launchIssueChat, sendEnter, getActiveChatId, getComposerData } =
+        chatUtils;
 
       // Debug: Show what we're getting from the database
       const composerData = getComposerData();
@@ -3100,9 +3561,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       // Launch the issue chat using the utility function
       // Format: "AAP-12345 short description" - Cursor keeps the issue key this way
       const chatId = await launchIssueChat(issueKey, {
-        returnToPrevious: true,  // Return to current chat after creating new one
+        returnToPrevious: true, // Return to current chat after creating new one
         autoApprove: false,
-        summary: "sprint work",  // Short description that follows the issue key
+        summary: "sprint work", // Short description that follows the issue key
       });
 
       if (chatId) {
@@ -3110,11 +3571,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
         // Wait a moment for Cursor to auto-name the chat, then verify
         logger.log("Waiting for Cursor to auto-name the chat...");
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
         // Check what name Cursor gave the chat
         const updatedData = getComposerData();
-        const newChat = updatedData?.allComposers?.find((c: any) => c.composerId === chatId);
+        const newChat = updatedData?.allComposers?.find(
+          (c: any) => c.composerId === chatId,
+        );
         const chatName = newChat?.name || "Unknown";
 
         logger.log("========================================");
@@ -3127,19 +3590,20 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         if (hasIssueKey) {
           logger.log("SUCCESS: Chat name contains issue key!");
           vscode.window.showInformationMessage(
-            `✅ Chat created: "${chatName}" - Issue key preserved!`
+            `✅ Chat created: "${chatName}" - Issue key preserved!`,
           );
         } else {
           logger.log("WARNING: Chat name does NOT contain issue key");
           vscode.window.showWarningMessage(
-            `⚠️ Chat created but name is "${chatName}" - issue key was stripped`
+            `⚠️ Chat created but name is "${chatName}" - issue key was stripped`,
           );
         }
       } else {
         logger.log("Chat launched for " + issueKey + " (no chatId returned)");
-        vscode.window.showWarningMessage(`Chat created for ${issueKey} but no ID returned`);
+        vscode.window.showWarningMessage(
+          `Chat created for ${issueKey} but no ID returned`,
+        );
       }
-
     } catch (e: any) {
       vscode.window.showErrorMessage(`Chat launcher failed: ${e.message}`);
       logger.error("Chat launcher error", e);
@@ -3164,7 +3628,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const content = this._meetingService!.formatMeetingNote(note);
       const doc = await vscode.workspace.openTextDocument({
         content,
-        language: 'markdown'
+        language: "markdown",
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     } else {
@@ -3172,17 +3636,21 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
   }
 
-  private async _handleViewTranscriptWithService(noteId: number): Promise<void> {
+  private async _handleViewTranscriptWithService(
+    noteId: number,
+  ): Promise<void> {
     const transcript = await this._meetingService!.getTranscript(noteId);
     if (transcript) {
       const content = this._meetingService!.formatTranscript(transcript);
       const doc = await vscode.workspace.openTextDocument({
         content,
-        language: 'markdown'
+        language: "markdown",
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     } else {
-      getNotificationService().warning(`Transcript for meeting ${noteId} not found`);
+      getNotificationService().warning(
+        `Transcript for meeting ${noteId} not found`,
+      );
     }
   }
 
@@ -3192,90 +3660,105 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const content = this._meetingService!.formatBotLog(log);
       const doc = await vscode.workspace.openTextDocument({
         content,
-        language: 'log'
+        language: "log",
       });
       await vscode.window.showTextDocument(doc, { preview: false });
     } else {
-      getNotificationService().warning(`Bot log for meeting ${noteId} not found`);
+      getNotificationService().warning(
+        `Bot log for meeting ${noteId} not found`,
+      );
     }
   }
 
-  private async _handleViewLinkedIssuesWithService(noteId: number): Promise<void> {
+  private async _handleViewLinkedIssuesWithService(
+    noteId: number,
+  ): Promise<void> {
     const issues = await this._meetingService!.getLinkedIssues(noteId);
     if (issues && issues.length > 0) {
       const items = issues.map((issue) => ({
-        label: issue.key || issue.id || 'Unknown',
+        label: issue.key || issue.id || "Unknown",
         description: issue.summary || issue.title,
-        url: issue.url || `https://issues.redhat.com/browse/${issue.key || issue.id}`
+        url:
+          issue.url ||
+          `https://issues.redhat.com/browse/${issue.key || issue.id}`,
       }));
       const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select an issue to open'
+        placeHolder: "Select an issue to open",
       });
       if (selected) {
         vscode.env.openExternal(vscode.Uri.parse(selected.url));
       }
     } else {
-      getNotificationService().info('No linked issues found for this meeting');
+      getNotificationService().info("No linked issues found for this meeting");
     }
   }
 
   // Formatting helpers for meeting data
   private formatMeetingNote(note: any): string {
     const lines = [
-      `# ${note.title || 'Meeting Notes'}`,
-      '',
-      `**Date:** ${note.date || 'Unknown'}`,
+      `# ${note.title || "Meeting Notes"}`,
+      "",
+      `**Date:** ${note.date || "Unknown"}`,
       `**Duration:** ${note.duration || 0} minutes`,
-      `**Participants:** ${note.participants?.join(', ') || 'Unknown'}`,
-      '',
-      '## Summary',
-      note.summary || '_No summary available_',
-      '',
-      '## Action Items',
-      ...(note.actionItems?.map((item: string) => `- [ ] ${item}`) || ['_No action items_']),
-      '',
-      '## Key Points',
-      ...(note.keyPoints?.map((point: string) => `- ${point}`) || ['_No key points_']),
-      '',
+      `**Participants:** ${note.participants?.join(", ") || "Unknown"}`,
+      "",
+      "## Summary",
+      note.summary || "_No summary available_",
+      "",
+      "## Action Items",
+      ...(note.actionItems?.map((item: string) => `- [ ] ${item}`) || [
+        "_No action items_",
+      ]),
+      "",
+      "## Key Points",
+      ...(note.keyPoints?.map((point: string) => `- ${point}`) || [
+        "_No key points_",
+      ]),
+      "",
     ];
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   private formatTranscript(transcript: any): string {
-    const entries = Array.isArray(transcript) ? transcript : (transcript.entries || []);
+    const entries = Array.isArray(transcript)
+      ? transcript
+      : transcript.entries || [];
     const lines = [
-      '# Meeting Transcript',
-      '',
+      "# Meeting Transcript",
+      "",
       `_${entries.length} entries_`,
-      '',
-      '---',
-      '',
+      "",
+      "---",
+      "",
     ];
 
     for (const entry of entries) {
-      const time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
-      lines.push(`**${entry.speaker || 'Unknown'}** ${time ? `(${time})` : ''}`);
-      lines.push(entry.text || '');
-      lines.push('');
+      const time = entry.timestamp
+        ? new Date(entry.timestamp).toLocaleTimeString()
+        : "";
+      lines.push(
+        `**${entry.speaker || "Unknown"}** ${time ? `(${time})` : ""}`,
+      );
+      lines.push(entry.text || "");
+      lines.push("");
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   private formatBotLog(log: any): string {
-    const entries = Array.isArray(log) ? log : (log.entries || []);
-    const lines = [
-      '=== Meeting Bot Log ===',
-      '',
-    ];
+    const entries = Array.isArray(log) ? log : log.entries || [];
+    const lines = ["=== Meeting Bot Log ===", ""];
 
     for (const entry of entries) {
-      const time = entry.timestamp ? new Date(entry.timestamp).toISOString() : '';
-      const level = entry.level || 'INFO';
-      lines.push(`[${time}] [${level}] ${entry.message || entry.text || ''}`);
+      const time = entry.timestamp
+        ? new Date(entry.timestamp).toISOString()
+        : "";
+      const level = entry.level || "INFO";
+      lines.push(`[${time}] [${level}] ${entry.message || entry.text || ""}`);
     }
 
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   // ============================================================================
@@ -3283,7 +3766,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   // ============================================================================
 
   private async openConfigFile() {
-    console.log("[CommandCenter] openConfigFile called, CONFIG_FILE:", CONFIG_FILE);
+    console.log(
+      "[CommandCenter] openConfigFile called, CONFIG_FILE:",
+      CONFIG_FILE,
+    );
     try {
       if (fs.existsSync(CONFIG_FILE)) {
         console.log("[CommandCenter] Config file exists, opening...");
@@ -3322,7 +3808,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           toolCount: m.tool_count || 0,
           tools: [],
         }));
-        this._toolModulesCache = modules.sort((a, b) => a.displayName.localeCompare(b.displayName));
+        this._toolModulesCache = modules.sort((a, b) =>
+          a.displayName.localeCompare(b.displayName),
+        );
         return this._toolModulesCache;
       }
     } catch (e) {
@@ -3359,7 +3847,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       appinterface: "App Interface",
       dev_workflow: "Dev Workflow",
     };
-    return nameMap[name] || name.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    return (
+      nameMap[name] ||
+      name
+        .split("_")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ")
+    );
   }
 
   private _getModuleDescription(name: string): string {
@@ -3414,7 +3908,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   private getPersonas(): Persona[] {
     if (!this._personasCache) {
       // Trigger async load to populate cache
-      this.loadPersonasAsync().catch(e => console.error("Failed to load personas:", e));
+      this.loadPersonasAsync().catch((e) =>
+        console.error("Failed to load personas:", e),
+      );
     }
     return this._personasCache || [];
   }
@@ -3424,9 +3920,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private getSkillsForPersona(personaName: string): string[] {
     const personas = this.getPersonas();
-    const persona = personas.find(p =>
-      p.name === personaName ||
-      p.fileName === personaName
+    const persona = personas.find(
+      (p) => p.name === personaName || p.fileName === personaName,
     );
     return persona?.skills || [];
   }
@@ -3437,9 +3932,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private getToolCountForPersona(personaName: string): number {
     const personas = this.getPersonas();
-    const persona = personas.find(p =>
-      p.name === personaName ||
-      p.fileName === personaName
+    const persona = personas.find(
+      (p) => p.name === personaName || p.fileName === personaName,
     );
     // Use cached toolCount from persona if available
     if (persona?.toolCount) {
@@ -3458,12 +3952,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Count actual tools in a tool module by scanning for @tool decorators.
    */
   private countToolsInModule(moduleName: string): number {
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+    const workspaceRoot =
+      vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
       path.join(os.homedir(), "src", "redhat-ai-workflow");
 
     // Handle _basic and _extra suffixes
     const baseName = moduleName.replace("_basic", "").replace("_extra", "");
-    const moduleDir = path.join(workspaceRoot, "tool_modules", `aa_${baseName}`, "src");
+    const moduleDir = path.join(
+      workspaceRoot,
+      "tool_modules",
+      `aa_${baseName}`,
+      "src",
+    );
 
     if (!fs.existsSync(moduleDir)) {
       return 0;
@@ -3505,15 +4005,20 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       if (result.success && result.data) {
         const data = result.data as any;
         const personas: Persona[] = (data.personas || []).map((p: any) => {
-          const fileName = p.file ? path.basename(p.file).replace(".yaml", "") : p.name;
+          const fileName = p.file
+            ? path.basename(p.file).replace(".yaml", "")
+            : p.name;
           const isSlim = fileName.includes("-slim");
           const isInternal = ["core", "universal"].includes(fileName);
           const isAgent = fileName === "slack";
 
           // Calculate tool count from tools list
-          const toolCount = (p.tools || []).reduce((sum: number, moduleName: string) => {
-            return sum + this.countToolsInModule(moduleName);
-          }, 0);
+          const toolCount = (p.tools || []).reduce(
+            (sum: number, moduleName: string) => {
+              return sum + this.countToolsInModule(moduleName);
+            },
+            0,
+          );
 
           return {
             name: p.name,
@@ -3599,23 +4104,51 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     return colorMap[name] || "purple";
   }
 
-  private _renderPersonaCards(personas: Persona[], activeAgent: { name: string }): string {
-    return personas.map(persona => {
-      const isActive = activeAgent.name === persona.name || activeAgent.name === persona.fileName;
-      const displayFileName = persona.fileName || persona.name;
-      const typeBadge = persona.isSlim ? '<span class="persona-type-badge slim">slim</span>' :
-                       persona.isInternal ? '<span class="persona-type-badge internal">internal</span>' :
-                       persona.isAgent ? '<span class="persona-type-badge agent">agent</span>' : '';
+  private _renderPersonaCards(
+    personas: Persona[],
+    activeAgent: { name: string },
+  ): string {
+    return personas
+      .map((persona) => {
+        const isActive =
+          activeAgent.name === persona.name ||
+          activeAgent.name === persona.fileName;
+        const displayFileName = persona.fileName || persona.name;
+        const typeBadge = persona.isSlim
+          ? '<span class="persona-type-badge slim">slim</span>'
+          : persona.isInternal
+            ? '<span class="persona-type-badge internal">internal</span>'
+            : persona.isAgent
+              ? '<span class="persona-type-badge agent">agent</span>'
+              : "";
 
-      const toolTags = persona.tools.slice(0, 6).map(t => `<span class="persona-tag tool">${t}</span>`).join("");
-      const moreTools = persona.tools.length > 6 ? `<span class="persona-tag">+${persona.tools.length - 6} more</span>` : '';
-      const noTools = persona.tools.length === 0 ? '<span class="persona-tag empty">none defined</span>' : '';
+        const toolTags = persona.tools
+          .slice(0, 6)
+          .map((t) => `<span class="persona-tag tool">${t}</span>`)
+          .join("");
+        const moreTools =
+          persona.tools.length > 6
+            ? `<span class="persona-tag">+${persona.tools.length - 6} more</span>`
+            : "";
+        const noTools =
+          persona.tools.length === 0
+            ? '<span class="persona-tag empty">none defined</span>'
+            : "";
 
-      const skillTags = persona.skills.slice(0, 8).map(s => `<span class="persona-tag skill">${s}</span>`).join("");
-      const moreSkills = persona.skills.length > 8 ? `<span class="persona-tag">+${persona.skills.length - 8} more</span>` : '';
-      const noSkills = persona.skills.length === 0 ? '<span class="persona-tag empty">all skills</span>' : '';
+        const skillTags = persona.skills
+          .slice(0, 8)
+          .map((s) => `<span class="persona-tag skill">${s}</span>`)
+          .join("");
+        const moreSkills =
+          persona.skills.length > 8
+            ? `<span class="persona-tag">+${persona.skills.length - 8} more</span>`
+            : "";
+        const noSkills =
+          persona.skills.length === 0
+            ? '<span class="persona-tag empty">all skills</span>'
+            : "";
 
-      return `
+        return `
       <div class="persona-card ${isActive ? "active" : ""} ${persona.isSlim ? "slim" : ""} ${persona.isInternal ? "internal" : ""} ${persona.isAgent ? "agent" : ""}" data-persona="${displayFileName}">
         <div class="persona-header">
           <div class="persona-icon ${this._getPersonaColor(persona.name)}">
@@ -3625,7 +4158,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             <div class="persona-name">${persona.name}${typeBadge}</div>
             <div class="persona-desc">${persona.description || displayFileName}</div>
           </div>
-          ${isActive ? '<span class="persona-active-badge">Active</span>' : ''}
+          ${isActive ? '<span class="persona-active-badge">Active</span>' : ""}
         </div>
         <div class="persona-body">
           <div class="persona-section">
@@ -3651,7 +4184,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         </div>
       </div>
       `;
-    }).join("");
+      })
+      .join("");
   }
 
   private _formatRelativeTime(isoString: string): string {
@@ -3689,7 +4223,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private _loadWorkspaceState(): void {
     // Trigger async D-Bus load - results will update UI when ready
-    this._loadWorkspaceStateViaDBus().catch(e => {
+    this._loadWorkspaceStateViaDBus().catch((e) => {
       debugLog(`D-Bus state load failed, using cached data: ${e}`);
     });
   }
@@ -3708,13 +4242,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     // Update UI state from D-Bus results
     if (sessionResult) {
       this._workspaceState = sessionResult.workspaces || {};
-      this._workspaceCount = sessionResult.workspace_count || Object.keys(this._workspaceState || {}).length;
+      this._workspaceCount =
+        sessionResult.workspace_count ||
+        Object.keys(this._workspaceState || {}).length;
       debugLog(`D-Bus session state: ${this._workspaceCount} workspaces`);
     }
 
     if (meetResult) {
       this._meetData = meetResult;
-      debugLog(`D-Bus meet state: ${this._meetData.upcomingMeetings?.length || 0} upcoming`);
+      debugLog(
+        `D-Bus meet state: ${this._meetData.upcomingMeetings?.length || 0} upcoming`,
+      );
     }
 
     if (cronResult) {
@@ -3810,7 +4348,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         [
           { type: "string", value: "get_state" },
           { type: "string", value: "{}" },
-        ]
+        ],
       );
 
       if (result.success && result.data) {
@@ -3847,7 +4385,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * in the webview. UI updates now go through TabManager and tabContentUpdate messages.
    * This method is kept for backward compatibility but only updates workspaces.
    */
-  private _dispatchAllUIUpdates(_priority?: any): void {
+  private _dispatchAllUIUpdates(): void {
     // Update workspaces tab (has its own rendering logic)
     this._updateWorkspacesTab();
   }
@@ -3856,7 +4394,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Format services data for UI consumption.
    */
   private _formatServicesForUI(): any[] {
-    const serviceNames = ["slack", "cron", "meet", "sprint", "video", "session", "config", "memory", "stats"];
+    const serviceNames = [
+      "slack",
+      "cron",
+      "meet",
+      "sprint",
+      "video",
+      "session",
+      "config",
+      "memory",
+      "stats",
+    ];
     const nameMap: Record<string, string> = {
       slack: "Slack Agent",
       cron: "Cron Scheduler",
@@ -3868,7 +4416,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       memory: "Memory Daemon",
       stats: "Stats Daemon",
     };
-    return serviceNames.map(name => {
+    return serviceNames.map((name) => {
       const svc = this._services[name] || {};
       return {
         name: nameMap[name] || name,
@@ -3904,15 +4452,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // TIER 1: Every 1 second - Session state (active session detection)
     // This is critical for showing which session is currently active
-    this._loadSessionStateViaDBus().then(sessionResult => {
-      if (sessionResult) {
-        this._workspaceState = sessionResult.workspaces || {};
-        this._workspaceCount = sessionResult.workspace_count || Object.keys(this._workspaceState || {}).length;
-        this._updateWorkspacesTab();
-      }
-    }).catch(e => {
-      debugLog(`Tiered sync: Failed to load session state: ${e}`);
-    });
+    this._loadSessionStateViaDBus()
+      .then((sessionResult) => {
+        if (sessionResult) {
+          this._workspaceState = sessionResult.workspaces || {};
+          this._workspaceCount =
+            sessionResult.workspace_count ||
+            Object.keys(this._workspaceState || {}).length;
+          this._updateWorkspacesTab();
+        }
+      })
+      .catch((e) => {
+        debugLog(`Tiered sync: Failed to load session state: ${e}`);
+      });
 
     // TIER 2: Every 5 seconds - Refresh active tab + update all badges
     // Fires at: 0, 5, 10, 15, 20, 25
@@ -3922,12 +4474,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         const skillsTab = this._tabManager.getTab("skills") as any;
 
         // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
-        const skipForMindMap = this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
+        const skipForMindMap =
+          this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
 
         // Skip FULL re-render if Skills tab is showing a running workflow.
         // The workflow uses incremental CSS updates for step progress -
         // a full re-render would cause visible flickering and undo smooth transitions.
-        const skipForWorkflow = this._currentTab === "skills" &&
+        const skipForWorkflow =
+          this._currentTab === "skills" &&
           skillsTab?.skillView === "workflow" &&
           skillsTab?.detailedExecution?.status === "running";
 
@@ -3935,16 +4489,23 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           debugLog("Tiered sync: Skipping re-render - mind map is active");
           this._updateAllTabBadges();
         } else if (skipForWorkflow) {
-          debugLog("Tiered sync: Skipping full re-render - workflow using incremental updates");
+          debugLog(
+            "Tiered sync: Skipping full re-render - workflow using incremental updates",
+          );
           this._updateAllTabBadges();
         } else {
           this._logActivity(`Refreshing ${this._currentTab}`);
-          activeTab.loadData().then(() => {
-            this._triggerTabRerender();
-            this._updateAllTabBadges();
-          }).catch(e => {
-            debugLog(`Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`);
-          });
+          activeTab
+            .loadData()
+            .then(() => {
+              this._triggerTabRerender();
+              this._updateAllTabBadges();
+            })
+            .catch((e) => {
+              debugLog(
+                `Tiered sync: Failed to refresh active tab ${this._currentTab}: ${e}`,
+              );
+            });
         }
       } else {
         // Still update badges even if no active tab
@@ -3989,11 +4550,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       8: "slack",
       12: "services",
       14: "inference",
-      16: "slop",      // Extra refresh for slop (running scans need updates)
-      18: "skills",    // Skills list rarely changes, 30s refresh is enough
-      20: "personas",  // Personas list from config daemon
-      22: "meetings",  // Extra refresh for meetings (active meetings need updates)
-      24: "tools",     // Tool modules from config daemon
+      16: "slop", // Extra refresh for slop (running scans need updates)
+      18: "skills", // Skills list rarely changes, 30s refresh is enough
+      20: "personas", // Personas list from config daemon
+      22: "meetings", // Extra refresh for meetings (active meetings need updates)
+      24: "tools", // Tool modules from config daemon
     };
 
     const tabId = schedule[cycleSecond];
@@ -4007,14 +4568,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     const tab = this._tabManager.getTab(tabId);
     if (tab) {
-      debugLog(`Staggered refresh: Loading ${tabId} at cycle second ${cycleSecond}`);
+      debugLog(
+        `Staggered refresh: Loading ${tabId} at cycle second ${cycleSecond}`,
+      );
       this._logActivity(`Syncing ${tabId}`);
-      tab.loadData().then(() => {
-        // Update badges after this tab loads
-        this._updateAllTabBadges();
-      }).catch(e => {
-        debugLog(`Staggered refresh: Failed to refresh ${tabId}: ${e}`);
-      });
+      tab
+        .loadData()
+        .then(() => {
+          // Update badges after this tab loads
+          this._updateAllTabBadges();
+        })
+        .catch((e) => {
+          debugLog(`Staggered refresh: Failed to refresh ${tabId}: ${e}`);
+        });
     }
   }
 
@@ -4066,17 +4632,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // Also refresh service status via D-Bus
     // This is async but we don't need to wait - it will dispatch its own UI update when done
-    this._refreshServicesViaDBus().catch(e => {
+    this._refreshServicesViaDBus().catch((e) => {
       debugLog(`Failed to refresh services via D-Bus: ${e}`);
     });
 
     // Refresh Ollama status via systemd
-    this.refreshOllamaStatus().catch(e => {
+    this.refreshOllamaStatus().catch((e) => {
       debugLog(`Failed to refresh Ollama status: ${e}`);
     });
 
     // Refresh MCP server status
-    this.checkMCPServerStatus().catch(e => {
+    this.checkMCPServerStatus().catch((e) => {
       debugLog(`Failed to check MCP status: ${e}`);
     });
   }
@@ -4086,7 +4652,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * Updates this._services which is used by _formatServicesForUI().
    */
   private async _refreshServicesViaDBus(): Promise<void> {
-    debugLog(`_refreshServicesViaDBus: Starting refresh for ${DBUS_SERVICES.length} services`);
+    debugLog(
+      `_refreshServicesViaDBus: Starting refresh for ${DBUS_SERVICES.length} services`,
+    );
 
     for (const service of DBUS_SERVICES) {
       try {
@@ -4095,9 +4663,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           service.service,
           service.path,
           service.interface,
-          "GetStatus"
+          "GetStatus",
         );
-        debugLog(`_refreshServicesViaDBus: ${service.service} result: success=${result.success}, data=${JSON.stringify(result.data)?.substring(0, 100)}`);
+        debugLog(
+          `_refreshServicesViaDBus: ${service.service} result: success=${result.success}, data=${JSON.stringify(result.data)?.substring(0, 100)}`,
+        );
 
         // Map D-Bus service name to our internal key
         const keyMap: Record<string, string> = {
@@ -4118,12 +4688,16 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             debugLog(`_refreshServicesViaDBus: Set ${key} to running=true`);
           } else {
             this._services[key] = { running: false, error: result.error };
-            debugLog(`_refreshServicesViaDBus: Set ${key} to running=false, error=${result.error}`);
+            debugLog(
+              `_refreshServicesViaDBus: Set ${key} to running=false, error=${result.error}`,
+            );
           }
         }
       } catch (e) {
         // Service not available - mark as not running
-        debugLog(`_refreshServicesViaDBus: Exception for ${service.service}: ${e}`);
+        debugLog(
+          `_refreshServicesViaDBus: Exception for ${service.service}: ${e}`,
+        );
         const keyMap: Record<string, string> = {
           "com.aiworkflow.BotSlack": "slack",
           "com.aiworkflow.BotCron": "cron",
@@ -4137,12 +4711,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         };
         const key = keyMap[service.service];
         if (key) {
-          this._services[key] = { running: false, error: "Service not available" };
+          this._services[key] = {
+            running: false,
+            error: "Service not available",
+          };
         }
       }
     }
 
-    debugLog(`_refreshServicesViaDBus: Final this._services = ${JSON.stringify(this._services)}`);
+    debugLog(
+      `_refreshServicesViaDBus: Final this._services = ${JSON.stringify(this._services)}`,
+    );
     // Dispatch UI update with new service status
     this._dispatchAllUIUpdates();
   }
@@ -4206,7 +4785,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     // Get the active tab's content and send it to the webview
     const activeTabId = this._tabManager.getActiveTabId();
     const activeTab = this._tabManager.getActiveTab();
-    debugLog(`_doTabRerender: activeTabId=${activeTabId}, _currentTab=${this._currentTab}`);
+    debugLog(
+      `_doTabRerender: activeTabId=${activeTabId}, _currentTab=${this._currentTab}`,
+    );
 
     // Use _currentTab as fallback if TabManager's activeTabId is out of sync
     const targetTabId = this._currentTab || activeTabId;
@@ -4224,11 +4805,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const styles = targetTab.getStyles();
       const script = targetTab.getScript();
 
-      debugLog(`_doTabRerender: Tab ${targetTab.getId()}, content length: ${content?.length || 0}, script length: ${script?.length || 0}`);
+      debugLog(
+        `_doTabRerender: Tab ${targetTab.getId()}, content length: ${content?.length || 0}, script length: ${script?.length || 0}`,
+      );
 
       // Log first 200 chars of content for debugging
       if (content) {
-        debugLog(`_doTabRerender: Content preview: ${content.substring(0, 200).replace(/\n/g, ' ')}...`);
+        debugLog(
+          `_doTabRerender: Content preview: ${content.substring(0, 200).replace(/\n/g, " ")}...`,
+        );
       }
 
       this._panel.webview.postMessage({
@@ -4308,7 +4893,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private _renderWorkspaces(): string {
     // Always try to render sessions grouped (shows Cursor chats if no MCP sessions)
-    if (this._sessionViewMode === 'table') {
+    if (this._sessionViewMode === "table") {
       return this._renderSessionsTable();
     }
     return this._renderSessionsGrouped();
@@ -4316,22 +4901,23 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private _renderSessionsTable(): string {
     // Collect all sessions for table view
-    const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
+    const allSessions: Array<{
+      session: ChatSession;
+      workspaceUri: string;
+      workspaceProject: string | null;
+      isActive: boolean;
+    }> = [];
 
     // Get the active session ID from workspace state (synced from Cursor's lastFocusedComposerIds)
-    let activeSessionId: string | null = null;
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
-        if (ws.active_session_id) {
-          activeSessionId = ws.active_session_id;
-        }
         const sessions = ws.sessions || {};
         for (const [sid, session] of Object.entries(sessions)) {
           allSessions.push({
             session: session as ChatSession,
             workspaceUri: uri,
             workspaceProject: ws.project,
-            isActive: sid === ws.active_session_id
+            isActive: sid === ws.active_session_id,
           });
         }
       }
@@ -4351,13 +4937,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // Sort by last activity (most recent first)
     allSessions.sort((a, b) => {
-      const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
-      const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
+      const aTime = a.session?.last_activity
+        ? new Date(a.session.last_activity).getTime()
+        : 0;
+      const bTime = b.session?.last_activity
+        ? new Date(b.session.last_activity).getTime()
+        : 0;
       return bTime - aTime;
     });
 
     // If no active session from Cursor, mark the most recent as active
-    const hasActiveSession = allSessions.some(s => s.isActive);
+    const hasActiveSession = allSessions.some((s) => s.isActive);
     if (!hasActiveSession && allSessions.length > 0) {
       allSessions[0].isActive = true;
     }
@@ -4379,58 +4969,73 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             </tr>
           </thead>
           <tbody>
-            ${allSessions.map(item => {
-              const session = item.session;
-              const sessionId = session.session_id;
-              const persona = session.persona || "developer";
-              const personaIcon = this._getPersonaIcon(persona);
-              const personaColor = this._getPersonaColor(persona);
-              // Dual tool count: show dynamic (filtered) if available, else static (baseline)
-              // If no tool count stored, calculate from persona's tool modules
-              const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
-              let toolCount = session.tool_count ?? session.static_tool_count ?? (session as any).active_tools?.length ?? 0;
-              if (toolCount === 0) {
-                // Fallback: calculate from persona's tool modules
-                toolCount = this.getToolCountForPersona(persona);
-              }
-              const toolLabel = isDynamic ? `${toolCount} ⚡` : `${toolCount}`;
-              const toolTitle = isDynamic
-                ? `${toolCount} tools (filtered for context)`
-                : `${toolCount} tools available for ${persona}`;
-              // Get skills for this persona
-              const skills = this.getSkillsForPersona(persona);
-              const skillsCount = skills.length > 0 ? skills.length : 'all';
-              const skillsTitle = skills.length > 0
-                ? `${skills.length} skills: ${skills.join(', ')}`
-                : 'All skills available';
-              const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
-              const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
-              const sessionProject = (session as any).project || item.workspaceProject || '-';
-              const issueKeys = session.issue_key ? session.issue_key.split(', ') : [];
+            ${allSessions
+              .map((item) => {
+                const session = item.session;
+                const sessionId = session.session_id;
+                const persona = session.persona || "developer";
+                const personaIcon = this._getPersonaIcon(persona);
+                const personaColor = this._getPersonaColor(persona);
+                // Dual tool count: show dynamic (filtered) if available, else static (baseline)
+                // If no tool count stored, calculate from persona's tool modules
+                const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
+                let toolCount =
+                  session.tool_count ??
+                  session.static_tool_count ??
+                  (session as any).active_tools?.length ??
+                  0;
+                if (toolCount === 0) {
+                  // Fallback: calculate from persona's tool modules
+                  toolCount = this.getToolCountForPersona(persona);
+                }
+                const toolLabel = isDynamic
+                  ? `${toolCount} ⚡`
+                  : `${toolCount}`;
+                const toolTitle = isDynamic
+                  ? `${toolCount} tools (filtered for context)`
+                  : `${toolCount} tools available for ${persona}`;
+                // Get skills for this persona
+                const skills = this.getSkillsForPersona(persona);
+                const skillsCount = skills.length > 0 ? skills.length : "all";
+                const skillsTitle =
+                  skills.length > 0
+                    ? `${skills.length} skills: ${skills.join(", ")}`
+                    : "All skills available";
+                const lastActivity = session.last_activity
+                  ? this._formatRelativeTime(session.last_activity)
+                  : "Unknown";
+                const sessionName =
+                  session.name || `Session ${sessionId.substring(0, 6)}`;
+                const sessionProject =
+                  (session as any).project || item.workspaceProject || "-";
+                const issueKeys = session.issue_key
+                  ? session.issue_key.split(", ")
+                  : [];
 
-              return `
-              <tr class="${item.isActive ? 'row-active' : ''}" data-session-id="${sessionId}">
+                return `
+              <tr class="${item.isActive ? "row-active" : ""}" data-session-id="${sessionId}">
                 <td><span class="persona-icon-small ${personaColor}">${personaIcon}</span></td>
                 <td class="text-left">
-                  <span class="clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat">
+                  <span class="clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, "&quot;")}" title="Click to find this chat">
                     <strong>${sessionName}</strong>
                   </span>
-                  ${item.isActive ? ' <span class="active-badge-small">Active</span>' : ''}
+                  ${item.isActive ? ' <span class="active-badge-small">Active</span>' : ""}
                 </td>
                 <td>${sessionProject}</td>
                 <td><span class="persona-badge-small ${personaColor}">${persona}</span></td>
-                <td class="issue-cell">${issueKeys.length > 0 ? `<div class="issue-badges-container">${issueKeys.map(k => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join('')}</div>` : '-'}</td>
+                <td class="issue-cell">${issueKeys.length > 0 ? `<div class="issue-badges-container">${issueKeys.map((k) => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge-small issue-link" title="Open ${k} in Jira">${k}</a>`).join("")}</div>` : "-"}</td>
                 <td>${lastActivity}</td>
                 <td title="${toolTitle}">${toolLabel}</td>
                 <td title="${skillsTitle}">${skillsCount}</td>
                 <td>
                   <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy Session ID">📋</button>
                   <button class="btn btn-ghost btn-small" data-action="viewSessionTools" data-session-id="${sessionId}" title="View Tools">🔧</button>
-                  ${session.meeting_references && session.meeting_references.length > 0 ? `<button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View ${session.meeting_references.length} meeting(s) where issues were discussed">📝</button>` : ''}
+                  ${session.meeting_references && session.meeting_references.length > 0 ? `<button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View ${session.meeting_references.length} meeting(s) where issues were discussed">📝</button>` : ""}
                 </td>
               </tr>
               `;
-            }).join('')}
+              })
+              .join("")}
           </tbody>
         </table>
       </div>
@@ -4439,7 +5044,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private _renderSessionsGrouped(): string {
     // Only show initialized MCP sessions
-    const allSessions: Array<{ session: ChatSession; workspaceUri: string; workspaceProject: string | null; isActive: boolean }> = [];
+    const allSessions: Array<{
+      session: ChatSession;
+      workspaceUri: string;
+      workspaceProject: string | null;
+      isActive: boolean;
+    }> = [];
 
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
@@ -4449,7 +5059,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             session: session as ChatSession,
             workspaceUri: uri,
             workspaceProject: ws.project,
-            isActive: sid === ws.active_session_id  // From Cursor's lastFocusedComposerIds
+            isActive: sid === ws.active_session_id, // From Cursor's lastFocusedComposerIds
           });
         }
       }
@@ -4469,13 +5079,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // Sort all sessions by last_activity to find the most recent one
     allSessions.sort((a, b) => {
-      const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
-      const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
+      const aTime = a.session?.last_activity
+        ? new Date(a.session.last_activity).getTime()
+        : 0;
+      const bTime = b.session?.last_activity
+        ? new Date(b.session.last_activity).getTime()
+        : 0;
       return bTime - aTime;
     });
 
     // If no active session from Cursor, mark the most recent as active
-    const hasActiveSession = allSessions.some(s => s.isActive);
+    const hasActiveSession = allSessions.some((s) => s.isActive);
     if (!hasActiveSession && allSessions.length > 0) {
       allSessions[0].isActive = true;
     }
@@ -4484,7 +5098,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     const groups: Map<string, typeof allSessions> = new Map();
 
     for (const item of allSessions) {
-      const groupKey = (item.session as any)?.project || item.workspaceProject || 'No Project';
+      const groupKey =
+        (item.session as any)?.project || item.workspaceProject || "No Project";
       if (!groups.has(groupKey)) {
         groups.set(groupKey, []);
       }
@@ -4492,48 +5107,60 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
 
     const sortedGroups = Array.from(groups.entries()).sort((a, b) => {
-      if (a[0] === 'No Project') return 1;
-      if (b[0] === 'No Project') return -1;
+      if (a[0] === "No Project") return 1;
+      if (b[0] === "No Project") return -1;
       return a[0].localeCompare(b[0]);
     });
 
-    return sortedGroups.map(([groupName, items]) => {
-      const groupIcon = this._getGroupIcon(groupName);
-      const groupColor = this._getGroupColor(groupName);
+    return sortedGroups
+      .map(([groupName, items]) => {
+        const groupIcon = this._getGroupIcon(groupName);
+        const groupColor = this._getGroupColor(groupName);
 
-      // Sort within group by last_activity (already sorted globally, but re-sort for display)
-      items.sort((a, b) => {
-        const aTime = a.session?.last_activity ? new Date(a.session.last_activity).getTime() : 0;
-        const bTime = b.session?.last_activity ? new Date(b.session.last_activity).getTime() : 0;
-        return bTime - aTime;
-      });
+        // Sort within group by last_activity (already sorted globally, but re-sort for display)
+        items.sort((a, b) => {
+          const aTime = a.session?.last_activity
+            ? new Date(a.session.last_activity).getTime()
+            : 0;
+          const bTime = b.session?.last_activity
+            ? new Date(b.session.last_activity).getTime()
+            : 0;
+          return bTime - aTime;
+        });
 
-      const sessionsHtml = items.map(item =>
-        this._renderSessionCard(item.session!.session_id, item.session!, item.isActive)
-      ).join('');
+        const sessionsHtml = items
+          .map((item) =>
+            this._renderSessionCard(
+              item.session!.session_id,
+              item.session!,
+              item.isActive,
+            ),
+          )
+          .join("");
 
-      return `
+        return `
         <div class="session-group">
           <div class="session-group-header ${groupColor}">
             <span class="group-icon">${groupIcon}</span>
             <span class="group-name">${groupName}</span>
-            <span class="group-count">${items.length} session${items.length !== 1 ? 's' : ''}</span>
+            <span class="group-count">${items.length} session${items.length !== 1 ? "s" : ""}</span>
           </div>
           <div class="session-group-content">
             ${sessionsHtml}
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join("");
   }
 
   private _getGroupIcon(groupName: string): string {
     // Icons for personas
     const personaIcons: Record<string, string> = {
-      'developer': '👨‍💻',
-      'devops': '🔧',
-      'incident': '🚨',
-      'release': '🚀'
+      developer: "👨‍💻",
+      devops: "🔧",
+      incident: "🚨",
+      release: "🚀",
     };
 
     if (personaIcons[groupName.toLowerCase()]) {
@@ -4541,17 +5168,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
 
     // Icons for projects (or default)
-    if (groupName === 'No Project') return '📁';
-    return '📦';
+    if (groupName === "No Project") return "📁";
+    return "📦";
   }
 
   private _getGroupColor(groupName: string): string {
     // Colors for personas
     const personaColors: Record<string, string> = {
-      'developer': 'cyan',
-      'devops': 'green',
-      'incident': 'red',
-      'release': 'purple'
+      developer: "cyan",
+      devops: "green",
+      incident: "red",
+      release: "purple",
     };
 
     if (personaColors[groupName.toLowerCase()]) {
@@ -4559,15 +5186,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
 
     // Default color for projects
-    if (groupName === 'No Project') return 'gray';
-    return 'blue';
+    if (groupName === "No Project") return "gray";
+    return "blue";
   }
 
   private _renderWorkspaceCard(uri: string, ws: WorkspaceState): string {
     const project = ws.project || "No project";
     const shortUri = uri.replace("file://", "").split("/").slice(-2).join("/");
     const isAutoDetected = ws.is_auto_detected ? " (auto)" : "";
-    const lastActivity = ws.last_activity ? this._formatRelativeTime(ws.last_activity) : "Unknown";
+    const lastActivity = ws.last_activity
+      ? this._formatRelativeTime(ws.last_activity)
+      : "Unknown";
     const sessionCount = Object.keys(ws.sessions || {}).length;
 
     // Render sessions within this workspace
@@ -4581,7 +5210,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             <div class="workspace-project">${project}${isAutoDetected}</div>
             <div class="workspace-uri" title="${uri}">${shortUri}</div>
           </div>
-          <div class="workspace-badge">${sessionCount} session${sessionCount !== 1 ? 's' : ''}</div>
+          <div class="workspace-badge">${sessionCount} session${sessionCount !== 1 ? "s" : ""}</div>
         </div>
         <div class="workspace-body">
           <div class="workspace-row">
@@ -4609,8 +5238,12 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // Sort by last_activity, most recent first
     sessionEntries.sort((a, b) => {
-      const aTime = a[1].last_activity ? new Date(a[1].last_activity).getTime() : 0;
-      const bTime = b[1].last_activity ? new Date(b[1].last_activity).getTime() : 0;
+      const aTime = a[1].last_activity
+        ? new Date(a[1].last_activity).getTime()
+        : 0;
+      const bTime = b[1].last_activity
+        ? new Date(b[1].last_activity).getTime()
+        : 0;
       return bTime - aTime;
     });
 
@@ -4622,97 +5255,135 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     `;
   }
 
-  private _renderSessionCard(sessionId: string, session: ChatSession, isActive: boolean): string {
+  private _renderSessionCard(
+    sessionId: string,
+    session: ChatSession,
+    isActive: boolean,
+  ): string {
     const persona = session.persona || "developer";
     const personaIcon = this._getPersonaIcon(persona);
     const personaColor = this._getPersonaColor(persona);
     // Dual tool count: show dynamic (filtered) if available, else static (baseline)
     // If no tool count stored, calculate from persona's tool modules
     const isDynamic = (session.dynamic_tool_count ?? 0) > 0;
-    let toolCount = session.tool_count ?? session.static_tool_count ?? session.active_tools?.length ?? 0;
+    let toolCount =
+      session.tool_count ??
+      session.static_tool_count ??
+      session.active_tools?.length ??
+      0;
     if (toolCount === 0) {
       // Fallback: calculate from persona's tool modules
       toolCount = this.getToolCountForPersona(persona);
     }
-    const toolLabel = isDynamic ? `${toolCount} (filtered)` : `${toolCount} available`;
-    const lastActivity = session.last_activity ? this._formatRelativeTime(session.last_activity) : "Unknown";
+    const toolLabel = isDynamic
+      ? `${toolCount} (filtered)`
+      : `${toolCount} available`;
+    const lastActivity = session.last_activity
+      ? this._formatRelativeTime(session.last_activity)
+      : "Unknown";
     const sessionName = session.name || `Session ${sessionId.substring(0, 6)}`;
     const activeClass = isActive ? "session-active" : "";
 
     // Per-session project support
     const sessionProject = (session as any).project || null;
-    const isProjectAutoDetected = (session as any).is_project_auto_detected || false;
+    const isProjectAutoDetected =
+      (session as any).is_project_auto_detected || false;
     const projectSuffix = isProjectAutoDetected ? " (auto)" : "";
 
     // Format last tool info
     const lastTool = session.last_tool || null;
-    const lastToolTime = session.last_tool_time ? this._formatRelativeTime(session.last_tool_time) : null;
+    const lastToolTime = session.last_tool_time
+      ? this._formatRelativeTime(session.last_tool_time)
+      : null;
     const toolCallCount = session.tool_call_count || 0;
 
     // Get skills for this persona
     const skills = this.getSkillsForPersona(persona);
-    const skillsLabel = skills.length > 0
-      ? `${skills.length} available`
-      : "all skills";
-    const skillsPreview = skills.length > 0
-      ? skills.slice(0, 3).join(", ") + (skills.length > 3 ? ` +${skills.length - 3} more` : "")
-      : "";
+    const skillsLabel =
+      skills.length > 0 ? `${skills.length} available` : "all skills";
+    const skillsPreview =
+      skills.length > 0
+        ? skills.slice(0, 3).join(", ") +
+          (skills.length > 3 ? ` +${skills.length - 3} more` : "")
+        : "";
 
     return `
       <div class="session-card ${activeClass}" data-session-id="${sessionId}">
-        <div class="session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, '&quot;')}" title="Click to find this chat session">
+        <div class="session-header clickable" data-action="openChatSession" data-session-id="${sessionId}" data-session-name="${sessionName.replace(/"/g, "&quot;")}" title="Click to find this chat session">
           <div class="session-icon ${personaColor}">${personaIcon}</div>
           <div class="session-info">
             <div class="session-name">${sessionName}</div>
           </div>
-          ${isActive ? '<span class="active-badge">Active</span>' : ''}
+          ${isActive ? '<span class="active-badge">Active</span>' : ""}
           <span class="open-chat-hint">🔍</span>
         </div>
         <div class="session-body">
-          ${sessionProject ? `
+          ${
+            sessionProject
+              ? `
           <div class="session-row">
             <span class="session-label">Project</span>
             <span class="session-value project-badge">${sessionProject}${projectSuffix}</span>
           </div>
-          ` : ""}
+          `
+              : ""
+          }
           <div class="session-row">
             <span class="session-label">Persona</span>
             <span class="session-value persona-badge ${personaColor}">${persona}</span>
           </div>
-          ${session.issue_key ? `
+          ${
+            session.issue_key
+              ? `
           <div class="session-row">
-            <span class="session-label">Issue${session.issue_key.includes(',') ? 's' : ''}</span>
-            <span class="session-value issue-badges">${session.issue_key.split(', ').map((k: string) => `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge issue-link" title="Open ${k} in Jira">${k}</a>`).join(' ')}</span>
+            <span class="session-label">Issue${session.issue_key.includes(",") ? "s" : ""}</span>
+            <span class="session-value issue-badges">${session.issue_key
+              .split(", ")
+              .map(
+                (k: string) =>
+                  `<a href="https://issues.redhat.com/browse/${k}" class="issue-badge issue-link" title="Open ${k} in Jira">${k}</a>`,
+              )
+              .join(" ")}</span>
           </div>
-          ` : ""}
-          ${session.branch ? `
+          `
+              : ""
+          }
+          ${
+            session.branch
+              ? `
           <div class="session-row">
             <span class="session-label">Branch</span>
             <span class="session-value branch-badge">${session.branch}</span>
           </div>
-          ` : ""}
+          `
+              : ""
+          }
           <div class="session-row">
             <span class="session-label">Tools</span>
             <span class="session-value">${toolLabel}</span>
           </div>
           <div class="session-row">
             <span class="session-label">Skills</span>
-            <span class="session-value" title="${skills.join(', ') || 'All skills available'}">${skillsLabel}${skillsPreview ? ` (${skillsPreview})` : ''}</span>
+            <span class="session-value" title="${skills.join(", ") || "All skills available"}">${skillsLabel}${skillsPreview ? ` (${skillsPreview})` : ""}</span>
           </div>
           <div class="session-row">
             <span class="session-label">Last Active</span>
             <span class="session-value">${lastActivity}</span>
           </div>
-          ${lastTool ? `
+          ${
+            lastTool
+              ? `
           <div class="session-row">
             <span class="session-label">Last Tool</span>
-            <span class="session-value"><code>${lastTool}</code> ${lastToolTime ? `(${lastToolTime})` : ''}</span>
+            <span class="session-value"><code>${lastTool}</code> ${lastToolTime ? `(${lastToolTime})` : ""}</span>
           </div>
           <div class="session-row">
             <span class="session-label">Tool Calls</span>
             <span class="session-value">${toolCallCount} total</span>
           </div>
-          ` : ""}
+          `
+              : ""
+          }
         </div>
         <div class="session-footer">
           <button class="btn btn-ghost btn-small" data-action="copySessionId" data-session-id="${sessionId}" title="Copy session ID to clipboard">
@@ -4721,11 +5392,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           <button class="btn btn-ghost btn-small" data-action="viewSessionTools" data-session-id="${sessionId}">
             🔧 Tools
           </button>
-          ${session.meeting_references && session.meeting_references.length > 0 ? `
+          ${
+            session.meeting_references && session.meeting_references.length > 0
+              ? `
           <button class="btn btn-ghost btn-small meeting-notes-btn" data-action="viewMeetingNotes" data-session-id="${sessionId}" title="View meeting notes where issues were discussed">
             📝 Notes (${session.meeting_references.length})
           </button>
-          ` : ''}
+          `
+              : ""
+          }
           <button class="btn btn-ghost btn-small" data-action="removeSession" data-session-id="${sessionId}" data-workspace-uri="${session.workspace_uri}">
             🗑️ Remove
           </button>
@@ -4741,16 +5416,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     }
 
     const ws = this._workspaceState[uri];
-    const activeSession = ws.active_session_id ? ws.sessions[ws.active_session_id] : null;
-    const persona = activeSession?.persona || 'developer';
-    let toolCount = activeSession?.tool_count ?? activeSession?.active_tools?.length ?? 0;
+    const activeSession = ws.active_session_id
+      ? ws.sessions[ws.active_session_id]
+      : null;
+    const persona = activeSession?.persona || "developer";
+    let toolCount =
+      activeSession?.tool_count ?? activeSession?.active_tools?.length ?? 0;
     if (toolCount === 0) {
       toolCount = this.getToolCountForPersona(persona);
     }
 
     // Show info about tools (we no longer store the full list)
     vscode.window.showInformationMessage(
-      `${persona} persona has ${toolCount} tools loaded. Use tool_list() in chat to see them.`
+      `${persona} persona has ${toolCount} tools loaded. Use tool_list() in chat to see them.`,
     );
   }
 
@@ -4760,7 +5438,6 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       return;
     }
 
-    const ws = this._workspaceState[uri];
     const folderPath = uri.replace("file://", "");
 
     // Check if folder exists
@@ -4771,7 +5448,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // Open the folder in a new window
     const folderUri = vscode.Uri.file(folderPath);
-    await vscode.commands.executeCommand("vscode.openFolder", folderUri, { forceNewWindow: false });
+    await vscode.commands.executeCommand("vscode.openFolder", folderUri, {
+      forceNewWindow: false,
+    });
   }
 
   private async _viewMeetingNotes(sessionId: string): Promise<void> {
@@ -4786,8 +5465,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       }
     }
 
-    if (!session || !session.meeting_references || session.meeting_references.length === 0) {
-      vscode.window.showInformationMessage('No meeting notes found for this session.');
+    if (
+      !session ||
+      !session.meeting_references ||
+      session.meeting_references.length === 0
+    ) {
+      vscode.window.showInformationMessage(
+        "No meeting notes found for this session.",
+      );
       return;
     }
 
@@ -4795,39 +5480,47 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     const items = session.meeting_references.map((ref: MeetingReference) => ({
       label: `📝 ${ref.title}`,
       description: ref.date,
-      detail: `${ref.matches} mention${ref.matches > 1 ? 's' : ''} of session issues`,
+      detail: `${ref.matches} mention${ref.matches > 1 ? "s" : ""} of session issues`,
       meetingId: ref.meeting_id,
     }));
 
     const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: `Select a meeting to view notes (${session.issue_key || 'no issues'})`,
-      title: 'Meeting Notes',
+      placeHolder: `Select a meeting to view notes (${session.issue_key || "no issues"})`,
+      title: "Meeting Notes",
     });
 
     if (selected) {
       // Open the meeting notes - for now, show info about how to access them
       // In the future, this could open a webview with the transcript
-      const dbPath = path.join(os.homedir(), '.config', 'aa-workflow', 'meetings.db');
+      const dbPath = path.join(
+        os.homedir(),
+        ".config",
+        "aa-workflow",
+        "meetings.db",
+      );
 
       if (fs.existsSync(dbPath)) {
         // Query the transcript for this meeting
         try {
-          const { spawnSync } = require('child_process');
           const query = `SELECT speaker, text, timestamp FROM transcripts WHERE meeting_id = ${selected.meetingId} ORDER BY timestamp LIMIT 50`;
           // Use spawnSync to avoid shell/bashrc sourcing
-          const sqlResult = spawnSync('sqlite3', ['-separator', '|||', dbPath, query], { encoding: 'utf8', timeout: 5000 });
-          const result = sqlResult.stdout || '';
+          const sqlResult = spawnSync(
+            "sqlite3",
+            ["-separator", "|||", dbPath, query],
+            { encoding: "utf8", timeout: 5000 },
+          );
+          const result = sqlResult.stdout || "";
 
           if (result.trim()) {
             // Create a markdown preview of the transcript
-            const lines = result.trim().split('\n');
-            let markdown = `# ${selected.label.replace('📝 ', '')}\n\n**Date:** ${selected.description}\n\n## Transcript (first 50 entries)\n\n`;
+            const lines = result.trim().split("\n");
+            let markdown = `# ${selected.label.replace("📝 ", "")}\n\n**Date:** ${selected.description}\n\n## Transcript (first 50 entries)\n\n`;
 
             for (const line of lines) {
-              const parts = line.split('|||');
+              const parts = line.split("|||");
               if (parts.length >= 3) {
                 const [speaker, text, timestamp] = parts;
-                const time = timestamp.split('T')[1]?.substring(0, 5) || '';
+                const time = timestamp.split("T")[1]?.substring(0, 5) || "";
                 markdown += `**${speaker}** (${time}): ${text}\n\n`;
               }
             }
@@ -4835,24 +5528,31 @@ Display the question text, evidence, notes, and AI-generated summary.`;
             // Show in a new untitled document
             const doc = await vscode.workspace.openTextDocument({
               content: markdown,
-              language: 'markdown'
+              language: "markdown",
             });
             await vscode.window.showTextDocument(doc, { preview: true });
           } else {
-            vscode.window.showInformationMessage(`No transcript found for meeting: ${selected.label}`);
+            vscode.window.showInformationMessage(
+              `No transcript found for meeting: ${selected.label}`,
+            );
           }
         } catch (error: any) {
-          vscode.window.showWarningMessage(`Failed to load transcript: ${error.message}`);
+          vscode.window.showWarningMessage(
+            `Failed to load transcript: ${error.message}`,
+          );
         }
       } else {
         vscode.window.showInformationMessage(
-          `Meeting: ${selected.label}\nDate: ${selected.description}\n\nMeeting database not found at ${dbPath}`
+          `Meeting: ${selected.label}\nDate: ${selected.description}\n\nMeeting database not found at ${dbPath}`,
         );
       }
     }
   }
 
-  private async _changeWorkspacePersona(uri: string, persona: string): Promise<void> {
+  private async _changeWorkspacePersona(
+    uri: string,
+    persona: string,
+  ): Promise<void> {
     if (!this._workspaceState || !this._workspaceState[uri]) {
       vscode.window.showWarningMessage(`Workspace not found: ${uri}`);
       return;
@@ -4860,13 +5560,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     const ws = this._workspaceState[uri];
     const project = ws.project || "unknown";
-    const activeSession = ws.active_session_id ? ws.sessions[ws.active_session_id] : null;
+    const activeSession = ws.active_session_id
+      ? ws.sessions[ws.active_session_id]
+      : null;
     const currentPersona = activeSession?.persona || "none";
 
     // Show notification that persona change was requested
     vscode.window.showInformationMessage(
       `Persona change requested for ${project}: ${currentPersona} → ${persona}. ` +
-      `Use persona_load("${persona}") in the chat to apply.`
+        `Use persona_load("${persona}") in the chat to apply.`,
     );
 
     // Note: Actually changing the persona requires calling the MCP server
@@ -4878,29 +5580,41 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       await vscode.env.clipboard.writeText(sessionId);
       vscode.window.showInformationMessage(
-        `Session ID copied: ${sessionId}. Search for this in your Cursor chat history to find the session.`
+        `Session ID copied: ${sessionId}. Search for this in your Cursor chat history to find the session.`,
       );
     } catch (error) {
       vscode.window.showErrorMessage(`Failed to copy session ID: ${error}`);
     }
   }
 
-  private async _openChatSession(sessionId: string, sessionName?: string): Promise<void> {
+  private async _openChatSession(
+    sessionId: string,
+    sessionName?: string,
+  ): Promise<void> {
     try {
       // Import chat utilities
-      const { openChatById, getChatNameById, sendEnter, sleep } = await import('./chatUtils');
+      const { getChatNameById, sendEnter, sleep } = await import("./chatUtils");
 
       // Get chat name from database
       const chatName = getChatNameById(sessionId) || sessionName;
-      console.log(`[CommandCenter] _openChatSession called - sessionId: ${sessionId}, sessionName: ${sessionName}, resolved chatName: ${chatName}`);
+      console.log(
+        `[CommandCenter] _openChatSession called - sessionId: ${sessionId}, sessionName: ${sessionName}, resolved chatName: ${chatName}`,
+      );
 
       // Open Quick Open with the chat name
-      const searchQuery = chatName ? `chat:${chatName}` : 'chat:';
-      console.log(`[CommandCenter] Opening Quick Open with query: "${searchQuery}"`);
-      await vscode.commands.executeCommand('workbench.action.quickOpen', searchQuery);
+      const searchQuery = chatName ? `chat:${chatName}` : "chat:";
+      console.log(
+        `[CommandCenter] Opening Quick Open with query: "${searchQuery}"`,
+      );
+      await vscode.commands.executeCommand(
+        "workbench.action.quickOpen",
+        searchQuery,
+      );
 
       // Wait for Quick Open to populate results (500ms is more reliable than 250ms)
-      console.log(`[CommandCenter] Waiting 500ms for Quick Open to populate...`);
+      console.log(
+        `[CommandCenter] Waiting 500ms for Quick Open to populate...`,
+      );
       await sleep(500);
 
       // Send Enter to select the first result
@@ -4909,13 +5623,14 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       console.log(`[CommandCenter] sendEnter() returned: ${enterResult}`);
 
       if (!enterResult) {
-        console.error(`[CommandCenter] sendEnter() failed - ydotool may not be running or socket not available`);
+        console.error(
+          `[CommandCenter] sendEnter() failed - ydotool may not be running or socket not available`,
+        );
       }
 
       if (chatName) {
         console.log(`[CommandCenter] Opening chat: "${chatName}"`);
       }
-
     } catch (error) {
       console.error(`[CommandCenter] _openChatSession error:`, error);
       vscode.window.showErrorMessage(`Failed to open chat: ${error}`);
@@ -4956,7 +5671,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         this._searchSessionsLocal(query);
       }
     } catch (error) {
-      debugLog(`Search via D-Bus failed: ${error}, falling back to local search`);
+      debugLog(
+        `Search via D-Bus failed: ${error}, falling back to local search`,
+      );
       this._searchSessionsLocal(query);
     }
   }
@@ -4976,7 +5693,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           const name = sess.name || "";
           const issueKey = sess.issue_key || "";
 
-          if (name.toLowerCase().includes(queryLower) || issueKey.toLowerCase().includes(queryLower)) {
+          if (
+            name.toLowerCase().includes(queryLower) ||
+            issueKey.toLowerCase().includes(queryLower)
+          ) {
             results.push({
               session_id: sid,
               name: name || `Session ${sid.substring(0, 8)}`,
@@ -5029,7 +5749,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private async _runSkillInNewChat(skillName: string): Promise<void> {
     try {
-      const { createNewChat } = await import('./chatUtils');
+      const { createNewChat } = await import("./chatUtils");
 
       // Build the skill command
       const command = `skill_run("${skillName}")`;
@@ -5056,7 +5776,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         // Fallback: copy to clipboard
         await vscode.env.clipboard.writeText(command);
         vscode.window.showInformationMessage(
-          `Skill command copied to clipboard. Paste in a new chat to run: ${command}`
+          `Skill command copied to clipboard. Paste in a new chat to run: ${command}`,
         );
       }
     } catch (error) {
@@ -5085,7 +5805,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     const result = await vscode.window.showWarningMessage(
       `Remove workspace "${project}" from tracking?`,
       { modal: true },
-      "Remove"
+      "Remove",
     );
 
     if (result === "Remove") {
@@ -5101,7 +5821,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           vscode.window.showInformationMessage(`Removed workspace: ${project}`);
         } else {
           const errorMsg = data?.error || dbusResult.error || "Unknown error";
-          vscode.window.showErrorMessage(`Failed to remove workspace: ${errorMsg}`);
+          vscode.window.showErrorMessage(
+            `Failed to remove workspace: ${errorMsg}`,
+          );
         }
       } catch (error) {
         vscode.window.showErrorMessage(`Failed to remove workspace: ${error}`);
@@ -5122,16 +5844,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const chatId = await createNewChat({
         message: command,
         title: `${personaName} persona`,
-        autoSubmit: true,  // Will send Enter via ydotool
+        autoSubmit: true, // Will send Enter via ydotool
       });
 
       if (chatId) {
-        vscode.window.showInformationMessage(`🚀 Loading ${personaName} persona...`);
+        vscode.window.showInformationMessage(
+          `🚀 Loading ${personaName} persona...`,
+        );
       } else {
         // Fallback: copy to clipboard
         await vscode.env.clipboard.writeText(command);
         vscode.window.showInformationMessage(
-          `📋 Copied to clipboard: ${command} - Open a new chat and paste to load the persona.`
+          `📋 Copied to clipboard: ${command} - Open a new chat and paste to load the persona.`,
         );
       }
     } catch (e) {
@@ -5141,15 +5865,22 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private async openPersonaFile(personaName: string) {
     try {
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
+      const workspaceRoot =
+        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ||
         path.join(os.homedir(), "src", "redhat-ai-workflow");
-      const personaFile = path.join(workspaceRoot, "personas", `${personaName}.yaml`);
+      const personaFile = path.join(
+        workspaceRoot,
+        "personas",
+        `${personaName}.yaml`,
+      );
 
       if (fs.existsSync(personaFile)) {
         const doc = await vscode.workspace.openTextDocument(personaFile);
         await vscode.window.showTextDocument(doc);
       } else {
-        vscode.window.showErrorMessage(`Persona file not found: ${personaFile}`);
+        vscode.window.showErrorMessage(
+          `Persona file not found: ${personaFile}`,
+        );
       }
     } catch (e) {
       vscode.window.showErrorMessage(`Failed to open persona file: ${e}`);
@@ -5163,7 +5894,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
   private _activeAgentCache: { name: string; tools: string[] } | null = null;
 
-  private async getActiveAgentAsync(): Promise<{ name: string; tools: string[] }> {
+  private async getActiveAgentAsync(): Promise<{
+    name: string;
+    tools: string[];
+  }> {
     try {
       // Get active agent from memory via D-Bus
       const workResult = await dbus.memory_getCurrentWork();
@@ -5177,7 +5911,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       // Get persona tools via D-Bus
       const personaResult = await dbus.config_getPersonaDefinition(agentName);
       if (personaResult.success && personaResult.data) {
-        const persona = (personaResult.data as any).persona || personaResult.data;
+        const persona =
+          (personaResult.data as any).persona || personaResult.data;
         const tools = persona?.tools || [];
         this._activeAgentCache = { name: agentName, tools };
         return this._activeAgentCache;
@@ -5185,7 +5920,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
       this._activeAgentCache = { name: agentName, tools: [] };
       return this._activeAgentCache;
-    } catch (e) {
+    } catch {
       return { name: "unknown", tools: [] };
     }
   }
@@ -5220,13 +5955,19 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     // On first render or forced, do full HTML render using modular generator
     if (forceFullRender || !this._panel.webview.html) {
-      debugLog(`Generating full HTML (forceFullRender: ${forceFullRender}, hasHtml: ${!!this._panel.webview.html})`);
+      debugLog(
+        `Generating full HTML (forceFullRender: ${forceFullRender}, hasHtml: ${!!this._panel.webview.html})`,
+      );
       try {
         const html = await this._getHtmlForWebviewModular(stats);
-        debugLog(`Got HTML from generator, length: ${html?.length ?? 'undefined'}`);
+        debugLog(
+          `Got HTML from generator, length: ${html?.length ?? "undefined"}`,
+        );
         if (html && html.length > 0) {
           this._panel.webview.html = html;
-          debugLog(`Webview HTML set successfully, verified length: ${this._panel.webview.html?.length ?? 'undefined'}`);
+          debugLog(
+            `Webview HTML set successfully, verified length: ${this._panel.webview.html?.length ?? "undefined"}`,
+          );
         } else {
           debugLog(`ERROR: HTML is empty or undefined!`);
         }
@@ -5238,7 +5979,11 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       await this._tabManager.loadActiveTabData();
 
       // Send data update to webview
-      const lifetime = stats?.lifetime || { tool_calls: 0, skill_executions: 0, sessions: 0 };
+      const lifetime = stats?.lifetime || {
+        tool_calls: 0,
+        skill_executions: 0,
+        sessions: 0,
+      };
       this._panel.webview.postMessage({
         type: "dataUpdate",
         stats: {
@@ -5262,7 +6007,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    * This is a simplified alternative to _getHtmlForWebview that uses
    * external CSS/JS files and tab classes for content generation.
    */
-  private async _getHtmlForWebviewModular(stats: AgentStats | null): Promise<string> {
+  private async _getHtmlForWebviewModular(
+    stats: AgentStats | null,
+  ): Promise<string> {
     if (!this._htmlGenerator) {
       debugLog("ERROR: HtmlGenerator not initialized!");
       return "<html><body>Error: HtmlGenerator not initialized</body></html>";
@@ -5284,7 +6031,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       sessions: 0,
     };
 
-    debugLog(`Generating HTML with stats: tool_calls=${lifetime.tool_calls}, skill_executions=${lifetime.skill_executions}, sessions=${lifetime.sessions}`);
+    debugLog(
+      `Generating HTML with stats: tool_calls=${lifetime.tool_calls}, skill_executions=${lifetime.skill_executions}, sessions=${lifetime.sessions}`,
+    );
     const html = this._htmlGenerator.generateHtml({
       toolCalls: lifetime.tool_calls,
       skillExecutions: lifetime.skill_executions,
@@ -5293,7 +6042,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     debugLog(`Generated HTML length: ${html.length}`);
     if (html.length < 1000) {
-      debugLog(`WARNING: HTML seems too short! Content: ${html.substring(0, 500)}`);
+      debugLog(
+        `WARNING: HTML seems too short! Content: ${html.substring(0, 500)}`,
+      );
     }
 
     return html;
@@ -5303,7 +6054,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     if (!timestamp) return "Unknown";
     try {
       const date = new Date(timestamp);
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     } catch {
       return "Unknown";
     }
@@ -5393,17 +6147,20 @@ export function getCommandCenterPanel(): CommandCenterPanel | undefined {
 
 export function registerCommandCenter(
   context: vscode.ExtensionContext,
-  dataProvider: WorkflowDataProvider
+  dataProvider: WorkflowDataProvider,
 ) {
   // Register command to open Command Center
   context.subscriptions.push(
-    vscode.commands.registerCommand("aa-workflow.openCommandCenter", (initialTab?: string) => {
-      commandCenterPanel = CommandCenterPanel.createOrShow(
-        context.extensionUri,
-        dataProvider,
-        initialTab
-      );
-    })
+    vscode.commands.registerCommand(
+      "aa-workflow.openCommandCenter",
+      (initialTab?: string) => {
+        commandCenterPanel = CommandCenterPanel.createOrShow(
+          context.extensionUri,
+          dataProvider,
+          initialTab,
+        );
+      },
+    ),
   );
 
   // Convenience commands for specific tabs
@@ -5412,9 +6169,9 @@ export function registerCommandCenter(
       commandCenterPanel = CommandCenterPanel.createOrShow(
         context.extensionUri,
         dataProvider,
-        "skills"
+        "skills",
       );
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -5422,9 +6179,9 @@ export function registerCommandCenter(
       commandCenterPanel = CommandCenterPanel.createOrShow(
         context.extensionUri,
         dataProvider,
-        "services"
+        "services",
       );
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -5432,9 +6189,9 @@ export function registerCommandCenter(
       commandCenterPanel = CommandCenterPanel.createOrShow(
         context.extensionUri,
         dataProvider,
-        "memory"
+        "memory",
       );
-    })
+    }),
   );
 
   context.subscriptions.push(
@@ -5442,11 +6199,10 @@ export function registerCommandCenter(
       commandCenterPanel = CommandCenterPanel.createOrShow(
         context.extensionUri,
         dataProvider,
-        "cron"
+        "cron",
       );
-    })
+    }),
   );
-
 }
 
 /**
@@ -5456,17 +6212,23 @@ export function registerCommandCenter(
  */
 export function registerCommandCenterSerializer(
   context: vscode.ExtensionContext,
-  dataProvider: WorkflowDataProvider
+  dataProvider: WorkflowDataProvider,
 ) {
-  debugLog("registerCommandCenterSerializer() - registering serializer early...");
+  debugLog(
+    "registerCommandCenterSerializer() - registering serializer early...",
+  );
   context.subscriptions.push(
     vscode.window.registerWebviewPanelSerializer("aaCommandCenter", {
-      async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel, _state: any) {
+      async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel) {
         debugLog("Serializer deserializeWebviewPanel called - reviving panel");
-        CommandCenterPanel.revive(webviewPanel, context.extensionUri, dataProvider);
+        CommandCenterPanel.revive(
+          webviewPanel,
+          context.extensionUri,
+          dataProvider,
+        );
         debugLog("Serializer deserializeWebviewPanel - revive complete");
-      }
-    })
+      },
+    }),
   );
   debugLog("registerCommandCenterSerializer() - serializer registered");
 }
@@ -5475,10 +6237,7 @@ export function registerCommandCenterSerializer(
  * Check if there's a Command Center panel that needs reconnection.
  * This handles the case where VS Code restored a panel before our serializer was ready.
  */
-export function ensureCommandCenterConnected(
-  context: vscode.ExtensionContext,
-  dataProvider: WorkflowDataProvider
-) {
+export function ensureCommandCenterConnected() {
   debugLog("ensureCommandCenterConnected() called");
   // If we already have a currentPanel, we're good
   if (CommandCenterPanel.currentPanel) {
@@ -5490,5 +6249,7 @@ export function ensureCommandCenterConnected(
   // Unfortunately VS Code doesn't provide a way to enumerate existing webview panels,
   // so we can't directly reconnect. The best we can do is ensure the serializer is
   // registered and hope VS Code calls it.
-  debugLog("ensureCommandCenterConnected() - no panel connected, serializer should handle restoration");
+  debugLog(
+    "ensureCommandCenterConnected() - no panel connected, serializer should handle restoration",
+  );
 }
