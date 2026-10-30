@@ -15,9 +15,9 @@ echo
 # Ensure virtual environment exists and is up to date
 echo "Setting up Python virtual environment with uv..."
 cd "$PROJECT_ROOT"
-if ! command -v uv &> /dev/null; then
-    echo "❌ uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    exit 1
+if ! command -v uv &>/dev/null; then
+	echo "❌ uv not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+	exit 1
 fi
 
 # Create/sync venv with all dependencies
@@ -30,18 +30,18 @@ mkdir -p "$SYSTEMD_USER_DIR"
 
 # Function to install a service
 install_service() {
-    local service_name=$1
-    local source_file="$PROJECT_ROOT/systemd/${service_name}.service"
-    local dest_file="$SYSTEMD_USER_DIR/${service_name}.service"
+	local service_name=$1
+	local source_file="$PROJECT_ROOT/systemd/${service_name}.service"
+	local dest_file="$SYSTEMD_USER_DIR/${service_name}.service"
 
-    if [[ ! -f "$source_file" ]]; then
-        echo "⚠️  Service file not found: $source_file"
-        return 1
-    fi
+	if [[ ! -f "$source_file" ]]; then
+		echo "⚠️  Service file not found: $source_file"
+		return 1
+	fi
 
-    echo "Installing $service_name..."
-    cp "$source_file" "$dest_file"
-    echo "   ✅ Copied to $dest_file"
+	echo "Installing $service_name..."
+	cp "$source_file" "$dest_file"
+	echo "   ✅ Copied to $dest_file"
 }
 
 # Install services

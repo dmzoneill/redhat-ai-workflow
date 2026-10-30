@@ -16,9 +16,12 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Check specific module or all
 if [[ -n "$1" ]]; then
-    MODULES=("$1")
+	MODULES=("$1")
 else
-    MODULES=($(ls -d "$PROJECT_ROOT"/tool_modules/aa-*/ 2>/dev/null | xargs -n1 basename))
+	MODULES=()
+	for dir in "$PROJECT_ROOT"/tool_modules/aa-*/; do
+		[[ -d "$dir" ]] && MODULES+=("$(basename "$dir")")
+	done
 fi
 
 echo -e "${YELLOW}Type-checking modules with mypy...${NC}\n"
@@ -28,27 +31,27 @@ passed=0
 failed=0
 
 for module in "${MODULES[@]}"; do
-    module_path="$PROJECT_ROOT/tool_modules/$module"
+	module_path="$PROJECT_ROOT/tool_modules/$module"
 
-    if [[ ! -d "$module_path/src" ]]; then
-        echo -e "${YELLOW}⊘ $module${NC} - No src/ directory, skipping"
-        continue
-    fi
+	if [[ ! -d "$module_path/src" ]]; then
+		echo -e "${YELLOW}⊘ $module${NC} - No src/ directory, skipping"
+		continue
+	fi
 
-    total=$((total + 1))
-    echo -e "${YELLOW}Checking $module...${NC}"
+	total=$((total + 1))
+	echo -e "${YELLOW}Checking $module...${NC}"
 
-    cd "$module_path"
-    # Set MYPYPATH to include project root and server directory
-    export MYPYPATH="$PROJECT_ROOT:$PROJECT_ROOT/server:$PROJECT_ROOT/tool_modules"
-    if mypy --package src --explicit-package-bases 2>&1; then
-        echo -e "${GREEN}✓ $module passed${NC}\n"
-        passed=$((passed + 1))
-    else
-        echo -e "${RED}✗ $module failed${NC}\n"
-        failed=$((failed + 1))
-    fi
-    cd "$PROJECT_ROOT"
+	cd "$module_path"
+	# Set MYPYPATH to include project root and server directory
+	export MYPYPATH="$PROJECT_ROOT:$PROJECT_ROOT/server:$PROJECT_ROOT/tool_modules"
+	if mypy --package src --explicit-package-bases 2>&1; then
+		echo -e "${GREEN}✓ $module passed${NC}\n"
+		passed=$((passed + 1))
+	else
+		echo -e "${RED}✗ $module failed${NC}\n"
+		failed=$((failed + 1))
+	fi
+	cd "$PROJECT_ROOT"
 done
 
 # Summary
@@ -56,9 +59,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo -e "Total: $total | ${GREEN}Passed: $passed${NC} | ${RED}Failed: $failed${NC}"
 
 if [[ $failed -eq 0 ]]; then
-    echo -e "${GREEN}All type checks passed!${NC}"
-    exit 0
+	echo -e "${GREEN}All type checks passed!${NC}"
+	exit 0
 else
-    echo -e "${RED}Some type checks failed.${NC}"
-    exit 1
+	echo -e "${RED}Some type checks failed.${NC}"
+	exit 1
 fi
