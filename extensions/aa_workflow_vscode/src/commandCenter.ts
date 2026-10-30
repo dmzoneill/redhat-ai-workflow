@@ -2736,8 +2736,7 @@ print(result[0].text if result else '[]')
           }, 1000);
           break;
 
-        case "stop": // Try D-Bus shutdown first for graceful stop
-        {
+        case "stop": { // Try D-Bus shutdown first for graceful stop
           const dbusService = DBUS_SERVICES.find((s) =>
             s.name.toLowerCase().includes(service),
           );
@@ -2771,8 +2770,7 @@ print(result[0].text if result else '[]')
           break;
         }
 
-        case "logs": // Always use journalctl -f in a terminal for live log streaming
-        {
+        case "logs": { // Always use journalctl -f in a terminal for live log streaming
           const terminal = vscode.window.createTerminal(`${service} logs`);
           terminal.show();
           terminal.sendText(`journalctl --user -u ${unit} -f`);
@@ -3252,8 +3250,7 @@ print(result[0].text if result else '[]')
           }
           break;
 
-        case "importGemini": // Import Gemini session
-        {
+        case "importGemini": { // Import Gemini session
           const options: vscode.OpenDialogOptions = {
             canSelectMany: false,
             openLabel: "Import Gemini Session",
@@ -3290,8 +3287,7 @@ print(result[0].text if result else '[]')
   ) {
     try {
       switch (action) {
-        case "collectDaily": // Run the daily collection skill
-        {
+        case "collectDaily": { // Run the daily collection skill
           vscode.window.showInformationMessage(
             "Starting daily performance collection...",
           );
@@ -3318,8 +3314,7 @@ This will fetch today's work from Jira, GitLab, and local git repos, map to comp
           break;
         }
 
-        case "backfill": // Run the backfill skill
-        {
+        case "backfill": { // Run the backfill skill
           vscode.window.showInformationMessage(
             "Starting performance backfill...",
           );
@@ -3347,8 +3342,7 @@ This will find any missing weekdays this quarter and collect data for them.`;
         }
 
         case "evaluateAll":
-        case "evaluate": // Run the evaluation skill
-        {
+        case "evaluate": { // Run the evaluation skill
           const evalTarget = questionId
             ? `question "${questionId}"`
             : "all questions";
@@ -3381,8 +3375,7 @@ This will use AI to generate summaries for ${evalTarget} based on collected evid
           break;
         }
 
-        case "exportReport": // Run the export skill
-        {
+        case "exportReport": { // Run the export skill
           vscode.window.showInformationMessage(
             "Generating performance report...",
           );
