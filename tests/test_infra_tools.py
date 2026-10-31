@@ -1,24 +1,26 @@
 """Tests for tool_modules.aa_workflow.src.infra_tools."""
 
-import sys
+import asyncio
 import time
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
 from tool_modules.aa_workflow.src import infra_tools
+
+
+def _private(name):
+    """Return a private module-level helper of infra_tools by name."""
+    return vars(infra_tools)[name]
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def vpn_state_files(tmp_path):
+@pytest.fixture(name="vpn_state_files")
+def fixture_vpn_state_files(tmp_path):
     """Redirect VPN state/lock files to temp dir."""
     state_file = tmp_path / "vpn_state"
     lock_file = tmp_path / "vpn.lock"
@@ -29,8 +31,8 @@ def vpn_state_files(tmp_path):
         yield state_file, lock_file
 
 
-@pytest.fixture
-def kube_state_files(tmp_path):
+@pytest.fixture(name="kube_state_files")
+def fixture_kube_state_files(tmp_path):
     """Redirect kube state/lock files to temp dir."""
     state_file = tmp_path / "kube_state"
     lock_file = tmp_path / "kube.lock"
@@ -47,20 +49,27 @@ def kube_state_files(tmp_path):
 
 
 class TestVpnStateHelpers:
-    def test_get_vpn_last_connect_time_no_file(self, vpn_state_files):
-        assert infra_tools._get_vpn_last_connect_time() == 0
+    """Tests for Vpn State Helpers."""
+
+    @pytest.mark.usefixtures("vpn_state_files")
+    def test_get_vpn_last_connect_time_no_file(self):
+        """Get vpn last connect time no file."""
+        assert _private("_get_vpn_last_connect_time")() == 0
 
     def test_get_set_vpn_last_connect_time(self, vpn_state_files):
+        """Get set vpn last connect time."""
         state_file, _ = vpn_state_files
         now = time.time()
-        infra_tools._set_vpn_last_connect_time(now)
-        result = infra_tools._get_vpn_last_connect_time()
+        _private("_set_vpn_last_connect_time")(now)
+        assert state_file.exists()
+        result = _private("_get_vpn_last_connect_time")()
         assert result == now
 
     def test_get_vpn_corrupt_file(self, vpn_state_files):
+        """Get vpn corrupt file."""
         state_file, _ = vpn_state_files
         state_file.write_text("not-a-number")
-        assert infra_tools._get_vpn_last_connect_time() == 0
+        assert _private("_get_vpn_last_connect_time")() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -69,32 +78,42 @@ class TestVpnStateHelpers:
 
 
 class TestKubeStateHelpers:
-    def test_get_kube_no_file(self, kube_state_files):
-        assert infra_tools._get_kube_last_login_time("s") == 0
+    """Tests for Kube State Helpers."""
+
+    @pytest.mark.usefixtures("kube_state_files")
+    def test_get_kube_no_file(self):
+        """Get kube no file."""
+        assert _private("_get_kube_last_login_time")("s") == 0
 
     def test_get_set_kube_login_time(self, kube_state_files):
+        """Get set kube login time."""
         state_file, _ = kube_state_files
         now = time.time()
-        infra_tools._set_kube_last_login_time("s", now)
-        result = infra_tools._get_kube_last_login_time("s")
+        _private("_set_kube_last_login_time")("s", now)
+        assert state_file.exists()
+        result = _private("_get_kube_last_login_time")("s")
         assert result == now
 
-    def test_multiple_clusters(self, kube_state_files):
-        infra_tools._set_kube_last_login_time("s", 100.0)
-        infra_tools._set_kube_last_login_time("p", 200.0)
-        assert infra_tools._get_kube_last_login_time("s") == 100.0
-        assert infra_tools._get_kube_last_login_time("p") == 200.0
+    @pytest.mark.usefixtures("kube_state_files")
+    def test_multiple_clusters(self):
+        """Multiple clusters."""
+        _private("_set_kube_last_login_time")("s", 100.0)
+        _private("_set_kube_last_login_time")("p", 200.0)
+        assert _private("_get_kube_last_login_time")("s") == 100.0
+        assert _private("_get_kube_last_login_time")("p") == 200.0
 
     def test_get_kube_corrupt_file(self, kube_state_files):
+        """Get kube corrupt file."""
         state_file, _ = kube_state_files
         state_file.write_text("not json")
-        assert infra_tools._get_kube_last_login_time("s") == 0
+        assert _private("_get_kube_last_login_time")("s") == 0
 
     def test_set_kube_corrupt_existing(self, kube_state_files):
+        """Set kube corrupt existing."""
         state_file, _ = kube_state_files
         state_file.write_text("not json")
-        infra_tools._set_kube_last_login_time("s", 100.0)
-        assert infra_tools._get_kube_last_login_time("s") == 100.0
+        _private("_set_kube_last_login_time")("s", 100.0)
+        assert _private("_get_kube_last_login_time")("s") == 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -103,34 +122,39 @@ class TestKubeStateHelpers:
 
 
 class TestCheckVpnConnected:
+    """Tests for Check Vpn Connected."""
+
     @pytest.mark.asyncio
     async def test_connected(self):
+        """Connected."""
         with patch(
             "tool_modules.aa_workflow.src.infra_tools.run_cmd_full",
             new_callable=AsyncMock,
             return_value=(True, "gitlab.cee.redhat.com has address 10.0.0.1", ""),
         ):
-            result = await infra_tools._check_vpn_connected()
+            result = await _private("_check_vpn_connected")()
         assert result is True
 
     @pytest.mark.asyncio
     async def test_not_connected(self):
+        """Not connected."""
         with patch(
             "tool_modules.aa_workflow.src.infra_tools.run_cmd_full",
             new_callable=AsyncMock,
             return_value=(False, "", "connection timed out"),
         ):
-            result = await infra_tools._check_vpn_connected()
+            result = await _private("_check_vpn_connected")()
         assert result is False
 
     @pytest.mark.asyncio
     async def test_exception(self):
+        """Exception."""
         with patch(
             "tool_modules.aa_workflow.src.infra_tools.run_cmd_full",
             new_callable=AsyncMock,
-            side_effect=Exception("network error"),
+            side_effect=OSError("network error"),
         ):
-            result = await infra_tools._check_vpn_connected()
+            result = await _private("_check_vpn_connected")()
         assert result is False
 
 
@@ -140,8 +164,11 @@ class TestCheckVpnConnected:
 
 
 class TestCheckKubeConnected:
+    """Tests for Check Kube Connected."""
+
     @pytest.mark.asyncio
     async def test_connected(self, tmp_path):
+        """Connected."""
         kubeconfig = tmp_path / ".kube" / "config.s"
         kubeconfig.parent.mkdir(parents=True)
         kubeconfig.touch()
@@ -155,20 +182,22 @@ class TestCheckKubeConnected:
                 return_value=(True, "user@cluster", ""),
             ),
         ):
-            result = await infra_tools._check_kube_connected("s")
+            result = await _private("_check_kube_connected")("s")
         assert result is True
 
     @pytest.mark.asyncio
     async def test_not_connected_no_kubeconfig(self):
+        """Not connected no kubeconfig."""
         with (
             patch("os.path.exists", return_value=False),
             patch("os.path.expanduser", return_value="/missing"),
         ):
-            result = await infra_tools._check_kube_connected("s")
+            result = await _private("_check_kube_connected")("s")
         assert result is False
 
     @pytest.mark.asyncio
     async def test_auth_failed(self):
+        """Auth failed."""
         with (
             patch("os.path.expanduser", return_value="/fake/config.s"),
             patch("os.path.exists", return_value=True),
@@ -178,7 +207,7 @@ class TestCheckKubeConnected:
                 return_value=(False, "", "Unauthorized"),
             ),
         ):
-            result = await infra_tools._check_kube_connected("s")
+            result = await _private("_check_kube_connected")("s")
         assert result is False
 
 
@@ -188,19 +217,25 @@ class TestCheckKubeConnected:
 
 
 class TestVpnConnectImpl:
+    """Tests for Vpn Connect Impl."""
+
     @pytest.mark.asyncio
-    async def test_debounce_returns_early(self, vpn_state_files):
-        infra_tools._set_vpn_last_connect_time(time.time())
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_debounce_returns_early(self):
+        """Debounce returns early."""
+        _private("_set_vpn_last_connect_time")(time.time())
         with patch(
             "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
             new_callable=AsyncMock,
             return_value=True,
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         assert "already connected" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_script_not_found(self, vpn_state_files):
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_script_not_found(self):
+        """Script not found."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
@@ -214,11 +249,13 @@ class TestVpnConnectImpl:
             patch("os.path.exists", return_value=False),
             patch("os.path.expanduser", return_value="/nonexistent/vpn"),
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         assert "not found" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_successful_connect(self, vpn_state_files):
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_successful_connect(self):
+        """Successful connect."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
@@ -237,11 +274,13 @@ class TestVpnConnectImpl:
                 return_value=(True, "Connection successfully activated", ""),
             ),
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         assert "connected successfully" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_already_active(self, vpn_state_files):
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_already_active(self):
+        """Already active."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
@@ -263,11 +302,13 @@ class TestVpnConnectImpl:
                 return_value=(False, "VPN is already active", ""),
             ),
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         assert "connected successfully" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_failed_but_connectivity_check_passes(self, vpn_state_files):
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_failed_but_connectivity_check_passes(self):
+        """Failed but connectivity check passes."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
@@ -287,14 +328,14 @@ class TestVpnConnectImpl:
             ),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         # Command failed → output reports failure
         assert "may have failed" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_timeout(self, vpn_state_files):
-        import asyncio
-
+    @pytest.mark.usefixtures("vpn_state_files")
+    async def test_timeout(self):
+        """Timeout."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_vpn_connected",
@@ -313,7 +354,7 @@ class TestVpnConnectImpl:
                 side_effect=asyncio.TimeoutError(),
             ),
         ):
-            result = await infra_tools._vpn_connect_impl()
+            result = await _private("_vpn_connect_impl")()
         assert "timed out" in result[0].text.lower()
 
 
@@ -323,9 +364,13 @@ class TestVpnConnectImpl:
 
 
 class TestKubeLoginImpl:
+    """Tests for Kube Login Impl."""
+
     @pytest.mark.asyncio
-    async def test_invalid_cluster(self, kube_state_files):
-        result = await infra_tools._kube_login_impl("invalid")
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_invalid_cluster(self):
+        """Invalid cluster."""
+        result = await _private("_kube_login_impl")("invalid")
         assert "Unknown cluster" in result[0].text
 
     @pytest.mark.asyncio
@@ -343,9 +388,8 @@ class TestKubeLoginImpl:
             ("e", "e"),
         ],
     )
-    async def test_cluster_name_mapping(
-        self, kube_state_files, cluster_input, expected_short
-    ):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_cluster_name_mapping(self, cluster_input, expected_short):
         """Test that cluster name mapping works."""
         # Just verify it doesn't return "Unknown cluster"
         with patch(
@@ -353,23 +397,27 @@ class TestKubeLoginImpl:
             new_callable=AsyncMock,
             return_value=True,
         ):
-            infra_tools._set_kube_last_login_time(expected_short, time.time())
-            result = await infra_tools._kube_login_impl(cluster_input)
+            _private("_set_kube_last_login_time")(expected_short, time.time())
+            result = await _private("_kube_login_impl")(cluster_input)
         assert "Unknown cluster" not in result[0].text
 
     @pytest.mark.asyncio
-    async def test_debounce_returns_early(self, kube_state_files):
-        infra_tools._set_kube_last_login_time("s", time.time())
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_debounce_returns_early(self):
+        """Debounce returns early."""
+        _private("_set_kube_last_login_time")("s", time.time())
         with patch(
             "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
             new_callable=AsyncMock,
             return_value=True,
         ):
-            result = await infra_tools._kube_login_impl("stage")
+            result = await _private("_kube_login_impl")("stage")
         assert "already logged in" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_successful_login(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_successful_login(self):
+        """Successful login."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
@@ -392,12 +440,14 @@ class TestKubeLoginImpl:
                 return_value=(True, "Logged in to cluster", ""),
             ),
         ):
-            result = await infra_tools._kube_login_impl("s")
+            result = await _private("_kube_login_impl")("s")
         text = result[0].text.lower()
         assert "logged into" in text or "stage" in text
 
     @pytest.mark.asyncio
-    async def test_oauth_failure(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_oauth_failure(self):
+        """Oauth failure."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
@@ -423,11 +473,13 @@ class TestKubeLoginImpl:
                 return_value=(False, "", "error: login failed"),
             ),
         ):
-            result = await infra_tools._kube_login_impl("s")
+            result = await _private("_kube_login_impl")("s")
         assert "oauth" in result[0].text.lower() or "failed" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_kube_command_not_found(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_kube_command_not_found(self):
+        """Kube command not found."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
@@ -445,11 +497,13 @@ class TestKubeLoginImpl:
                 side_effect=FileNotFoundError(),
             ),
         ):
-            result = await infra_tools._kube_login_impl("s")
+            result = await _private("_kube_login_impl")("s")
         assert "not found" in result[0].text.lower()
 
     @pytest.mark.asyncio
-    async def test_stale_credentials_cleanup(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_stale_credentials_cleanup(self):
+        """Stale credentials cleanup."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
@@ -475,12 +529,13 @@ class TestKubeLoginImpl:
                 return_value=(True, "Logged in", ""),
             ),
         ):
-            result = await infra_tools._kube_login_impl("s")
+            result = await _private("_kube_login_impl")("s")
         text = result[0].text.lower()
         assert "stale" in text or "logged into" in text or "verified" in text
 
     @pytest.mark.asyncio
-    async def test_connection_test_errors(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_connection_test_errors(self):
         """Test various connection test failure patterns."""
         error_cases = [
             ("unauthorized 401", "Token is invalid"),
@@ -514,12 +569,14 @@ class TestKubeLoginImpl:
                     return_value=(True, "Logged in", ""),
                 ),
             ):
-                result = await infra_tools._kube_login_impl("s")
+                result = await _private("_kube_login_impl")("s")
                 # Test verifies no exception is raised
                 assert result is not None  # detailed error message check is fragile
 
     @pytest.mark.asyncio
-    async def test_kubeconfig_not_found_after_login(self, kube_state_files):
+    @pytest.mark.usefixtures("kube_state_files")
+    async def test_kubeconfig_not_found_after_login(self):
+        """Kubeconfig not found after login."""
         with (
             patch(
                 "tool_modules.aa_workflow.src.infra_tools._check_kube_connected",
@@ -537,6 +594,6 @@ class TestKubeLoginImpl:
                 return_value=(True, "Done", ""),
             ),
         ):
-            result = await infra_tools._kube_login_impl("s")
-        # Verify it reports an error (exact message depends on code path)
-        assert "error" in result[0].text.lower()
+            result = await _private("_kube_login_impl")("s")
+        # Login reports success but the kubeconfig never appeared
+        assert "kubeconfig not found at /home/user/.kube/config.s" in result[0].text.lower()
