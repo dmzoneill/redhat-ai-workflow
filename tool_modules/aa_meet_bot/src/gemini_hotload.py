@@ -19,7 +19,6 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class GeminiResponse:
     latency_ms: float
     tokens_in: int = 0
     tokens_out: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # pylint: disable-next=too-many-instance-attributes
@@ -56,7 +55,7 @@ class GeminiHotload:
 
     def __init__(
         self,
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         model: str = DEFAULT_MODEL,
         timeout: float = 30.0,
         max_history: int = 20,
@@ -76,17 +75,24 @@ class GeminiHotload:
         self.max_history = max_history
 
         # Conversation history
-        self._history: List[dict] = []
+        self._history: list[dict] = []
         self._running = False
         self._lock = asyncio.Lock()
 
         # Stats
         self.messages_sent = 0
         self.total_latency_ms = 0.0
-        self._start_time: Optional[float] = None
+        self._start_time: float | None = None
 
     async def start(self) -> bool:
-        """Initialize the Gemini interface."""
+        """
+        Initialize the Gemini interface.
+
+        Returns:
+            True when the interface is ready. False when the system-prompt
+            warm-up call got no response, so callers can fall back to
+            another backend instead of sending into a broken CLI.
+        """
         if self._running:
             return True
 
@@ -97,13 +103,12 @@ class GeminiHotload:
         # Warm up with a simple call if system prompt provided
         if self.system_prompt:
             logger.info("Warming up Gemini with system prompt...")
-            response = await self._call_gemini(
-                f"System: {self.system_prompt}\n\nAcknowledge with 'Ready.'"
-            )
-            if response:
-                logger.info("Gemini ready: %s...", response[:50])
-            else:
+            response = await self._call_gemini(f"System: {self.system_prompt}\n\nAcknowledge with 'Ready.'")
+            if not response:
                 logger.warning("Gemini warm-up got no response")
+                self._running = False
+                return False
+            logger.info("Gemini ready: %s...", response[:50])
 
         logger.info("Gemini hotload ready (model: %s)", self.model)
         return True
@@ -131,11 +136,8 @@ class GeminiHotload:
         Returns:
             GeminiResponse with the text and metadata
         """
-        if not self._running:
-            if not await self.start():
-                return GeminiResponse(
-                    text="", latency_ms=0, error="Failed to start Gemini"
-                )
+        if not self._running and not await self.start():
+            return GeminiResponse(text="", latency_ms=0, error="Failed to start Gemini")
 
         async with self._lock:
             start = time.time()
@@ -149,13 +151,10 @@ class GeminiHotload:
 
                 latency = (time.time() - start) * 1000
 
-                # pylint: disable-next=no-else-return
                 if response_text:
                     # Add to history
                     self._history.append({"role": "user", "content": message})
-                    self._history.append(
-                        {"role": "assistant", "content": response_text}
-                    )
+                    self._history.append({"role": "assistant", "content": response_text})
 
                     # Trim history
                     if len(self._history) > self.max_history * 2:
@@ -168,10 +167,7 @@ class GeminiHotload:
                         text=response_text,
                         latency_ms=latency,
                     )
-                else:
-                    return GeminiResponse(
-                        text="", latency_ms=latency, error="No response from Gemini"
-                    )
+                return GeminiResponse(text="", latency_ms=latency, error="No response from Gemini")
 
             except asyncio.TimeoutError:
                 return GeminiResponse(
@@ -179,12 +175,8 @@ class GeminiHotload:
                     latency_ms=(time.time() - start) * 1000,
                     error="Response timeout",
                 )
-            # Best-effort: failure is contained, not raised.
-            # pylint: disable-next=broad-exception-caught
-            except Exception as e:
-                return GeminiResponse(
-                    text="", latency_ms=(time.time() - start) * 1000, error=str(e)
-                )
+            except (OSError, ValueError) as e:
+                return GeminiResponse(text="", latency_ms=(time.time() - start) * 1000, error=str(e))
 
     def _build_prompt(self, message: str) -> str:
         """Build prompt with conversation history."""
@@ -208,7 +200,7 @@ class GeminiHotload:
 
         return "\n".join(parts)
 
-    async def _call_gemini(self, prompt: str) -> Optional[str]:
+    async def _call_gemini(self, prompt: str) -> str | None:
         """Call Gemini CLI with a prompt via stdin pipe."""
         try:
             env = os.environ.copy()
@@ -227,28 +219,22 @@ class GeminiHotload:
                 env=env,
             )
 
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=prompt.encode()), timeout=self.timeout
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(input=prompt.encode()), timeout=self.timeout)
 
-            # pylint: disable-next=no-else-return
             if proc.returncode == 0:
                 return stdout.decode().strip()
+            error = stderr.decode().strip()
+            # Check for common errors
+            if "Organization Policy" in error:
+                logger.error("Model %s not allowed by org policy", self.model)
             else:
-                error = stderr.decode().strip()
-                # Check for common errors
-                if "Organization Policy" in error:
-                    logger.error("Model %s not allowed by org policy", self.model)
-                else:
-                    logger.error("Gemini error: %s", error[:200])
-                return None
+                logger.error("Gemini error: %s", error[:200])
+            return None
 
         except asyncio.TimeoutError:
             logger.error("Gemini call timed out")
             raise
-        # Best-effort: failure is contained, not raised.
-        # pylint: disable-next=broad-exception-caught
-        except Exception as e:
+        except (OSError, ValueError) as e:
             logger.error("Gemini call failed: %s", e)
             return None
 
@@ -319,7 +305,7 @@ class GeminiPool:
 
 # Global pool
 # pylint: disable-next=invalid-name
-_gemini_pool: Optional[GeminiPool] = None
+_gemini_pool: GeminiPool | None = None
 
 
 def get_gemini_pool() -> GeminiPool:
