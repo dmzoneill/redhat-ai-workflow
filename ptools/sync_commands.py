@@ -13,17 +13,26 @@ Usage:
 """
 
 import argparse
+import importlib
 import logging
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 logger = logging.getLogger(__name__)
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
+
+def _optional_yaml() -> ModuleType | None:
+    """Return the PyYAML module, or None when it isn't installed."""
+    try:
+        return importlib.import_module("yaml")
+    except ImportError:
+        return None
+
+
+yaml = _optional_yaml()
 
 # Directories
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -56,7 +65,7 @@ def extract_command_metadata(content: str, filename: str) -> dict:
             if line.strip() and not line.startswith("#"):
                 description = line.strip()
                 break
-            elif line.startswith("##"):
+            if line.startswith("##"):
                 break
 
     # Extract arguments from skill_run calls
@@ -70,14 +79,11 @@ def extract_command_metadata(content: str, filename: str) -> dict:
             arg_names = re.findall(r'"(\w+)":', args_str)
             for arg in arg_names:
                 # Check if there's a placeholder like $JIRA_KEY
-                if (
-                    f"${arg.upper()}" in content
-                    or f"${arg.upper().replace('_', '')}" in content
-                ):
+                if f"${arg.upper()}" in content or f"${arg.upper().replace('_', '')}" in content:
                     arguments.append({"name": arg, "required": True})
                 else:
                     arguments.append({"name": arg, "required": False})
-        except Exception as exc:
+        except (AttributeError, IndexError, TypeError) as exc:
             logger.debug("Suppressed error: %s", exc)
 
     return {
@@ -95,14 +101,14 @@ def cursor_to_claude(content: str, filename: str) -> str:
     # Build YAML frontmatter
     frontmatter_lines = [
         "---",
-        f'name: {metadata["name"]}',
+        f"name: {metadata['name']}",
         f'description: "{metadata["description"]}"',
     ]
 
     if metadata["arguments"]:
         frontmatter_lines.append("arguments:")
         for arg in metadata["arguments"]:
-            frontmatter_lines.append(f'  - name: {arg["name"]}')
+            frontmatter_lines.append(f"  - name: {arg['name']}")
             if arg["required"]:
                 frontmatter_lines.append("    required: true")
 
@@ -119,8 +125,12 @@ def cursor_to_claude(content: str, filename: str) -> str:
     return frontmatter + content
 
 
-def claude_to_cursor(content: str) -> str:
-    """Convert Claude Code command to Cursor format (remove frontmatter)."""
+def claude_to_cursor(content: str, _filename: str = "") -> str:
+    """Convert Claude Code command to Cursor format (remove frontmatter).
+
+    Takes the same (content, filename) arguments as cursor_to_claude so
+    sync_commands() can call either converter; the filename is unused.
+    """
     if not content.strip().startswith("---"):
         return content
 
@@ -143,40 +153,100 @@ def claude_to_cursor(content: str) -> str:
     return content
 
 
+def _skill_command_names(skill_file: Path) -> tuple[str, str, str]:
+    """Return (skill_name, full_skill_name, command_name) for a skill file."""
+    rel = skill_file.relative_to(SKILLS_DIR)
+    if len(rel.parts) > 1:
+        # Subdirectory skill like performance/collect_daily.yaml
+        skill_name = str(rel.with_suffix("")).replace("/", "-")
+        full_skill_name = str(rel.with_suffix("")).replace("-", "/")
+    else:
+        skill_name = skill_file.stem
+        full_skill_name = skill_file.stem
+    return skill_name, full_skill_name, skill_name.replace("_", "-")
+
+
+def _input_specs(inputs) -> list[dict]:
+    """Normalise skill inputs (list or dict format) to a list of dicts."""
+    if isinstance(inputs, list):
+        return [{"name": inp.get("name", "param"), **inp} for inp in inputs]
+    if isinstance(inputs, dict):
+        return [{**(spec if isinstance(spec, dict) else {}), "name": name} for name, spec in inputs.items()]
+    return []
+
+
+def _skill_run_lines(full_skill_name: str, specs: list[dict]) -> list[str]:
+    """Return the fenced skill_run() example for a command."""
+    input_parts = [
+        f'"{spec["name"]}": "${spec["name"].upper()}"' if spec.get("required", False) else f'"{spec["name"]}": ""'
+        for spec in specs
+    ]
+    inputs_json = "{" + ", ".join(input_parts) + "}"
+    return ["```text", f"skill_run(\"{full_skill_name}\", '{inputs_json}')", "```"]
+
+
+def _parameter_lines(specs: list[dict]) -> list[str]:
+    """Return the markdown parameter table for a command."""
+    lines = [
+        "",
+        "## Parameters",
+        "",
+        "| Parameter | Description | Required |",
+        "|-----------|-------------|----------|",
+    ]
+    for spec in specs:
+        desc = spec.get("description", "")
+        if spec.get("default", ""):
+            desc += f" (default: {spec['default']})"
+        required = "Yes" if spec.get("required", False) else "No"
+        lines.append(f"| `{spec['name']}` | {desc} | {required} |")
+    return lines
+
+
+def _render_command(skill: dict, skill_name: str, full_skill_name: str) -> str:
+    """Render the Cursor command markdown for a loaded skill definition."""
+    name = skill.get("name", skill_name)
+    description = skill.get("description", f"Run the {name} skill").strip()
+    inputs = skill.get("inputs", [])
+    specs = _input_specs(inputs)
+
+    lines = [
+        f"# {name.replace('_', ' ').replace('-', ' ').title()}",
+        "",
+        description.split("\n")[0].strip(),
+        "",
+        "## Instructions",
+        "",
+        *_skill_run_lines(full_skill_name, specs),
+        "",
+        "## What It Does",
+        "",
+        *(line.strip() for line in description.split("\n")),
+    ]
+    if inputs:
+        lines.extend(_parameter_lines(specs))
+    lines.append("")
+    return "\n".join(lines)
+
+
 def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> int:
     """Generate Cursor commands for skills that don't have commands."""
     if yaml is None:
         print("❌ PyYAML not installed. Run: uv add pyyaml")
         return 0
 
-    # Get existing commands
     existing_commands = {f.stem for f in CURSOR_COMMANDS.glob("*.md")}
-
     created = 0
 
     for skill_file in sorted(SKILLS_DIR.glob("**/*.yaml")):
-        rel = skill_file.relative_to(SKILLS_DIR)
-
-        # Determine skill name and command name
-        if len(rel.parts) > 1:
-            # Subdirectory skill like performance/collect_daily.yaml
-            skill_name = str(rel.with_suffix("")).replace("/", "-")
-            full_skill_name = str(rel.with_suffix("")).replace("-", "/")
-        else:
-            skill_name = skill_file.stem
-            full_skill_name = skill_file.stem
-
-        command_name = skill_name.replace("_", "-")
-
-        # Skip if command already exists
+        skill_name, full_skill_name, command_name = _skill_command_names(skill_file)
         if command_name in existing_commands:
             continue
 
-        # Load skill definition
         try:
             with open(skill_file, encoding="utf-8") as f:
                 skill = yaml.safe_load(f)
-        except Exception as e:
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
             if verbose:
                 print(f"  ⚠️  Error loading {skill_file.name}: {e}")
             continue
@@ -184,102 +254,10 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
         if not skill:
             continue
 
-        # Extract skill info
-        name = skill.get("name", skill_name)
-        description = skill.get("description", f"Run the {name} skill").strip()
-        short_desc = description.split("\n")[0].strip()
-        inputs = skill.get("inputs", [])
-
-        # Build command content
-        lines = [
-            f"# {name.replace('_', ' ').replace('-', ' ').title()}",
-            "",
-            short_desc,
-            "",
-            "## Instructions",
-            "",
-        ]
-
-        # Build skill_run call
-        if inputs:
-            input_parts = []
-            # Handle both list format and dict format for inputs
-            if isinstance(inputs, list):
-                for inp in inputs:
-                    inp_name = inp.get("name", "param")
-                    inp_required = inp.get("required", False)
-                    if inp_required:
-                        input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
-                    else:
-                        input_parts.append(f'"{inp_name}": ""')
-            elif isinstance(inputs, dict):
-                for inp_name, inp_def in inputs.items():
-                    inp_required = (
-                        inp_def.get("required", False)
-                        if isinstance(inp_def, dict)
-                        else False
-                    )
-                    if inp_required:
-                        input_parts.append(f'"{inp_name}": "${inp_name.upper()}"')
-                    else:
-                        input_parts.append(f'"{inp_name}": ""')
-            inputs_json = "{" + ", ".join(input_parts) + "}"
-            lines.append("```text")
-            lines.append(f"skill_run(\"{full_skill_name}\", '{inputs_json}')")
-            lines.append("```")
-        else:
-            lines.append("```text")
-            lines.append(f"skill_run(\"{full_skill_name}\", '{{}}')")
-            lines.append("```")
-
-        lines.append("")
-        lines.append("## What It Does")
-        lines.append("")
-
-        # Add full description
-        for line in description.split("\n"):
-            lines.append(line.strip())
-
-        # Add parameters section if there are inputs
-        if inputs:
-            lines.append("")
-            lines.append("## Parameters")
-            lines.append("")
-            lines.append("| Parameter | Description | Required |")
-            lines.append("|-----------|-------------|----------|")
-            # Handle both list format and dict format for inputs
-            if isinstance(inputs, list):
-                for inp in inputs:
-                    inp_name = inp.get("name", "param")
-                    inp_desc = inp.get("description", "")
-                    inp_required = "Yes" if inp.get("required", False) else "No"
-                    inp_default = inp.get("default", "")
-                    if inp_default:
-                        inp_desc += f" (default: {inp_default})"
-                    lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
-            elif isinstance(inputs, dict):
-                for inp_name, inp_def in inputs.items():
-                    if isinstance(inp_def, dict):
-                        inp_desc = inp_def.get("description", "")
-                        inp_required = "Yes" if inp_def.get("required", False) else "No"
-                        inp_default = inp_def.get("default", "")
-                        if inp_default:
-                            inp_desc += f" (default: {inp_default})"
-                    else:
-                        inp_desc = ""
-                        inp_required = "No"
-                    lines.append(f"| `{inp_name}` | {inp_desc} | {inp_required} |")
-
-        lines.append("")
-
-        # Write command file
-        command_file = CURSOR_COMMANDS / f"{command_name}.md"
         if verbose:
             print(f"  ✨ {command_name}.md (generated from {skill_file.name})")
-
         if not dry_run:
-            command_file.write_text("\n".join(lines))
-
+            (CURSOR_COMMANDS / f"{command_name}.md").write_text(_render_command(skill, skill_name, full_skill_name))
         created += 1
 
     return created
@@ -288,7 +266,7 @@ def generate_missing_commands(dry_run: bool = False, verbose: bool = True) -> in
 def sync_commands(
     source_dir: Path,
     target_dir: Path,
-    converter: callable,
+    converter: Callable[[str, str], str],
     dry_run: bool = False,
     verbose: bool = True,
 ) -> tuple[int, int, int]:
@@ -322,10 +300,9 @@ def sync_commands(
                 if verbose:
                     print(f"  ⏭️  {source_file.name} (unchanged)")
                 continue
-            else:
-                if verbose:
-                    print(f"  📝 {source_file.name} (updated)")
-                updated += 1
+            if verbose:
+                print(f"  📝 {source_file.name} (updated)")
+            updated += 1
         else:
             if verbose:
                 print(f"  ✨ {source_file.name} (created)")
@@ -338,10 +315,41 @@ def sync_commands(
     return created, updated, skipped
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Sync commands between Cursor and Claude Code formats"
-    )
+def _run_generate_missing(dry_run: bool, quiet: bool) -> int:
+    """Run --generate-missing mode and return the exit status."""
+    if yaml is None:
+        print("❌ PyYAML not installed. Run: uv add pyyaml")
+        return 1
+    print("\n🔧 Generating commands for skills without commands")
+    print(f"   Skills: {SKILLS_DIR.relative_to(PROJECT_ROOT)}")
+    print(f"   Target: {CURSOR_COMMANDS.relative_to(PROJECT_ROOT)}")
+
+    if dry_run:
+        print("   Mode: DRY RUN (no changes will be made)\n")
+    else:
+        print()
+
+    # Ensure target directory exists
+    if not dry_run:
+        CURSOR_COMMANDS.mkdir(parents=True, exist_ok=True)
+
+    created = generate_missing_commands(dry_run=dry_run, verbose=not quiet)
+
+    print(f"\n📊 Generated: {created} new commands")
+
+    if dry_run and created:
+        print("\n💡 Run without --dry-run to create the commands")
+
+    return 0
+
+
+def main() -> int:
+    """Parse arguments, run the requested sync and return the exit status.
+
+    Returns 1 when the sync can't run (PyYAML missing for
+    --generate-missing, or the source directory missing), otherwise 0.
+    """
+    parser = argparse.ArgumentParser(description="Sync commands between Cursor and Claude Code formats")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -363,30 +371,9 @@ def main():
 
     # Handle generate-missing mode
     if args.generate_missing:
-        print("\n🔧 Generating commands for skills without commands")
-        print(f"   Skills: {SKILLS_DIR.relative_to(PROJECT_ROOT)}")
-        print(f"   Target: {CURSOR_COMMANDS.relative_to(PROJECT_ROOT)}")
+        return _run_generate_missing(args.dry_run, args.quiet)
 
-        if args.dry_run:
-            print("   Mode: DRY RUN (no changes will be made)\n")
-        else:
-            print()
-
-        # Ensure target directory exists
-        if not args.dry_run:
-            CURSOR_COMMANDS.mkdir(parents=True, exist_ok=True)
-
-        created = generate_missing_commands(
-            dry_run=args.dry_run, verbose=not args.quiet
-        )
-
-        print(f"\n📊 Generated: {created} new commands")
-
-        if args.dry_run and created:
-            print("\n💡 Run without --dry-run to create the commands")
-
-        return 0
-
+    converter: Callable[[str, str], str]
     if args.reverse:
         source_dir = CLAUDE_COMMANDS
         target_dir = CURSOR_COMMANDS
@@ -397,6 +384,10 @@ def main():
         target_dir = CLAUDE_COMMANDS
         converter = cursor_to_claude
         direction = "Cursor → Claude Code"
+
+    if not source_dir.exists():
+        print(f"❌ Source directory does not exist: {source_dir}")
+        return 1
 
     print(f"\n🔄 Syncing commands: {direction}")
     print(f"   Source: {source_dir.relative_to(PROJECT_ROOT)}")
