@@ -13,7 +13,7 @@ This is the primary mode for the meeting scheduler.
 import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any
 
@@ -48,6 +48,17 @@ except ImportError:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=too-many-instance-attributes
@@ -338,7 +349,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
             # Don't wait for UI automation (captions, popups, etc.)
             if self._use_npu_stt:
                 logger.info("🧠 Starting NPU STT early (before UI automation)...")
-                asyncio.create_task(self._setup_npu_stt())
+                _spawn_background(self._setup_npu_stt())
 
             # Join the meeting (this does UI automation - can take 10+ seconds)
             controller = self._controller
