@@ -2,11 +2,12 @@
 
 import logging
 import math
-import random
+import secrets
 from pathlib import Path
 
 import cv2
 import numpy as np
+
 from tool_modules.aa_meet_bot.src.dynamic_fields import DynamicFields
 from tool_modules.aa_meet_bot.src.video_config import Attendee
 from tool_modules.aa_meet_bot.src.video_theme import (
@@ -18,6 +19,9 @@ from tool_modules.aa_meet_bot.src.video_theme import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 
 class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-methods
@@ -49,22 +53,18 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
                     color = "dark_green"  # Older - faded
 
                 y = transcript_start_y + i * transcript_line_height
-                text_items.append(
-                    (f"> {display_text}", c.wave_x, y, color, "medium")
-                )  # +6pt
+                text_items.append((f"> {display_text}", c.wave_x, y, color, "medium"))  # +6pt
 
         # === VOICE PROFILE ANALYSIS - LEFT of facial recognition (top right area) ===
         voice_x = c.voice_profile_x
         voice_y = c.voice_profile_y
-        text_items.append(
-            ("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large")
-        )  # doubled size
+        text_items.append(("VOICE PROFILE ANALYSIS", voice_x, voice_y, "green", "large"))  # doubled size
 
         stats = [
             f"Voice Print ID: {attendee_data['voice_print_id']:05d}",
             "",
-            f"Freq: 125-4000 Hz | Pitch: {random.randint(150, 220)} Hz",
-            f"Cadence: {random.randint(120, 160)} wpm | Conf: {random.uniform(90, 99):.1f}%",
+            f"Freq: 125-4000 Hz | Pitch: {_RNG.randint(150, 220)} Hz",
+            f"Cadence: {_RNG.randint(120, 160)} wpm | Conf: {_RNG.uniform(90, 99):.1f}%",
         ]
         for i, stat in enumerate(stats):
             if stat:  # Skip empty lines
@@ -73,9 +73,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
                 )  # doubled size + line height
 
         # === FACIAL RECOGNITION - TOP RIGHT === (+10pt bigger text)
-        text_items.append(
-            ("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large")
-        )
+        text_items.append(("FACIAL RECOGNITION", c.face_x, c.face_y - 10, "red", "large"))
 
         # Show Slack username below the profile image
         if attendee_data and attendee_data.get("has_slack_data"):
@@ -83,12 +81,8 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
             slack_id = attendee_data.get("slack_id", "")
             # Position below the face box
             slack_info_y = c.face_y + c.face_h + 25
-            text_items.append(
-                (f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium")
-            )
-            text_items.append(
-                (f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal")
-            )
+            text_items.append((f"@{slack_name}", c.face_x, slack_info_y, "cyan", "medium"))
+            text_items.append((f"[{slack_id}]", c.face_x, slack_info_y + 25, "dark_green", "normal"))
 
         # === RIGHT COLUMN REMOVED - no more "BUILDING CONTEXT" ===
 
@@ -146,25 +140,15 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         busy_sec = npu["busy_us"] / 1_000_000
         mem_mb = npu["mem_bytes"] / (1024 * 1024)
         # Calculate utilization from delta (busy_delta over 500ms = busy_delta/500000 * 100%)
-        util_pct = (
-            min(100, int(npu["busy_delta_us"] / 5000))
-            if npu["busy_delta_us"] > 0
-            else 0
-        )
+        util_pct = min(100, int(npu["busy_delta_us"] / 5000)) if npu["busy_delta_us"] > 0 else 0
         runtime_status = npu["runtime_status"].upper()
 
         # Distribute stats across 6 columns (fewer items per column = larger text fits)
         # Column 1 - NPU core stats
         stt = self._stt_stats
         rtf_display = f"{stt['avg_rtf']:.2f}" if stt["avg_rt"] > 0 else "---"
-        latency_display = (
-            f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
-        )
-        rate_display = (
-            f"{stt['inferences_per_second']:.1f}/s"
-            if stt["inferences_per_second"] > 0
-            else "---"
-        )
+        latency_display = f"{stt['avg_latency_ms']:.0f}ms" if stt["avg_latency_ms"] > 0 else "---"
+        rate_display = f"{stt['inferences_per_second']:.1f}/s" if stt["inferences_per_second"] > 0 else "---"
         active = self._cyan_if_active
         self._add_lines(
             text_items,
@@ -258,9 +242,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         # Only show face box and silhouette if NO photo available
         if not has_photo:
             # Face box outline
-            shapes.append(
-                ("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1)
-            )
+            shapes.append(("rect", c.face_x, c.face_y, c.face_w, c.face_h, "dark_green", 1))
             # Silhouette - sized to match typical photo dimensions
             center_x = c.face_x + c.face_w // 2
             # Make silhouette fit typical photo size (roughly 200x200 centered)
@@ -337,9 +319,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         """
         transcript_history = transcript_history or []
         if not self._gpu_text_renderer:
-            raise RuntimeError(
-                "GPU text renderer not initialized - required for video generation"
-            )
+            raise RuntimeError("GPU text renderer not initialized - required for video generation")
 
         c = self.config
 
@@ -377,15 +357,14 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         # text_items.append((assessment, c.left_margin, c.assessment_y, "yellow", "normal"))
 
         # === WAVEFORM LABEL - above the waveform box, left aligned ===
-        text_items.append(
-            ("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium")
-        )  # +6pt
+        text_items.append(("ANALYZING SPEECH PATTERNS", c.wave_x, c.wave_y - 15, "cyan", "medium"))  # +6pt
 
         self._append_profile_items(text_items, c, transcript_history, attendee_data)
 
         self._append_npu_items(text_items, c, frame_num)
 
-        return self._paint_base_frame(text_items, c, attendee_data)
+        base_frame: np.ndarray = self._paint_base_frame(text_items, c, attendee_data)
+        return base_frame
 
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-locals
@@ -419,9 +398,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
                     h, w = img.shape[:2]
                     scale = target_size / max(h, w)
                     new_w, new_h = int(w * scale), int(h * scale)
-                    photo_bgr = cv2.resize(
-                        img, (new_w, new_h), interpolation=cv2.INTER_AREA
-                    )
+                    photo_bgr = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
                     logger.debug(
                         "Loaded photo for %s: %s -> %sx%s",
                         attendee.name,
@@ -430,7 +407,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
                         new_h,
                     )
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("Failed to load photo %s: %s", photo_path, e)
+                logger.warning("Failed to load photo %s: %s", photo_path, e, exc_info=True)
 
         return {
             "username": username,
@@ -446,11 +423,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
             "email": email,
             "has_slack_data": attendee.slack_id is not None,
             "tools": [
-                (
-                    f"slack://user/{slack_id}"
-                    if attendee.slack_id
-                    else f"slack://search?user={first_name}.{last_name}"
-                ),
+                (f"slack://user/{slack_id}" if attendee.slack_id else f"slack://search?user={first_name}.{last_name}"),
                 f"ldap://query?uid={username}",
                 f"jira://search?assignee={username}",
                 f"gitlab://commits?author={email}",
@@ -487,11 +460,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         pitch_var = 12 + int(8 * math.sin(t * 0.9))
 
         # Left stats column
-        voice_print_id = (
-            attendee_data["voice_print_id"]
-            if attendee_data
-            else hash(attendee.name) % 99999
-        )
+        voice_print_id = attendee_data["voice_print_id"] if attendee_data else hash(attendee.name) % 99999
         draw_text(
             frame,
             f"VOICE PRINT ID: VP-{voice_print_id:05d}",
@@ -565,9 +534,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
             (right_stats_x, voice_stats_y + 28),
             (font_small, CV_GREEN, thickness),
         )
-        profile_color = (
-            (0, 255, 0) if t > 10 else CV_GREEN
-        )  # Bright green when complete
+        profile_color = (0, 255, 0) if t > 10 else CV_GREEN  # Bright green when complete
         draw_text(
             frame,
             f"PROFILE: {min(100, int(t * 7))}%",
@@ -577,23 +544,17 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
 
         # Generate waveform into pre-allocated buffer
         if has_audio:
-            wave_arr = self._generate_waveform_frame_from_audio(
-                audio_data, self._wave_buffer
-            )
+            wave_arr = self._generate_waveform_frame_from_audio(audio_data, self._wave_buffer)
         else:
             wave_arr = self._generate_waveform_frame(t, self._wave_buffer)
 
         # Scale waveform using cv2.resize (100x faster than fancy indexing)
         target_h = wave_h - 4
         target_w = wave_w - 4
-        scaled_wave = cv2.resize(
-            wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST
-        )
+        scaled_wave = cv2.resize(wave_arr, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
 
         # Paste waveform
-        frame[
-            wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w
-        ] = scaled_wave
+        frame[wave_y + 2 : wave_y + 2 + target_h, wave_x + 2 : wave_x + 2 + target_w] = scaled_wave
 
         # Generate NPU panel into pre-allocated buffer
         npu_arr = self._generate_npu_frame(t, frame_num, self._npu_buffer)
@@ -647,14 +608,10 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
 
         # Animated dots (changes per frame)
         dots = "." * (int(t * 3) % 4)
-        draw_text(
-            frame, f"ANALYZING{dots}", (padding, 45), (font_small, CV_GREEN, thickness)
-        )
+        draw_text(frame, f"ANALYZING{dots}", (padding, 45), (font_small, CV_GREEN, thickness))
 
         # Person name (changes per attendee)
-        draw_text(
-            frame, attendee.name, (padding, 70), (font_medium, CV_WHITE, thickness)
-        )
+        draw_text(frame, attendee.name, (padding, 70), (font_medium, CV_WHITE, thickness))
 
         # Tools - appear over time (dynamic)
         y_pos = 100
@@ -669,9 +626,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
                 )
 
         # Findings - appear after tools (dynamic)
-        findings_start = (
-            len(realistic_tools[: config.num_tools]) * config.tool_display_time
-        )
+        findings_start = len(realistic_tools[: config.num_tools]) * config.tool_display_time
         findings_y = y_pos + config.num_tools * 20 + 15
         for j, finding in enumerate(findings):
             finding_start = findings_start + j * 1.0
@@ -760,7 +715,8 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
             duration,
             realistic_tools,
         )
-        return self._draw_voice_and_panels(frame, t, frame_num, attendee, attendee_data)
+        complete: np.ndarray = self._draw_voice_and_panels(frame, t, frame_num, attendee, attendee_data)
+        return complete
 
     def _realistic_tools(self, attendee, attendee_data):
         """Return tool URLs from enrichment data or a stable fallback."""
@@ -793,8 +749,6 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         filters = []
 
         # Header
-        filters.append(
-            "drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15"
-        )
+        filters.append("drawtext=text='[ AI RESEARCH MODULE v2.1 ]':fontsize=32:fontcolor=cyan:x=30:y=15")
 
         return filters
