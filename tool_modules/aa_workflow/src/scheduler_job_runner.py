@@ -13,11 +13,13 @@ import logging
 import os
 import shutil
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any
 
 import yaml
+
 from tool_modules.aa_workflow.src.notification_emitter import (
     notify_cron_job_completed,
     notify_cron_job_failed,
@@ -39,10 +41,21 @@ except ImportError:  # optional path config; VPN uses the default script
 
 logger = logging.getLogger(__name__)
 
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
+
 # Compact markers so these lists are not duplicate-code with skill auto-heal.
 _AUTH_MARKERS = (
-    "unauthorized|401|forbidden|403|token expired|authentication required|"
-    "not authorized|permission denied|credentials"
+    "unauthorized|401|forbidden|403|token expired|authentication required|not authorized|permission denied|credentials"
 )
 _NETWORK_MARKERS = (
     "no route to host|connection refused|network unreachable|timeout|dial tcp|"
@@ -56,7 +69,7 @@ def _marker_hit(text: str, markers: str) -> bool:
 
 
 def _cron_session_name(skill: str) -> str:
-    now = datetime.now()
+    now = datetime.now().astimezone()
     safe_skill = skill.replace("/", "-")
     return f"cron-{safe_skill}-{now.strftime('%Y%m%d')}-{now.strftime('%H%M%S')}"
 
@@ -102,7 +115,7 @@ def _claude_job_prompt(job_name, skill, inputs, session_name, persona) -> str:
 def _timeout_event(current_state: dict, skill_name: str, error: str) -> dict:
     return {
         "type": "skill_timeout",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now().astimezone().isoformat(),
         "skillName": skill_name,
         "workspaceUri": current_state.get("workspaceUri", "default"),
         "stepIndex": current_state.get("currentStepIndex"),
@@ -181,7 +194,7 @@ def _write_claude_log(log_file: Path, meta: dict, output, err):
         handle.write(f"=== Cron Job: {meta['job']} ===\n")
         handle.write(f"Skill: {meta['skill']}\n")
         handle.write(f"Session: {meta['session']}\n")
-        handle.write(f"Started: {datetime.now().isoformat()}\n")
+        handle.write(f"Started: {datetime.now().astimezone().isoformat()}\n")
         handle.write(f"Exit Code: {meta['code']}\n")
         handle.write(f"\n=== STDOUT ===\n{output}\n")
         if err:
@@ -205,7 +218,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             log_file = Path.home() / ".config" / "aa-workflow" / "scheduler.log"
             log_file.parent.mkdir(parents=True, exist_ok=True)
             with open(log_file, "a", encoding="utf-8") as handle:
-                handle.write(f"{datetime.now().isoformat()} - {message}\n")
+                handle.write(f"{datetime.now().astimezone().isoformat()} - {message}\n")
         except OSError as exc:
             logger.debug("Suppressed error: %s", exc)
 
@@ -223,9 +236,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             logger.warning("Failed to cleanup skill execution state: %s", exc)
 
     def _rewrite_running_skill_state(self, skill_name: str, error: str):
-        execution_file = (
-            Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
-        )
+        execution_file = Path.home() / ".config" / "aa-workflow" / "skill_execution.json"
         if not execution_file.exists():
             return
         with open(execution_file, encoding="utf-8") as handle:
@@ -233,10 +244,8 @@ class JobRunner:  # pylint: disable=too-few-public-methods
         if not self._should_reset_skill_state(current_state, skill_name):
             return
         current_state["status"] = "failed"
-        current_state["endTime"] = datetime.now().isoformat()
-        current_state.setdefault("events", []).append(
-            _timeout_event(current_state, skill_name, error)
-        )
+        current_state["endTime"] = datetime.now().astimezone().isoformat()
+        current_state.setdefault("events", []).append(_timeout_event(current_state, skill_name, error))
         tmp_file = execution_file.with_suffix(".tmp")
         with open(tmp_file, "w", encoding="utf-8") as handle:
             json.dump(current_state, handle, indent=2)
@@ -247,16 +256,11 @@ class JobRunner:  # pylint: disable=too-few-public-methods
     def _should_reset_skill_state(self, current_state: dict, skill_name: str) -> bool:
         if current_state.get("skillName") != skill_name:
             other = current_state.get("skillName")
-            self._log_to_file(
-                f"Skill execution state is for different skill ({other}), "
-                "not cleaning up"
-            )
+            self._log_to_file(f"Skill execution state is for different skill ({other}), not cleaning up")
             return False
         if current_state.get("status") != "running":
             status = current_state.get("status")
-            self._log_to_file(
-                f"Skill execution state is already {status}, not cleaning up"
-            )
+            self._log_to_file(f"Skill execution state is already {status}, not cleaning up")
             return False
         return True
 
@@ -280,9 +284,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             return "timeout"
         return "unknown"
 
-    async def _apply_remediation(
-        self, failure_type: str, job_name: str
-    ) -> tuple[str | None, bool]:
+    async def _apply_remediation(self, failure_type: str, job_name: str) -> tuple[str | None, bool]:
         """Apply remediation based on failure type before retry.
 
         Args:
@@ -405,8 +407,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             session_name,
         )
         self._log_to_file(
-            f"_execute_job called: job={job_name}, skill={skill}, "
-            f"persona={persona}, session={session_name}"
+            f"_execute_job called: job={job_name}, skill={skill}, persona={persona}, session={session_name}"
         )
 
     async def _run_attempts(self, plan, request) -> dict:
@@ -441,9 +442,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             plan.max_attempts,
             delay,
         )
-        self._log_to_file(
-            f"Retry {attempt}/{plan.max_attempts} for {job_name}, waiting {delay}s"
-        )
+        self._log_to_file(f"Retry {attempt}/{plan.max_attempts} for {job_name}, waiting {delay}s")
         await asyncio.sleep(delay)
 
     def _log_attempt_success(self, job_name: str, attempt: int):
@@ -481,7 +480,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             output = await self._run_skill(skill, inputs, job_name=job_name)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Skill failures stay inside the retry loop and must not kill cron.
-            logger.error("Job %s failed: %s", job_name, exc)
+            logger.exception("Job %s failed", job_name)
             return False, None, str(exc)
         logger.info("Job %s completed successfully (direct execution)", job_name)
         return True, output, None
@@ -544,9 +543,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
         log_dir = Path.home() / ".config" / "aa-workflow" / "cron_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{session_name}.log"
-        self._log_to_file(
-            f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s"
-        )
+        self._log_to_file(f"Running Claude CLI, output to {log_file}, timeout={timeout_seconds}s")
         meta = {"job": job_name, "skill": skill, "session": session_name}
         try:
             return await self._collect_claude(prompt, log_file, meta, timeout_seconds)
@@ -558,7 +555,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             self._cleanup_skill_execution_state(skill, str(exc))
             return False, None, str(exc)
 
-    async def _collect_claude(self, prompt, log_file, meta, timeout_seconds):
+    async def _collect_claude(self, prompt, log_file, meta, timeout_seconds) -> tuple[bool, str | None, str | None]:
         skill = meta["skill"]
         process = await asyncio.create_subprocess_exec(
             "claude",
@@ -570,9 +567,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
             cwd=str(PROJECT_ROOT),
         )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(), timeout=timeout_seconds
-            )
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
@@ -590,9 +585,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
         error_msg = error_output or f"Claude CLI exited with code {process.returncode}"
         return False, output[:200] if output else None, error_msg
 
-    async def _run_skill(
-        self, skill_name: str, inputs: dict, job_name: str | None = None
-    ) -> str:
+    async def _run_skill(self, skill_name: str, inputs: dict, job_name: str | None = None) -> str:
         """Run a skill and return its output.
 
         Args:
@@ -608,8 +601,7 @@ class JobRunner:  # pylint: disable=too-few-public-methods
         skill_file = SKILLS_DIR / f"{skill_name}.yaml"
         if not skill_file.exists():
             raise FileNotFoundError(f"Skill not found: {skill_name}")
-        with open(skill_file, encoding="utf-8") as handle:
-            skill = yaml.safe_load(handle)
+        skill = await _load_yaml(skill_file)
         executor = SkillExecutor(
             skill=skill,
             inputs=inputs,
