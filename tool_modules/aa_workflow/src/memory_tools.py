@@ -31,18 +31,32 @@ For the new unified memory interface, see:
 - tool_modules/aa_workflow/src/memory_unified.py - Unified MCP tools
 """
 
+import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 from fastmcp import Context
 from mcp.types import TextContent
+
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
 
 # Support both package import and direct loading
 try:
@@ -129,7 +143,7 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
                 return MEMORY_DIR / "state" / "projects" / project / "current_work.yaml"
             # Intentional: optional step must not abort the caller.
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
+                logger.debug("Suppressed error: %s", exc, exc_info=True)
 
         # Fall back to sync version
         try:
@@ -155,9 +169,7 @@ async def _resolve_memory_path_async(key: str, ctx: Any = None) -> Path:
 # ==================== TOOL IMPLEMENTATIONS ====================
 
 
-def _check_pattern_matches(
-    patterns: list, pattern_key: str, error_lower: str, tool_lower: str = ""
-) -> list:
+def _check_pattern_matches(patterns: list, pattern_key: str, error_lower: str, tool_lower: str = "") -> list:
     """Check a list of patterns for matches and return formatted results."""
     matches = []
     for pattern in patterns:
@@ -203,7 +215,8 @@ def _load_tool_fixes_from_memory() -> list:
     try:
         with open(fixes_file, encoding="utf-8") as f:
             fixes_data = yaml.safe_load(f) or {}
-            return fixes_data.get("tool_fixes", [])
+            fixes: list = fixes_data.get("tool_fixes", [])
+            return fixes
     except (yaml.YAMLError, OSError):
         return []
 
@@ -253,7 +266,7 @@ def _collect_file_stats() -> tuple[dict, int]:
         total_size += size_bytes
         file_stats[str(relative)] = {
             "size_kb": round(size_bytes / 1024, 2),
-            "modified": datetime.fromtimestamp(file.stat().st_mtime).isoformat(),
+            "modified": datetime.fromtimestamp(file.stat().st_mtime, tz=timezone.utc).astimezone().isoformat(),
         }
     return file_stats, total_size
 
@@ -362,9 +375,7 @@ def _format_memory_stats(  # pylint: disable=too-many-branches,too-many-locals
 
     # Top 10 largest files
     lines.append("### 📁 Largest Files")
-    sorted_files = sorted(
-        stats["files"].items(), key=lambda x: x[1]["size_kb"], reverse=True
-    )[:10]
+    sorted_files = sorted(stats["files"].items(), key=lambda x: x[1]["size_kb"], reverse=True)[:10]
     for file_path, info in sorted_files:
         lines.append(f"- {file_path}: {info['size_kb']} KB")
     lines.append("")
@@ -380,9 +391,7 @@ def _format_memory_stats(  # pylint: disable=too-many-branches,too-many-locals
 
     # Check auto-heal rate
     if stats.get("auto_heal") and stats["auto_heal"]["success_rate"] < 0.7:
-        warnings.append(
-            f"⚠️ Auto-heal success rate low: {stats['auto_heal']['success_rate']:.0%}"
-        )
+        warnings.append(f"⚠️ Auto-heal success rate low: {stats['auto_heal']['success_rate']:.0%}")
 
     # Check total storage
     if stats["storage"]["total_kb"] > 1024:
@@ -390,8 +399,7 @@ def _format_memory_stats(  # pylint: disable=too-many-branches,too-many-locals
         warnings.append(f"⚠️ Total storage over 1 MB: {storage_kb} KB")
 
     if warnings:
-        for w in warnings:
-            lines.append(w)
+        lines.extend(warnings)
     else:
         lines.append("✅ All checks passed - memory system healthy")
 
@@ -463,27 +471,21 @@ async def _memory_read_impl(key: str = "", ctx: Any = None) -> list[TextContent]
         return [
             TextContent(
                 type="text",
-                text=f"❌ Memory not found: {key}\n\n"
-                "Use memory_read() without args to see available memory.",
+                text=f"❌ Memory not found: {key}\n\nUse memory_read() without args to see available memory.",
             )
         ]
 
     try:
         content = memory_file.read_text()
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [
-            TextContent(
-                type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```"
-            )
-        ]
+        return [TextContent(type="text", text=f"## Memory: {display_key}\n\n```yaml\n{content}\n```")]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error reading memory")
         return [TextContent(type="text", text=f"❌ Error reading memory: {e}")]
 
 
-async def _memory_write_impl(
-    key: str, content: str, ctx: Any = None
-) -> list[TextContent]:
+async def _memory_write_impl(key: str, content: str, ctx: Any = None) -> list[TextContent]:
     """
     Write to persistent memory.
 
@@ -524,12 +526,11 @@ async def _memory_write_impl(
         return [TextContent(type="text", text=f"❌ Invalid YAML: {e}")]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error writing memory")
         return [TextContent(type="text", text=f"❌ Error writing memory: {e}")]
 
 
-async def _memory_update_impl(
-    key: str, path: str, value: str, ctx: Any = None
-) -> list[TextContent]:
+async def _memory_update_impl(key: str, path: str, value: str, ctx: Any = None) -> list[TextContent]:
     """
     Update a specific field in memory.
 
@@ -564,8 +565,7 @@ async def _memory_update_impl(
 
     try:
         # Load existing
-        with open(memory_file, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        data = await _load_yaml(memory_file) or {}
 
         # Parse the new value
         new_value = yaml.safe_load(value)
@@ -580,21 +580,17 @@ async def _memory_update_impl(
         target[parts[-1]] = new_value
 
         # Write back
-        with open(memory_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
+        await _dump_yaml(memory_file, data, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [
-            TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")
-        ]
+        return [TextContent(type="text", text=f"✅ Updated {display_key}: {path} = {value}")]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error updating memory")
         return [TextContent(type="text", text=f"❌ Error updating memory: {e}")]
 
 
-async def _memory_append_impl(
-    key: str, list_path: str, item: str, ctx: Any = None
-) -> list[TextContent]:
+async def _memory_append_impl(key: str, list_path: str, item: str, ctx: Any = None) -> list[TextContent]:
     """
     Append an item to a list in memory.
 
@@ -629,8 +625,7 @@ async def _memory_append_impl(
 
     try:
         # Load existing
-        with open(memory_file, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        data = await _load_yaml(memory_file) or {}
 
         # Parse the new item
         new_item = yaml.safe_load(item)
@@ -652,21 +647,17 @@ async def _memory_append_impl(
         target[parts[-1]].append(new_item)
 
         # Write back
-        with open(memory_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
+        await _dump_yaml(memory_file, data, default_flow_style=False)
 
         display_key = str(memory_file.relative_to(MEMORY_DIR))
-        return [
-            TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")
-        ]
+        return [TextContent(type="text", text=f"✅ Appended to {display_key}: {list_path}")]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error appending to memory")
         return [TextContent(type="text", text=f"❌ Error appending to memory: {e}")]
 
 
-async def _memory_query_impl(
-    key: str, query: str, ctx: Any = None
-) -> list[TextContent]:
+async def _memory_query_impl(key: str, query: str, ctx: Any = None) -> list[TextContent]:
     """
     Query memory using JSONPath expressions.
 
@@ -713,8 +704,7 @@ async def _memory_query_impl(
 
     try:
         # Load memory file
-        with open(memory_file, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        data = await _load_yaml(memory_file) or {}
 
         # Parse and execute JSONPath query
         expr = parse(query)
@@ -745,6 +735,7 @@ async def _memory_query_impl(
         ]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Memory tool failed")
         key_normalized = key.replace(".yaml", "")
         return [
             TextContent(
@@ -778,15 +769,14 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
 
     record_memory_write()
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
     session_file = MEMORY_DIR / "sessions" / f"{today}.yaml"
     session_file.parent.mkdir(parents=True, exist_ok=True)
 
     try:
         # Load existing or create new
         if session_file.exists():
-            with open(session_file, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+            data = await _load_yaml(session_file) or {}
         else:
             data = {"date": today, "entries": []}
 
@@ -795,7 +785,7 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
 
         # Add entry
         entry = {
-            "time": datetime.now().strftime("%H:%M:%S"),
+            "time": datetime.now().astimezone().strftime("%H:%M:%S"),
             "action": action,
         }
         if details:
@@ -804,18 +794,16 @@ async def _memory_session_log_impl(action: str, details: str = "") -> list[TextC
         data["entries"].append(entry)
 
         # Write back
-        with open(session_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
+        await _dump_yaml(session_file, data, default_flow_style=False)
 
         return [TextContent(type="text", text=f"✅ Logged: {action}")]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error logging")
         return [TextContent(type="text", text=f"❌ Error logging: {e}")]
 
 
-async def _check_known_issues_impl(
-    tool_name: str = "", error_text: str = ""
-) -> list[TextContent]:
+async def _check_known_issues_impl(tool_name: str = "", error_text: str = "") -> list[TextContent]:
     """
     Check memory for known fixes before or after an error.
 
@@ -845,9 +833,7 @@ async def _check_known_issues_impl(
         "jira_cli_patterns",
     ]
     for pattern_type in pattern_types:
-        pattern_matches = _check_pattern_matches(
-            patterns.get(pattern_type, []), pattern_type, error_lower, tool_lower
-        )
+        pattern_matches = _check_pattern_matches(patterns.get(pattern_type, []), pattern_type, error_lower, tool_lower)
         matches.extend(pattern_matches)
 
     # Load and check tool fixes
@@ -920,8 +906,7 @@ async def _learn_tool_fix_impl(
     try:
         # Load existing or create new
         if fixes_file.exists():
-            with open(fixes_file, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+            data = await _load_yaml(fixes_file) or {}
         else:
             data = {"tool_fixes": [], "common_mistakes": {}}
 
@@ -934,23 +919,19 @@ async def _learn_tool_fix_impl(
             "error_pattern": error_pattern,
             "root_cause": root_cause,
             "fix_applied": fix_description,
-            "date_learned": datetime.now().strftime("%Y-%m-%d"),
+            "date_learned": datetime.now().astimezone().strftime("%Y-%m-%d"),
             "times_prevented": 0,
         }
 
         # Check for duplicates
         for existing in data["tool_fixes"]:
-            if (
-                existing.get("tool_name") == tool_name
-                and existing.get("error_pattern") == error_pattern
-            ):
+            if existing.get("tool_name") == tool_name and existing.get("error_pattern") == error_pattern:
                 # Update existing instead of adding duplicate
                 existing["root_cause"] = root_cause
                 existing["fix_applied"] = fix_description
                 existing["date_learned"] = new_fix["date_learned"]
 
-                with open(fixes_file, "w", encoding="utf-8") as f:
-                    yaml.dump(data, f, default_flow_style=False)
+                await _dump_yaml(fixes_file, data, default_flow_style=False)
 
                 return [
                     TextContent(
@@ -966,8 +947,7 @@ async def _learn_tool_fix_impl(
         data["tool_fixes"].append(new_fix)
 
         # Write back
-        with open(fixes_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
+        await _dump_yaml(fixes_file, data, default_flow_style=False)
 
         return [
             TextContent(
@@ -982,6 +962,7 @@ async def _learn_tool_fix_impl(
         ]
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error saving fix")
         return [TextContent(type="text", text=f"❌ Error saving fix: {e}")]
 
 
@@ -1017,14 +998,13 @@ async def _memory_stats_impl() -> list[TextContent]:
         sessions_dir = MEMORY_DIR / "sessions"
         if sessions_dir.exists():
             session_files = list(sessions_dir.glob("*.yaml"))
-            today = datetime.now().strftime("%Y-%m-%d")
+            today = datetime.now().astimezone().strftime("%Y-%m-%d")
             today_file = sessions_dir / f"{today}.yaml"
 
             today_actions = 0
             if today_file.exists():
-                with open(today_file, encoding="utf-8") as f:
-                    today_data = yaml.safe_load(f) or {}
-                    today_actions = len(today_data.get("entries", []))
+                today_data = await _load_yaml(today_file) or {}
+                today_actions = len(today_data.get("entries", []))
 
             stats["sessions"] = {
                 "total_session_files": len(session_files),
@@ -1047,6 +1027,7 @@ async def _memory_stats_impl() -> list[TextContent]:
 
     # Intentional: optional step must not abort the caller.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Error generating stats")
         return [TextContent(type="text", text=f"❌ Error generating stats: {e}")]
 
 
@@ -1097,9 +1078,7 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_update(
-        ctx: Context, key: str, path: str, value: str
-    ) -> list[TextContent]:
+    async def memory_update(ctx: Context, key: str, path: str, value: str) -> list[TextContent]:
         """
         Update a specific field in memory.
 
@@ -1117,9 +1096,7 @@ def register_memory_tools(server: "FastMCP") -> int:
 
     @auto_heal()
     @registry.tool()
-    async def memory_append(
-        ctx: Context, key: str, list_path: str, item: str
-    ) -> list[TextContent]:
+    async def memory_append(ctx: Context, key: str, list_path: str, item: str) -> list[TextContent]:
         """
         Append an item to a list in memory.
 
@@ -1222,9 +1199,7 @@ def register_memory_tools(server: "FastMCP") -> int:
         Returns:
             Confirmation of the saved fix.
         """
-        return await _learn_tool_fix_impl(
-            tool_name, error_pattern, root_cause, fix_description
-        )
+        return await _learn_tool_fix_impl(tool_name, error_pattern, root_cause, fix_description)
 
     @registry.tool()
     async def memory_stats(
