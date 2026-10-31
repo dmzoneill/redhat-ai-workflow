@@ -205,7 +205,13 @@ class PiperTTS:
             logger.debug("Running piper: %s", " ".join(cmd))
 
             # Run piper with text on stdin
-            result = subprocess.run(cmd, input=text.encode(), capture_output=True, timeout=30, check=False)
+            result = subprocess.run(
+                cmd,
+                input=text.encode(),
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
 
             if result.returncode != 0:
                 logger.error("Piper CLI error: %s", result.stderr.decode())
