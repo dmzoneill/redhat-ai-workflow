@@ -8,7 +8,9 @@ import os
 import secrets
 import struct
 import time
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -27,6 +29,18 @@ from tool_modules.aa_meet_bot.src.video_theme import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 # Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
 _RNG = secrets.SystemRandom()
@@ -64,14 +78,14 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 # Set running flag BEFORE starting processing loop
                 self.__dict__["_running"] = True
                 # Start audio processing task
-                asyncio.create_task(self._audio_processing_loop())
+                _spawn_background(self._audio_processing_loop())
 
                 # Initialize STT engine (runs on NPU)
                 if self._stt_enabled:
-                    asyncio.create_task(self._init_stt_engine())
+                    _spawn_background(self._init_stt_engine())
 
                 # Start NPU stats monitoring (lightweight, every 0.5s)
-                asyncio.create_task(self._npu_stats_loop())
+                _spawn_background(self._npu_stats_loop())
 
                 return True
             logger.warning("Failed to start audio capture from %s", self._audio_source)
@@ -169,7 +183,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     getattr(self._stt_engine, "_actual_device", "unknown"),
                 )
                 # Start STT processing loop
-                asyncio.create_task(self._stt_processing_loop())
+                _spawn_background(self._stt_processing_loop())
             else:
                 logger.warning("STT engine failed to initialize, transcription disabled")
                 self.__dict__["_stt_enabled"] = False
