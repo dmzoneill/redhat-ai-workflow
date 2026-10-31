@@ -31,9 +31,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
-
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -44,6 +41,9 @@ from tool_modules.aa_meet_bot.src.llm_responder import LLMResponder, get_llm_res
 from tool_modules.aa_meet_bot.src.stt_engine import NPUWhisperSTT
 from tool_modules.aa_meet_bot.src.tts_engine import TTSEngine, get_tts_engine
 from tool_modules.aa_meet_bot.src.wake_word import TextWakeWordDetector, WakeWordEvent
+
+if TYPE_CHECKING:
+    from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
 
