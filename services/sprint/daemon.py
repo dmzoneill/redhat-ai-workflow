@@ -52,7 +52,6 @@ __all__ = ["SprintDaemon", "_add_timeline_event"]
 logger = logging.getLogger(__name__)
 
 
-# pylint: disable-next=too-many-instance-attributes
 class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     """Main Sprint Bot daemon with D-Bus support."""
 
@@ -65,16 +64,38 @@ class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase
     object_path = "/com/aiworkflow/BotSprint"
     interface_name = "com.aiworkflow.BotSprint"
 
+    # Custom D-Bus methods; each is served by the ``_handle_<name>`` coroutine.
+    DBUS_METHODS: tuple[str, ...] = (
+        "list_issues",
+        "approve_issue",
+        "reject_issue",  # Unapprove
+        "abort_issue",  # Abort in-progress
+        "skip_issue",
+        "refresh",
+        "enable",  # Enable automatic mode
+        "disable",  # Disable automatic mode
+        "start",  # Manual start (ignores schedule)
+        "stop",  # Manual stop
+        "get_config",
+        "set_config",
+        "approve_all",
+        "reject_all",  # Unapprove all
+        "process_next",
+        "open_in_cursor",
+        "get_work_log",
+        "write_state",
+        "start_issue",
+        "toggle_background",
+        "get_state",  # Full state for UI
+        "get_history",  # Sprint history
+        "get_trace",  # Execution trace
+    )
+
     def __init__(self, verbose: bool = False, enable_dbus: bool = False):
         self._workflow_config: WorkflowConfig | None = None
         BaseDaemon.__init__(self, verbose=verbose, enable_dbus=enable_dbus)
         DaemonDBusBase.__init__(self)
         SleepWakeAwareDaemon.__init__(self)
-        self.verbose = verbose
-        self.enable_dbus = enable_dbus
-        self._shutdown_event = asyncio.Event()
-        self._issues_processed = 0
-        self._issues_completed = 0
         self._last_jira_refresh: datetime | None = None
         self._last_review_check: datetime | None = None
 
@@ -94,30 +115,9 @@ class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase
             "claude_cli_timeout_seconds": sprint_config.get("claude_cli_timeout_seconds", 1800),
         }
 
-        # Register custom D-Bus method handlers
-        self.register_handler("list_issues", self._handle_list_issues)
-        self.register_handler("approve_issue", self._handle_approve_issue)
-        self.register_handler("reject_issue", self._handle_reject_issue)  # Unapprove
-        self.register_handler("abort_issue", self._handle_abort_issue)  # Abort in-progress
-        self.register_handler("skip_issue", self._handle_skip_issue)
-        self.register_handler("refresh", self._handle_refresh)
-        self.register_handler("enable", self._handle_enable)  # Enable automatic mode
-        self.register_handler("disable", self._handle_disable)  # Disable automatic mode
-        self.register_handler("start", self._handle_start)  # Manual start (ignores schedule)
-        self.register_handler("stop", self._handle_stop)  # Manual stop
-        self.register_handler("get_config", self._handle_get_config)
-        self.register_handler("set_config", self._handle_set_config)
-        self.register_handler("approve_all", self._handle_approve_all)
-        self.register_handler("reject_all", self._handle_reject_all)  # Unapprove all
-        self.register_handler("process_next", self._handle_process_next)
-        self.register_handler("open_in_cursor", self._handle_open_in_cursor)
-        self.register_handler("get_work_log", self._handle_get_work_log)
-        self.register_handler("write_state", self._handle_write_state)
-        self.register_handler("start_issue", self._handle_start_issue)
-        self.register_handler("toggle_background", self._handle_toggle_background)
-        self.register_handler("get_state", self._handle_get_state)  # Full state for UI
-        self.register_handler("get_history", self._handle_get_history)  # Sprint history
-        self.register_handler("get_trace", self._handle_get_trace)  # Execution trace
+        # Register custom D-Bus method handlers (method name -> _handle_<name>)
+        for method_name in self.DBUS_METHODS:
+            self.register_handler(method_name, getattr(self, f"_handle_{method_name}"))
         self.register_handler("list_traces", self._handle_list_traces)  # List all traces
 
     # ==================== Abstract Method Implementations ====================
@@ -198,76 +198,68 @@ class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase
         self.is_running = True
         logger.info("Sprint daemon ready: %s issues", len(state.get("issues", [])))
 
-    # pylint: disable-next=too-many-branches
+    def _should_run(self, state: dict) -> bool:
+        """Whether the bot works now.
+
+        ``manuallyStarted`` runs immediately (ignores schedule); ``automaticMode`` runs within working hours.
+        """
+        manually_started = state.get("manuallyStarted", False)
+        automatic_mode = state.get("automaticMode", False)
+        if manually_started:
+            return True
+        within_hours = self._is_within_working_hours()
+        if automatic_mode and within_hours:
+            return True
+        if automatic_mode:
+            logger.debug("Automatic mode enabled but outside working hours, waiting...")
+        else:
+            logger.debug("Bot not active (automatic mode off, not manually started), waiting...")
+        return False
+
+    async def _run_periodic_checks(self) -> None:
+        """Refresh from Jira and check Review issues when their configured intervals have elapsed."""
+        if self._elapsed_seconds(self._last_jira_refresh) > self._config["jira_refresh_interval_seconds"]:
+            await self._refresh_from_jira()
+        if self._elapsed_seconds(self._last_review_check) > self._config["review_check_interval_seconds"]:
+            await self._check_review_issues()
+
+    async def _process_if_idle(self, state: dict) -> None:
+        """Start the next approved, actionable issue when nothing is in progress."""
+        if state.get("processingIssue"):
+            return
+        issues = state.get("issues", [])
+        approved_actionable = [i for i in issues if i.get("approvalStatus") == "approved" and self._is_actionable(i)]
+        if approved_actionable:
+            logger.info("Found %s approved actionable issues", len(approved_actionable))
+            await self._process_next_issue()
+            return
+        actionable = [i for i in issues if self._is_actionable(i)]
+        logger.debug("Issues: %s total, %s actionable, 0 approved+actionable", len(issues), len(actionable))
+
+    async def _run_cycle(self) -> int:
+        """Run one loop iteration and return how many seconds to wait before the next one."""
+        state = self._load_state()
+        if not self._should_run(state):
+            return 60
+        await self._run_periodic_checks()
+        await self._process_if_idle(state)
+        # Save state periodically (for UI to read)
+        self._save_state(state)
+        return self._config["check_interval_seconds"]
+
     async def run_daemon(self):
         """Main daemon loop."""
         while not self._shutdown_event.is_set():
             try:
-                state = self._load_state()
-
-                # Check if bot should run:
-                # - manuallyStarted: run immediately (ignores schedule)
-                # - automaticMode + within working hours: run on schedule
-                manually_started = state.get("manuallyStarted", False)
-                automatic_mode = state.get("automaticMode", False)
-                within_hours = self._is_within_working_hours()
-
-                should_run = manually_started or (automatic_mode and within_hours)
-
-                if not should_run:
-                    if automatic_mode and not within_hours:
-                        logger.debug("Automatic mode enabled but outside working hours, waiting...")
-                    elif not automatic_mode and not manually_started:
-                        logger.debug("Bot not active (automatic mode off, not manually started), waiting...")
-                    if await self._wait_with_shutdown(60):
-                        break
-                    continue
-
-                # Refresh from Jira periodically
-                refresh_interval = self._config["jira_refresh_interval_seconds"]
-                if self._elapsed_seconds(self._last_jira_refresh) > refresh_interval:
-                    await self._refresh_from_jira()
-
-                # Check issues in Review for merge readiness (interval from config)
-                review_check_interval = self._config["review_check_interval_seconds"]
-                if self._elapsed_seconds(self._last_review_check) > review_check_interval:
-                    await self._check_review_issues()
-
-                # Check if we should process next issue
-                # Only process if no issue is currently in progress
-                if not state.get("processingIssue"):
-                    # Check for approved AND actionable issues
-                    approved_actionable = [
-                        i
-                        for i in state.get("issues", [])
-                        if i.get("approvalStatus") == "approved" and self._is_actionable(i)
-                    ]
-                    if approved_actionable:
-                        logger.info("Found %s approved actionable issues", len(approved_actionable))
-                        await self._process_next_issue()
-                    else:
-                        # Log status periodically
-                        issues = state.get("issues", [])
-                        actionable = [i for i in issues if self._is_actionable(i)]
-                        logger.debug(
-                            "Issues: %s total, %s actionable, 0 approved+actionable", len(issues), len(actionable)
-                        )
-
-                # Save state periodically (for UI to read)
-                self._save_state(state)
-
-                # Wait before next check (with shutdown awareness)
-                check_interval = self._config["check_interval_seconds"]
-                if await self._wait_with_shutdown(check_interval):
-                    break
-
+                wait_seconds = await self._run_cycle()
             except asyncio.CancelledError:
                 logger.info("Main loop cancelled")
                 break
             except RECOVERABLE_ERRORS:
                 logger.exception("Error in main loop")
-                if await self._wait_with_shutdown(60):
-                    break
+                wait_seconds = 60
+            if await self._wait_with_shutdown(wait_seconds):
+                break
 
     async def shutdown(self):
         """Clean up daemon resources."""
