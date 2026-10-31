@@ -19,6 +19,7 @@ Services:
 
 import argparse
 import asyncio
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -27,13 +28,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# Local imports after path setup
-from scripts.common.dbus_base import (  # noqa: E402
-    DBUS_AVAILABLE,
-    check_daemon_health,
-    check_daemon_status,
-    get_client,
-)
+# Local import after path setup
+dbus_base = importlib.import_module("scripts.common.dbus_base")
 
 SERVICES = ["slack", "cron", "meet", "sprint"]
 
@@ -42,12 +38,11 @@ def format_uptime(seconds: float) -> str:
     """Format uptime in human-readable form."""
     if seconds < 60:
         return f"{seconds:.0f}s"
-    elif seconds < 3600:
+    if seconds < 3600:
         return f"{seconds / 60:.0f}m"
-    elif seconds < 86400:
+    if seconds < 86400:
         return f"{seconds / 3600:.1f}h"
-    else:
-        return f"{seconds / 86400:.1f}d"
+    return f"{seconds / 86400:.1f}d"
 
 
 async def cmd_status(args):
@@ -60,7 +55,7 @@ async def cmd_status(args):
     print()
 
     for service in services:
-        status = await check_daemon_status(service)
+        status = await dbus_base.check_daemon_status(service)
 
         if status.get("running", False):
             uptime = format_uptime(status.get("uptime", 0))
@@ -80,9 +75,7 @@ async def cmd_status(args):
             elif service == "sprint":
                 print(f"   Issues: {status.get('total_issues', 0)}")
                 print(f"   Processed: {status.get('issues_processed', 0)}")
-                print(
-                    f"   Working Hours: {'Yes' if status.get('within_working_hours') else 'No'}"
-                )
+                print(f"   Working Hours: {'Yes' if status.get('within_working_hours') else 'No'}")
         else:
             error = status.get("error", "Not running")
             print(f"❌ {service.upper()}: {error}")
@@ -96,7 +89,7 @@ async def cmd_stop(args):
         print("Error: service name required")
         return
 
-    client = get_client(args.service)
+    client = dbus_base.get_client(args.service)
     if await client.connect():
         result = await client.shutdown()
         await client.disconnect()
@@ -114,7 +107,7 @@ async def cmd_run_job(args):
         print("Error: job name required")
         return
 
-    client = get_client("cron")
+    client = dbus_base.get_client("cron")
     if await client.connect():
         result = await client.call_method("run_job", [args.job_name])
         await client.disconnect()
@@ -128,7 +121,8 @@ async def cmd_run_job(args):
 
 async def cmd_list_jobs(args):
     """List cron jobs."""
-    client = get_client("cron")
+    del args  # uniform command signature; no options
+    client = dbus_base.get_client("cron")
     if await client.connect():
         result = await client.call_method("list_jobs", [])
         await client.disconnect()
@@ -149,7 +143,8 @@ async def cmd_list_jobs(args):
 
 async def cmd_list_meetings(args):
     """List upcoming meetings."""
-    client = get_client("meet")
+    del args  # uniform command signature; no options
+    client = dbus_base.get_client("meet")
     if await client.connect():
         result = await client.call_method("list_meetings", [])
         await client.disconnect()
@@ -182,7 +177,7 @@ async def cmd_json(args):
     result = {}
 
     for service in services:
-        status = await check_daemon_status(service)
+        status = await dbus_base.check_daemon_status(service)
         result[service] = status
 
     print(json.dumps(result, indent=2, default=str))
@@ -199,7 +194,7 @@ async def cmd_health(args):
 
     all_healthy = True
     for service in services:
-        health = await check_daemon_health(service)
+        health = await dbus_base.check_daemon_health(service)
 
         if health.get("healthy", False):
             print(f"✅ {service.upper()}: {health.get('message', 'Healthy')}")
@@ -233,9 +228,6 @@ async def cmd_health(args):
 
 async def cmd_fix(args):
     """Attempt to fix unhealthy services."""
-    import subprocess
-    import time
-
     services = [args.service] if args.service else SERVICES
 
     print("Checking services and attempting fixes...")
@@ -249,7 +241,7 @@ async def cmd_fix(args):
     }
 
     for service in services:
-        health = await check_daemon_health(service)
+        health = await dbus_base.check_daemon_health(service)
 
         if health.get("healthy", False):
             print(f"✅ {service.upper()}: Already healthy")
@@ -264,33 +256,41 @@ async def cmd_fix(args):
             continue
 
         try:
-            # Restart the service
-            subprocess.run(
-                ["systemctl", "--user", "restart", unit],
-                capture_output=True,
-                timeout=30,
+            # Restart the service without blocking the event loop
+            proc = await asyncio.create_subprocess_exec(
+                "systemctl",
+                "--user",
+                "restart",
+                unit,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                print("   ⚠️  Restart timed out")
+                print()
+                continue
 
             # Wait for service to start
-            time.sleep(5)
+            await asyncio.sleep(5)
 
             # Re-check health
-            new_health = await check_daemon_health(service)
+            new_health = await dbus_base.check_daemon_health(service)
             if new_health.get("healthy", False):
                 print(f"   ✅ {service.upper()}: Recovered!")
             else:
-                print(
-                    f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}"
-                )
-        except subprocess.TimeoutExpired:
-            print("   ⚠️  Restart timed out")
-        except Exception as e:
+                print(f"   ❌ {service.upper()}: Still unhealthy - {new_health.get('message')}")
+        except OSError as e:
             print(f"   ⚠️  Restart failed: {e}")
 
         print()
 
 
 async def main():
+    """Parse arguments and dispatch to the selected command."""
     parser = argparse.ArgumentParser(
         description="AI Workflow Service Control",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -300,9 +300,7 @@ async def main():
 
     # status command
     status_parser = subparsers.add_parser("status", help="Show service status")
-    status_parser.add_argument(
-        "service", nargs="?", choices=SERVICES, help="Service name"
-    )
+    status_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
 
     # stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a service")
@@ -320,21 +318,13 @@ async def main():
 
     # json command
     json_parser = subparsers.add_parser("json", help="Output raw JSON status")
-    json_parser.add_argument(
-        "service", nargs="?", choices=SERVICES, help="Service name"
-    )
+    json_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
 
     # health command
     health_parser = subparsers.add_parser("health", help="Perform health checks")
-    health_parser.add_argument(
-        "service", nargs="?", choices=SERVICES, help="Service name"
-    )
-    health_parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Show all checks"
-    )
-    health_parser.add_argument(
-        "--no-fix", action="store_true", help="Don't show fix tip"
-    )
+    health_parser.add_argument("service", nargs="?", choices=SERVICES, help="Service name")
+    health_parser.add_argument("-v", "--verbose", action="store_true", help="Show all checks")
+    health_parser.add_argument("--no-fix", action="store_true", help="Don't show fix tip")
 
     # fix command
     fix_parser = subparsers.add_parser("fix", help="Attempt to fix unhealthy services")
@@ -342,7 +332,7 @@ async def main():
 
     args = parser.parse_args()
 
-    if not DBUS_AVAILABLE:
+    if not dbus_base.DBUS_AVAILABLE:
         print("Error: dbus-next not installed")
         print("Install with: uv add dbus-next")
         sys.exit(1)
