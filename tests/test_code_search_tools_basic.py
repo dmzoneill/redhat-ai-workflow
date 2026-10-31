@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from tool_modules.aa_code_search.src import tools_basic
+from tool_modules.aa_code_search.src import cs_config, tools_basic
 
 
 def _private(name):
@@ -39,7 +39,7 @@ def test_parse_timestamp_naive_and_aware():
 @pytest.fixture(name="vector_db")
 def fixture_vector_db(tmp_path, monkeypatch):
     """Point VECTOR_DB_PATH at a temporary directory."""
-    monkeypatch.setattr(tools_basic, "VECTOR_DB_PATH", tmp_path)
+    monkeypatch.setattr(cs_config, "VECTOR_DB_PATH", tmp_path)
     return tmp_path
 
 
@@ -112,7 +112,12 @@ def test_register_tools_names_and_docstrings():
             {"query": "q", "project": "", "limit": 10, "file_filter": "", "type_filter": ""},
         ),
         ("code_compact", "_code_compact_impl", {"project": "p"}, {"project": "p"}),
-        ("knowledge_deep_scan", "_knowledge_deep_scan_impl", {"project": "p"}, {"project": "p"}),
+        (
+            "knowledge_deep_scan",
+            "_knowledge_deep_scan_impl",
+            {"project": "p", "update_memory": False},
+            {"project": "p", "update_memory": False},
+        ),
         (
             "code_watch_all",
             "_code_watch_all_impl",
