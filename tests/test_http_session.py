@@ -4,6 +4,7 @@ Tests the HTTP session store, SAML HTML parsing helpers, and the
 full SAML auth flow with mocked HTTP responses.
 """
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -27,8 +28,76 @@ from tool_modules.aa_sso.src.tools_basic import (
 # ==================== HTTPSAMLConfig ====================
 
 
+def _happy_path_responses(keycloak_login_html, saml_response_html):
+    """Mocked HTTP responses for each phase of a successful SAML flow."""
+    # Build mock responses for each phase
+    # Phase 1: init -> returns JSON with _csrf
+    init_response = httpx.Response(
+        200,
+        json={"_csrf": "csrf_token_123", "subprogram": {"id": 102}},
+        request=httpx.Request("GET", "https://rewardzone.redhat.com/api/v1/init"),
+    )
+
+    # Phase 2: SAML login -> 302 redirect to SSO
+    saml_login_response = httpx.Response(
+        302,
+        headers={"location": "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml?SAMLRequest=xxx"},
+        request=httpx.Request("GET", "https://rewardzone.redhat.com/saml/login"),
+    )
+
+    # Phase 3: SSO login page -> returns HTML form
+    sso_page_response = httpx.Response(
+        200,
+        text=keycloak_login_html,
+        request=httpx.Request("GET", "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml"),
+    )
+
+    # Phase 4+5: POST credentials -> returns SAML response HTML
+    credentials_response = httpx.Response(
+        200,
+        text=saml_response_html,
+        request=httpx.Request(
+            "POST",
+            "https://auth.redhat.com/auth/realms/EmployeeIDP/login-actions/authenticate",
+        ),
+    )
+
+    # Phase 6: POST SAMLResponse to ACS -> 302 to /sso/{token}
+    acs_response = httpx.Response(
+        302,
+        headers={"location": "/sso/session_token_abc"},
+        request=httpx.Request("POST", "https://rewardzone.redhat.com/saml/acs"),
+    )
+
+    # Phase 6b: Follow redirect to /sso/{token}
+    sso_redirect_response = httpx.Response(
+        200,
+        text="OK",
+        request=httpx.Request("GET", "https://rewardzone.redhat.com/sso/session_token_abc"),
+    )
+
+    # Phase 7: POST SSO login with session token
+    sso_login_response = httpx.Response(
+        200,
+        json={"pin": "12345", "_csrf": "new_csrf_456"},
+        request=httpx.Request("POST", "https://rewardzone.redhat.com/api/v1/Sso/login"),
+    )
+    return SimpleNamespace(
+        init_response=init_response,
+        saml_login_response=saml_login_response,
+        sso_page_response=sso_page_response,
+        credentials_response=credentials_response,
+        acs_response=acs_response,
+        sso_redirect_response=sso_redirect_response,
+        sso_login_response=sso_login_response,
+    )
+
+
 class TestHTTPSAMLConfig:
+    """Tests for HTTPSAMLConfig."""
+
     def test_default_csrf_field(self):
+        """Default csrf field."""
         config = HTTPSAMLConfig(
             init_url="/init",
             saml_login_path="/saml/login",
@@ -38,6 +107,7 @@ class TestHTTPSAMLConfig:
         assert config.csrf_field == "_csrf"
 
     def test_custom_csrf_field(self):
+        """Custom csrf field."""
         config = HTTPSAMLConfig(
             init_url="/init",
             saml_login_path="/saml/login",
@@ -48,6 +118,7 @@ class TestHTTPSAMLConfig:
         assert config.csrf_field == "csrfToken"
 
     def test_reward_zone_config_exists(self):
+        """Reward zone config exists."""
         assert "reward_zone" in HTTP_SAML_CONFIGS
         config = HTTP_SAML_CONFIGS["reward_zone"]
         assert config.init_url == "/api/v1/Subprograms/init?subprogramId=102"
@@ -61,7 +132,10 @@ class TestHTTPSAMLConfig:
 
 
 class TestSAMLResponseParser:
+    """Tests for _SAMLResponseParser."""
+
     def test_extracts_saml_response(self):
+        """Extracts saml response."""
         html = """
         <html><body>
         <form method="post" action="https://example.com/saml/acs">
@@ -78,6 +152,7 @@ class TestSAMLResponseParser:
         assert parser.form_action == "https://example.com/saml/acs"
 
     def test_no_saml_response(self):
+        """No saml response."""
         html = "<html><body><p>Not a SAML form</p></body></html>"
         parser = _SAMLResponseParser()
         parser.feed(html)
@@ -85,6 +160,7 @@ class TestSAMLResponseParser:
         assert parser.relay_state is None
 
     def test_saml_response_without_relay_state(self):
+        """Saml response without relay state."""
         html = """
         <form method="post" action="/acs">
             <input type="hidden" name="SAMLResponse" value="abc123" />
@@ -96,6 +172,7 @@ class TestSAMLResponseParser:
         assert parser.relay_state is None
 
     def test_extracts_form_action(self):
+        """Extracts form action."""
         html = """
         <form method="post" action="https://sp.example.com/saml/acs">
             <input type="hidden" name="SAMLResponse" value="data" />
@@ -110,7 +187,10 @@ class TestSAMLResponseParser:
 
 
 class TestExtractFormAction:
+    """Tests for _extract_form_action."""
+
     def test_keycloak_form(self):
+        """Keycloak form."""
         html = (
             '<form id="kc-form-login"'
             ' action="https://auth.example.com/auth/realms/'
@@ -126,22 +206,26 @@ class TestExtractFormAction:
         assert "&amp;" not in result
 
     def test_generic_authenticate_form(self):
+        """Generic authenticate form."""
         html = '<form method="post" action="/login/authenticate?code=xyz">'
         result = _extract_form_action(html)
         assert result == "/login/authenticate?code=xyz"
 
     def test_fallback_post_form(self):
+        """Fallback post form."""
         html = '<form method="post" action="/submit">'
         result = _extract_form_action(html)
         assert result == "/submit"
 
     def test_no_form(self):
+        """No form."""
         html = "<html><body>No form here</body></html>"
         result = _extract_form_action(html)
         assert result is None
 
     def test_get_form_ignored_unless_fallback(self):
         # A GET form shouldn't match the POST fallback
+        """Get form ignored unless fallback."""
         html = '<form method="get" action="/search">'
         result = _extract_form_action(html)
         assert result is None
@@ -151,7 +235,10 @@ class TestExtractFormAction:
 
 
 class TestExtractHiddenFields:
+    """Tests for _extract_hidden_fields."""
+
     def test_extracts_hidden_inputs(self):
+        """Extracts hidden inputs."""
         html = """
         <form>
             <input type="hidden" name="session_code" value="abc123" />
@@ -167,17 +254,20 @@ class TestExtractHiddenFields:
         assert "username" not in fields  # not hidden
 
     def test_empty_value(self):
+        """Empty value."""
         html = '<input type="hidden" name="token" value="" />'
         fields = _extract_hidden_fields(html)
         assert fields["token"] == ""
 
     def test_no_hidden_fields(self):
+        """No hidden fields."""
         html = '<form><input type="text" name="q" value="test" /></form>'
         fields = _extract_hidden_fields(html)
         assert fields == {}
 
     def test_reverse_attribute_order(self):
         # value before name
+        """Reverse attribute order."""
         html = '<input type="hidden" value="val123" name="field1" />'
         fields = _extract_hidden_fields(html)
         assert fields["field1"] == "val123"
@@ -187,6 +277,8 @@ class TestExtractHiddenFields:
 
 
 class TestHTTPSessionLifecycle:
+    """Tests for HTTP Session Lifecycle."""
+
     @pytest.fixture(autouse=True)
     async def cleanup_sessions(self):
         """Clean up any sessions created during tests."""
@@ -194,6 +286,7 @@ class TestHTTPSessionLifecycle:
         await _close_all_http_sessions()
 
     async def test_create_session(self):
+        """Create session."""
         client, meta = await _create_http_session("test_session", "https://example.com")
         assert isinstance(client, httpx.AsyncClient)
         assert meta["base_url"] == "https://example.com"
@@ -202,16 +295,19 @@ class TestHTTPSessionLifecycle:
         assert "test_session" in _http_sessions
 
     async def test_get_existing_session(self):
+        """Get existing session."""
         await _create_http_session("test_session", "https://example.com")
         client, meta = await _get_http_session("test_session")
         assert isinstance(client, httpx.AsyncClient)
         assert meta["base_url"] == "https://example.com"
 
     async def test_get_nonexistent_session_raises(self):
+        """Get nonexistent session raises."""
         with pytest.raises(KeyError, match="not found"):
             await _get_http_session("nonexistent")
 
     async def test_close_session(self):
+        """Close session."""
         await _create_http_session("test_session", "https://example.com")
         assert "test_session" in _http_sessions
         await _close_http_session("test_session")
@@ -220,9 +316,11 @@ class TestHTTPSessionLifecycle:
 
     async def test_close_nonexistent_session_is_noop(self):
         # Should not raise
+        """Close nonexistent session is noop."""
         await _close_http_session("nonexistent")
 
     async def test_recreate_replaces_session(self):
+        """Recreate replaces session."""
         await _create_http_session("test_session", "https://example.com")
         client2, meta2 = await _create_http_session("test_session", "https://other.com")
         assert meta2["base_url"] == "https://other.com"
@@ -230,6 +328,7 @@ class TestHTTPSessionLifecycle:
         assert _http_sessions["test_session"] is client2
 
     async def test_close_all_sessions(self):
+        """Close all sessions."""
         await _create_http_session("s1", "https://a.com")
         await _create_http_session("s2", "https://b.com")
         assert len(_http_sessions) == 2
@@ -246,6 +345,7 @@ class TestSAMLAuthHTTP:
 
     @pytest.fixture
     def config(self):
+        """HTTP SAML config used by the flow tests."""
         return HTTPSAMLConfig(
             init_url="/api/v1/init",
             saml_login_path="/saml/login",
@@ -286,72 +386,11 @@ class TestSAMLAuthHTTP:
         </html>
         """
 
-    async def test_successful_auth_flow(
-        self, config, keycloak_login_html, saml_response_html
-    ):
+    async def test_successful_auth_flow(self, config, keycloak_login_html, saml_response_html):
         """Test the full SAML flow with mocked responses at each phase."""
         meta = {"base_url": "https://rewardzone.redhat.com", "csrf": None, "pin": None}
 
-        # Build mock responses for each phase
-        # Phase 1: init -> returns JSON with _csrf
-        init_response = httpx.Response(
-            200,
-            json={"_csrf": "csrf_token_123", "subprogram": {"id": 102}},
-            request=httpx.Request("GET", "https://rewardzone.redhat.com/api/v1/init"),
-        )
-
-        # Phase 2: SAML login -> 302 redirect to SSO
-        saml_login_response = httpx.Response(
-            302,
-            headers={
-                "location": "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml?SAMLRequest=xxx"
-            },
-            request=httpx.Request("GET", "https://rewardzone.redhat.com/saml/login"),
-        )
-
-        # Phase 3: SSO login page -> returns HTML form
-        sso_page_response = httpx.Response(
-            200,
-            text=keycloak_login_html,
-            request=httpx.Request(
-                "GET", "https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml"
-            ),
-        )
-
-        # Phase 4+5: POST credentials -> returns SAML response HTML
-        credentials_response = httpx.Response(
-            200,
-            text=saml_response_html,
-            request=httpx.Request(
-                "POST",
-                "https://auth.redhat.com/auth/realms/EmployeeIDP/login-actions/authenticate",
-            ),
-        )
-
-        # Phase 6: POST SAMLResponse to ACS -> 302 to /sso/{token}
-        acs_response = httpx.Response(
-            302,
-            headers={"location": "/sso/session_token_abc"},
-            request=httpx.Request("POST", "https://rewardzone.redhat.com/saml/acs"),
-        )
-
-        # Phase 6b: Follow redirect to /sso/{token}
-        sso_redirect_response = httpx.Response(
-            200,
-            text="OK",
-            request=httpx.Request(
-                "GET", "https://rewardzone.redhat.com/sso/session_token_abc"
-            ),
-        )
-
-        # Phase 7: POST SSO login with session token
-        sso_login_response = httpx.Response(
-            200,
-            json={"pin": "12345", "_csrf": "new_csrf_456"},
-            request=httpx.Request(
-                "POST", "https://rewardzone.redhat.com/api/v1/Sso/login"
-            ),
-        )
+        responses = _happy_path_responses(keycloak_login_html, saml_response_html)
 
         # Set up the client mock
         client = AsyncMock(spec=httpx.AsyncClient)
@@ -360,27 +399,23 @@ class TestSAMLAuthHTTP:
 
         # Configure get/post responses in order
         client.get = AsyncMock(
-            side_effect=[init_response, saml_login_response, sso_redirect_response]
+            side_effect=[responses.init_response, responses.saml_login_response, responses.sso_redirect_response]
         )
-        client.post = AsyncMock(side_effect=[acs_response, sso_login_response])
+        client.post = AsyncMock(side_effect=[responses.acs_response, responses.sso_login_response])
 
         # Mock the SSO client (used for phases 3-5)
         mock_sso_client = AsyncMock()
-        mock_sso_client.get = AsyncMock(return_value=sso_page_response)
-        mock_sso_client.post = AsyncMock(return_value=credentials_response)
+        mock_sso_client.get = AsyncMock(return_value=responses.sso_page_response)
+        mock_sso_client.post = AsyncMock(return_value=responses.credentials_response)
 
         # We need to mock httpx.AsyncClient context manager for the SSO client
-        with patch(
-            "tool_modules.aa_sso.src.tools_basic.httpx.AsyncClient"
-        ) as MockClient:
+        with patch("tool_modules.aa_sso.src.sso_http.httpx.AsyncClient") as mock_client_cls:
             mock_cm = AsyncMock()
             mock_cm.__aenter__ = AsyncMock(return_value=mock_sso_client)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_cm
+            mock_client_cls.return_value = mock_cm
 
-            result = await _saml_auth_http(
-                client, meta, config, "testuser", "testpass123"
-            )
+            result = await _saml_auth_http(client, meta, config, "testuser", "testpass123")
 
         assert result["success"] is True
         assert result["pin"] == "12345"
@@ -471,17 +506,13 @@ class TestSAMLAuthHTTP:
         mock_sso_client.get = AsyncMock(return_value=sso_page_response)
         mock_sso_client.post = AsyncMock(return_value=credentials_response)
 
-        with patch(
-            "tool_modules.aa_sso.src.tools_basic.httpx.AsyncClient"
-        ) as MockClient:
+        with patch("tool_modules.aa_sso.src.sso_http.httpx.AsyncClient") as mock_client_cls:
             mock_cm = AsyncMock()
             mock_cm.__aenter__ = AsyncMock(return_value=mock_sso_client)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_cm
+            mock_client_cls.return_value = mock_cm
 
-            result = await _saml_auth_http(
-                client, meta, config, "testuser", "wrongpass"
-            )
+            result = await _saml_auth_http(client, meta, config, "testuser", "wrongpass")
 
         assert result["success"] is False
         assert "Invalid username or password" in result["error"]
@@ -523,22 +554,18 @@ class TestSAMLAuthHTTP:
         mock_sso_client.get = AsyncMock(return_value=sso_page_response)
         mock_sso_client.post = AsyncMock(return_value=credentials_response)
 
-        with patch(
-            "tool_modules.aa_sso.src.tools_basic.httpx.AsyncClient"
-        ) as MockClient:
+        with patch("tool_modules.aa_sso.src.sso_http.httpx.AsyncClient") as mock_client_cls:
             mock_cm = AsyncMock()
             mock_cm.__aenter__ = AsyncMock(return_value=mock_sso_client)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_cm
+            mock_client_cls.return_value = mock_cm
 
             result = await _saml_auth_http(client, meta, config, "testuser", "testpass")
 
         assert result["success"] is False
         assert "SAMLResponse" in result["error"]
 
-    async def test_acs_no_redirect(
-        self, config, keycloak_login_html, saml_response_html
-    ):
+    async def test_acs_no_redirect(self, config, keycloak_login_html, saml_response_html):
         """Test that ACS not redirecting returns error."""
         meta = {"base_url": "https://example.com", "csrf": None, "pin": None}
 
@@ -580,13 +607,11 @@ class TestSAMLAuthHTTP:
         mock_sso_client.get = AsyncMock(return_value=sso_page_response)
         mock_sso_client.post = AsyncMock(return_value=credentials_response)
 
-        with patch(
-            "tool_modules.aa_sso.src.tools_basic.httpx.AsyncClient"
-        ) as MockClient:
+        with patch("tool_modules.aa_sso.src.sso_http.httpx.AsyncClient") as mock_client_cls:
             mock_cm = AsyncMock()
             mock_cm.__aenter__ = AsyncMock(return_value=mock_sso_client)
             mock_cm.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_cm
+            mock_client_cls.return_value = mock_cm
 
             result = await _saml_auth_http(client, meta, config, "testuser", "testpass")
 
