@@ -29,6 +29,28 @@ class ResearchVideoGenerator:
     on meeting attendees. ALL DATA IS FAKE.
     """
 
+    def _pick_fake_data(self) -> tuple[list, list, str]:
+        """Pick this attendee's fake research tools, findings and threat assessment."""
+        config = self.config
+        tools = _RNG.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
+        findings = _RNG.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
+        return tools, findings, _RNG.choice(THREAT_ASSESSMENTS)
+
+    def _header_filters(self, attendee_index: int, total_attendees: int) -> list[str]:
+        """Drawtext filters for the module title, attendee count and position."""
+        config = self.config
+        return [
+            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15",
+            (
+                f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
+                f":fontcolor={config.text_color}:x=30:y=55"
+            ),
+            (
+                f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
+                f":fontcolor=cyan:x={config.width - 150}:y=15"
+            ),
+        ]
+
     def __init__(self, config: VideoConfig | None = None):
         self.config = config or VideoConfig()
         self._ffmpeg_process: subprocess.Popen | None = None
@@ -208,23 +230,13 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = _RNG.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
-        findings = _RNG.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
-        assessment = _RNG.choice(THREAT_ASSESSMENTS)
+        tools, findings, assessment = self._pick_fake_data()
 
         # Build filter graph
         filters = []
 
         # Header
-        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
-        filters.append(
-            f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
-            f":fontcolor={config.text_color}:x=30:y=55"
-        )
-        filters.append(
-            f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
-            f":fontcolor=cyan:x={config.width - 150}:y=15"
-        )
+        filters.extend(self._header_filters(attendee_index, total_attendees))
 
         # Target name with animated dots (cycles: name, name ., name .., name ...)
         escaped_name = self._escape_text(attendee.name)
@@ -319,23 +331,13 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = _RNG.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
-        findings = _RNG.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
-        assessment = _RNG.choice(THREAT_ASSESSMENTS)
+        tools, findings, assessment = self._pick_fake_data()
 
         # Build filter graph for this single attendee
         filters = []
 
         # Header with attendee count
-        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15")
-        filters.append(
-            f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
-            f":fontcolor={config.text_color}:x=30:y=55"
-        )
-        filters.append(
-            f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
-            f":fontcolor=cyan:x={config.width - 150}:y=15"
-        )
+        filters.extend(self._header_filters(attendee_index, total_attendees))
 
         # Right column - 400px wide, with vertical divider
         right_col_x = config.width - config.right_column_width
