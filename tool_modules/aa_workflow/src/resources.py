@@ -6,6 +6,7 @@ Provides MCP resources for:
 - Configuration (agents, skills, repositories)
 """
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -47,18 +48,15 @@ async def _get_current_work() -> str:
 
     work_file = get_project_work_state_path()
     if work_file.exists():
-        return work_file.read_text()
-    return (
-        "# No current work tracked for this project\n"
-        "active_issues: []\nopen_mrs: []\nfollow_ups: []"
-    )
+        return await asyncio.to_thread(work_file.read_text, encoding="utf-8")
+    return "# No current work tracked for this project\nactive_issues: []\nopen_mrs: []\nfollow_ups: []"
 
 
 async def _get_patterns() -> str:
     """Get learned error patterns resource."""
     patterns_file = MEMORY_DIR / "learned" / "patterns.yaml"
     if patterns_file.exists():
-        return patterns_file.read_text()
+        return await asyncio.to_thread(patterns_file.read_text, encoding="utf-8")
     return "# No patterns recorded yet\npatterns: []"
 
 
@@ -66,7 +64,7 @@ async def _get_runbooks() -> str:
     """Get learned runbooks resource."""
     runbooks_file = MEMORY_DIR / "learned" / "runbooks.yaml"
     if runbooks_file.exists():
-        return runbooks_file.read_text()
+        return await asyncio.to_thread(runbooks_file.read_text, encoding="utf-8")
     return "# No runbooks recorded yet\nrunbooks: {}"
 
 
@@ -74,7 +72,7 @@ async def _get_service_quirks() -> str:
     """Get service quirks resource."""
     quirks_file = MEMORY_DIR / "learned" / "service_quirks.yaml"
     if quirks_file.exists():
-        return quirks_file.read_text()
+        return await asyncio.to_thread(quirks_file.read_text, encoding="utf-8")
     return "# No service quirks recorded yet\nservices: {}"
 
 
@@ -82,7 +80,7 @@ async def _get_environments() -> str:
     """Get environment health status resource."""
     env_file = MEMORY_DIR / "state" / "environments.yaml"
     if env_file.exists():
-        return env_file.read_text()
+        return await asyncio.to_thread(env_file.read_text, encoding="utf-8")
     return "# No environment state\nenvironments: {}"
 
 
@@ -92,8 +90,7 @@ async def _get_personas() -> str:
     if PERSONAS_DIR.exists():
         for f in PERSONAS_DIR.glob("*.yaml"):
             try:
-                with open(f, encoding="utf-8") as fp:
-                    data = yaml.safe_load(fp)
+                data = yaml.safe_load(await asyncio.to_thread(f.read_text, encoding="utf-8"))
                 personas.append(
                     {
                         "name": data.get("name", f.stem),
@@ -103,9 +100,9 @@ async def _get_personas() -> str:
                     }
                 )
             # One bad persona file should not hide the rest of the catalog.
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
-    return yaml.dump({"personas": personas}, default_flow_style=False)
+            except (OSError, yaml.YAMLError, AttributeError, TypeError) as exc:
+                logger.debug("Skipping unreadable file %s: %s", f, exc)
+    return str(yaml.dump({"personas": personas}, default_flow_style=False))
 
 
 async def _get_skills() -> str:
@@ -114,8 +111,7 @@ async def _get_skills() -> str:
     if SKILLS_DIR.exists():
         for f in SKILLS_DIR.glob("*.yaml"):
             try:
-                with open(f, encoding="utf-8") as fp:
-                    data = yaml.safe_load(fp)
+                data = yaml.safe_load(await asyncio.to_thread(f.read_text, encoding="utf-8"))
                 skills.append(
                     {
                         "name": data.get("name", f.stem),
@@ -124,16 +120,16 @@ async def _get_skills() -> str:
                     }
                 )
             # One bad skill file should not hide the rest of the catalog.
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
-    return yaml.dump({"skills": skills}, default_flow_style=False)
+            except (OSError, yaml.YAMLError, AttributeError, TypeError) as exc:
+                logger.debug("Skipping unreadable file %s: %s", f, exc)
+    return str(yaml.dump({"skills": skills}, default_flow_style=False))
 
 
 def _get_repositories(load_config_fn) -> str:
     """Get configured repositories resource."""
     config = load_config_fn()
     repos = config.get("repositories", {})
-    return yaml.dump({"repositories": repos}, default_flow_style=False)
+    return str(yaml.dump({"repositories": repos}, default_flow_style=False))
 
 
 def register_resources(server: "FastMCP", load_config_fn) -> int:

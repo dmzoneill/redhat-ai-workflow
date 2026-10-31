@@ -1,13 +1,16 @@
 # pylint: disable=duplicate-code,cyclic-import
 """Split from skill_engine.py so the public module stays importable."""
 
+import asyncio
 import json
 import logging
+import traceback
 from typing import Optional
 
 import yaml
 from fastmcp import Context, FastMCP
 from mcp.types import TextContent
+
 from server.tool_registry import ToolRegistry
 
 from .skill_paths import skills_dir
@@ -33,9 +36,8 @@ def _skill_list_impl() -> list[TextContent]:
                     }
                 )
             except Exception as e:  # pylint: disable=broad-exception-caught
-                skills.append(
-                    {"name": f.stem, "description": f"Error loading: {e}", "inputs": []}
-                )
+                logger.debug("Failed to load skill %s", f, exc_info=True)
+                skills.append({"name": f.stem, "description": f"Error loading: {e}", "inputs": []})
 
     if not skills:
         return [
@@ -59,15 +61,12 @@ def _validate_skill_inputs(skill: dict, input_data: dict) -> list[str]:
     """Validate required skill inputs and return list of missing inputs."""
     missing = []
     for inp in skill.get("inputs", []):
-        if inp.get("required", False) and inp["name"] not in input_data:
-            if "default" not in inp:
-                missing.append(inp["name"])
+        if inp.get("required", False) and inp["name"] not in input_data and "default" not in inp:
+            missing.append(inp["name"])
     return missing
 
 
-def _format_skill_plan(
-    skill: dict, skill_name: str, input_data: dict
-) -> list[TextContent]:
+def _format_skill_plan(skill: dict, skill_name: str, input_data: dict) -> list[TextContent]:
     """Format skill execution plan (preview mode)."""
     lines = [f"## 📋 Skill Plan: {skill.get('name', skill_name)}\n"]
     lines.append(f"*{skill.get('description', '')}*\n")
@@ -76,9 +75,7 @@ def _format_skill_plan(
         lines.append(f"- `{k}`: {v}")
     lines.append("\n### Steps to Execute\n")
 
-    step_num = 0
-    for step in skill.get("steps", []):
-        step_num += 1
+    for step_num, step in enumerate(skill.get("steps", []), start=1):
         name = step.get("name", f"step_{step_num}")
 
         if "tool" in step:
@@ -124,22 +121,16 @@ async def _skill_run_impl(
     """
     skill_file = skills_dir() / f"{skill_name}.yaml"
     if not skill_file.exists():
-        available = (
-            [f.stem for f in skills_dir().glob("*.yaml")]
-            if skills_dir().exists()
-            else []
-        )
+        available = [f.stem for f in skills_dir().glob("*.yaml")] if skills_dir().exists() else []
         return [
             TextContent(
                 type="text",
-                # pylint: disable-next=line-too-long
                 text=f"❌ Skill not found: {skill_name}\n\nAvailable: {', '.join(available) or 'none'}",
             )
         ]
 
     try:
-        with open(skill_file, encoding="utf-8") as f:
-            skill = yaml.safe_load(f)
+        skill = yaml.safe_load(await asyncio.to_thread(skill_file.read_text, encoding="utf-8"))
 
         try:
             input_data = json.loads(inputs) if inputs else {}
@@ -154,9 +145,7 @@ async def _skill_run_impl(
             for inp in skill.get("inputs", []):
                 req = "**required**" if inp.get("required") else "optional"
                 default = f" (default: {inp['default']})" if "default" in inp else ""
-                lines.append(
-                    f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}"
-                )
+                lines.append(f"- `{inp['name']}` ({inp.get('type', 'string')}) - {req}{default}")
                 if inp.get("description"):
                     lines.append(f"  {inp['description']}")
             return [TextContent(type="text", text="\n".join(lines))]
@@ -183,7 +172,7 @@ async def _skill_run_impl(
                     session_id = session.session_id
                     session_name = session.name
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("Could not get session context: %s", e)
+                logger.debug("Could not get session context: %s", e, exc_info=True)
 
         # Execute mode: run the skill. Imported here to avoid a cycle with skill_executor.
         from .skill_executor import (  # pylint: disable=import-outside-toplevel
@@ -211,7 +200,7 @@ async def _skill_run_impl(
         return [TextContent(type="text", text=result)]
 
     except Exception as e:  # pylint: disable=broad-exception-caught
-        import traceback  # pylint: disable=import-outside-toplevel
+        logger.exception("Skill %s failed", skill_name)
 
         if debug:
             return [
@@ -223,9 +212,7 @@ async def _skill_run_impl(
         return [TextContent(type="text", text=f"❌ Error loading skill: {e}")]
 
 
-def register_skill_tools(
-    server: "FastMCP", create_issue_fn=None, ask_question_fn=None
-) -> int:
+def register_skill_tools(server: "FastMCP", create_issue_fn=None, ask_question_fn=None) -> int:
     """Register skill tools with the MCP server."""
     registry = ToolRegistry(server)
 
