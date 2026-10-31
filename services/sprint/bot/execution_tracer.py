@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar, Optional
+from typing import ClassVar, Optional, TypedDict, Unpack
 
 import yaml
 
@@ -80,24 +80,106 @@ class WorkflowState(str, Enum):
     FAILED = "failed"
 
 
+class StepDetails(TypedDict, total=False):
+    """Optional result details accepted by :meth:`ExecutionTracer.end_step`."""
+
+    outputs: dict | None
+    decision: str | None
+    reason: str | None
+    error: str | None
+    chat_id: str | None
+
+
+class LogStepDetails(StepDetails, total=False):
+    """Optional details accepted by :meth:`ExecutionTracer.log_step`."""
+
+    inputs: dict | None
+    skill_name: str | None
+    tool_name: str | None
+    duration_ms: int | None
+
+
 @dataclass
-# pylint: disable-next=too-many-instance-attributes
+class StepOutcome:
+    """Result of a step: timing, outputs, decision and error details."""
+
+    duration_ms: int | None = None
+    outputs: dict = field(default_factory=dict)
+    decision: str | None = None
+    reason: str | None = None
+    error: str | None = None
+    chat_id: str | None = None
+
+
+@dataclass
+class StepOrigin:
+    """Which skill or tool a step ran, if any."""
+
+    skill_name: str | None = None
+    tool_name: str | None = None
+
+
+@dataclass
 class StepTrace:
     """A single step in the execution trace."""
 
     step_id: str
     name: str
     timestamp: str
-    duration_ms: int | None = None
     status: StepStatus = StepStatus.PENDING
     inputs: dict = field(default_factory=dict)
-    outputs: dict = field(default_factory=dict)
-    decision: str | None = None
-    reason: str | None = None
-    error: str | None = None
-    skill_name: str | None = None
-    tool_name: str | None = None
-    chat_id: str | None = None
+    origin: StepOrigin = field(default_factory=StepOrigin)
+    outcome: StepOutcome = field(default_factory=StepOutcome)
+
+    @property
+    def duration_ms(self) -> int | None:
+        """Step duration in milliseconds."""
+        return self.outcome.duration_ms
+
+    @property
+    def outputs(self) -> dict:
+        """Output values from the step."""
+        return self.outcome.outputs
+
+    @property
+    def decision(self) -> str | None:
+        """What was decided, if this was a decision point."""
+        return self.outcome.decision
+
+    @property
+    def reason(self) -> str | None:
+        """Reasoning for the decision."""
+        return self.outcome.reason
+
+    @property
+    def error(self) -> str | None:
+        """Error message if the step failed."""
+        return self.outcome.error
+
+    @property
+    def chat_id(self) -> str | None:
+        """Cursor chat ID, if applicable."""
+        return self.outcome.chat_id
+
+    @classmethod
+    def from_dict(cls, step_data: dict) -> "StepTrace":
+        """Rebuild a step from its serialized form."""
+        return cls(
+            step_id=step_data["step_id"],
+            name=step_data["name"],
+            timestamp=step_data["timestamp"],
+            status=StepStatus(step_data.get("status", "success")),
+            inputs=step_data.get("inputs", {}),
+            origin=StepOrigin(skill_name=step_data.get("skill_name"), tool_name=step_data.get("tool_name")),
+            outcome=StepOutcome(
+                duration_ms=step_data.get("duration_ms"),
+                outputs=step_data.get("outputs", {}),
+                decision=step_data.get("decision"),
+                reason=step_data.get("reason"),
+                error=step_data.get("error"),
+                chat_id=step_data.get("chat_id"),
+            ),
+        )
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -109,23 +191,37 @@ class StepTrace:
         }
         if self.duration_ms is not None:
             d["duration_ms"] = self.duration_ms
-        if self.inputs:
-            d["inputs"] = self.inputs
-        if self.outputs:
-            d["outputs"] = self.outputs
-        if self.decision:
-            d["decision"] = self.decision
-        if self.reason:
-            d["reason"] = self.reason
-        if self.error:
-            d["error"] = self.error
-        if self.skill_name:
-            d["skill_name"] = self.skill_name
-        if self.tool_name:
-            d["tool_name"] = self.tool_name
-        if self.chat_id:
-            d["chat_id"] = self.chat_id
+        optional = {
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "decision": self.decision,
+            "reason": self.reason,
+            "error": self.error,
+            "skill_name": self.origin.skill_name,
+            "tool_name": self.origin.tool_name,
+            "chat_id": self.chat_id,
+        }
+        d.update({key: value for key, value in optional.items() if value})
         return d
+
+
+@dataclass
+class _StepCursor:
+    """The step currently being timed."""
+
+    counter: int = 0
+    start_time: float | None = None
+    current: StepTrace | None = None
+
+
+@dataclass
+class _TraceRecord:
+    """Timestamps, steps and transitions recorded for a trace."""
+
+    started_at: str
+    completed_at: str | None = None
+    steps: list[StepTrace] = field(default_factory=list)
+    transitions: list["StateTransition"] = field(default_factory=list)
 
 
 @dataclass
@@ -152,7 +248,6 @@ class StateTransition:
         return d
 
 
-# pylint: disable-next=too-many-instance-attributes
 class ExecutionTracer:
     """
     Traces execution of sprint bot workflows.
@@ -283,19 +378,32 @@ class ExecutionTracer:
         self.workflow_type = workflow_type
         self.execution_mode = execution_mode
 
-        self.started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        self.completed_at: str | None = None
-
         self.current_state = WorkflowState.IDLE
-        self.steps: list[StepTrace] = []
-        self.transitions: list[StateTransition] = []
-
-        self._step_counter = 0
-        self._step_start_time: float | None = None
-        self._current_step: StepTrace | None = None
+        self._record = _TraceRecord(started_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+        self._cursor = _StepCursor()
 
         # Ensure traces directory exists
         TRACES_DIR.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def started_at(self) -> str:
+        """ISO timestamp when the trace started."""
+        return self._record.started_at
+
+    @property
+    def completed_at(self) -> str | None:
+        """ISO timestamp when the trace finished, if it has."""
+        return self._record.completed_at
+
+    @property
+    def steps(self) -> list[StepTrace]:
+        """Recorded steps, in order."""
+        return self._record.steps
+
+    @property
+    def transitions(self) -> list[StateTransition]:
+        """Recorded state transitions, in order."""
+        return self._record.transitions
 
     @property
     def trace_path(self) -> Path:
@@ -321,35 +429,29 @@ class ExecutionTracer:
         Returns:
             Step ID for later reference
         """
-        self._step_counter += 1
-        step_id = f"step_{self._step_counter}"
+        self._cursor.counter += 1
+        step_id = f"step_{self._cursor.counter}"
 
-        self._current_step = StepTrace(
+        self._cursor.current = StepTrace(
             step_id=step_id,
             name=name,
             timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             status=StepStatus.RUNNING,
             inputs=inputs or {},
-            skill_name=skill_name,
-            tool_name=tool_name,
+            origin=StepOrigin(skill_name=skill_name, tool_name=tool_name),
         )
-        self._step_start_time = time.time()
+        self._cursor.start_time = time.time()
 
-        self.steps.append(self._current_step)
+        self.steps.append(self._cursor.current)
         logger.debug("[Tracer] Started step: %s (%s)", name, step_id)
 
         return step_id
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def end_step(
         self,
         step_id: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        outputs: dict | None = None,
-        decision: str | None = None,
-        reason: str | None = None,
-        error: str | None = None,
-        chat_id: str | None = None,
+        **details: Unpack[StepDetails],
     ) -> None:
         """
         End the current or specified step.
@@ -357,13 +459,11 @@ class ExecutionTracer:
         Args:
             step_id: Step to end (defaults to current)
             status: Final status of the step
-            outputs: Output values from the step
-            decision: If this was a decision point, what was decided
-            reason: Reasoning for the decision
-            error: Error message if failed
-            chat_id: Cursor chat ID if applicable
+            **details: Optional ``outputs`` (output values), ``decision`` (what was decided at a
+                decision point), ``reason`` (reasoning for it), ``error`` (error message if failed)
+                and ``chat_id`` (Cursor chat ID).
         """
-        step = self._current_step
+        step = self._cursor.current
         if step_id:
             step = next((s for s in self.steps if s.step_id == step_id), None)
 
@@ -372,61 +472,53 @@ class ExecutionTracer:
             return
 
         # Calculate duration
-        if self._step_start_time:
-            step.duration_ms = int((time.time() - self._step_start_time) * 1000)
+        if self._cursor.start_time:
+            step.outcome.duration_ms = int((time.time() - self._cursor.start_time) * 1000)
 
         step.status = status
-        if outputs:
-            step.outputs = outputs
-        if decision:
-            step.decision = decision
-        if reason:
-            step.reason = reason
+        outcome = step.outcome
+        outcome.outputs = details.get("outputs") or outcome.outputs
+        outcome.decision = details.get("decision") or outcome.decision
+        outcome.reason = details.get("reason") or outcome.reason
+        outcome.chat_id = details.get("chat_id") or outcome.chat_id
+        error = details.get("error")
         if error:
-            step.error = error
+            outcome.error = error
             step.status = StepStatus.FAILED
-        if chat_id:
-            step.chat_id = chat_id
 
         logger.debug("[Tracer] Ended step: %s -> %s", step.name, status.value)
 
-        self._current_step = None
-        self._step_start_time = None
+        self._cursor.current = None
+        self._cursor.start_time = None
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def log_step(
         self,
         name: str,
-        inputs: dict | None = None,
-        outputs: dict | None = None,
-        decision: str | None = None,
-        reason: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        skill_name: str | None = None,
-        tool_name: str | None = None,
-        duration_ms: int | None = None,
-        error: str | None = None,
-        chat_id: str | None = None,
+        **details: Unpack[LogStepDetails],
     ) -> str:
         """
         Log a complete step in one call.
 
-        Convenience method for steps that complete immediately.
+        Convenience method for steps that complete immediately. Accepts the
+        :meth:`end_step` details plus ``inputs``, ``skill_name``, ``tool_name``
+        and ``duration_ms``.
         """
-        step_id = self.start_step(name, inputs, skill_name, tool_name)
+        step_id = self.start_step(name, details.get("inputs"), details.get("skill_name"), details.get("tool_name"))
 
-        if duration_ms and self._current_step:
-            self._current_step.duration_ms = duration_ms
-            self._step_start_time = None  # Don't calculate
+        duration_ms = details.get("duration_ms")
+        if duration_ms and self._cursor.current:
+            self._cursor.current.outcome.duration_ms = duration_ms
+            self._cursor.start_time = None  # Don't calculate
 
         self.end_step(
             step_id=step_id,
             status=status,
-            outputs=outputs,
-            decision=decision,
-            reason=reason,
-            error=error,
-            chat_id=chat_id,
+            outputs=details.get("outputs"),
+            decision=details.get("decision"),
+            reason=details.get("reason"),
+            error=details.get("error"),
+            chat_id=details.get("chat_id"),
         )
 
         return step_id
@@ -487,7 +579,7 @@ class ExecutionTracer:
 
         # Mark completion
         if to_state in (WorkflowState.COMPLETED, WorkflowState.FAILED):
-            self.completed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            self._record.completed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         return True
 
@@ -589,8 +681,8 @@ class ExecutionTracer:
                 execution_mode=data.get("execution_mode", "foreground"),
             )
 
-            tracer.started_at = data.get("started_at", tracer.started_at)
-            tracer.completed_at = data.get("completed_at")
+            tracer._record.started_at = data.get("started_at", tracer.started_at)
+            tracer._record.completed_at = data.get("completed_at")
 
             # Restore state
             try:
@@ -599,23 +691,7 @@ class ExecutionTracer:
                 tracer.current_state = WorkflowState.IDLE
 
             # Restore steps
-            for step_data in data.get("steps", []):
-                step = StepTrace(
-                    step_id=step_data["step_id"],
-                    name=step_data["name"],
-                    timestamp=step_data["timestamp"],
-                    duration_ms=step_data.get("duration_ms"),
-                    status=StepStatus(step_data.get("status", "success")),
-                    inputs=step_data.get("inputs", {}),
-                    outputs=step_data.get("outputs", {}),
-                    decision=step_data.get("decision"),
-                    reason=step_data.get("reason"),
-                    error=step_data.get("error"),
-                    skill_name=step_data.get("skill_name"),
-                    tool_name=step_data.get("tool_name"),
-                    chat_id=step_data.get("chat_id"),
-                )
-                tracer.steps.append(step)
+            tracer.steps.extend(StepTrace.from_dict(step_data) for step_data in data.get("steps", []))
 
             # Restore transitions
             for trans_data in data.get("transitions", []):
@@ -628,11 +704,11 @@ class ExecutionTracer:
                 )
                 tracer.transitions.append(trans)
 
-            tracer._step_counter = len(tracer.steps)
+            tracer._cursor.counter = len(tracer.steps)
 
             return tracer
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError, AttributeError):
             logger.exception("[Tracer] Failed to load trace")
             return None
 
@@ -842,7 +918,7 @@ def list_traces() -> list[dict]:
                     "summary": data.get("summary", {}),
                 }
             )
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except (OSError, yaml.YAMLError, AttributeError) as e:
             logger.warning("Failed to read trace %s: %s", trace_file, e, exc_info=True)
 
     # Sort by started_at descending
@@ -859,7 +935,7 @@ def get_trace(issue_key: str) -> dict | None:
 
     try:
         return yaml.safe_load(trace_path.read_text())
-    except Exception:  # pylint: disable=broad-exception-caught
+    except (OSError, yaml.YAMLError):
         logger.exception("Failed to load trace for %s", issue_key)
         return None
 
