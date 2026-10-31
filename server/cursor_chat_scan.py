@@ -416,7 +416,7 @@ def format_session_context_for_jira(
     summary = chat_content.get("summary", {})
     lines.append("h3. Summary")
     lines.append(
-        "* *Messages:* " f"{summary.get('user_messages', 0)} user, " f"{summary.get('assistant_messages', 0)} assistant"
+        f"* *Messages:* {summary.get('user_messages', 0)} user, {summary.get('assistant_messages', 0)} assistant"
     )
     lines.append(f"* *Tool Calls:* {summary.get('tool_calls', 0)}")
     lines.append(f"* *Code References:* {summary.get('code_changes', 0)}")

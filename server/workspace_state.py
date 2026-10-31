@@ -111,6 +111,7 @@ __all__ = [
     "_cursor_workspace_storage",
     "_generate_session_id",
     "_persona_tool_counts",
+    "detect_project",
     "format_session_context_for_jira",
     "get_all_persona_tool_counts",
     "get_cursor_chat_content",
@@ -170,6 +171,25 @@ def _sum_results(totals: dict, result: dict) -> None:
     totals["updated"] += result.get("updated", 0)
 
 
+def detect_project(workspace_uri: str) -> str | None:
+    """Detect project from workspace URI by matching against config.json.
+
+    Args:
+        workspace_uri: Workspace URI (file:// or path)
+
+    Returns:
+        Project name if found, None otherwise
+    """
+    config = utils.load_config()
+    if not config:
+        return None
+
+    workspace_path = _workspace_path(workspace_uri)
+    if workspace_path is None:
+        return None
+    return _project_containing(workspace_path, config.get("repositories", {}))
+
+
 class WorkspaceRegistry:
     """Registry of workspace states.
 
@@ -216,7 +236,7 @@ class WorkspaceRegistry:
             # Try to restore from disk first (in case server restarted)
             # This handles the case where restore_if_empty was called but
             # the workspace URI didn't match any persisted workspaces
-            cls._try_restore_workspace_from_disk(workspace_uri)
+            cls.try_restore_workspace_from_disk(workspace_uri)
 
             # Check again after potential restore
             if workspace_uri in cls._workspaces:
@@ -227,7 +247,7 @@ class WorkspaceRegistry:
                 state = WorkspaceState(workspace_uri=workspace_uri)
 
                 # Auto-detect project from workspace path
-                detected_project = cls._detect_project(workspace_uri)
+                detected_project = detect_project(workspace_uri)
                 if detected_project:
                     state.project = detected_project
                     state.is_auto_detected = True
@@ -300,25 +320,6 @@ class WorkspaceRegistry:
         return DEFAULT_WORKSPACE
 
     @classmethod
-    def _detect_project(cls, workspace_uri: str) -> str | None:
-        """Detect project from workspace URI by matching against config.json.
-
-        Args:
-            workspace_uri: Workspace URI (file:// or path)
-
-        Returns:
-            Project name if found, None otherwise
-        """
-        config = utils.load_config()
-        if not config:
-            return None
-
-        workspace_path = _workspace_path(workspace_uri)
-        if workspace_path is None:
-            return None
-        return _project_containing(workspace_path, config.get("repositories", {}))
-
-    @classmethod
     def _read_persisted(cls) -> dict | None:
         """Persisted workspaces (version 2 format), or None when absent or older."""
         with open(PERSIST_FILE, encoding="utf-8") as f:
@@ -331,7 +332,7 @@ class WorkspaceRegistry:
         return data.get("workspaces", {})
 
     @classmethod
-    def _try_restore_workspace_from_disk(cls, workspace_uri: str) -> bool:
+    def try_restore_workspace_from_disk(cls, workspace_uri: str) -> bool:
         """Try to restore a specific workspace from the persisted file.
 
         This is called when a workspace URI is not found in memory but might
@@ -400,7 +401,7 @@ class WorkspaceRegistry:
         """
         if workspace_uri not in cls._workspaces:
             state = WorkspaceState(workspace_uri=workspace_uri)
-            detected_project = cls._detect_project(workspace_uri)
+            detected_project = detect_project(workspace_uri)
             if detected_project:
                 state.project = detected_project
                 state.is_auto_detected = True
@@ -698,7 +699,7 @@ class WorkspaceRegistry:
     def _restore_persisted_workspace(cls, workspace_uri: str, ws_data: dict) -> WorkspaceState:
         """Rebuild one persisted workspace, re-detecting its project from the URI."""
         persisted_project = ws_data.get("project")
-        detected_project = cls._detect_project(workspace_uri)
+        detected_project = detect_project(workspace_uri)
         if detected_project and detected_project != persisted_project:
             logger.info(
                 "Re-detected project '%s' for workspace %s (was '%s')",

@@ -39,6 +39,27 @@ def _generate_session_id() -> str:
     return str(uuid.uuid4())
 
 
+def loaded_tool_names() -> set[str]:
+    """Get currently loaded tool names from PersonaLoader."""
+    try:
+        loader = persona_loader.get_loader()
+        if loader:
+            status = loader.get_status()
+            tools = set(status["tools"])
+            logger.info(
+                "get_loaded_tools: found %s tools from %s modules",
+                len(tools),
+                len(status["loaded_modules"]),
+            )
+            return tools
+        logger.warning("get_loaded_tools: PersonaLoader not initialized")
+    # Best-effort: log and continue.
+    except CURSOR_DB_ERRORS as e:
+        logger.warning("Could not get loaded tools: %s", e)
+
+    return set()
+
+
 @dataclass
 class WorkspaceState:
     """State for a Cursor workspace (folder).
@@ -117,7 +138,7 @@ class WorkspaceState:
             persona=persona if persona is not None else workspace_defaults.get_default_persona(),
             project=session_project,
             is_project_auto_detected=is_project_auto_detected if project is not None else self.is_auto_detected,
-            static_tool_count=len(self._get_loaded_tools()),
+            static_tool_count=len(loaded_tool_names()),
             name=name if name is not None or not cursor_chat_name else cursor_chat_name,
         )
 
@@ -161,7 +182,7 @@ class WorkspaceState:
             session = self.sessions.get(self.active_session_id)
             # Refresh static tool count if zero (e.g., after restore from disk)
             if session and refresh_tools and session.static_tool_count == 0:
-                session.static_tool_count = len(self._get_loaded_tools())
+                session.static_tool_count = len(loaded_tool_names())
             return session
         return None
 
@@ -263,7 +284,7 @@ class WorkspaceState:
     def _sync_inputs(self, cursor_chats: list[dict], scan_ids: list[str]) -> workspace_sync.SyncInputs:
         """Collect Cursor's chats, content scan results and the loaded tool count."""
         chat_map = {c["composerId"]: c for c in cursor_chats}
-        current_tool_count = len(self._get_loaded_tools())
+        current_tool_count = len(loaded_tool_names())
         scan = workspace_sync.scan_content(scan_ids)
         return workspace_sync.SyncInputs(
             chat_map=chat_map,
@@ -351,24 +372,8 @@ class WorkspaceState:
         return result["renamed"]
 
     def _get_loaded_tools(self) -> set[str]:
-        """Get currently loaded tool names from PersonaLoader."""
-        try:
-            loader = persona_loader.get_loader()
-            if loader:
-                status = loader.get_status()
-                tools = set(status["tools"])
-                logger.info(
-                    "_get_loaded_tools: found %s tools from %s modules",
-                    len(tools),
-                    len(status["loaded_modules"]),
-                )
-                return tools
-            logger.warning("_get_loaded_tools: PersonaLoader not initialized")
-        # Best-effort: log and continue.
-        except CURSOR_DB_ERRORS as e:
-            logger.warning("Could not get loaded tools: %s", e)
-
-        return set()
+        """Currently loaded tool names (kept for existing callers; see :func:`loaded_tool_names`)."""
+        return loaded_tool_names()
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
