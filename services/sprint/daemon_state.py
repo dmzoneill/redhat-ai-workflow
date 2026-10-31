@@ -10,12 +10,14 @@ import tempfile
 import traceback
 from datetime import datetime, time
 from pathlib import Path
+from typing import Unpack
 from zoneinfo import ZoneInfo
 
 # Sprint daemon owns its own state file - no shared file with other services
 from server.utils import load_config
 from services.sprint.bot.execution_tracer import (
     ExecutionTracer,
+    LogStepDetails,
     StepStatus,
     WorkflowState,
 )
@@ -49,6 +51,107 @@ from tool_modules.aa_workflow.src.sprint_history import (
 from tool_modules.aa_workflow.src.sprint_prioritizer import prioritize_issues
 
 logger = logging.getLogger(__name__)
+
+
+MR_STATUS_PATTERN = re.compile(r"\[MR_STATUS:\s*(\w+)\](?:\s*reason:\s*(.+))?", re.IGNORECASE)
+MR_ID_PATTERN = re.compile(r"\[MR_ID:\s*(\d+)\]")
+
+
+def sprint_metadata(sprint_info: dict | None) -> dict | None:
+    """``currentSprint`` metadata from ``jira_get_active_sprint``; ``None`` when it failed."""
+    if not sprint_info or "error" in sprint_info:
+        return None
+    return {
+        "id": str(sprint_info.get("id", "")),
+        "name": sprint_info.get("name", ""),
+        "startDate": sprint_info.get("startDate", ""),
+        "endDate": sprint_info.get("endDate", ""),
+        "totalPoints": 0,  # Calculated from issues
+        "completedPoints": 0,  # Calculated from issues
+    }
+
+
+def filter_assigned(jira_issues: list[dict], user_info: dict) -> list[dict]:
+    """Keep issues assigned to the configured user (Jira may report username or full name)."""
+    match_values = [v.lower() for v in (user_info.get("jira_username", ""), user_info.get("full_name", "")) if v]
+    if not match_values:
+        return jira_issues
+    assigned = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
+    logger.info("Filtered to %s/%s issues assigned to %s", len(assigned), len(jira_issues), match_values[0])
+    return assigned
+
+
+def merge_sprint_issues(sprint_issues: list[dict], existing_issues: list) -> list:
+    """Build SprintIssues from Jira data, preserving approval, waiting reason, chat ID and timeline."""
+    existing_by_key = {issue.key: issue for issue in existing_issues}
+    merged = []
+    for issue_data in sprint_issues:
+        existing = existing_by_key.get(issue_data["key"])
+        merged.append(
+            SprintIssue(
+                key=issue_data["key"],
+                summary=issue_data["summary"],
+                story_points=issue_data.get("storyPoints", 0),
+                priority=issue_data.get("priority", "Major"),
+                jira_status=issue_data.get("jiraStatus", "New"),
+                assignee=issue_data.get("assignee", ""),
+                approval_status=existing.approval_status if existing else "pending",
+                waiting_reason=existing.waiting_reason if existing else None,
+                priority_reasoning=issue_data.get("priorityReasoning", []),
+                estimated_actions=issue_data.get("estimatedActions", []),
+                chat_id=existing.chat_id if existing else None,
+                timeline=existing.timeline if existing else [],
+                issue_type=issue_data.get("issueType", "Story"),
+                created=issue_data.get("created", ""),
+            )
+        )
+    return merged
+
+
+def apply_sprint_points(current_sprint: dict | None, issues: list) -> None:
+    """Fill ``totalPoints``/``completedPoints`` of the sprint metadata from its issues."""
+    if not current_sprint:
+        return
+    current_sprint["totalPoints"] = sum(i.story_points for i in issues)
+    current_sprint["completedPoints"] = sum(
+        i.story_points for i in issues if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
+    )
+
+
+def parse_mr_status(output: str) -> tuple[str, str | None, int | None] | None:
+    """Parse ``[MR_STATUS: X] reason: ...`` and ``[MR_ID: N]`` from Claude output; ``None`` if absent."""
+    status_match = MR_STATUS_PATTERN.search(output)
+    if not status_match:
+        return None
+    mr_id_match = MR_ID_PATTERN.search(output)
+    hold_reason = status_match.group(2).strip() if status_match.group(2) else None
+    return status_match.group(1).upper(), hold_reason, int(mr_id_match.group(1)) if mr_id_match else None
+
+
+def review_check_prompt(issue_key: str, dont_merge_patterns: list) -> str:
+    """Prompt asking Claude to report the MR status of an issue in Review."""
+    return f"""Check the merge request status for Jira issue {issue_key}.
+
+1. First, find the MR for this issue:
+   ```
+   gitlab_mr_list(project="automation-analytics/automation-analytics-backend", search="{issue_key}")
+   ```
+
+2. If an MR exists, check its status:
+   - Is it approved?
+   - Has the pipeline passed?
+   - Are there any comments containing: {", ".join(dont_merge_patterns[:5])}
+
+3. Report the status in this exact format:
+   [MR_STATUS: READY_TO_MERGE] - MR is approved, CI passed, no hold comments
+   [MR_STATUS: APPROVED_WITH_HOLD] reason: <the hold comment>
+   [MR_STATUS: NEEDS_APPROVAL] - MR not yet approved
+   [MR_STATUS: CI_FAILING] - Pipeline failed
+   [MR_STATUS: NO_MR] - No MR found for this issue
+   [MR_STATUS: CHANGES_REQUESTED] - Reviewer requested changes
+
+Also output the MR ID if found: [MR_ID: <number>]
+"""
 
 
 class SprintStateMixin:
@@ -205,134 +308,54 @@ class SprintStateMixin:
 
     # ==================== Jira Integration ====================
 
-    # pylint: disable-next=too-many-locals,too-many-statements
     async def _refresh_from_jira(self) -> None:
         """Refresh sprint issues from Jira by calling the Jira API directly.
 
         Fetches sprint info and issues, then saves to state file.
         """
         logger.info("Refreshing sprint issues from Jira...")
-
         try:
-            config = SprintBotConfig(
-                working_hours=WorkingHours(),
-                jira_project=self._config.get("jira_project", "AAP"),
-            )
-
-            # Fetch active sprint info first (for currentSprint metadata)
-            sprint_info = await jira_get_active_sprint(project=config.jira_project)
-            current_sprint = None
-            if sprint_info and "error" not in sprint_info:
-                current_sprint = {
-                    "id": str(sprint_info.get("id", "")),
-                    "name": sprint_info.get("name", ""),
-                    "startDate": sprint_info.get("startDate", ""),
-                    "endDate": sprint_info.get("endDate", ""),
-                    "totalPoints": 0,  # Will be calculated from issues
-                    "completedPoints": 0,  # Will be calculated from issues
-                }
-                logger.info("Active sprint: %s", current_sprint.get("name"))
-            else:
-                logger.warning("Could not get active sprint info: %s", sprint_info)
-
-            # Fetch issues from Jira (async)
-            jira_issues = await fetch_sprint_issues(config)
-
-            if not jira_issues:
-                logger.warning("No issues fetched from Jira, keeping existing state")
-                self._last_jira_refresh = _local_now()
-                return
-
-            # Filter to only show issues assigned to current user
-            user_config = load_config()
-            user_info = user_config.get("user", {})
-            jira_username = user_info.get("jira_username", "")
-            full_name = user_info.get("full_name", "")
-            if jira_username or full_name:
-                original_count = len(jira_issues)
-                # Match against username OR full name (Jira may use either)
-                match_values = [v.lower() for v in [jira_username, full_name] if v]
-                jira_issues = [issue for issue in jira_issues if issue.get("assignee", "").lower() in match_values]
-                logger.info(
-                    "Filtered to %s/%s issues assigned to %s",
-                    len(jira_issues),
-                    original_count,
-                    jira_username or full_name,
-                )
-
-            if not jira_issues:
-                logger.info("No issues assigned to current user, clearing sprint list")
-                state = load_sprint_state()
-                state.current_sprint = current_sprint  # Still update sprint info
-                state.issues = []
-                state.last_updated = _local_now().isoformat()
-                save_sprint_state(state)
-                self._last_jira_refresh = _local_now()
-                return
-
-            # Prioritize issues
-            prioritized = prioritize_issues(jira_issues)
-            sprint_issues = to_sprint_issue_format(prioritized)
-
-            # Load existing state to preserve approval status, chat IDs, etc.
-            state = load_sprint_state()
-            existing_by_key = {issue.key: issue for issue in state.issues}
-
-            # Merge with existing state
-            new_issues = []
-            for issue_data in sprint_issues:
-                key = issue_data["key"]
-                # Preserve approval status, waiting reason, chat ID and timeline of known issues
-                existing = existing_by_key.get(key)
-                new_issues.append(
-                    SprintIssue(
-                        key=key,
-                        summary=issue_data["summary"],
-                        story_points=issue_data.get("storyPoints", 0),
-                        priority=issue_data.get("priority", "Major"),
-                        jira_status=issue_data.get("jiraStatus", "New"),
-                        assignee=issue_data.get("assignee", ""),
-                        approval_status=existing.approval_status if existing else "pending",
-                        waiting_reason=existing.waiting_reason if existing else None,
-                        priority_reasoning=issue_data.get("priorityReasoning", []),
-                        estimated_actions=issue_data.get("estimatedActions", []),
-                        chat_id=existing.chat_id if existing else None,
-                        timeline=existing.timeline if existing else [],
-                        issue_type=issue_data.get("issueType", "Story"),
-                        created=issue_data.get("created", ""),
-                    )
-                )
-
-            # Calculate points for sprint info
-            total_points = sum(i.story_points for i in new_issues)
-            completed_points = sum(
-                i.story_points for i in new_issues if i.jira_status and i.jira_status.lower() in COMPLETED_STATUSES
-            )
-
-            # Update currentSprint with calculated points
-            if current_sprint:
-                current_sprint["totalPoints"] = total_points
-                current_sprint["completedPoints"] = completed_points
-
-            # Update state
-            state.current_sprint = current_sprint
-            state.issues = new_issues
-            state.last_updated = _local_now().isoformat()
-            save_sprint_state(state)
-
-            logger.info(
-                "Sprint refresh completed: %s issues, sprint: %s",
-                len(new_issues),
-                current_sprint.get("name") if current_sprint else "None",
-            )
-            self._last_jira_refresh = _local_now()
-
+            await self._sync_sprint_from_jira()
         except RECOVERABLE_ERRORS:
             logger.exception("Failed to refresh sprint")
-
             logger.debug(traceback.format_exc())
-            # Don't block - use existing state
-            self._last_jira_refresh = _local_now()
+        # Even on failure: don't block, keep using the existing state until the next interval
+        self._last_jira_refresh = _local_now()
+
+    async def _sync_sprint_from_jira(self) -> None:
+        """Fetch the active sprint and the user's issues and merge them into the sprint state."""
+        config = SprintBotConfig(working_hours=WorkingHours(), jira_project=self._config.get("jira_project", "AAP"))
+
+        sprint_info = await jira_get_active_sprint(project=config.jira_project)
+        current_sprint = sprint_metadata(sprint_info)
+        if current_sprint:
+            logger.info("Active sprint: %s", current_sprint.get("name"))
+        else:
+            logger.warning("Could not get active sprint info: %s", sprint_info)
+
+        jira_issues = await fetch_sprint_issues(config)
+        if not jira_issues:
+            logger.warning("No issues fetched from Jira, keeping existing state")
+            return
+
+        jira_issues = filter_assigned(jira_issues, load_config().get("user", {}))
+        state = load_sprint_state()
+        if jira_issues:
+            new_issues = merge_sprint_issues(to_sprint_issue_format(prioritize_issues(jira_issues)), state.issues)
+        else:
+            logger.info("No issues assigned to current user, clearing sprint list")
+            new_issues = []
+        apply_sprint_points(current_sprint, new_issues)
+
+        state.current_sprint = current_sprint
+        state.issues = new_issues
+        state.last_updated = _local_now().isoformat()
+        save_sprint_state(state)
+        logger.info(
+            "Sprint refresh completed: %s issues, sprint: %s",
+            len(new_issues),
+            current_sprint.get("name") if current_sprint else "None",
+        )
 
     async def _check_review_issues(self) -> None:
         """Check issues in Review status and try to move them to Done.
@@ -389,105 +412,60 @@ class SprintStateMixin:
         # Save any state changes
         self._save_state(state)
 
-    # pylint: disable-next=too-many-locals
     async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
         logger.info("Checking review status for %s", _log_safe(issue_key))
-
         try:
-            claude_path = shutil.which("claude")
-            if not claude_path:
-                logger.warning("Claude CLI not found, skipping review check")
+            output = await self._ask_claude_for_mr_status(str(issue_key), dont_merge_patterns)
+            if output is None:
                 return
-
-            # Build prompt to check MR status
-            prompt = f"""Check the merge request status for Jira issue {issue_key}.
-
-1. First, find the MR for this issue:
-   ```
-   gitlab_mr_list(project="automation-analytics/automation-analytics-backend", search="{issue_key}")
-   ```
-
-2. If an MR exists, check its status:
-   - Is it approved?
-   - Has the pipeline passed?
-   - Are there any comments containing: {", ".join(dont_merge_patterns[:5])}
-
-3. Report the status in this exact format:
-   [MR_STATUS: READY_TO_MERGE] - MR is approved, CI passed, no hold comments
-   [MR_STATUS: APPROVED_WITH_HOLD] reason: <the hold comment>
-   [MR_STATUS: NEEDS_APPROVAL] - MR not yet approved
-   [MR_STATUS: CI_FAILING] - Pipeline failed
-   [MR_STATUS: NO_MR] - No MR found for this issue
-   [MR_STATUS: CHANGES_REQUESTED] - Reviewer requested changes
-
-Also output the MR ID if found: [MR_ID: <number>]
-"""
-
-            process = await spawn_claude_cli(claude_path, prompt)
-
-            try:
-                stdout, _stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=120,  # 2 minute timeout
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                logger.warning("Review check timed out for %s", _log_safe(issue_key))
-                return
-
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
-
-            # Parse the status
-
-            status_match = re.search(
-                r"\[MR_STATUS:\s*(\w+)\](?:\s*reason:\s*(.+))?",
-                output,
-                re.IGNORECASE,
-            )
-            mr_id_match = re.search(r"\[MR_ID:\s*(\d+)\]", output)
-
-            if not status_match:
+            parsed = parse_mr_status(output)
+            if not parsed:
                 logger.warning("Could not parse MR status for %s", _log_safe(issue_key))
                 return
-
-            mr_status = status_match.group(1).upper()
-            hold_reason = status_match.group(2).strip() if status_match.group(2) else None
-            mr_id = int(mr_id_match.group(1)) if mr_id_match else None
-
-            logger.info("%s: MR status = %s, MR ID = %s", _log_safe(issue_key), _log_safe(mr_status), _log_safe(mr_id))
-
-            if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
-                # Merge the MR and transition to Done
-                await self._merge_and_close(issue_key, mr_id, issue)
-
-            elif mr_status == "APPROVED_WITH_HOLD":
-                # Log but don't merge
-                logger.info("%s: MR approved but on hold: %s", _log_safe(issue_key), _log_safe(hold_reason))
-                _add_timeline_event(
-                    issue,
-                    {
-                        "timestamp": _local_now().isoformat(),
-                        "action": "review_hold",
-                        "description": f"MR approved but merge on hold: {hold_reason}",
-                    },
-                )
-
-            elif mr_status == "CHANGES_REQUESTED":
-                logger.info("%s: Changes requested on MR", _log_safe(issue_key))
-                # Could notify or take action here
-
-            elif mr_status == "CI_FAILING":
-                logger.info("%s: CI is failing", _log_safe(issue_key))
-                # Could notify or take action here
-
-            elif mr_status == "NO_MR":
-                logger.warning("%s: No MR found but issue is in Review", _log_safe(issue_key))
-
+            await self._act_on_mr_status(issue, *parsed)
         except RECOVERABLE_ERRORS:
             logger.exception("Error checking MR status for %s", _log_safe(issue_key))
+
+    async def _ask_claude_for_mr_status(self, issue_key: str, dont_merge_patterns: list) -> str | None:
+        """Run Claude CLI to report the MR status; ``None`` when the CLI is missing or times out."""
+        claude_path = shutil.which("claude")
+        if not claude_path:
+            logger.warning("Claude CLI not found, skipping review check")
+            return None
+        process = await spawn_claude_cli(claude_path, review_check_prompt(issue_key, dont_merge_patterns))
+        try:
+            stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            logger.warning("Review check timed out for %s", _log_safe(issue_key))
+            return None
+        return stdout.decode("utf-8", errors="replace") if stdout else ""
+
+    async def _act_on_mr_status(self, issue: dict, mr_status: str, hold_reason: str | None, mr_id: int | None) -> None:
+        """Merge and close a ready MR, record holds, and log the other statuses."""
+        issue_key = issue.get("key")
+        logger.info("%s: MR status = %s, MR ID = %s", _log_safe(issue_key), _log_safe(mr_status), _log_safe(mr_id))
+        if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
+            await self._merge_and_close(issue_key, mr_id, issue)
+        elif mr_status == "APPROVED_WITH_HOLD":
+            logger.info("%s: MR approved but on hold: %s", _log_safe(issue_key), _log_safe(hold_reason))
+            _add_timeline_event(
+                issue,
+                {
+                    "timestamp": _local_now().isoformat(),
+                    "action": "review_hold",
+                    "description": f"MR approved but merge on hold: {hold_reason}",
+                },
+            )
+        elif mr_status == "CHANGES_REQUESTED":
+            logger.info("%s: Changes requested on MR", _log_safe(issue_key))
+        elif mr_status == "CI_FAILING":
+            logger.info("%s: CI is failing", _log_safe(issue_key))
+        elif mr_status == "NO_MR":
+            logger.warning("%s: No MR found but issue is in Review", _log_safe(issue_key))
 
     async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
@@ -647,34 +625,15 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         return tracer
 
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     def _trace_step(
         self,
         tracer: ExecutionTracer,
         name: str,
-        inputs: dict | None = None,
-        outputs: dict | None = None,
-        decision: str | None = None,
-        reason: str | None = None,
-        skill_name: str | None = None,
-        tool_name: str | None = None,
         status: StepStatus = StepStatus.SUCCESS,
-        error: str | None = None,
-        chat_id: str | None = None,
+        **details: Unpack[LogStepDetails],
     ) -> None:
-        """Log a step to the tracer and save."""
-        tracer.log_step(
-            name=name,
-            inputs=inputs,
-            outputs=outputs,
-            decision=decision,
-            reason=reason,
-            skill_name=skill_name,
-            tool_name=tool_name,
-            status=status,
-            error=error,
-            chat_id=chat_id,
-        )
+        """Log a step to the tracer and save (``details`` as accepted by ``ExecutionTracer.log_step``)."""
+        tracer.log_step(name=name, status=status, **details)
         tracer.save()
 
     def _trace_transition(
