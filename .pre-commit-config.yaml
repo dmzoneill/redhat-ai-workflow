@@ -4,12 +4,11 @@
 # Test pre-push hooks: pre-commit run --hook-stage pre-push --all-files
 
 repos:
-  # Code formatting (line-length must match pyproject.toml [tool.black])
-  - repo: https://github.com/psf/black
-    rev: 26.10.1
+  # Code formatting: ruff-format, line-length 120 (pyproject.toml [tool.ruff])
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
     hooks:
-      - id: black
-        language_version: python3
+      - id: ruff-format
 
   # Import sorting
   - repo: https://github.com/pycqa/isort
