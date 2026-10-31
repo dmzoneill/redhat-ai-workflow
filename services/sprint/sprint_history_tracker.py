@@ -8,6 +8,9 @@ daemon lifecycle and D-Bus orchestration.
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -30,15 +33,11 @@ class SprintHistoryTracker:
         """Load the work log for an issue."""
         path = self.get_work_log_path(issue_key)
         if path.exists():
-            import yaml
-
             return yaml.safe_load(path.read_text()) or {}
         return {}
 
     def save_work_log(self, issue_key: str, work_log: dict) -> None:
         """Save the work log for an issue."""
-        import yaml
-
         SPRINT_WORK_DIR.mkdir(parents=True, exist_ok=True)
         path = self.get_work_log_path(issue_key)
         path.write_text(yaml.dump(work_log, default_flow_style=False, sort_keys=False))
@@ -72,15 +71,13 @@ class SprintHistoryTracker:
             },
         }
 
-    def log_action(
-        self, issue_key: str, action_type: str, details: str, data: dict = None
-    ) -> None:
+    def log_action(self, issue_key: str, action_type: str, details: str, data: dict | None = None) -> None:
         """Log an action to the work log."""
         work_log = self.load_work_log(issue_key)
         if not work_log:
             return
 
-        action = {
+        action: dict[str, Any] = {
             "timestamp": datetime.now().isoformat(),
             "type": action_type,
             "details": details,
@@ -154,36 +151,8 @@ class SprintHistoryTracker:
         parts.append(f"- **Completed**: {work_log.get('completed', 'N/A')}")
         parts.append("")
 
-        # Outcome
-        outcome = work_log.get("outcome", {})
-        if any(outcome.values()):
-            parts.append("## Work Completed")
-            if outcome.get("commits"):
-                parts.append(f"- **Commits**: {', '.join(outcome['commits'][:5])}")
-            if outcome.get("merge_requests"):
-                parts.append(
-                    f"- **Merge Requests**: {', '.join(outcome['merge_requests'])}"
-                )
-            if outcome.get("files_changed"):
-                parts.append(
-                    f"- **Files Changed**: {', '.join(outcome['files_changed'][:10])}"
-                )
-            if outcome.get("branches_created"):
-                parts.append(
-                    f"- **Branches**: {', '.join(outcome['branches_created'])}"
-                )
-            parts.append("")
-
-        # Actions log (last 10)
-        actions = work_log.get("actions", [])
-        if actions:
-            parts.append("## Recent Actions")
-            for action in actions[-10:]:
-                timestamp = action.get("timestamp", "")[:19]  # Trim to datetime
-                action_type = action.get("type", "")
-                details = action.get("details", "")
-                parts.append(f"- [{timestamp}] **{action_type}**: {details}")
-            parts.append("")
+        parts.extend(self._outcome_section(work_log.get("outcome", {})))
+        parts.extend(self._actions_section(work_log.get("actions", [])))
 
         # Suggested next steps
         cursor_context = work_log.get("cursor_context", {})
@@ -207,11 +176,36 @@ class SprintHistoryTracker:
 
         # Instructions
         parts.append("---")
-        parts.append(
-            "Please review the above context and continue working on this issue."
-        )
-        parts.append(
-            'Load the developer persona if needed: `persona_load("developer")`'
-        )
+        parts.append("Please review the above context and continue working on this issue.")
+        parts.append('Load the developer persona if needed: `persona_load("developer")`')
 
         return "\n".join(parts)
+
+    @staticmethod
+    def _outcome_section(outcome: dict) -> list[str]:
+        """Render the 'Work Completed' section of the Cursor context prompt."""
+        if not any(outcome.values()):
+            return []
+        parts = ["## Work Completed"]
+        if outcome.get("commits"):
+            parts.append(f"- **Commits**: {', '.join(outcome['commits'][:5])}")
+        if outcome.get("merge_requests"):
+            parts.append(f"- **Merge Requests**: {', '.join(outcome['merge_requests'])}")
+        if outcome.get("files_changed"):
+            parts.append(f"- **Files Changed**: {', '.join(outcome['files_changed'][:10])}")
+        if outcome.get("branches_created"):
+            parts.append(f"- **Branches**: {', '.join(outcome['branches_created'])}")
+        parts.append("")
+        return parts
+
+    @staticmethod
+    def _actions_section(actions: list) -> list[str]:
+        """Render the last ten actions of the work log."""
+        if not actions:
+            return []
+        parts = ["## Recent Actions"]
+        for action in actions[-10:]:
+            timestamp = action.get("timestamp", "")[:19]  # Trim to datetime
+            parts.append(f"- [{timestamp}] **{action.get('type', '')}**: {action.get('details', '')}")
+        parts.append("")
+        return parts
