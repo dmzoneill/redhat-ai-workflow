@@ -75,6 +75,11 @@ SPRINT_WORK_DIR = PROJECT_ROOT / "memory" / "state" / "sprint_work"
 logger = logging.getLogger(__name__)
 
 
+def _log_safe(value: Any) -> str:
+    """Return value as a single-line string so it cannot forge log entries."""
+    return str(value).replace("\r", "").replace("\n", "")
+
+
 # Maximum timeline entries per issue to prevent unbounded memory growth
 MAX_TIMELINE_ENTRIES = 50
 
@@ -663,7 +668,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         if not target_issue:
             return {"success": False, "error": f"Issue {issue_key} not found in sprint"}
 
-        logger.info("Starting issue immediately: %s (background=%s)", issue_key, background_mode)
+        logger.info("Starting issue immediately: %s (background=%s)", _log_safe(issue_key), _log_safe(background_mode))
 
         # Mark as in_progress and set as processing
         target_issue["approvalStatus"] = "in_progress"
@@ -1315,7 +1320,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
     async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list, state: dict) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
-        logger.info("Checking review status for %s", issue_key)
+        logger.info("Checking review status for %s", _log_safe(issue_key))
 
         try:
             claude_path = shutil.which("claude")
@@ -1365,7 +1370,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning("Review check timed out for %s", issue_key)
+                logger.warning("Review check timed out for %s", _log_safe(issue_key))
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
@@ -1380,14 +1385,14 @@ Also output the MR ID if found: [MR_ID: <number>]
             mr_id_match = re.search(r"\[MR_ID:\s*(\d+)\]", output)
 
             if not status_match:
-                logger.warning("Could not parse MR status for %s", issue_key)
+                logger.warning("Could not parse MR status for %s", _log_safe(issue_key))
                 return
 
             mr_status = status_match.group(1).upper()
             hold_reason = status_match.group(2).strip() if status_match.group(2) else None
             mr_id = int(mr_id_match.group(1)) if mr_id_match else None
 
-            logger.info("%s: MR status = %s, MR ID = %s", issue_key, mr_status, mr_id)
+            logger.info("%s: MR status = %s, MR ID = %s", _log_safe(issue_key), _log_safe(mr_status), _log_safe(mr_id))
 
             if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
                 # Merge the MR and transition to Done
@@ -1395,7 +1400,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             elif mr_status == "APPROVED_WITH_HOLD":
                 # Log but don't merge
-                logger.info("%s: MR approved but on hold: %s", issue_key, hold_reason)
+                logger.info("%s: MR approved but on hold: %s", _log_safe(issue_key), _log_safe(hold_reason))
                 _add_timeline_event(
                     issue,
                     {
@@ -1406,23 +1411,23 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
             elif mr_status == "CHANGES_REQUESTED":
-                logger.info("%s: Changes requested on MR", issue_key)
+                logger.info("%s: Changes requested on MR", _log_safe(issue_key))
                 # Could notify or take action here
 
             elif mr_status == "CI_FAILING":
-                logger.info("%s: CI is failing", issue_key)
+                logger.info("%s: CI is failing", _log_safe(issue_key))
                 # Could notify or take action here
 
             elif mr_status == "NO_MR":
-                logger.warning("%s: No MR found but issue is in Review", issue_key)
+                logger.warning("%s: No MR found but issue is in Review", _log_safe(issue_key))
 
         except Exception:  # pylint: disable=broad-exception-caught
-            logger.exception("Error checking MR status for %s", issue_key)
+            logger.exception("Error checking MR status for %s", _log_safe(issue_key))
 
     # pylint: disable-next=unused-argument
     async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict, state: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
-        logger.info("Merging MR !%s and closing %s", mr_id, issue_key)
+        logger.info("Merging MR !%s and closing %s", _log_safe(mr_id), _log_safe(issue_key))
 
         try:
             claude_path = shutil.which("claude")
@@ -1468,7 +1473,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning("Merge/close timed out for %s", issue_key)
+                logger.warning("Merge/close timed out for %s", _log_safe(issue_key))
                 return
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
@@ -1482,7 +1487,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 error = result_match.group(2).strip() if result_match.group(2) else None
 
                 if result == "SUCCESS":
-                    logger.info("Successfully merged MR !%s and closed %s", mr_id, issue_key)
+                    logger.info("Successfully merged MR !%s and closed %s", _log_safe(mr_id), _log_safe(issue_key))
 
                     # Update local state
                     issue["jiraStatus"] = self.JIRA_STATUS_DONE
@@ -1498,7 +1503,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
                     self._issues_completed += 1
                 else:
-                    logger.warning("Merge/close failed for %s: %s", issue_key, error)
+                    logger.warning("Merge/close failed for %s: %s", _log_safe(issue_key), _log_safe(error))
                     _add_timeline_event(
                         issue,
                         {
@@ -1508,10 +1513,10 @@ Also output the MR ID if found: [MR_ID: <number>]
                         },
                     )
             else:
-                logger.warning("Could not parse merge result for %s", issue_key)
+                logger.warning("Could not parse merge result for %s", _log_safe(issue_key))
 
         except Exception:  # pylint: disable=broad-exception-caught
-            logger.exception("Error merging/closing %s", issue_key)
+            logger.exception("Error merging/closing %s", _log_safe(issue_key))
 
     # ==================== Issue Processing ====================
 
@@ -1635,7 +1640,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         try:
             claude_path = shutil.which("claude")
             if not claude_path:
-                logger.warning("Claude CLI not found, cannot transition %s", issue_key)
+                logger.warning("Claude CLI not found, cannot transition %s", _log_safe(issue_key))
                 return False
 
             prompt = f'Call jira_transition("{issue_key}", "{target_status}") to move the issue to {target_status}.'
@@ -1658,19 +1663,19 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                logger.warning("Jira transition timed out for %s", issue_key)
+                logger.warning("Jira transition timed out for %s", _log_safe(issue_key))
                 return False
 
             if process.returncode == 0:  # pylint: disable=no-else-return
-                logger.info("Transitioned %s to %s", issue_key, target_status)
+                logger.info("Transitioned %s to %s", _log_safe(issue_key), _log_safe(target_status))
                 return True
             else:
                 error = stderr.decode("utf-8", errors="replace") if stderr else ""
-                logger.warning("Failed to transition %s: %s", issue_key, error[:200])
+                logger.warning("Failed to transition %s: %s", _log_safe(issue_key), _log_safe(error[:200]))
                 return False
 
         except Exception:  # pylint: disable=broad-exception-caught
-            logger.exception("Error transitioning %s", issue_key)
+            logger.exception("Error transitioning %s", _log_safe(issue_key))
             return False
 
     def _is_actionable(self, issue: dict) -> bool:
@@ -1709,7 +1714,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         issue_key = next_issue["key"]
         background_mode = state.get("backgroundTasks", True)
 
-        logger.info("Processing issue: %s (background=%s)", issue_key, background_mode)
+        logger.info("Processing issue: %s (background=%s)", _log_safe(issue_key), _log_safe(background_mode))
 
         # Initialize execution tracer
         tracer = self._get_tracer(issue_key, next_issue)
@@ -1784,7 +1789,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             return await self._process_in_cursor_traced(next_issue, state, tracer)
 
         # BACKGROUND MODE: Run via Claude CLI (no Cursor dependency)
-        logger.info("Background mode: Running %s via Claude CLI", issue_key)
+        logger.info("Background mode: Running %s via Claude CLI", _log_safe(issue_key))
         self._trace_step(
             tracer,
             "select_execution_mode",
@@ -2004,7 +2009,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             )
             self._save_state(state)
             self._issues_processed += 1
-            logger.info("Chat created for %s: %s", issue_key, chat_id)
+            logger.info("Chat created for %s: %s", _log_safe(issue_key), _log_safe(chat_id))
 
             # Note: In foreground mode, the tracer stays in IMPLEMENTING state
             # The chat itself will complete the work and transition Jira
@@ -2029,7 +2034,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             issue["waitingReason"] = "Failed to create Cursor chat"
             state["processingIssue"] = None
             self._save_state(state)
-            logger.warning("Could not create chat for %s", issue_key)
+            logger.warning("Could not create chat for %s", _log_safe(issue_key))
             return {"success": False, "error": f"Failed to create chat for {issue_key}"}
 
     async def _launch_cursor_chat(self, issue: dict) -> str | None:
@@ -2176,7 +2181,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         """
         issue_key = issue["key"]
 
-        logger.info("Running %s in background mode (Claude CLI)", issue_key)
+        logger.info("Running %s in background mode (Claude CLI)", _log_safe(issue_key))
 
         # Initialize work log
         work_log = self._init_work_log(issue)
@@ -2336,7 +2341,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(issue_key, work_log)
 
                 self._save_work_log(issue_key, work_log)
-                logger.info("Background processing completed for %s", issue_key)
+                logger.info("Background processing completed for %s", _log_safe(issue_key))
                 return {
                     "success": True,
                     "message": f"Completed {issue_key} in background",
@@ -2374,7 +2379,9 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 self._save_work_log(issue_key, work_log)
-                logger.warning("Background processing blocked for %s: %s", issue_key, blocked_reason)
+                logger.warning(
+                    "Background processing blocked for %s: %s", _log_safe(issue_key), _log_safe(blocked_reason)
+                )
                 return {
                     "success": False,
                     "error": f"Blocked: {blocked_reason}",
@@ -2406,7 +2413,9 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
 
                 self._save_work_log(issue_key, work_log)
-                logger.warning("Background processing failed for %s: %s", issue_key, error_reason[:200])
+                logger.warning(
+                    "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_reason[:200])
+                )
                 return {"success": False, "error": f"Failed: {error_reason[:200]}"}
 
             else:
@@ -2423,7 +2432,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                         issue_key, work_log
                     )
                     self._save_work_log(issue_key, work_log)
-                    logger.info("Background processing completed for %s", issue_key)
+                    logger.info("Background processing completed for %s", _log_safe(issue_key))
                     return {
                         "success": True,
                         "message": f"Completed {issue_key} in background",
@@ -2438,7 +2447,9 @@ Also output the MR ID if found: [MR_ID: <number>]
                     )
                     work_log["cursor_context"]["suggested_prompt"] = retry_prompt
                     self._save_work_log(issue_key, work_log)
-                    logger.warning("Background processing failed for %s: %s", issue_key, error_output[:200])
+                    logger.warning(
+                        "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
+                    )
                     return {
                         "success": False,
                         "error": f"Claude CLI failed: {error_output[:200]}",
@@ -2456,7 +2467,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 "Please investigate and continue the work."
             )
             self._save_work_log(issue_key, work_log)
-            logger.exception("Background processing error for %s", issue_key)
+            logger.exception("Background processing error for %s", _log_safe(issue_key))
             return {"success": False, "error": str(e)}
 
     def _parse_bot_status(self, output: str) -> dict:
