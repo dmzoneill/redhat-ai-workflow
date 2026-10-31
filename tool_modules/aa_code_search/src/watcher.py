@@ -6,15 +6,68 @@ Implements debouncing to avoid excessive re-indexing during rapid saves.
 """
 
 import asyncio
+import importlib
 import logging
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
 # Global watcher instances
 _watchers: dict[str, "CodeIndexWatcher"] = {}
+
+# File extensions to watch
+CODE_EXTENSIONS = frozenset(
+    {".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".java", ".rb", ".yaml", ".yml", ".md", ".sh"}
+)
+
+# Directories to ignore
+IGNORE_DIRS = frozenset(
+    {
+        "__pycache__",
+        "node_modules",
+        "venv",
+        ".venv",
+        "env",
+        "dist",
+        "build",
+        ".git",
+        ".tox",
+        "htmlcov",
+        "coverage",
+        ".pytest_cache",
+        ".mypy_cache",
+        "migrations",
+        ".eggs",
+    }
+)
+
+# Errors from watchfiles or the filesystem that end the watch loop.
+WATCH_ERRORS = (OSError, RuntimeError, ValueError)
+
+# Errors from an index run or the on_update callback that are logged and survived.
+INDEX_ERRORS = (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError)
+
+
+def _should_watch(_change_type, path: str) -> bool:
+    """watchfiles filter: code files outside ignored and hidden directories."""
+    p = Path(path)
+    if p.suffix.lower() not in CODE_EXTENSIONS:
+        return False
+    return not any(part in IGNORE_DIRS or part.startswith(".") for part in p.parts)
+
+
+@dataclass
+class _WatchState:
+    """Mutable runtime state of a watcher."""
+
+    running: bool = False
+    pending_update: asyncio.Task | None = None
+    last_update: datetime | None = None
+    changes_pending: int = 0
 
 
 class CodeIndexWatcher:
@@ -53,186 +106,135 @@ class CodeIndexWatcher:
         self.on_update = on_update
 
         self._task: asyncio.Task | None = None
-        self._pending_update: asyncio.Task | None = None
-        self._running = False
-        self._last_update: datetime | None = None
-        self._changes_pending = 0
+        self._state = _WatchState()
 
     @property
     def is_running(self) -> bool:
         """Check if watcher is currently running."""
-        return self._running and self._task is not None
+        return self._state.running and self._task is not None
 
     @property
     def last_update(self) -> datetime | None:
         """Get timestamp of last index update."""
-        return self._last_update
+        return self._state.last_update
 
     @property
     def status(self) -> dict:
         """Get watcher status."""
+        last_update = self._state.last_update
         return {
             "project": self.project,
             "running": self.is_running,
-            "last_update": self._last_update.isoformat() if self._last_update else None,
-            "changes_pending": self._changes_pending,
+            "last_update": last_update.isoformat() if last_update else None,
+            "changes_pending": self._state.changes_pending,
             "debounce_seconds": self.debounce_seconds,
         }
 
     async def start(self) -> None:
         """Start watching for file changes."""
-        if self._running:
-            logger.warning(f"Watcher for {self.project} already running")
+        if self._state.running:
+            logger.warning("Watcher for %s already running", self.project)
             return
 
-        self._running = True
+        self._state.running = True
         self._task = asyncio.create_task(self._watch_loop())
-        logger.info(f"Started watching {self.project} at {self.project_path}")
+        logger.info("Started watching %s at %s", self.project, self.project_path)
 
     async def stop(self) -> None:
         """Stop watching for file changes."""
-        self._running = False
+        self._state.running = False
 
-        if self._pending_update:
-            self._pending_update.cancel()
-            self._pending_update = None
+        if self._state.pending_update:
+            self._state.pending_update.cancel()
+            self._state.pending_update = None
 
         if self._task:
             self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            # Wait for the loop to finish without swallowing a cancellation
+            # of stop() itself; asyncio.wait never raises the task's result.
+            await asyncio.wait({self._task})
             self._task = None
 
-        logger.info(f"Stopped watching {self.project}")
+        logger.info("Stopped watching %s", self.project)
 
     async def _watch_loop(self) -> None:
         """Main watch loop using watchfiles."""
         try:
-            import watchfiles
+            watchfiles = importlib.import_module("watchfiles")
         except ImportError:
             logger.error("watchfiles not installed. Run: uv add watchfiles")
-            self._running = False
+            self._state.running = False
             return
-
-        # File extensions to watch
-        code_extensions = {
-            ".py",
-            ".js",
-            ".ts",
-            ".jsx",
-            ".tsx",
-            ".go",
-            ".rs",
-            ".java",
-            ".rb",
-            ".yaml",
-            ".yml",
-            ".md",
-            ".sh",
-        }
-
-        # Directories to ignore
-        ignore_dirs = {
-            "__pycache__",
-            "node_modules",
-            "venv",
-            ".venv",
-            "env",
-            "dist",
-            "build",
-            ".git",
-            ".tox",
-            "htmlcov",
-            "coverage",
-            ".pytest_cache",
-            ".mypy_cache",
-            "migrations",
-            ".eggs",
-        }
-
-        def should_watch(change_type, path: str) -> bool:
-            """Filter function for watchfiles."""
-            p = Path(path)
-
-            # Check extension
-            if p.suffix.lower() not in code_extensions:
-                return False
-
-            # Check for ignored directories
-            for part in p.parts:
-                if part in ignore_dirs or part.startswith("."):
-                    return False
-
-            return True
 
         try:
             async for changes in watchfiles.awatch(
                 self.project_path,
-                watch_filter=should_watch,
-                stop_event=asyncio.Event() if not self._running else None,
+                watch_filter=_should_watch,
+                stop_event=asyncio.Event() if not self._state.running else None,
             ):
-                if not self._running:
+                if not self._state.running:
                     break
-
-                # Count pending changes
-                self._changes_pending += len(changes)
-
-                # Log changes
-                for change_type, path in changes:
-                    rel_path = Path(path).relative_to(self.project_path)
-                    logger.debug(f"Change detected: {change_type.name} {rel_path}")
-
-                # Cancel previous pending update
-                if self._pending_update and not self._pending_update.done():
-                    self._pending_update.cancel()
-
-                # Schedule new update after debounce period
-                self._pending_update = asyncio.create_task(self._delayed_index())
+                self._record_changes(changes)
 
         except asyncio.CancelledError:
-            logger.debug(f"Watch loop cancelled for {self.project}")
-        except Exception as e:
-            logger.error(f"Watch loop error for {self.project}: {e}")
-            self._running = False
+            logger.debug("Watch loop cancelled for %s", self.project)
+            raise
+        except WATCH_ERRORS as e:
+            logger.error("Watch loop error for %s: %s", self.project, e)
+            self._state.running = False
+
+    def _record_changes(self, changes) -> None:
+        """Count and log a batch of changes and (re)schedule the debounced index."""
+        self._state.changes_pending += len(changes)
+
+        for change_type, path in changes:
+            rel_path = Path(path).relative_to(self.project_path)
+            logger.debug("Change detected: %s %s", change_type.name, rel_path)
+
+        # Cancel previous pending update, then schedule a new one after the debounce period
+        pending = self._state.pending_update
+        if pending and not pending.done():
+            pending.cancel()
+        self._state.pending_update = asyncio.create_task(self._delayed_index())
 
     async def _delayed_index(self) -> None:
         """Wait for debounce period then trigger re-index."""
         try:
             await asyncio.sleep(self.debounce_seconds)
-
-            if not self._running:
-                return
-
-            logger.info(f"Re-indexing {self.project} ({self._changes_pending} changes)")
-
-            # Run indexing (incremental)
-            start = datetime.now()
-            stats = self.index_func(self.project, force=False)
-            duration = (datetime.now() - start).total_seconds()
-
-            self._last_update = datetime.now()
-            self._changes_pending = 0
-
-            logger.info(
-                f"Re-indexed {self.project}: "
-                f"{stats.get('files_indexed', 0)} files, "
-                f"{stats.get('chunks_created', 0)} chunks "
-                f"in {duration:.1f}s"
-            )
-
-            # Call optional callback
-            if self.on_update:
-                try:
-                    self.on_update(self.project, stats)
-                except Exception as e:
-                    logger.error(f"on_update callback error: {e}")
-
         except asyncio.CancelledError:
-            logger.debug(f"Delayed index cancelled for {self.project}")
-        except Exception as e:
-            logger.error(f"Re-indexing error for {self.project}: {e}")
+            logger.debug("Delayed index cancelled for %s", self.project)
+            raise
+
+        if not self._state.running:
+            return
+
+        logger.info("Re-indexing %s (%s changes)", self.project, self._state.changes_pending)
+        try:
+            # Run indexing (incremental)
+            start = time.monotonic()
+            stats = self.index_func(self.project, force=False)
+            duration = time.monotonic() - start
+        except INDEX_ERRORS as e:
+            logger.error("Re-indexing error for %s: %s", self.project, e)
+            return
+
+        self._state.last_update = datetime.now().astimezone()
+        self._state.changes_pending = 0
+
+        logger.info(
+            "Re-indexed %s: %s files, %s chunks in %.1fs",
+            self.project,
+            stats.get("files_indexed", 0),
+            stats.get("chunks_created", 0),
+            duration,
+        )
+
+        # Call optional callback
+        if self.on_update:
+            try:
+                self.on_update(self.project, stats)
+            except INDEX_ERRORS as e:
+                logger.error("on_update callback error: %s", e)
 
 
 def get_watcher(project: str) -> CodeIndexWatcher | None:
