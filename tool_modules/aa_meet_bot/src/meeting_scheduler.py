@@ -13,59 +13,121 @@ Features:
 """
 
 import asyncio
+import functools
 import logging
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import ClassVar
 from zoneinfo import ZoneInfo
 
-from tool_modules.common import PROJECT_ROOT, get_meet_bot_timezone
+import aiosqlite
+from googleapiclient.errors import HttpError
+from playwright.async_api import Error as PlaywrightError
 
-__project_root__ = PROJECT_ROOT
-
-# Import centralized paths
-try:
-    from server.paths import MEETBOT_SCREENSHOTS_DIR
-except ImportError:
-    # Fallback for standalone usage
-    from pathlib import Path
-
-    MEETBOT_SCREENSHOTS_DIR = Path.home() / ".config" / "aa-workflow" / "meet_bot" / "screenshots"
-
+from server.paths import MEETBOT_SCREENSHOTS_DIR
 from server.state_manager import state as state_manager
-from tool_modules.aa_meet_bot.src.config import get_config  # pylint: disable=ungrouped-imports
+from tool_modules.aa_google_calendar.src.tools_basic import get_calendar_service
 from tool_modules.aa_meet_bot.src.notes_bot import NotesBot, init_notes_bot
 from tool_modules.aa_meet_bot.src.notes_database import (
     MeetingNotesDB,
     MonitoredCalendar,
     init_notes_db,
 )
+from tool_modules.common import PROJECT_ROOT, get_meet_bot_timezone
+
+__project_root__ = PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+
+# Failures the scheduler logs and survives: I/O and network (OSError), asyncio timeouts, bad or missing data
+# (ValueError/LookupError), runtime state errors, database errors and Google API errors.
+RECOVERABLE_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    LookupError,
+    asyncio.TimeoutError,
+    aiosqlite.Error,
+    HttpError,
+    PlaywrightError,
+)
 
 # Timezone from config.json (meet_bot.timezone > schedules.timezone > google_calendar.timezone)
 TIMEZONE = get_meet_bot_timezone()
 
 
 @dataclass
-# pylint: disable-next=too-many-instance-attributes
-class ScheduledMeeting:
-    """A meeting scheduled to be joined."""
+class MeetingWindow:
+    """When a scheduled meeting starts and ends."""
 
-    event_id: str
-    calendar_id: str
-    title: str
-    meet_url: str
     start_time: datetime
     end_time: datetime
+
+
+@dataclass
+class MeetingInfo:
+    """Descriptive calendar details of a scheduled meeting."""
+
+    title: str
+    meet_url: str
     organizer: str
     attendees: list[str] = field(default_factory=list)
     description: str = ""
+
+
+@dataclass
+class ScheduledMeeting:
+    """A meeting scheduled to be joined."""
+
+    MAX_JOIN_ATTEMPTS: ClassVar[int] = 3  # Maximum join attempts before giving up
+
+    event_id: str
+    calendar_id: str
+    window: MeetingWindow
+    info: MeetingInfo
     bot_mode: str = "notes"  # notes or interactive
     status: str = "scheduled"  # scheduled, joining, active, completed, skipped, failed
     join_attempts: int = 0  # Track number of join attempts
-    max_join_attempts: int = 3  # Maximum join attempts before giving up
+
+    @property
+    def title(self) -> str:
+        """Meeting title."""
+        return self.info.title
+
+    @property
+    def meet_url(self) -> str:
+        """Google Meet URL."""
+        return self.info.meet_url
+
+    @property
+    def organizer(self) -> str:
+        """Organizer email or name."""
+        return self.info.organizer
+
+    @property
+    def attendees(self) -> list[str]:
+        """Attendee list."""
+        return self.info.attendees
+
+    @property
+    def description(self) -> str:
+        """Event description."""
+        return self.info.description
+
+    @property
+    def start_time(self) -> datetime:
+        """Meeting start."""
+        return self.window.start_time
+
+    @property
+    def end_time(self) -> datetime:
+        """Meeting end."""
+        return self.window.end_time
 
 
 @dataclass
@@ -80,7 +142,6 @@ class SchedulerState:
     errors: list[str] = field(default_factory=list)
 
 
-# pylint: disable-next=too-many-instance-attributes
 class MeetingScheduler:
     """
     Service that monitors calendars and auto-joins meetings.
@@ -88,6 +149,10 @@ class MeetingScheduler:
     Runs as a background task, polling calendars and joining
     meetings at the appropriate time.
     """
+
+    POLL_INTERVAL: ClassVar[int] = 300  # Poll calendars every 5 minutes (300 seconds)
+    JOIN_BUFFER_MINUTES: ClassVar[int] = 1  # Join 1 minute before start
+    LEAVE_BUFFER_MINUTES: ClassVar[int] = 1  # Leave 1 minute after end
 
     def __init__(
         self,
@@ -101,15 +166,9 @@ class MeetingScheduler:
             db: Database instance
             notes_bot: Notes bot instance for joining meetings
         """
-        self.config = get_config()
         self.db = db
         self.notes_bot = notes_bot
         self.state = SchedulerState()
-
-        # Configuration
-        self.poll_interval = 300  # Poll calendars every 5 minutes (300 seconds)
-        self.join_buffer_minutes = 1  # Join 1 minute before start
-        self.leave_buffer_minutes = 1  # Leave 1 minute after end
 
         # Status overrides - persists user decisions across restarts via StateManager
         self._status_overrides: dict[str, dict] = {}  # meet_key -> {status, timestamp}
@@ -133,7 +192,7 @@ class MeetingScheduler:
             if len(self._status_overrides) != len(data):
                 self._save_status_overrides()
             logger.info("Loaded %s status overrides from state.json", len(self._status_overrides))
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.warning("Failed to load status overrides: %s", e, exc_info=True)
             self._status_overrides = {}
 
@@ -141,7 +200,7 @@ class MeetingScheduler:
         """Save status overrides to StateManager."""
         try:
             state_manager.set("meetings", "overrides", self._status_overrides, flush=True)
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.warning("Failed to save status overrides: %s", e, exc_info=True)
 
     def _set_status_override(self, meet_url: str, status: str) -> None:
@@ -207,7 +266,7 @@ class MeetingScheduler:
             logger.info("Meeting scheduler initialized")
             return True
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to initialize scheduler")
             self.state.errors.append(str(e))
             return False
@@ -224,7 +283,7 @@ class MeetingScheduler:
         # This ensures we have meeting data immediately on startup
         try:
             await self._poll_calendars()
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.warning("Initial calendar poll failed: %s", e, exc_info=True)
 
         self._poll_task = asyncio.create_task(self._poll_loop())
@@ -266,7 +325,7 @@ class MeetingScheduler:
                 await asyncio.wait_for(self.notes_bot.close(), timeout=15.0)
             except asyncio.TimeoutError:
                 logger.warning("Timeout closing notes bot during shutdown")
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS as e:
                 logger.warning("Error closing notes bot: %s", e, exc_info=True)
             self.notes_bot = None
 
@@ -274,7 +333,7 @@ class MeetingScheduler:
         if self.db:
             try:
                 await self.db.close()
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS as e:
                 logger.warning("Error closing database: %s", e, exc_info=True)
             self.db = None
 
@@ -285,11 +344,11 @@ class MeetingScheduler:
         while self.state.running:
             try:
                 await self._poll_calendars()
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS as e:
                 logger.exception("Poll loop error")
                 self.state.errors.append(str(e))
 
-            await asyncio.sleep(self.poll_interval)
+            await asyncio.sleep(self.POLL_INTERVAL)
 
     async def _meeting_check_loop(self) -> None:
         """Frequent loop to check if it's time to join/leave meetings.
@@ -299,12 +358,11 @@ class MeetingScheduler:
         while self.state.running:
             try:
                 await self._check_meeting_times()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS:
                 logger.exception("Meeting check loop error")
 
             await asyncio.sleep(30)  # Check every 30 seconds
 
-    # pylint: disable-next=too-many-locals
     async def _poll_calendars(self) -> None:
         """Poll all monitored calendars for upcoming meetings."""
         if not self.db:
@@ -362,13 +420,14 @@ class MeetingScheduler:
                         meeting = ScheduledMeeting(
                             event_id=event["event_id"],
                             calendar_id=calendar.calendar_id,
-                            title=event["title"],
-                            meet_url=event["meet_url"],
-                            start_time=event["start"],
-                            end_time=event["end"],
-                            organizer=event.get("organizer", ""),
-                            attendees=event.get("attendees", []),
-                            description=event.get("description", ""),
+                            window=MeetingWindow(start_time=event["start"], end_time=event["end"]),
+                            info=MeetingInfo(
+                                title=event["title"],
+                                meet_url=event["meet_url"],
+                                organizer=event.get("organizer", ""),
+                                attendees=event.get("attendees", []),
+                                description=event.get("description", ""),
+                            ),
                             bot_mode=calendar.bot_mode,
                             status=initial_status,
                         )
@@ -378,7 +437,7 @@ class MeetingScheduler:
                                 "New meeting (pending approval): %s (calendar: %s)", event["title"], calendar.name
                             )
 
-            except Exception:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS:
                 logger.exception("Failed to poll calendar %s", calendar.calendar_id)
 
         # Add new meetings to upcoming list
@@ -396,7 +455,45 @@ class MeetingScheduler:
 
         self.state.last_poll = now
 
-    # pylint: disable-next=too-many-locals
+    @staticmethod
+    def _parse_calendar_event(event: dict, tz: ZoneInfo) -> dict | None:
+        """Convert a Google Calendar event to a scheduler event dict, or None if it has no Meet link or is all-day."""
+        # Extract Meet URL
+        meet_url = None
+        if event.get("conferenceData", {}).get("entryPoints"):
+            for entry in event["conferenceData"]["entryPoints"]:
+                if entry.get("entryPointType") == "video":
+                    meet_url = entry.get("uri", "")
+                    break
+
+        if not meet_url:
+            return None  # Skip events without Meet links
+
+        # Parse times
+        start = event["start"].get("dateTime", event["start"].get("date"))
+        end = event["end"].get("dateTime", event["end"].get("date"))
+
+        try:
+            if "T" in start:
+                start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
+                end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")).astimezone(tz)
+            else:
+                # All-day event, skip
+                return None
+        except (ValueError, TypeError):
+            return None
+
+        return {
+            "event_id": event.get("id", ""),
+            "title": event.get("summary", "Untitled"),
+            "meet_url": meet_url,
+            "start": start_dt,
+            "end": end_dt,
+            "organizer": event.get("organizer", {}).get("email", ""),
+            "attendees": [a.get("email", "") for a in event.get("attendees", [])],
+            "description": event.get("description", ""),
+        }
+
     async def _get_calendar_events(
         self,
         calendar_id: str,
@@ -409,11 +506,6 @@ class MeetingScheduler:
         Uses the Google Calendar API via the aa_google_calendar module.
         """
         try:
-            # Import here to avoid circular imports
-            from tool_modules.aa_google_calendar.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                get_calendar_service,
-            )
-
             service, error = get_calendar_service()
             if error or not service:
                 # Do not log the raw error: it can include credential details.
@@ -438,47 +530,13 @@ class MeetingScheduler:
 
             events = []
             for event in events_result.get("items", []):
-                # Extract Meet URL
-                meet_url = None
-                if event.get("conferenceData", {}).get("entryPoints"):
-                    for entry in event["conferenceData"]["entryPoints"]:
-                        if entry.get("entryPointType") == "video":
-                            meet_url = entry.get("uri", "")
-                            break
-
-                if not meet_url:
-                    continue  # Skip events without Meet links
-
-                # Parse times
-                start = event["start"].get("dateTime", event["start"].get("date"))
-                end = event["end"].get("dateTime", event["end"].get("date"))
-
-                try:
-                    if "T" in start:
-                        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00")).astimezone(tz)
-                        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")).astimezone(tz)
-                    else:
-                        # All-day event, skip
-                        continue
-                except (ValueError, TypeError):
-                    continue
-
-                events.append(
-                    {
-                        "event_id": event.get("id", ""),
-                        "title": event.get("summary", "Untitled"),
-                        "meet_url": meet_url,
-                        "start": start_dt,
-                        "end": end_dt,
-                        "organizer": event.get("organizer", {}).get("email", ""),
-                        "attendees": [a.get("email", "") for a in event.get("attendees", [])],
-                        "description": event.get("description", ""),
-                    }
-                )
+                parsed = self._parse_calendar_event(event, tz)
+                if parsed is not None:
+                    events.append(parsed)
 
             return events
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to get calendar events")
             return []
 
@@ -493,7 +551,7 @@ class MeetingScheduler:
         # Check if we need to leave current meeting
         if self.state.current_meeting:
             meeting = self.state.current_meeting
-            leave_time = meeting.end_time + timedelta(minutes=self.leave_buffer_minutes)
+            leave_time = meeting.end_time + timedelta(minutes=self.LEAVE_BUFFER_MINUTES)
 
             if now >= leave_time:
                 logger.info("Meeting ended: %s", meeting.title)
@@ -513,17 +571,17 @@ class MeetingScheduler:
 
                 # Calculate join window: from (start - buffer) to (start + late_join_window)
                 # Allow joining meetings up to 10 minutes after they've started
-                join_time = meeting.start_time - timedelta(minutes=self.join_buffer_minutes)
+                join_time = meeting.start_time - timedelta(minutes=self.JOIN_BUFFER_MINUTES)
                 late_join_cutoff = meeting.start_time + timedelta(minutes=10)
 
                 # Join if we're in the window (2 min before to 10 min after start)
-                if now >= join_time and now < late_join_cutoff:  # pylint: disable=chained-comparison,no-else-break
+                if join_time <= now < late_join_cutoff:
                     # Check if we've exceeded max join attempts
-                    if meeting.join_attempts >= meeting.max_join_attempts:
+                    if meeting.join_attempts >= meeting.MAX_JOIN_ATTEMPTS:
                         logger.warning(
                             "Meeting '%s' exceeded max join attempts (%s), marking as failed",
                             meeting.title,
-                            meeting.max_join_attempts,
+                            meeting.MAX_JOIN_ATTEMPTS,
                         )
                         meeting.status = "failed"
                         continue
@@ -532,7 +590,7 @@ class MeetingScheduler:
                         "Time to join approved meeting: %s (attempt %s/%s)",
                         meeting.title,
                         meeting.join_attempts + 1,
-                        meeting.max_join_attempts,
+                        meeting.MAX_JOIN_ATTEMPTS,
                     )
                     meeting.status = "joining"
                     meeting.join_attempts += 1
@@ -553,24 +611,24 @@ class MeetingScheduler:
                         logger.info("Joined meeting: %s", meeting.title)
                     else:
                         # If failed but still have attempts left, set back to approved
-                        if meeting.join_attempts < meeting.max_join_attempts:
+                        if meeting.join_attempts < meeting.MAX_JOIN_ATTEMPTS:
                             meeting.status = "approved"
                             logger.warning(
                                 "Failed to join meeting: %s, will retry (%s/%s)",
                                 meeting.title,
                                 meeting.join_attempts,
-                                meeting.max_join_attempts,
+                                meeting.MAX_JOIN_ATTEMPTS,
                             )
                         else:
                             meeting.status = "failed"
                             logger.error(
-                                "Failed to join meeting after %s attempts: %s", meeting.max_join_attempts, meeting.title
+                                "Failed to join meeting after %s attempts: %s", meeting.MAX_JOIN_ATTEMPTS, meeting.title
                             )
 
                     break  # Only try one meeting at a time
 
                 # If meeting started more than 10 minutes ago, mark as missed
-                elif now >= meeting.start_time + timedelta(minutes=10):
+                if now >= meeting.start_time + timedelta(minutes=10):
                     logger.info(
                         "Meeting '%s' started more than 10 minutes ago, marking as missed (started at %s)",
                         meeting.title,
@@ -651,17 +709,14 @@ class MeetingScheduler:
         """
         for meeting in self.state.upcoming_meetings:
             if meeting.event_id == event_id:
-                if meeting.status == "approved":  # pylint: disable=no-else-return
+                if meeting.status == "approved":
                     meeting.status = "skipped"
                     # Persist using meet_url as key (stable across calendar syncs)
                     self._set_status_override(meeting.meet_url, "skipped")
                     logger.info("Un-approved meeting (now skipped): %s", meeting.title)
                     return True
-                else:
-                    logger.warning(
-                        "Meeting found but status is '%s', not 'approved'. Cannot unapprove.", meeting.status
-                    )
-                    return False
+                logger.warning("Meeting found but status is '%s', not 'approved'. Cannot unapprove.", meeting.status)
+                return False
         logger.warning("No meeting found with event_id=%s", event_id)
         return False
 
@@ -681,21 +736,20 @@ class MeetingScheduler:
             )
             if meeting.event_id == event_id:
                 # Allow approving from scheduled, skipped, or failed states
-                if meeting.status in ("scheduled", "skipped", "failed"):  # pylint: disable=no-else-return
+                if meeting.status in ("scheduled", "skipped", "failed"):
                     meeting.status = "approved"
                     meeting.bot_mode = mode
                     # Persist using meet_url as key (stable across calendar syncs)
                     self._set_status_override(meeting.meet_url, "approved")
                     logger.info("Pre-approved meeting: %s (mode: %s, was: %s)", meeting.title, mode, meeting.status)
                     return True
-                elif meeting.status == "approved":
+                if meeting.status == "approved":
                     # Already approved, just update mode if different
                     meeting.bot_mode = mode
                     logger.info("Meeting already approved, updated mode: %s (mode: %s)", meeting.title, mode)
                     return True
-                else:
-                    logger.warning("Meeting found but status is '%s', cannot approve.", meeting.status)
-                    return False
+                logger.warning("Meeting found but status is '%s', cannot approve.", meeting.status)
+                return False
 
         logger.warning("No meeting found with event_id=%s", event_id)
         # Log available event IDs for debugging
@@ -736,12 +790,11 @@ class MeetingScheduler:
                     attendees=meeting.attendees,
                 )
 
-                if success:  # pylint: disable=no-else-return
+                if success:
                     meeting.status = "active"
                     self.state.current_meeting = meeting
                     return True
-                else:
-                    meeting.status = "skipped"
+                meeting.status = "skipped"
 
         return False
 
@@ -772,13 +825,14 @@ class MeetingScheduler:
         meeting = ScheduledMeeting(
             event_id=event_id,
             calendar_id="manual",
-            title=title,
-            meet_url=meet_url,
-            start_time=now,
-            end_time=now + timedelta(hours=2),  # Default 2 hour duration
-            organizer="manual",
-            attendees=[],
-            description="Manually joined meeting",
+            window=MeetingWindow(start_time=now, end_time=now + timedelta(hours=2)),  # Default 2 hour duration
+            info=MeetingInfo(
+                title=title,
+                meet_url=meet_url,
+                organizer="manual",
+                attendees=[],
+                description="Manually joined meeting",
+            ),
             status="joining",
             bot_mode=mode,
         )
@@ -800,15 +854,14 @@ class MeetingScheduler:
             video_enabled=video_enabled,
         )
 
-        if success:  # pylint: disable=no-else-return
+        if success:
             meeting.status = "active"
             self.state.current_meeting = meeting
             logger.info("Successfully joined meeting: %s", title)
             return True
-        else:
-            meeting.status = "skipped"
-            logger.error("Failed to join meeting: %s", title)
-            return False
+        meeting.status = "skipped"
+        logger.error("Failed to join meeting: %s", title)
+        return False
 
     async def get_status(self) -> dict:
         """Get scheduler status."""
@@ -886,16 +939,10 @@ class MeetingScheduler:
         return match.group(1) if match else None
 
 
-# Global instance
-_scheduler: MeetingScheduler | None = None  # pylint: disable=invalid-name
-
-
+@functools.cache
 def get_scheduler() -> MeetingScheduler:
-    """Get the global scheduler instance."""
-    global _scheduler  # pylint: disable=global-statement
-    if _scheduler is None:
-        _scheduler = MeetingScheduler()
-    return _scheduler
+    """Get the global scheduler instance (created once, on first use)."""
+    return MeetingScheduler()
 
 
 async def init_scheduler() -> MeetingScheduler:
