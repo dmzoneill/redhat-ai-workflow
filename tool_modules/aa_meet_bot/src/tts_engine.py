@@ -13,12 +13,14 @@ import json
 import logging
 import os
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Any
 
 import numpy as np
+
 from tool_modules.common import PROJECT_ROOT
 
 __project_root__ = PROJECT_ROOT
@@ -28,9 +30,7 @@ from tool_modules.aa_meet_bot.src.config import get_config
 logger = logging.getLogger(__name__)
 
 # GPT-SoVITS paths (for voice cloning backend)
-GPT_SOVITS_ROOT = Path(
-    os.environ.get("GPT_SOVITS_ROOT", Path.home() / "src" / "GPT-SoVITS")
-)
+GPT_SOVITS_ROOT = Path(os.environ.get("GPT_SOVITS_ROOT", Path.home() / "src" / "GPT-SoVITS"))
 GPT_SOVITS_VENV = GPT_SOVITS_ROOT / "venv" / "bin" / "python"
 VOICE_SAMPLES_DIR = Path(__file__).parent.parent / "voice_samples"
 
@@ -49,9 +49,9 @@ class TTSResult:
     text: str
     timestamp: datetime = field(default_factory=datetime.now)
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
     # In-memory audio data (optional, for zero-copy pipeline)
-    audio_data: Optional[np.ndarray] = None
+    audio_data: np.ndarray | None = None
 
 
 class PiperTTS:
@@ -73,9 +73,9 @@ class PiperTTS:
         """
         self.voice = voice
         self._initialized = False
-        self._model_path: Optional[Path] = None
-        self._config_path: Optional[Path] = None
-        self._piper_cli: Optional[str] = None
+        self._model_path: Path | None = None
+        self._config_path: Path | None = None
+        self._piper_cli: str | None = None
 
     async def initialize(self) -> bool:
         """Initialize the Piper TTS (check CLI is available)."""
@@ -89,31 +89,25 @@ class PiperTTS:
             # Check for piper CLI
             self._piper_cli = shutil.which("piper")
             if not self._piper_cli:
-                logger.error(
-                    "piper CLI not found. Install from: https://github.com/rhasspy/piper/releases"
-                )
+                logger.error("piper CLI not found. Install from: https://github.com/rhasspy/piper/releases")
                 return False
 
             # Find or download model
             model_path = await self._get_model_path()
             if not model_path:
-                logger.warning(
-                    "Model %s not found, will try to download on first use", self.voice
-                )
+                logger.warning("Model %s not found, will try to download on first use", self.voice)
 
             self._initialized = True
-            logger.info(
-                "Piper TTS ready (CLI: %s, voice: %s)", self._piper_cli, self.voice
-            )
+            logger.info("Piper TTS ready (CLI: %s, voice: %s)", self._piper_cli, self.voice)
             return True
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to initialize Piper TTS: %s", e)
+        except Exception:
+            logger.exception("Failed to initialize Piper TTS")
             return False
 
-    async def _get_model_path(self) -> Optional[Path]:
+    async def _get_model_path(self) -> Path | None:
         """Get or download the voice model."""
         PIPER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -130,7 +124,8 @@ class PiperTTS:
 
         try:
             # Use piper_download if available
-            subprocess.run(
+            await asyncio.to_thread(
+                subprocess.run,
                 [
                     "piper",
                     "--download-dir",
@@ -171,12 +166,12 @@ class PiperTTS:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to download voice model: %s", e)
+        except Exception:
+            logger.exception("Failed to download voice model")
 
         return None
 
-    def synthesize(self, text: str) -> Tuple[np.ndarray, int]:
+    def synthesize(self, text: str) -> tuple[np.ndarray, int]:
         """
         Synthesize text to audio using piper CLI.
 
@@ -211,7 +206,11 @@ class PiperTTS:
 
             # Run piper with text on stdin
             result = subprocess.run(
-                cmd, input=text.encode(), capture_output=True, timeout=30, check=False
+                cmd,
+                input=text.encode(),
+                capture_output=True,
+                timeout=30,
+                check=False,
             )
 
             if result.returncode != 0:
@@ -236,11 +235,11 @@ class PiperTTS:
             return np.array([], dtype=np.float32), 22050
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Piper synthesis error: %s", e)
+        except Exception:
+            logger.exception("Piper synthesis error")
             return np.array([], dtype=np.float32), 22050
 
-    async def synthesize_async(self, text: str) -> Tuple[np.ndarray, int]:
+    async def synthesize_async(self, text: str) -> tuple[np.ndarray, int]:
         """Async wrapper for synthesize."""
         if not self._initialized:
             await self.initialize()
@@ -252,7 +251,7 @@ class PiperTTS:
         self,
         text: str,
         save_to_file: bool = False,
-        output_dir: Optional[Path] = None,
+        output_dir: Path | None = None,
     ) -> TTSResult:
         """
         Synthesize and return a TTSResult.
@@ -265,16 +264,15 @@ class PiperTTS:
         Returns:
             TTSResult with in-memory audio data
         """
-        if not self._initialized:
-            if not await self.initialize():
-                return TTSResult(
-                    audio_path=Path(""),
-                    duration_seconds=0,
-                    sample_rate=0,
-                    text=text,
-                    success=False,
-                    error="Failed to initialize Piper TTS",
-                )
+        if not self._initialized and not await self.initialize():
+            return TTSResult(
+                audio_path=Path(""),
+                duration_seconds=0,
+                sample_rate=0,
+                text=text,
+                success=False,
+                error="Failed to initialize Piper TTS",
+            )
 
         try:
             audio_data, sample_rate = await self.synthesize_async(text)
@@ -285,7 +283,7 @@ class PiperTTS:
                 output_dir = output_dir or get_config().audio.output_dir
                 output_dir.mkdir(parents=True, exist_ok=True)
 
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
                 audio_path = output_dir / f"piper_{timestamp}.wav"
 
                 # Save to file
@@ -317,7 +315,7 @@ class PiperTTS:
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error("Piper TTS synthesis failed: %s", e)
+            logger.exception("Piper TTS synthesis failed")
             return TTSResult(
                 audio_path=Path(""),
                 duration_seconds=0,
@@ -342,9 +340,7 @@ class GPTSoVITSEngine:
 
         # Model paths
         self.gpt_model = GPT_SOVITS_ROOT / "GPT_weights_v2Pro" / "dave-e50.ckpt"
-        self.sovits_model = (
-            GPT_SOVITS_ROOT / "SoVITS_weights_v2Pro" / "dave_e12_s240.pth"
-        )
+        self.sovits_model = GPT_SOVITS_ROOT / "SoVITS_weights_v2Pro" / "dave_e12_s240.pth"
 
         # Reference audio for voice cloning
         self.ref_audio = VOICE_SAMPLES_DIR / "ref_clip.wav"
@@ -359,7 +355,7 @@ class GPTSoVITSEngine:
 
     def _create_tts_script(self) -> Path:
         """Create a standalone TTS script that runs in GPT-SoVITS venv."""
-        script_path = self.output_dir / "run_tts.py"
+        script_path: Path = self.output_dir / "run_tts.py"
 
         gpt_sovits_path = str(GPT_SOVITS_ROOT)
         script_content = '''#!/usr/bin/env python3
@@ -463,7 +459,8 @@ if __name__ == "__main__":
                 full_recording = VOICE_SAMPLES_DIR / "reference.wav"
                 if full_recording.exists():
                     logger.info("Creating reference clip from full recording...")
-                    subprocess.run(
+                    await asyncio.to_thread(
+                        subprocess.run,
                         [
                             "ffmpeg",
                             "-y",
@@ -489,16 +486,16 @@ if __name__ == "__main__":
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to initialize GPT-SoVITS: %s", e)
+        except Exception:
+            logger.exception("Failed to initialize GPT-SoVITS")
             return False
 
     async def synthesize(
         self,
         text: str,
-        output_filename: Optional[str] = None,
-        ref_audio: Optional[Path] = None,
-        ref_text: Optional[str] = None,
+        output_filename: str | None = None,
+        ref_audio: Path | None = None,
+        ref_text: str | None = None,
     ) -> TTSResult:
         """
         Synthesize speech from text using voice cloning.
@@ -512,16 +509,15 @@ if __name__ == "__main__":
         Returns:
             TTSResult with audio path and metadata
         """
-        if not self.initialized:
-            if not await self.initialize():
-                return TTSResult(
-                    audio_path=Path(""),
-                    duration_seconds=0,
-                    sample_rate=0,
-                    text=text,
-                    success=False,
-                    error="Failed to initialize TTS engine",
-                )
+        if not self.initialized and not await self.initialize():
+            return TTSResult(
+                audio_path=Path(""),
+                duration_seconds=0,
+                sample_rate=0,
+                text=text,
+                success=False,
+                error="Failed to initialize TTS engine",
+            )
 
         try:
             # Use defaults if not provided
@@ -530,7 +526,7 @@ if __name__ == "__main__":
 
             # Generate output filename
             if not output_filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
                 output_filename = f"tts_{timestamp}.wav"
 
             output_path = self.output_dir / output_filename
@@ -570,7 +566,7 @@ if __name__ == "__main__":
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.error("TTS synthesis failed: %s", e)
+            logger.exception("TTS synthesis failed")
             return TTSResult(
                 audio_path=Path(""),
                 duration_seconds=0,
@@ -580,9 +576,7 @@ if __name__ == "__main__":
                 error=str(e),
             )
 
-    def _synthesize_subprocess(
-        self, text: str, ref_audio_path: str, ref_text: str, output_path: str
-    ) -> dict:
+    def _synthesize_subprocess(self, text: str, ref_audio_path: str, ref_text: str, output_path: str) -> dict:
         """Run synthesis via subprocess in GPT-SoVITS venv."""
         try:
             cmd = [
@@ -615,7 +609,8 @@ if __name__ == "__main__":
             # Parse JSON output
             for line in result.stdout.strip().split("\n"):
                 if line.startswith("{"):
-                    return json.loads(line)
+                    parsed: dict = json.loads(line)
+                    return parsed
 
             # If no JSON found, check stderr
             if result.returncode != 0:
@@ -628,6 +623,7 @@ if __name__ == "__main__":
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
+            logger.debug("GPT-SoVITS synthesis subprocess failed", exc_info=True)
             return {"success": False, "error": str(e)}
 
     async def synthesize_stream(self, text: str, chunk_callback: Callable[..., Any]):
@@ -663,8 +659,8 @@ class TTSEngine:
             backend: "piper" (default, fast) or "gpt-sovits" (voice cloning)
         """
         self.backend = backend
-        self._piper: Optional[PiperTTS] = None
-        self._gpt_sovits: Optional[GPTSoVITSEngine] = None
+        self._piper: PiperTTS | None = None
+        self._gpt_sovits: GPTSoVITSEngine | None = None
 
     async def initialize(self) -> bool:
         """Initialize the selected backend."""
@@ -679,7 +675,7 @@ class TTSEngine:
     async def synthesize(
         self,
         text: str,
-        output_filename: Optional[str] = None,
+        output_filename: str | None = None,
     ) -> TTSResult:
         """
         Synthesize text to speech.
@@ -704,7 +700,7 @@ class TTSEngine:
                 self._gpt_sovits = GPTSoVITSEngine()
             return await self._gpt_sovits.synthesize(text, output_filename)
 
-    def synthesize_sync(self, text: str) -> Tuple[np.ndarray, int]:
+    def synthesize_sync(self, text: str) -> tuple[np.ndarray, int]:
         """
         Synchronous synthesis for low-latency pipeline.
 
@@ -759,9 +755,7 @@ class TTSEngine:
             # 1. Normalize audio to consistent level (prevents clipping and ensures audibility)
             max_val = np.max(np.abs(audio_data))
             if max_val > 0:
-                audio_data = (
-                    audio_data / max_val * 0.85
-                )  # Normalize to 85% to leave headroom
+                audio_data = audio_data / max_val * 0.85  # Normalize to 85% to leave headroom
 
             # 2. Apply fade-in and fade-out to prevent clicks/pops
             fade_in_samples = int(sample_rate * 0.05)  # 50ms fade-in
@@ -781,9 +775,7 @@ class TTSEngine:
 
             # Lead-in: 100ms (reduced from 500ms - virtual pipe is always ready)
             lead_in_samples = int(sample_rate * 0.1)
-            silence_start = (
-                np.random.randn(lead_in_samples).astype(np.float32) * noise_level
-            )
+            silence_start = np.random.randn(lead_in_samples).astype(np.float32) * noise_level
 
             # Tail: 200ms (reduced from 800ms - just enough for audio to finish)
             tail_samples = int(sample_rate * 0.2)
@@ -794,9 +786,7 @@ class TTSEngine:
             wake_samples = int(sample_rate * 0.02)  # 20ms
             t = np.linspace(0, 0.02, wake_samples)
             wake_tone = np.sin(2 * np.pi * 440 * t) * 0.01  # Very quiet
-            wake_tone *= (
-                1 - np.cos(np.linspace(0, np.pi, wake_samples))
-            ) / 2  # Fade envelope
+            wake_tone *= (1 - np.cos(np.linspace(0, np.pi, wake_samples))) / 2  # Fade envelope
             silence_start[:wake_samples] += wake_tone.astype(np.float32)
 
             audio_data = np.concatenate([silence_start, audio_data, silence_end])
@@ -837,8 +827,8 @@ class TTSEngine:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to write to pipe: %s", e)
+        except Exception:
+            logger.exception("Failed to write to pipe")
             return 0.0
 
     def _write_to_pipe_blocking(self, pipe_path: str, audio_bytes: bytes) -> bool:
@@ -870,16 +860,16 @@ class TTSEngine:
             return False
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Pipe write error: %s", e)
+        except Exception:
+            logger.exception("Pipe write error")
             return False
 
 
 # Global engine instances
 # pylint: disable-next=invalid-name
-_tts_engine: Optional[TTSEngine] = None
+_tts_engine: TTSEngine | None = None
 # pylint: disable-next=invalid-name
-_gpt_sovits_engine: Optional[GPTSoVITSEngine] = None
+_gpt_sovits_engine: GPTSoVITSEngine | None = None
 
 
 def get_tts_engine(backend: str = "piper") -> TTSEngine:
@@ -907,7 +897,7 @@ def get_gpt_sovits_engine() -> GPTSoVITSEngine:
 
 async def synthesize_speech(
     text: str,
-    output_filename: Optional[str] = None,
+    output_filename: str | None = None,
     backend: str = "piper",
 ) -> TTSResult:
     """
