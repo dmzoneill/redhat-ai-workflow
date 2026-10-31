@@ -2,12 +2,11 @@
 
 import asyncio
 import logging
-import random
+import secrets
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from tool_modules.aa_meet_bot.src.video_config import Attendee, VideoConfig
 from tool_modules.aa_meet_bot.src.video_theme import (
@@ -18,6 +17,9 @@ from tool_modules.aa_meet_bot.src.video_theme import (
 
 logger = logging.getLogger(__name__)
 
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
+
 
 class ResearchVideoGenerator:
     """
@@ -27,9 +29,31 @@ class ResearchVideoGenerator:
     on meeting attendees. ALL DATA IS FAKE.
     """
 
-    def __init__(self, config: Optional[VideoConfig] = None):
+    def _pick_fake_data(self) -> tuple[list, list, str]:
+        """Pick this attendee's fake research tools, findings and threat assessment."""
+        config = self.config
+        tools = _RNG.sample(RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS)))
+        findings = _RNG.sample(FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS)))
+        return tools, findings, _RNG.choice(THREAT_ASSESSMENTS)
+
+    def _header_filters(self, attendee_index: int, total_attendees: int) -> list[str]:
+        """Drawtext filters for the module title, attendee count and position."""
+        config = self.config
+        return [
+            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15",
+            (
+                f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
+                f":fontcolor={config.text_color}:x=30:y=55"
+            ),
+            (
+                f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
+                f":fontcolor=cyan:x={config.width - 150}:y=15"
+            ),
+        ]
+
+    def __init__(self, config: VideoConfig | None = None):
         self.config = config or VideoConfig()
-        self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._ffmpeg_process: subprocess.Popen | None = None
         self._running = False
 
     async def generate_video_file(
@@ -50,9 +74,7 @@ class ResearchVideoGenerator:
         # Build ffmpeg filter graph
         filter_complex = self._build_filter_graph(attendees)
 
-        total_duration = (
-            len(attendees) * self.config.duration_per_person + 3
-        )  # +3 for intro/outro
+        total_duration = len(attendees) * self.config.duration_per_person + 3  # +3 for intro/outro
 
         cmd = [
             "ffmpeg",
@@ -60,8 +82,10 @@ class ResearchVideoGenerator:
             "-",
             "lavfi",
             "-i",
-            f"color=c={self.config.background_color}:s={self.config.width}x{self.config.height}"
-            f":r={self.config.fps}:d={total_duration}",
+            (
+                f"color=c={self.config.background_color}:s={self.config.width}x{self.config.height}"
+                f":r={self.config.fps}:d={total_duration}"
+            ),
             "-v",
             filter_complex,
             "-c:v",
@@ -138,9 +162,7 @@ class ResearchVideoGenerator:
                 if not self._running:
                     break
 
-                logger.info(
-                    "🔍 [%s/%s] Analyzing: %s", idx + 1, total_attendees, attendee.name
-                )
+                logger.info("🔍 [%s/%s] Analyzing: %s", idx + 1, total_attendees, attendee.name)
                 await self._stream_single_attendee(
                     attendee=attendee,
                     video_device=video_device,
@@ -208,29 +230,13 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = random.sample(
-            RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS))
-        )
-        findings = random.sample(
-            FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS))
-        )
-        assessment = random.choice(THREAT_ASSESSMENTS)
+        tools, findings, assessment = self._pick_fake_data()
 
         # Build filter graph
         filters = []
 
         # Header
-        filters.append(
-            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15"
-        )
-        filters.append(
-            f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
-            f":fontcolor={config.text_color}:x=30:y=55"
-        )
-        filters.append(
-            f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
-            f":fontcolor=cyan:x={config.width - 150}:y=15"
-        )
+        filters.extend(self._header_filters(attendee_index, total_attendees))
 
         # Target name with animated dots (cycles: name, name ., name .., name ...)
         escaped_name = self._escape_text(attendee.name)
@@ -291,8 +297,7 @@ class ResearchVideoGenerator:
             "-",
             "lavfi",
             "-i",
-            f"color=c={config.background_color}:s={config.width}x{config.height}:"
-            f"r={config.fps}:d={duration}",
+            f"color=c={config.background_color}:s={config.width}x{config.height}:r={config.fps}:d={duration}",
             "-v",
             filter_graph,
             "-c:v",
@@ -326,29 +331,13 @@ class ResearchVideoGenerator:
         duration = config.duration_per_person
 
         # Pick random fake data for this attendee
-        tools = random.sample(
-            RESEARCH_TOOLS, min(config.num_tools, len(RESEARCH_TOOLS))
-        )
-        findings = random.sample(
-            FAKE_FINDINGS, min(config.num_findings, len(FAKE_FINDINGS))
-        )
-        assessment = random.choice(THREAT_ASSESSMENTS)
+        tools, findings, assessment = self._pick_fake_data()
 
         # Build filter graph for this single attendee
         filters = []
 
         # Header with attendee count
-        filters.append(
-            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=24:fontcolor=gray:x=30:y=15"
-        )
-        filters.append(
-            f"drawtext=text='SCANNING {total_attendees} MEETING ATTENDEES...':fontsize=36"
-            f":fontcolor={config.text_color}:x=30:y=55"
-        )
-        filters.append(
-            f"drawtext=text='[{attendee_index + 1}/{total_attendees}]':fontsize=28"
-            f":fontcolor=cyan:x={config.width - 150}:y=15"
-        )
+        filters.extend(self._header_filters(attendee_index, total_attendees))
 
         # Right column - 400px wide, with vertical divider
         right_col_x = config.width - config.right_column_width
@@ -357,8 +346,7 @@ class ResearchVideoGenerator:
 
         # Vertical green line divider
         filters.append(
-            f"drawbox=x={right_col_x}:y={right_col_top}:w=2:h={right_col_height}:"
-            f"color={config.text_color}:t=fill"
+            f"drawbox=x={right_col_x}:y={right_col_top}:w=2:h={right_col_height}:color={config.text_color}:t=fill"
         )
 
         # 4 sections in right column, ~110px each
@@ -367,9 +355,7 @@ class ResearchVideoGenerator:
 
         # Section 1: JIRA ISSUE TRACKER
         sec1_y = right_col_top + 5
-        filters.append(
-            f"drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec1_y}"
-        )
+        filters.append(f"drawtext=text='[ JIRA ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec1_y}")
         jira_items = [
             "VELOCITY: 42",
             "BLOCKERS: 3",
@@ -385,9 +371,7 @@ class ResearchVideoGenerator:
 
         # Section 2: SLACK SIGINT MODULE
         sec2_y = sec1_y + section_height
-        filters.append(
-            f"drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec2_y}"
-        )
+        filters.append(f"drawtext=text='[ SLACK ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec2_y}")
         slack_items = [
             "CHANNELS: 847",
             "DM: ACTIVE",
@@ -403,9 +387,7 @@ class ResearchVideoGenerator:
 
         # Section 3: SEMANTIC VECTOR SEARCH
         sec3_y = sec2_y + section_height
-        filters.append(
-            f"drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec3_y}"
-        )
+        filters.append(f"drawtext=text='[ SEMANTIC ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec3_y}")
         semantic_items = [
             "VECTORS: 4.2M",
             "COSINE: 0.847",
@@ -421,9 +403,7 @@ class ResearchVideoGenerator:
 
         # Section 4: COMMS INTERCEPT ANALYSIS
         sec4_y = sec3_y + section_height
-        filters.append(
-            f"drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec4_y}"
-        )
+        filters.append(f"drawtext=text='[ COMMS ]':fontsize=12:fontcolor=cyan:x={section_x}:y={sec4_y}")
         comms_items = [
             "EMAIL: 12.4K",
             "CALENDAR: LIVE",
@@ -444,26 +424,16 @@ class ResearchVideoGenerator:
         silhouette_h = 250
 
         filters.append(
-            f"drawbox=x={silhouette_x}:y={silhouette_y}:w={silhouette_w}:"
-            f"h={silhouette_h}:color={config.text_color}:t=2"
+            f"drawbox=x={silhouette_x}:y={silhouette_y}:w={silhouette_w}:h={silhouette_h}:color={config.text_color}:t=2"
         )
         # Head
         head_cx = silhouette_x + silhouette_w // 2
         head_cy = silhouette_y + 50
-        filters.append(
-            f"drawbox=x={head_cx - 25}:y={head_cy - 25}:w=50:"
-            f"h=50:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 25}:y={head_cy - 25}:w=50:h=50:color={config.text_color}@0.5:t=fill")
         # Body
-        filters.append(
-            f"drawbox=x={head_cx - 35}:y={head_cy + 35}:w=70:"
-            f"h=120:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 35}:y={head_cy + 35}:w=70:h=120:color={config.text_color}@0.5:t=fill")
         # Shoulders
-        filters.append(
-            f"drawbox=x={head_cx - 55}:y={head_cy + 35}:w=110:"
-            f"h=25:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 55}:y={head_cy + 35}:w=110:h=25:color={config.text_color}@0.5:t=fill")
         filters.append(
             f"drawtext=text='SUBJECT':fontsize=14:fontcolor={config.text_color}"
             f":x={silhouette_x + 70}:y={silhouette_y - 20}"
@@ -476,19 +446,11 @@ class ResearchVideoGenerator:
         wave_h = config.wave_h
 
         # Waveform box border
-        filters.append(
-            f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}:color={config.text_color}:t=2"
-        )
+        filters.append(f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}:color={config.text_color}:t=2")
         # Caption above the waveform
-        filters.append(
-            f"drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan:"
-            f"x={wave_x + 240}:y={wave_y - 18}"
-        )
+        filters.append(f"drawtext=text='VOICE ANALYSIS':fontsize=14:fontcolor=cyan:x={wave_x + 240}:y={wave_y - 18}")
         # Additional label below
-        filters.append(
-            f"drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray:"
-            f"x={wave_x + 270}:y={wave_y + wave_h + 5}"
-        )
+        filters.append(f"drawtext=text='[ AUDIO ]':fontsize=11:fontcolor=gray:x={wave_x + 270}:y={wave_y + wave_h + 5}")
 
         # Target name with animated dots (cycles: name, name ., name .., name ...)
         escaped_name = self._escape_text(attendee.name)
@@ -554,8 +516,7 @@ class ResearchVideoGenerator:
             "-",
             "lavfi",
             "-i",
-            f"color=c={config.background_color}:s={config.width}x{config.height}:"
-            f"r={config.fps}:d={duration}",
+            f"color=c={config.background_color}:s={config.width}x{config.height}:r={config.fps}:d={duration}",
             "-v",
             filter_graph,
             "-t",
@@ -575,9 +536,7 @@ class ResearchVideoGenerator:
 
         _stdout, stderr = await process.communicate()
         if process.returncode != 0:
-            logger.warning(
-                "FFmpeg error for %s: %s", attendee.name, stderr.decode()[:200]
-            )
+            logger.warning("FFmpeg error for %s: %s", attendee.name, stderr.decode()[:200])
 
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-locals
@@ -588,9 +547,7 @@ class ResearchVideoGenerator:
         total_attendees = len(attendees)
 
         # Header - scaled for 720p
-        filters.append(
-            "drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10"
-        )
+        filters.append("drawtext=text='AI RESEARCH MODULE v2.1':fontsize=18:fontcolor=gray:x=20:y=10")
         filters.append(
             f"drawtext=text='SCANNING {total_attendees} ATTENDEES...'"
             f":fontsize=24:fontcolor={config.text_color}:x=20:y=35"
@@ -604,28 +561,18 @@ class ResearchVideoGenerator:
 
         # Draw silhouette box border
         filters.append(
-            f"drawbox=x={silhouette_x}:y={silhouette_y}:w={silhouette_w}:"
-            f"h={silhouette_h}:color={config.text_color}:t=2"
+            f"drawbox=x={silhouette_x}:y={silhouette_y}:w={silhouette_w}:h={silhouette_h}:color={config.text_color}:t=2"
         )
 
         # Draw person silhouette using simple shapes (head + body)
         head_cx = silhouette_x + silhouette_w // 2
         head_cy = silhouette_y + 45
         # Head
-        filters.append(
-            f"drawbox=x={head_cx - 22}:y={head_cy - 22}:w=44:"
-            f"h=44:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 22}:y={head_cy - 22}:w=44:h=44:color={config.text_color}@0.5:t=fill")
         # Body
-        filters.append(
-            f"drawbox=x={head_cx - 30}:y={head_cy + 30}:w=60:"
-            f"h=100:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 30}:y={head_cy + 30}:w=60:h=100:color={config.text_color}@0.5:t=fill")
         # Shoulders
-        filters.append(
-            f"drawbox=x={head_cx - 48}:y={head_cy + 30}:w=96:"
-            f"h=22:color={config.text_color}@0.5:t=fill"
-        )
+        filters.append(f"drawbox=x={head_cx - 48}:y={head_cy + 30}:w=96:h=22:color={config.text_color}@0.5:t=fill")
 
         # "SUBJECT" label above silhouette
         filters.append(
@@ -640,14 +587,11 @@ class ResearchVideoGenerator:
         wave_h = config.wave_h
 
         # Waveform box border
-        filters.append(
-            f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}:color={config.text_color}:t=2"
-        )
+        filters.append(f"drawbox=x={wave_x}:y={wave_y}:w={wave_w}:h={wave_h}:color={config.text_color}:t=2")
 
         # "ANALYZING SPEECH PATTERN" label
         filters.append(
-            f"drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan:"
-            f"x={wave_x + 250}:y={wave_y + wave_h + 4}"
+            f"drawtext=text='VOICE ANALYSIS':fontsize=11:fontcolor=cyan:x={wave_x + 250}:y={wave_y + wave_h + 4}"
         )
 
         # Animated waveform bars
@@ -682,7 +626,7 @@ class ResearchVideoGenerator:
             )
 
             # Random tools - left side
-            tools = random.sample(RESEARCH_TOOLS, config.num_tools)
+            tools = _RNG.sample(RESEARCH_TOOLS, config.num_tools)
             for j, tool in enumerate(tools):
                 tool_start = start_time + j * config.tool_display_time
                 tool_end = min(tool_start + config.tool_display_time + 1, end_time)
@@ -693,12 +637,10 @@ class ResearchVideoGenerator:
                 )
 
             # Random findings
-            findings = random.sample(FAKE_FINDINGS, config.num_findings)
+            findings = _RNG.sample(FAKE_FINDINGS, config.num_findings)
             for j, finding in enumerate(findings):
                 finding_start = start_time + 4 + j * config.finding_display_time
-                finding_end = min(
-                    finding_start + config.finding_display_time + 1, end_time
-                )
+                finding_end = min(finding_start + config.finding_display_time + 1, end_time)
                 filters.append(
                     f"drawtext=text='{self._escape_text(finding)}'"
                     ":fontsize=12:fontcolor=yellow"
@@ -707,7 +649,7 @@ class ResearchVideoGenerator:
                 )
 
             # Assessment - appears at end
-            assessment = random.choice(THREAT_ASSESSMENTS)
+            assessment = _RNG.choice(THREAT_ASSESSMENTS)
             filters.append(
                 f"drawtext=text='{self._escape_text(assessment)}'"
                 ":fontsize=16:fontcolor=cyan"
@@ -755,7 +697,7 @@ def load_attendees_from_file(filepath: Path) -> list[Attendee]:
 
 async def generate_research_video(
     attendee_names: list[str],
-    output_path: Optional[Path] = None,
+    output_path: Path | None = None,
 ) -> Path:
     """
     Convenience function to generate a research video.
