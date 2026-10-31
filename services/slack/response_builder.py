@@ -7,32 +7,39 @@ Contains:
 - ResponseGenerator: Claude-powered response generation
 """
 
+import importlib
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from scripts.common.config_loader import load_config
+from services.slack.errors import SLACK_ERRORS
 
 if TYPE_CHECKING:
     from services.slack.message_processor import UserClassification
 
 logger = logging.getLogger(__name__)
 
-# Desktop notifications (optional)
-NOTIFY_AVAILABLE = False
-try:
-    import gi
 
-    gi.require_version("Notify", "0.7")
-    from gi.repository import Notify
-
-    NOTIFY_AVAILABLE = True
+def _load_notify() -> Any:
+    """libnotify's Notify module, initialised once, or None when unavailable."""
+    try:
+        gi = importlib.import_module("gi")
+        gi.require_version("Notify", "0.7")
+        notify = importlib.import_module("gi.repository.Notify")
+    except (ImportError, ValueError) as exc:
+        logger.debug("Suppressed error: %s", exc)
+        return None
     # Only init once (may already be initialized by daemon.py)
-    if not Notify.is_initted():
-        Notify.init("AI Workflow Slack Persona")
-except (ImportError, ValueError) as exc:
-    logger.debug("Suppressed error: %s", exc)
+    if not notify.is_initted():
+        notify.init("AI Workflow Slack Persona")
+    return notify
+
+
+# Desktop notifications (optional)
+_NOTIFY = _load_notify()
+NOTIFY_AVAILABLE = _NOTIFY is not None
 
 
 def _load_configs():
@@ -88,9 +95,7 @@ class DesktopNotifier:
         """Check if we're within rate limits. Returns True if OK to send."""
         now = time.time()
         # Remove old entries outside the window
-        self._notification_times = [
-            t for t in self._notification_times if now - t < self.RATE_LIMIT_WINDOW
-        ]
+        self._notification_times = [t for t in self._notification_times if now - t < self.RATE_LIMIT_WINDOW]
         # Check if we're at the limit
         if len(self._notification_times) >= self.RATE_LIMIT_MAX:
             return False
@@ -105,24 +110,22 @@ class DesktopNotifier:
         icon: str = "dialog-information",
         urgency: int = 1,
         timeout: int = 5000,
-        bypass_rate_limit: bool = False,
     ):
-        """Send a desktop notification."""
+        """Send a desktop notification, subject to the rate limit."""
         if not self.enabled:
             return
 
-        # Check rate limit (unless bypassed for critical notifications)
-        if not bypass_rate_limit and not self._check_rate_limit():
-            logger.debug(f"Notification rate limited: {title}")
+        if not self._check_rate_limit():
+            logger.debug("Notification rate limited: %s", title)
             return
 
         try:
-            notification = Notify.Notification.new(title, body, icon)
+            notification = _NOTIFY.Notification.new(title, body, icon)
             notification.set_urgency(urgency)
             notification.set_timeout(timeout)
             notification.show()
-        except Exception as e:
-            logger.debug(f"Notification failed: {e}")
+        except (OSError, RuntimeError, ValueError, TypeError, AttributeError) as e:
+            logger.debug("Notification failed: %s", e)
 
     def message_received(
         self,
@@ -138,20 +141,14 @@ class DesktopNotifier:
         title = f"📩 Message from {user_name}"
         body = f"#{channel_name}\n{preview}\n\n[{classification}]"
 
-        urgency = (
-            self.URGENCY_CRITICAL
-            if classification == "concerned"
-            else self.URGENCY_NORMAL
-        )
+        urgency = self.URGENCY_CRITICAL if classification == "concerned" else self.URGENCY_NORMAL
         self._send(title, body, self._icons["received"], urgency)
 
     def responding(self, user_name: str, channel_name: str, intent: str):
         """Notify when responding to a message."""
         title = "✅ Responding"
         body = f"To {user_name} in #{channel_name}\nIntent: {intent}"
-        self._send(
-            title, body, self._icons["responding"], self.URGENCY_LOW, timeout=3000
-        )
+        self._send(title, body, self._icons["responding"], self.URGENCY_LOW, timeout=3000)
 
     def response_sent(self, user_name: str, channel_name: str):
         """Notify when response was sent successfully."""
@@ -242,7 +239,7 @@ class DesktopNotifier:
 class TerminalUI:
     """Rich terminal output for the daemon."""
 
-    COLORS = {
+    COLORS: ClassVar[dict[str, str]] = {
         "reset": "\033[0m",
         "bold": "\033[1m",
         "dim": "\033[2m",
@@ -320,9 +317,7 @@ class TerminalUI:
         channel_allowed: bool = True,
     ):
         """Print incoming message."""
-        print(
-            f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
-        )
+        print(f"\n{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
         print(f"{self.COLORS['bold']}📩 New Message{self.COLORS['reset']}")
 
         # Show channel with permission indicator
@@ -354,9 +349,7 @@ class TerminalUI:
         print(f"   Response: {status}")
         if self.verbose:
             print(f"   {self.COLORS['dim']}{response[:200]}...{self.COLORS['reset']}")
-        print(
-            f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}"
-        )
+        print(f"{self.COLORS['yellow']}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{self.COLORS['reset']}")
 
     def print_error(self, error: str):
         """Print error message."""
@@ -365,9 +358,7 @@ class TerminalUI:
 
     def print_shutdown(self, listener_stats: dict | None = None):
         """Print shutdown message."""
-        print(
-            f"\n\n{self.COLORS['cyan']}Shutting down gracefully...{self.COLORS['reset']}"
-        )
+        print(f"\n\n{self.COLORS['cyan']}Shutting down gracefully...{self.COLORS['reset']}")
         print(f"   📊 Total processed: {self.messages_processed}")
         print(f"   💬 Total responded: {self.messages_responded}")
         # Combine listener errors with daemon errors
@@ -381,12 +372,19 @@ class TerminalUI:
 # RESPONSE GENERATOR
 # =============================================================================
 
-# Try to import Claude agent
-try:
-    from scripts.claude_agent import ANTHROPIC_AVAILABLE, ClaudeAgent
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    ClaudeAgent = None
+
+def _load_claude_agent_class() -> Any:
+    """scripts.claude_agent.ClaudeAgent when it and the anthropic package are installed, else None."""
+    try:
+        module = importlib.import_module("scripts.claude_agent")
+    except ImportError:
+        return None
+    return module.ClaudeAgent if module.ANTHROPIC_AVAILABLE else None
+
+
+# Claude agent (optional import; required at runtime by ResponseGenerator)
+CLAUDE_AGENT_CLASS = _load_claude_agent_class()
+ANTHROPIC_AVAILABLE = CLAUDE_AGENT_CLASS is not None
 
 
 class ResponseGenerator:
@@ -403,7 +401,7 @@ class ResponseGenerator:
         self,
         notifier: DesktopNotifier | None = None,
     ):
-        self.claude_agent = None
+        self.claude_agent: Any = None
         config, slack_config = _load_configs()
         self.templates = slack_config.get("response_templates", {})
         self._config = config
@@ -413,12 +411,8 @@ class ResponseGenerator:
     def _init_claude(self):
         """Initialize Claude agent - REQUIRED for operation."""
         if not ANTHROPIC_AVAILABLE:
-            logger.error(
-                "anthropic package not installed. Install with: uv add anthropic"
-            )
-            raise RuntimeError(
-                "Claude agent required but anthropic package not available"
-            )
+            logger.error("anthropic package not installed. Install with: uv add anthropic")
+            raise RuntimeError("Claude agent required but anthropic package not available")
 
         # Check for either direct API key or Vertex AI credentials
         use_vertex = os.getenv("CLAUDE_CODE_USE_VERTEX") == "1"
@@ -435,32 +429,26 @@ class ResponseGenerator:
             # Get model from config
             agent_config = self._config.get("agent", {})
             model = agent_config.get("model", "claude-sonnet-4-20250514")
-            vertex_model = agent_config.get(
-                "vertex_model", "claude-sonnet-4-5@20250929"
-            )
+            vertex_model = agent_config.get("vertex_model", "claude-sonnet-4-5@20250929")
             max_tokens = agent_config.get("max_tokens", 4096)
             system_prompt = agent_config.get("system_prompt")
 
-            self.claude_agent = ClaudeAgent(
+            self.claude_agent = CLAUDE_AGENT_CLASS(
                 model=model,
                 vertex_model=vertex_model,
                 max_tokens=max_tokens,
                 system_prompt=system_prompt,
             )
             if use_vertex:
-                logger.info(f"Claude agent initialized via Vertex AI: {vertex_project}")
+                logger.info("Claude agent initialized via Vertex AI: %s", vertex_project)
             else:
-                logger.info(f"Claude agent initialized with model: {model}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Claude agent: {e}")
+                logger.info("Claude agent initialized with model: %s", model)
+        except SLACK_ERRORS as e:
+            logger.error("Failed to initialize Claude agent: %s", e)
             raise RuntimeError(f"Claude agent initialization failed: {e}") from e
 
-    def _modulate_response(
-        self,
-        response: str,
-        user_name: str,
-        classification: "UserClassification",
-    ) -> str:
+    @staticmethod
+    def modulate_response(response: str | None, classification: "UserClassification") -> str | None:
         """
         Light post-processing of Claude's response.
 
@@ -471,10 +459,9 @@ class ResponseGenerator:
             return None
 
         # Truncate if max length specified (unknown users get 500 char limit)
-        if classification.max_response_length:
-            if len(response) > classification.max_response_length:
-                response = response[: classification.max_response_length - 50]
-                response += "\n\n_...truncated_"
+        if classification.max_response_length and len(response) > classification.max_response_length:
+            response = response[: classification.max_response_length - 50]
+            response += "\n\n_...truncated_"
 
         return response
 
@@ -517,18 +504,16 @@ class ResponseGenerator:
             else:
                 conversation_id = f"{message.channel_id}:{message.user_id}"
 
-            response = await self.claude_agent.process_message(
-                message.text, context, conversation_id=conversation_id
-            )
+            response = await self.claude_agent.process_message(message.text, context, conversation_id=conversation_id)
             self.notifier.skill_completed("claude_agent", success=True)
-        except Exception as e:
+        except SLACK_ERRORS:
             # Log full error internally - stay completely silent to user
-            logger.error(f"Claude agent error: {e}", exc_info=True)
+            logger.exception("Claude agent error")
             self.notifier.skill_completed("claude_agent", success=False)
             return None, False  # Don't respond at all on error
 
         # Modulate response based on user classification
-        response = self._modulate_response(response, message.user_name, classification)
+        response = self.modulate_response(response, classification)
 
         # Determine if we should auto-send
         should_send = classification.auto_respond and not classification.require_review
