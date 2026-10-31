@@ -582,6 +582,11 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
         self._enable_wake_word = enabled
         logger.info("Wake word detection %s", "enabled" if enabled else "disabled")
 
+    @property
+    def controller(self) -> GoogleMeetController | None:
+        """The attached Meet browser controller, if any."""
+        return self._controller
+
     def has_controller(self) -> bool:
         """Return whether a Meet browser controller is attached."""
         return getattr(self, "_controller", None) is not None
