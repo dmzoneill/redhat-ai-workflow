@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # pylint: disable=too-many-lines
-# ruff: noqa: DTZ005, DTZ901 - naive local timestamps are persisted/compared; tz-aware is a separate change
 """
 Sprint Bot Daemon
 
@@ -42,15 +41,17 @@ import re
 import shutil
 import tempfile
 import traceback
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import yaml
+from dbus_next.aio import MessageBus
 
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
+from server.utils import load_config
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
@@ -65,6 +66,20 @@ from services.sprint.bot.workflow_config import (
     WorkflowConfig,
     get_workflow_config,
 )
+from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint
+from tool_modules.aa_workflow.src.notification_emitter import (
+    notify_sprint_issue_blocked,
+    notify_sprint_issue_completed,
+    notify_sprint_issue_started,
+)
+from tool_modules.aa_workflow.src.sprint_bot import (
+    SprintBotConfig,
+    WorkingHours,
+    fetch_sprint_issues,
+    to_sprint_issue_format,
+)
+from tool_modules.aa_workflow.src.sprint_history import SprintIssue, load_sprint_state, save_sprint_state
+from tool_modules.aa_workflow.src.sprint_prioritizer import prioritize_issues
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
@@ -73,6 +88,23 @@ SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
 SPRINT_WORK_DIR = PROJECT_ROOT / "memory" / "state" / "sprint_work"
 
 logger = logging.getLogger(__name__)
+
+# Failures the daemon recovers from (logs and keeps running) instead of crashing the loop
+RECOVERABLE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    LookupError,
+    AttributeError,
+    asyncio.TimeoutError,
+    yaml.YAMLError,
+)
+
+
+def _local_now() -> datetime:
+    """Naive local wall-clock time, matching the timestamps already persisted in state files."""
+    return datetime.now(timezone.utc).astimezone().replace(tzinfo=None)
 
 
 def _log_safe(value: Any) -> str:
@@ -116,11 +148,10 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._shutdown_event = asyncio.Event()
         self._issues_processed = 0
         self._issues_completed = 0
-        self._last_jira_refresh = datetime.min
-        self._last_review_check = datetime.min
+        self._last_jira_refresh: datetime | None = None
+        self._last_review_check: datetime | None = None
 
         # Configuration - read from config.json sprint section
-        from server.utils import load_config  # pylint: disable=import-outside-toplevel
 
         full_config = load_config()
         sprint_config = full_config.get("sprint", {})
@@ -274,7 +305,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "approved",
                         "description": "Issue approved for sprint bot",
                     },
@@ -300,7 +331,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "unapproved",
                         "description": "Issue unapproved - removed from bot queue",
                     },
@@ -326,7 +357,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "aborted",
                         "description": "User took control - automated work stopped",
                     },
@@ -358,7 +389,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "skipped",
                         "description": f"Issue skipped: {reason}",
                     },
@@ -374,7 +405,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         try:
             await self._refresh_from_jira()
             return {"success": True, "message": "Refreshed from Jira"}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to refresh from Jira via D-Bus")
             return {"success": False, "error": str(e)}
 
@@ -382,7 +413,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         """Enable automatic mode (scheduled Mon-Fri 9-5)."""
         state = self._load_state()
         state["automaticMode"] = True
-        state["lastUpdated"] = datetime.now().isoformat()
+        state["lastUpdated"] = _local_now().isoformat()
         self._save_state(state)
         logger.info("Sprint bot automatic mode enabled")
         return {"success": True, "message": "Sprint bot automatic mode enabled"}
@@ -391,7 +422,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         """Disable automatic mode."""
         state = self._load_state()
         state["automaticMode"] = False
-        state["lastUpdated"] = datetime.now().isoformat()
+        state["lastUpdated"] = _local_now().isoformat()
         self._save_state(state)
         logger.info("Sprint bot automatic mode disabled")
         return {"success": True, "message": "Sprint bot automatic mode disabled"}
@@ -400,7 +431,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         """Manually start the bot (ignores schedule)."""
         state = self._load_state()
         state["manuallyStarted"] = True
-        state["lastUpdated"] = datetime.now().isoformat()
+        state["lastUpdated"] = _local_now().isoformat()
         self._save_state(state)
         logger.info("Sprint bot manually started")
         return {"success": True, "message": "Sprint bot started manually"}
@@ -410,7 +441,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         state = self._load_state()
         state["manuallyStarted"] = False
         state["processingIssue"] = None
-        state["lastUpdated"] = datetime.now().isoformat()
+        state["lastUpdated"] = _local_now().isoformat()
         self._save_state(state)
         logger.info("Sprint bot stopped")
         return {"success": True, "message": "Sprint bot stopped"}
@@ -443,7 +474,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     _add_timeline_event(
                         issue,
                         {
-                            "timestamp": datetime.now().isoformat(),
+                            "timestamp": _local_now().isoformat(),
                             "action": "approved",
                             "description": "Bulk approved by sprint bot",
                         },
@@ -479,7 +510,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "unapproved",
                         "description": "Bulk unapproved",
                     },
@@ -503,7 +534,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         else:
             state["backgroundTasks"] = not state.get("backgroundTasks", False)
 
-        state["lastUpdated"] = datetime.now().isoformat()
+        state["lastUpdated"] = _local_now().isoformat()
         self._save_state(state)
 
         mode = "enabled" if state["backgroundTasks"] else "disabled"
@@ -533,9 +564,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "within_working_hours": within_hours,
             "issues_processed": self._issues_processed,
             "issues_completed": self._issues_completed,
-            "last_jira_refresh": (
-                self._last_jira_refresh.isoformat() if self._last_jira_refresh != datetime.min else None
-            ),
+            "last_jira_refresh": (self._last_jira_refresh.isoformat() if self._last_jira_refresh else None),
         }
 
         return {"success": True, "state": state}
@@ -549,7 +578,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             state = self._load_state()
             history = state.get("sprint_history", [])
             return {"success": True, "history": history}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to get sprint history")
             return {"success": False, "error": str(e), "history": []}
 
@@ -572,7 +601,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             trace = yaml.safe_load(trace_file.read_text(encoding="utf-8"))
 
             return {"success": True, "trace": trace}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to get trace for %s", issue_key)
             return {"success": False, "error": str(e)}
 
@@ -603,7 +632,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # Sort by started_at descending
             traces.sort(key=lambda t: t.get("started_at", ""), reverse=True)
             return {"success": True, "traces": traces}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to list traces")
             return {"success": False, "error": str(e), "traces": []}
 
@@ -624,13 +653,13 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         return {"success": True, "work_log": work_log}
 
-    async def _handle_write_state(self, params: dict) -> dict:  # pylint: disable=unused-argument
+    async def _handle_write_state(self, *_args: Any, **_kwargs: Any) -> dict:
         """Write state to file immediately (for UI refresh requests)."""
         try:
             state = self._load_state()
             self._save_state(state)
             return {"success": True, "file": str(SPRINT_STATE_FILE)}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to save sprint state via D-Bus")
             return {"success": False, "error": str(e)}
 
@@ -676,7 +705,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         _add_timeline_event(
             target_issue,
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _local_now().isoformat(),
                 "action": "force_started",
                 "description": "Issue started immediately via UI (bypassing checks)",
             },
@@ -731,7 +760,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         _add_timeline_event(
             target_issue,
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _local_now().isoformat(),
                 "action": "started",
                 "description": "Sprint bot started background processing",
                 "jiraTransition": self.JIRA_STATUS_IN_PROGRESS,
@@ -751,7 +780,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         state = self._load_state()
         target_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), target_issue)
 
-        if result.get("success"):  # pylint: disable=no-else-return
+        if result.get("success"):
             self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
             await self._transition_jira_issue(issue_key, self.JIRA_STATUS_IN_REVIEW)
             self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
@@ -760,7 +789,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             _add_timeline_event(
                 target_issue,
                 {
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _local_now().isoformat(),
                     "action": "background_completed",
                     "description": "Background processing completed - moved to review",
                     "workLogPath": str(self._get_work_log_path(issue_key)),
@@ -780,26 +809,25 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 "message": f"Completed {issue_key}",
                 "mode": "background",
             }
-        else:
-            error_reason = result.get("error", "Background processing failed")
-            tracer.mark_blocked(error_reason)
+        error_reason = result.get("error", "Background processing failed")
+        tracer.mark_blocked(error_reason)
 
-            _add_timeline_event(
-                target_issue,
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "background_blocked",
-                    "description": f"Bot blocked: {error_reason}",
-                },
-            )
-            target_issue["approvalStatus"] = "blocked"
-            target_issue["waitingReason"] = error_reason
-            target_issue["hasWorkLog"] = True
-            target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
-            state["processingIssue"] = None
-            self._save_state(state)
+        _add_timeline_event(
+            target_issue,
+            {
+                "timestamp": _local_now().isoformat(),
+                "action": "background_blocked",
+                "description": f"Bot blocked: {error_reason}",
+            },
+        )
+        target_issue["approvalStatus"] = "blocked"
+        target_issue["waitingReason"] = error_reason
+        target_issue["hasWorkLog"] = True
+        target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+        state["processingIssue"] = None
+        self._save_state(state)
 
-            return {"success": False, "error": error_reason, "mode": "background"}
+        return {"success": False, "error": error_reason, "mode": "background"}
 
     # pylint: disable-next=too-many-locals
     async def _handle_open_in_cursor(self, params: dict) -> dict:
@@ -830,8 +858,6 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
         # Create a Cursor chat with this context
         try:
-            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
-
             bus = await MessageBus().connect()
             introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
             proxy = bus.get_proxy_object("com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection)
@@ -859,7 +885,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                             _add_timeline_event(
                                 issue,
                                 {
-                                    "timestamp": datetime.now().isoformat(),
+                                    "timestamp": _local_now().isoformat(),
                                     "action": "opened_in_cursor",
                                     "description": "Opened background work in Cursor for interactive continuation",
                                     "chatLink": chat_id,
@@ -878,7 +904,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             return {"success": False, "error": "Failed to create Cursor chat"}
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to open %s in Cursor", issue_key)
             return {"success": False, "error": str(e)}
 
@@ -1012,7 +1038,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                     logger.debug("OS operation failed: %s", exc)
                 raise
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to save state")
 
     def _export_workflow_config(self) -> dict:
@@ -1061,7 +1087,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             "automaticMode": False,  # Bot runs on schedule (Mon-Fri 9-5)
             "manuallyStarted": False,  # Bot is running now (ignores schedule)
             "backgroundTasks": False,
-            "lastUpdated": datetime.now().isoformat(),
+            "lastUpdated": _local_now().isoformat(),
             "processingIssue": None,
         }
 
@@ -1075,7 +1101,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             tz = ZoneInfo(wh["timezone"])
             now = datetime.now(tz)
         except ImportError:
-            now = datetime.now()
+            now = _local_now()
 
         # Check weekday (0=Monday, 6=Sunday)
         if wh["weekdays_only"] and now.weekday() >= 5:
@@ -1099,24 +1125,6 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         logger.info("Refreshing sprint issues from Jira...")
 
         try:
-            from tool_modules.aa_jira.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                jira_get_active_sprint,
-            )
-            from tool_modules.aa_workflow.src.sprint_bot import (  # pylint: disable=import-outside-toplevel
-                SprintBotConfig,
-                WorkingHours,
-                fetch_sprint_issues,
-                to_sprint_issue_format,
-            )
-            from tool_modules.aa_workflow.src.sprint_history import (  # pylint: disable=import-outside-toplevel
-                SprintIssue,
-                load_sprint_state,
-                save_sprint_state,
-            )
-            from tool_modules.aa_workflow.src.sprint_prioritizer import (  # pylint: disable=import-outside-toplevel
-                prioritize_issues,
-            )
-
             config = SprintBotConfig(
                 working_hours=WorkingHours(),
                 jira_project=self._config.get("jira_project", "AAP"),
@@ -1143,11 +1151,10 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
 
             if not jira_issues:
                 logger.warning("No issues fetched from Jira, keeping existing state")
-                self._last_jira_refresh = datetime.now()
+                self._last_jira_refresh = _local_now()
                 return
 
             # Filter to only show issues assigned to current user
-            from server.utils import load_config  # pylint: disable=import-outside-toplevel
 
             user_config = load_config()
             user_info = user_config.get("user", {})
@@ -1170,9 +1177,9 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 state = load_sprint_state()
                 state.current_sprint = current_sprint  # Still update sprint info
                 state.issues = []
-                state.last_updated = datetime.now().isoformat()
+                state.last_updated = _local_now().isoformat()
                 save_sprint_state(state)
-                self._last_jira_refresh = datetime.now()
+                self._last_jira_refresh = _local_now()
                 return
 
             # Prioritize issues
@@ -1244,7 +1251,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
             # Update state
             state.current_sprint = current_sprint
             state.issues = new_issues
-            state.last_updated = datetime.now().isoformat()
+            state.last_updated = _local_now().isoformat()
             save_sprint_state(state)
 
             logger.info(
@@ -1252,14 +1259,14 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 len(new_issues),
                 current_sprint.get("name") if current_sprint else "None",
             )
-            self._last_jira_refresh = datetime.now()
+            self._last_jira_refresh = _local_now()
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to refresh sprint")
 
             logger.debug(traceback.format_exc())
             # Don't block - use existing state
-            self._last_jira_refresh = datetime.now()
+            self._last_jira_refresh = _local_now()
 
     async def _check_review_issues(self) -> None:
         """Check issues in Review status and try to move them to Done.
@@ -1273,7 +1280,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         This automates the final step of the workflow.
         """
         logger.info("Checking issues in Review for merge readiness...")
-        self._last_review_check = datetime.now()
+        self._last_review_check = _local_now()
 
         state = self._load_state()
         issues = state.get("issues", [])
@@ -1308,8 +1315,8 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
                 continue
 
             try:
-                await self._check_single_review_issue(issue, dont_merge_patterns, state)
-            except Exception:  # pylint: disable=broad-exception-caught
+                await self._check_single_review_issue(issue, dont_merge_patterns)
+            except RECOVERABLE_ERRORS:
                 logger.exception("Error checking review issue %s", issue_key)
                 continue
 
@@ -1317,7 +1324,7 @@ class SprintDaemon(SleepWakeAwareDaemon, DaemonDBusBase, BaseDaemon):
         self._save_state(state)
 
     # pylint: disable-next=too-many-locals
-    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list, state: dict) -> None:
+    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
         logger.info("Checking review status for %s", _log_safe(issue_key))
@@ -1396,7 +1403,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
                 # Merge the MR and transition to Done
-                await self._merge_and_close(issue_key, mr_id, issue, state)
+                await self._merge_and_close(issue_key, mr_id, issue)
 
             elif mr_status == "APPROVED_WITH_HOLD":
                 # Log but don't merge
@@ -1404,7 +1411,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 _add_timeline_event(
                     issue,
                     {
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": _local_now().isoformat(),
                         "action": "review_hold",
                         "description": f"MR approved but merge on hold: {hold_reason}",
                     },
@@ -1421,11 +1428,10 @@ Also output the MR ID if found: [MR_ID: <number>]
             elif mr_status == "NO_MR":
                 logger.warning("%s: No MR found but issue is in Review", _log_safe(issue_key))
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error checking MR status for %s", _log_safe(issue_key))
 
-    # pylint: disable-next=unused-argument
-    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict, state: dict) -> None:
+    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
         logger.info("Merging MR !%s and closing %s", _log_safe(mr_id), _log_safe(issue_key))
 
@@ -1495,7 +1501,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     _add_timeline_event(
                         issue,
                         {
-                            "timestamp": datetime.now().isoformat(),
+                            "timestamp": _local_now().isoformat(),
                             "action": "merged_and_closed",
                             "description": f"MR !{mr_id} merged, issue closed",
                             "jiraTransition": self.JIRA_STATUS_DONE,
@@ -1507,7 +1513,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     _add_timeline_event(
                         issue,
                         {
-                            "timestamp": datetime.now().isoformat(),
+                            "timestamp": _local_now().isoformat(),
                             "action": "merge_failed",
                             "description": f"Failed to merge/close: {error}",
                         },
@@ -1515,7 +1521,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             else:
                 logger.warning("Could not parse merge result for %s", _log_safe(issue_key))
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error merging/closing %s", _log_safe(issue_key))
 
     # ==================== Issue Processing ====================
@@ -1530,6 +1536,13 @@ Also output the MR ID if found: [MR_ID: <number>]
         if self._workflow_config is None:
             self._workflow_config = get_workflow_config()
         return self._workflow_config
+
+    @staticmethod
+    def _elapsed_seconds(since: datetime | None) -> float:
+        """Seconds since ``since``; infinite when it has never happened."""
+        if since is None:
+            return float("inf")
+        return (_local_now() - since).total_seconds()
 
     # Legacy properties for backward compatibility - delegate to config
     @property
@@ -1666,15 +1679,14 @@ Also output the MR ID if found: [MR_ID: <number>]
                 logger.warning("Jira transition timed out for %s", _log_safe(issue_key))
                 return False
 
-            if process.returncode == 0:  # pylint: disable=no-else-return
+            if process.returncode == 0:
                 logger.info("Transitioned %s to %s", _log_safe(issue_key), _log_safe(target_status))
                 return True
-            else:
-                error = stderr.decode("utf-8", errors="replace") if stderr else ""
-                logger.warning("Failed to transition %s: %s", _log_safe(issue_key), _log_safe(error[:200]))
-                return False
+            error = stderr.decode("utf-8", errors="replace") if stderr else ""
+            logger.warning("Failed to transition %s: %s", _log_safe(issue_key), _log_safe(error[:200]))
+            return False
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error transitioning %s", _log_safe(issue_key))
             return False
 
@@ -1827,7 +1839,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         _add_timeline_event(
             next_issue,
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _local_now().isoformat(),
                 "action": "started",
                 "description": "Sprint bot started background processing",
                 "jiraTransition": self.JIRA_STATUS_IN_PROGRESS,
@@ -1855,7 +1867,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         state = self._load_state()
         next_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), next_issue)
 
-        if result.get("success"):  # pylint: disable=no-else-return
+        if result.get("success"):
             # Transition Jira issue to "In Review" (work completed, MR created)
             self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
 
@@ -1877,7 +1889,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             _add_timeline_event(
                 next_issue,
                 {
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _local_now().isoformat(),
                     "action": "background_completed",
                     "description": "Background processing completed - moved to review",
                     "workLogPath": str(self._get_work_log_path(issue_key)),
@@ -1894,31 +1906,30 @@ Also output the MR ID if found: [MR_ID: <number>]
             self._save_state(state)
             self._issues_processed += 1
             return result
-        else:
-            # Bot is blocked - keep in "In Progress" but mark as blocked with reason
-            # Do NOT transition Jira status - it stays "In Progress"
-            error_reason = result.get("error", "Background processing failed")
+        # Bot is blocked - keep in "In Progress" but mark as blocked with reason
+        # Do NOT transition Jira status - it stays "In Progress"
+        error_reason = result.get("error", "Background processing failed")
 
-            tracer.mark_blocked(error_reason)
+        tracer.mark_blocked(error_reason)
 
-            _add_timeline_event(
-                next_issue,
-                {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "background_blocked",
-                    "description": f"Bot blocked: {error_reason}",
-                },
-            )
-            next_issue["approvalStatus"] = "blocked"
-            next_issue["waitingReason"] = error_reason
-            # jiraStatus stays as "In Progress" - issue is not done, just blocked
-            next_issue["hasWorkLog"] = True
-            next_issue["hasTrace"] = True
-            next_issue["tracePath"] = str(tracer.trace_path)
-            next_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
-            state["processingIssue"] = None
-            self._save_state(state)
-            return result
+        _add_timeline_event(
+            next_issue,
+            {
+                "timestamp": _local_now().isoformat(),
+                "action": "background_blocked",
+                "description": f"Bot blocked: {error_reason}",
+            },
+        )
+        next_issue["approvalStatus"] = "blocked"
+        next_issue["waitingReason"] = error_reason
+        # jiraStatus stays as "In Progress" - issue is not done, just blocked
+        next_issue["hasWorkLog"] = True
+        next_issue["hasTrace"] = True
+        next_issue["tracePath"] = str(tracer.trace_path)
+        next_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+        state["processingIssue"] = None
+        self._save_state(state)
+        return result
 
     async def _process_in_cursor(self, issue: dict, state: dict) -> dict:
         """Process an issue by opening a Cursor chat (foreground mode).
@@ -1962,7 +1973,7 @@ Also output the MR ID if found: [MR_ID: <number>]
         _add_timeline_event(
             issue,
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _local_now().isoformat(),
                 "action": "started",
                 "description": "Sprint bot started processing in Cursor",
                 "jiraTransition": self.JIRA_STATUS_IN_PROGRESS,
@@ -1988,7 +1999,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         chat_id = await self._launch_cursor_chat(issue)
 
-        if chat_id:  # pylint: disable=no-else-return
+        if chat_id:
             self._trace_step(
                 tracer,
                 "chat_created",
@@ -2001,7 +2012,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             _add_timeline_event(
                 issue,
                 {
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _local_now().isoformat(),
                     "action": "chat_created",
                     "description": "Cursor chat created - work in progress",
                     "chatLink": chat_id,
@@ -2020,22 +2031,21 @@ Also output the MR ID if found: [MR_ID: <number>]
                 "message": f"Processing {issue_key}",
                 "chat_id": chat_id,
             }
-        else:
-            # Chat creation failed - mark as blocked but keep In Progress in Jira
-            self._trace_step(
-                tracer,
-                "chat_creation_failed",
-                error="Failed to create Cursor chat",
-                status=StepStatus.FAILED,
-            )
-            tracer.mark_blocked("Failed to create Cursor chat")
+        # Chat creation failed - mark as blocked but keep In Progress in Jira
+        self._trace_step(
+            tracer,
+            "chat_creation_failed",
+            error="Failed to create Cursor chat",
+            status=StepStatus.FAILED,
+        )
+        tracer.mark_blocked("Failed to create Cursor chat")
 
-            issue["approvalStatus"] = "blocked"
-            issue["waitingReason"] = "Failed to create Cursor chat"
-            state["processingIssue"] = None
-            self._save_state(state)
-            logger.warning("Could not create chat for %s", _log_safe(issue_key))
-            return {"success": False, "error": f"Failed to create chat for {issue_key}"}
+        issue["approvalStatus"] = "blocked"
+        issue["waitingReason"] = "Failed to create Cursor chat"
+        state["processingIssue"] = None
+        self._save_state(state)
+        logger.warning("Could not create chat for %s", _log_safe(issue_key))
+        return {"success": False, "error": f"Failed to create chat for {issue_key}"}
 
     async def _launch_cursor_chat(self, issue: dict) -> str | None:
         """Launch a Cursor chat for an issue via D-Bus.
@@ -2056,8 +2066,6 @@ Also output the MR ID if found: [MR_ID: <number>]
         prompt = self._build_work_prompt(issue)
 
         try:
-            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
-
             bus = await MessageBus().connect()
 
             # Get the VS Code extension's chat service
@@ -2080,14 +2088,13 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             if result:
                 result_dict = json.loads(str(result))
-                if result_dict.get("success"):  # pylint: disable=no-else-return
+                if result_dict.get("success"):
                     return result_dict.get("chatId")
-                else:
-                    logger.warning("LaunchIssueChatWithPrompt returned error: %s", result_dict.get("error"))
+                logger.warning("LaunchIssueChatWithPrompt returned error: %s", result_dict.get("error"))
 
             return None
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to launch chat via D-Bus")
             logger.debug("Is VS Code running with the AA Workflow extension active?")
             return None
@@ -2121,7 +2128,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             "issue_type": issue.get("issueType", "Story"),
             "story_points": issue.get("storyPoints"),
             "jira_status": issue.get("jiraStatus", ""),
-            "started": datetime.now().isoformat(),
+            "started": _local_now().isoformat(),
             "status": "in_progress",
             "execution_mode": "background",
             "persona_used": "developer",
@@ -2148,7 +2155,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             return
 
         action: dict[str, Any] = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _local_now().isoformat(),
             "type": action_type,
             "details": details,
         }
@@ -2196,12 +2203,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
         # Emit toast notification for issue started
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
-                notify_sprint_issue_started,
-            )
-
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc, exc_info=True)
 
         try:
@@ -2271,7 +2274,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
                 work_log = self._load_work_log(issue_key)
                 work_log["status"] = "timeout"
-                work_log["completed"] = datetime.now().isoformat()
+                work_log["completed"] = _local_now().isoformat()
                 work_log["cursor_context"]["can_continue"] = True
                 work_log["cursor_context"]["suggested_prompt"] = (
                     f"Continue working on {issue_key}. The background process timed out. "
@@ -2285,7 +2288,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             # Update work log with results
             work_log = self._load_work_log(issue_key)
-            work_log["completed"] = datetime.now().isoformat()
+            work_log["completed"] = _local_now().isoformat()
 
             # Parse output to extract useful information
             self._parse_background_output(issue_key, output, work_log)
@@ -2310,7 +2313,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                 },
             )
 
-            if bot_status["status"] == "COMPLETED":  # pylint: disable=no-else-return
+            if bot_status["status"] == "COMPLETED":
                 work_log["status"] = "completed"
                 self._log_action(
                     issue_key,
@@ -2320,13 +2323,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Emit toast notification for issue completed
                 try:
-                    # pylint: disable-next=import-outside-toplevel
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_sprint_issue_completed,
-                    )
-
                     notify_sprint_issue_completed(issue_key)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                except RECOVERABLE_ERRORS as exc:
                     logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
@@ -2347,7 +2345,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     "message": f"Completed {issue_key} in background",
                 }
 
-            elif bot_status["status"] == "BLOCKED":
+            if bot_status["status"] == "BLOCKED":
                 # Bot is blocked - needs human intervention
                 blocked_reason = bot_status.get("reason", "Unknown reason")
                 work_log["status"] = "blocked"
@@ -2356,13 +2354,8 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Emit toast notification for issue blocked
                 try:
-                    # pylint: disable-next=import-outside-toplevel
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_sprint_issue_blocked,
-                    )
-
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                except RECOVERABLE_ERRORS as exc:
                     logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
@@ -2388,7 +2381,7 @@ Also output the MR ID if found: [MR_ID: <number>]
                     "blocked": True,
                 }
 
-            elif bot_status["status"] == "FAILED" or process.returncode != 0:
+            if bot_status["status"] == "FAILED" or process.returncode != 0:
                 # Bot failed
                 error_reason = bot_status.get("error") or error_output[:500]
                 work_log["status"] = "failed"
@@ -2418,49 +2411,43 @@ Also output the MR ID if found: [MR_ID: <number>]
                 )
                 return {"success": False, "error": f"Failed: {error_reason[:200]}"}
 
-            else:
-                # No explicit status - assume completed if return code is 0
-                if process.returncode == 0:  # pylint: disable=no-else-return
-                    work_log["status"] = "completed"
-                    self._log_action(
-                        issue_key,
-                        "completed",
-                        "Background processing completed (no explicit status)",
-                    )
-                    work_log["cursor_context"]["can_continue"] = True
-                    work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(
-                        issue_key, work_log
-                    )
-                    self._save_work_log(issue_key, work_log)
-                    logger.info("Background processing completed for %s", _log_safe(issue_key))
-                    return {
-                        "success": True,
-                        "message": f"Completed {issue_key} in background",
-                    }
-                else:
-                    work_log["status"] = "failed"
-                    work_log["error"] = error_output[:500]
-                    self._log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
-                    work_log["cursor_context"]["can_continue"] = True
-                    retry_prompt = (
-                        f"The background process for {issue_key} failed. Please investigate and continue the work."
-                    )
-                    work_log["cursor_context"]["suggested_prompt"] = retry_prompt
-                    self._save_work_log(issue_key, work_log)
-                    logger.warning(
-                        "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Claude CLI failed: {error_output[:200]}",
-                    }
+            # No explicit status - assume completed if return code is 0
+            if process.returncode == 0:
+                work_log["status"] = "completed"
+                self._log_action(
+                    issue_key,
+                    "completed",
+                    "Background processing completed (no explicit status)",
+                )
+                work_log["cursor_context"]["can_continue"] = True
+                work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(issue_key, work_log)
+                self._save_work_log(issue_key, work_log)
+                logger.info("Background processing completed for %s", _log_safe(issue_key))
+                return {
+                    "success": True,
+                    "message": f"Completed {issue_key} in background",
+                }
+            work_log["status"] = "failed"
+            work_log["error"] = error_output[:500]
+            self._log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
+            work_log["cursor_context"]["can_continue"] = True
+            retry_prompt = f"The background process for {issue_key} failed. Please investigate and continue the work."
+            work_log["cursor_context"]["suggested_prompt"] = retry_prompt
+            self._save_work_log(issue_key, work_log)
+            logger.warning(
+                "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
+            )
+            return {
+                "success": False,
+                "error": f"Claude CLI failed: {error_output[:200]}",
+            }
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             self._log_action(issue_key, "error", f"Exception: {e!s}")
             work_log = self._load_work_log(issue_key)
             work_log["status"] = "failed"
             work_log["error"] = str(e)
-            work_log["completed"] = datetime.now().isoformat()
+            work_log["completed"] = _local_now().isoformat()
             work_log["cursor_context"]["can_continue"] = True
             work_log["cursor_context"]["suggested_prompt"] = (
                 f"The background process for {issue_key} encountered an error: {e!s}. "
@@ -2584,8 +2571,6 @@ Also output the MR ID if found: [MR_ID: <number>]
     async def _is_cursor_available(self) -> bool:
         """Check if Cursor/VS Code is available via D-Bus."""
         try:
-            from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
-
             bus = await MessageBus().connect()
             introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
 
@@ -2597,7 +2582,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             return result and "pong" in result
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.debug("Ping failed", exc_info=True)
             return False
 
@@ -2665,12 +2650,12 @@ Also output the MR ID if found: [MR_ID: <number>]
 
                 # Refresh from Jira periodically
                 refresh_interval = self._config["jira_refresh_interval_seconds"]
-                if (datetime.now() - self._last_jira_refresh).total_seconds() > refresh_interval:
+                if self._elapsed_seconds(self._last_jira_refresh) > refresh_interval:
                     await self._refresh_from_jira()
 
                 # Check issues in Review for merge readiness (interval from config)
                 review_check_interval = self._config["review_check_interval_seconds"]
-                if (datetime.now() - self._last_review_check).total_seconds() > review_check_interval:
+                if self._elapsed_seconds(self._last_review_check) > review_check_interval:
                     await self._check_review_issues()
 
                 # Check if we should process next issue
@@ -2704,7 +2689,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             except asyncio.CancelledError:
                 logger.info("Main loop cancelled")
                 break
-            except Exception:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS:
                 logger.exception("Error in main loop")
                 if await self._wait_with_shutdown(60):
                     break
