@@ -1,11 +1,12 @@
-# pylint: disable=duplicate-code
-"""Sign-in, join, leave, and screenshot methods for GoogleMeetController."""  # pylint: disable=too-many-lines
+"""Sign-in, join, leave, and screenshot methods for GoogleMeetController."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
+import signal
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -14,14 +15,30 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from tool_modules.aa_meet_bot.src.browser_errors import BROWSER_ERRORS
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetingState
 from tool_modules.aa_meet_bot.src.meet_sign_in import MeetSignIn
+from tool_modules.aa_meet_bot.src.virtual_devices import cleanup_orphaned_meetbot_devices
+
+try:
+    import psutil
+
+    HAVE_PSUTIL = True
+except ImportError:  # psutil is optional: without it force_kill only kills the browser PID
+    HAVE_PSUTIL = False
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
 
+# Audio device cleanup shells out to pactl/pw tools: OS errors, timeouts and tool failures (RuntimeError).
+# Join failures: browser errors plus RuntimeError from sign-in/device setup.
+JOIN_ERRORS: tuple[type[BaseException], ...] = (*BROWSER_ERRORS, RuntimeError)
 
-class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
+DEVICE_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError, asyncio.TimeoutError)
+
+
+class SessionAuthMixin:
+    """Sign-in, join, leave and shutdown behaviour mixed into GoogleMeetController."""
+
     # Declared for mixins that read sibling state.
     SELECTORS: Any
     _browser_pid: Any
@@ -61,7 +78,14 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         """
         return await MeetSignIn(cast("GoogleMeetController", self)).sign_in_google()
 
-    # pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements,too-many-statements
+    # Join buttons in order of preference.
+    JOIN_BUTTON_TEXTS: ClassVar[tuple[str, ...]] = (
+        "Join now",
+        "Join anyway",  # When meeting hasn't started or scheduling conflict
+        "Switch here",  # When Google thinks another browser is already in the meeting
+        "Ask to join",  # When you need to be admitted
+    )
+
     async def join_meeting(self, meet_url: str) -> bool:
         """
         Join a Google Meet meeting.
@@ -75,7 +99,52 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         logger.info("[JOIN] ========== Starting join_meeting ==========")
         logger.info("[JOIN] URL: %s", meet_url)
 
-        # Check if browser needs reinitialization
+        if not await self._ensure_browser_ready():
+            return False
+
+        # Extract meeting ID from URL
+        match = re.search(r"meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})", meet_url)
+        if not match:
+            error_msg = f"Invalid Meet URL format: {meet_url}"
+            logger.error("[JOIN] ERROR: %s", error_msg)
+            self.state.errors.append(error_msg)
+            return False
+
+        meeting_id = match.group(1)
+        logger.info("[JOIN] Meeting ID: %s", meeting_id)
+
+        # Update state but preserve errors
+        old_errors = self.state.errors if self.state else []
+        self.state = MeetingState(meeting_id=meeting_id, meeting_url=meet_url)
+        self.state.errors = old_errors
+
+        try:
+            await self._open_meeting_page(meet_url)
+            if not await self._sign_in_if_required(meet_url):
+                return False
+            await self._prepare_devices_before_join()
+
+            join_button = await self._find_join_button(meeting_id)
+            if not join_button:
+                logger.error("[JOIN] ========== FAILED: Join button not found ==========")
+                logger.error("[JOIN] Current URL: %s", self.page.url)
+                self.state.errors.append("Join button not found")
+                return False
+
+            logger.info("[JOIN] Clicking join button...")
+            await join_button.click()
+            logger.info("[JOIN] Join button clicked successfully")
+            await self._finish_join(meeting_id)
+            return True
+
+        except JOIN_ERRORS as e:
+            error_msg = f"Failed to join meeting: {e}"
+            logger.exception("[JOIN] ========== EXCEPTION: %s ==========", error_msg)
+            self.state.errors.append(error_msg)
+            return False
+
+    async def _ensure_browser_ready(self) -> bool:
+        """Reinitialize the browser if its page is missing or closed; False if it can't be made ready."""
         needs_reinit = False
         if not self.page:
             logger.warning("[JOIN] page is None")
@@ -107,303 +176,267 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             logger.error("[JOIN] ERROR: %s", error_msg)
             self.state.errors.append(error_msg)
             return False
+        return True
 
-        # Extract meeting ID from URL
-        match = re.search(r"meet\.google\.com/([a-z]{3}-[a-z]{4}-[a-z]{3})", meet_url)
-        if not match:
-            error_msg = f"Invalid Meet URL format: {meet_url}"
-            logger.error("[JOIN] ERROR: %s", error_msg)
-            self.state.errors.append(error_msg)
+    async def _open_meeting_page(self, meet_url: str) -> None:
+        """Navigate to the meeting and clear the pre-join permission and "Got it" dialogs."""
+        # Navigate to meeting - use domcontentloaded instead of networkidle (faster, more reliable)
+        logger.info("[JOIN] Navigating to meeting URL...")
+        await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
+        logger.info("[JOIN] Navigation complete. Current URL: %s", self.page.url)
+
+        # Wait for page to load
+        logger.info("[JOIN] Waiting 2s for page to settle...")
+        await asyncio.sleep(2)
+
+        # Log page title and URL for debugging
+        try:
+            title = await self.page.title()
+            logger.info("[JOIN] Page title: %s", title)
+            logger.info("[JOIN] Current URL after wait: %s", self.page.url)
+        except BROWSER_ERRORS as e:
+            logger.warning("[JOIN] Could not get page title: %s", e)
+
+        # Handle permissions dialog - "Do you want people to hear you in the meeting?"
+        # This appears before joining and asks about mic/camera permissions
+        logger.info("[JOIN] Checking for permissions dialog...")
+        await self._handle_permissions_dialog()
+
+        # Handle "Got it" dialog if present
+        logger.info("[JOIN] Checking for 'Got it' dialog...")
+        try:
+            got_it = await self.page.wait_for_selector(self.SELECTORS["got_it_button"], timeout=3000)
+            if got_it:
+                logger.info("[JOIN] Found 'Got it' dialog - clicking")
+                await got_it.click()
+                await asyncio.sleep(1)
+        except BROWSER_ERRORS:
+            logger.info("[JOIN] No 'Got it' dialog found")
+
+    async def _sign_in_if_required(self, meet_url: str) -> bool:
+        """Run the Google sign-in flow when Meet asks for it; False if sign-in fails."""
+        # Check if we need to sign in (look for Sign in button or name input for guest)
+        logger.info("[JOIN] Checking if sign-in is required...")
+        sign_in_button = await self.page.locator('div[role="button"]:has-text("Sign in")').count() > 0
+        name_input = await self.page.query_selector(self.SELECTORS["name_input"])
+        logger.info(
+            "[JOIN] Sign-in button present: %s, Name input present: %s",
+            sign_in_button,
+            name_input is not None,
+        )
+
+        if not (sign_in_button or name_input):
+            logger.info("[JOIN] No sign-in required, proceeding to join")
+            return True
+
+        logger.info("[JOIN] Sign-in required - initiating OAuth flow")
+        if not await self.sign_in_google():
+            logger.error("[JOIN] Sign-in failed!")
+            self.state.errors.append("Failed to sign in to Google")
             return False
 
-        meeting_id = match.group(1)
-        logger.info("[JOIN] Meeting ID: %s", meeting_id)
+        # After sign-in, we should already be on the Meet page
+        # Wait a moment for the page to settle
+        logger.info("[JOIN] Sign-in complete, waiting for page to settle...")
+        await asyncio.sleep(3)
 
-        # Update state but preserve errors
-        old_errors = self.state.errors if self.state else []
-        self.state = MeetingState(meeting_id=meeting_id, meeting_url=meet_url)
-        self.state.errors = old_errors
+        # Dismiss Chrome sync dialog if present ("Sign in to Chromium?")
+        await self._dismiss_chrome_sync_dialog()
 
-        try:  # pylint: disable=too-many-nested-blocks
-            # pylint: disable-next=line-too-long
-            # Navigate to meeting - use domcontentloaded instead of networkidle (faster, more reliable)
-            logger.info("[JOIN] Navigating to meeting URL...")
-            await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
-            logger.info("[JOIN] Navigation complete. Current URL: %s", self.page.url)
-
-            # Wait for page to load
-            logger.info("[JOIN] Waiting 2s for page to settle...")
-            await asyncio.sleep(2)
-
-            # Log page title and URL for debugging
-            try:
-                title = await self.page.title()
-                logger.info("[JOIN] Page title: %s", title)
-                logger.info("[JOIN] Current URL after wait: %s", self.page.url)
-            except BROWSER_ERRORS as e:
-                logger.warning("[JOIN] Could not get page title: %s", e)
-
-            # Handle permissions dialog - "Do you want people to hear you in the meeting?"
-            # This appears before joining and asks about mic/camera permissions
-            logger.info("[JOIN] Checking for permissions dialog...")
-            await self._handle_permissions_dialog()
-
-            # Handle "Got it" dialog if present
-            logger.info("[JOIN] Checking for 'Got it' dialog...")
-            try:
-                got_it = await self.page.wait_for_selector(self.SELECTORS["got_it_button"], timeout=3000)
-                if got_it:
-                    logger.info("[JOIN] Found 'Got it' dialog - clicking")
-                    await got_it.click()
-                    await asyncio.sleep(1)
-            except BROWSER_ERRORS:
-                logger.info("[JOIN] No 'Got it' dialog found")
-
-            # Check if we need to sign in (look for Sign in button or name input for guest)
-            logger.info("[JOIN] Checking if sign-in is required...")
-            sign_in_button = await self.page.locator('div[role="button"]:has-text("Sign in")').count() > 0
-            name_input = await self.page.query_selector(self.SELECTORS["name_input"])
+        # Check if we need to re-navigate (sometimes SSO redirects elsewhere)
+        if "meet.google.com" not in self.page.url:
             logger.info(
-                "[JOIN] Sign-in button present: %s, Name input present: %s",
-                sign_in_button,
-                name_input is not None,
+                "[JOIN] Re-navigating to meeting after sign-in (current: %s)",
+                self.page.url,
             )
+            await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
+        return True
 
-            if sign_in_button or name_input:
-                logger.info("[JOIN] Sign-in required - initiating OAuth flow")
-                if not await self.sign_in_google():
-                    logger.error("[JOIN] Sign-in failed!")
-                    self.state.errors.append("Failed to sign in to Google")
-                    return False
+    async def _prepare_devices_before_join(self) -> None:
+        """Dismiss blocking dialogs, unmute the virtual mic, select MeetBot devices and set the camera."""
+        # Check again for Chrome sync dialog (it can appear delayed)
+        logger.info("[JOIN] Checking for Chrome sync dialog before joining...")
+        await self._dismiss_chrome_sync_dialog()
 
-                # After sign-in, we should already be on the Meet page
-                # Wait a moment for the page to settle
-                logger.info("[JOIN] Sign-in complete, waiting for page to settle...")
-                await asyncio.sleep(3)
+        # UNMUTE microphone (it's a virtual pipe - only produces sound when we write to it)
+        # Turn off camera before joining (we use virtual avatar instead)
+        logger.info("[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)...")
+        # Always unmute - the bot's mic is a virtual pipe, not a real microphone
+        # It only produces sound when TTS writes audio to it
+        await self._toggle_mute(mute=False)
 
-                # Dismiss Chrome sync dialog if present ("Sign in to Chromium?")
-                await self._dismiss_chrome_sync_dialog()
+        # Dismiss any popups that might block device selection
+        # (e.g., "Let people see you in Full HD", "Turn on 1080p", etc.)
+        logger.info("[JOIN] Dismissing any blocking popups...")
+        await self._dismiss_info_popups()
 
-                # Check if we need to re-navigate (sometimes SSO redirects elsewhere)
-                if "meet.google.com" not in self.page.url:
-                    logger.info(
-                        "[JOIN] Re-navigating to meeting after sign-in (current: %s)",
-                        self.page.url,
-                    )
-                    await self.page.goto(meet_url, wait_until="domcontentloaded", timeout=30000)
-                    await asyncio.sleep(2)
-            else:
-                logger.info("[JOIN] No sign-in required, proceeding to join")
+        # Select MeetBot virtual devices before joining
+        # This ensures Google Meet uses our virtual devices instead of system defaults
+        logger.info("[JOIN] Selecting MeetBot virtual devices...")
+        await self._select_meetbot_devices()
 
-            # Check again for Chrome sync dialog (it can appear delayed)
-            logger.info("[JOIN] Checking for Chrome sync dialog before joining...")
-            await self._dismiss_chrome_sync_dialog()
+        # Also set devices programmatically via JavaScript MediaDevices API
+        # This is more reliable than clicking UI elements
+        logger.info("[JOIN] Setting devices programmatically via JS...")
+        await self._set_devices_via_js()
 
-            # UNMUTE microphone (it's a virtual pipe - only produces sound when we write to it)
-            # Turn off camera before joining (we use virtual avatar instead)
-            logger.info("[JOIN] Setting up audio/video (UNMUTE virtual mic, turn off camera)...")
-            # Always unmute - the bot's mic is a virtual pipe, not a real microphone
-            # It only produces sound when TTS writes audio to it
-            await self._toggle_mute(mute=False)
+        # Set camera state based on video_enabled setting
+        # If video is enabled, keep camera ON to show the AI overlay
+        # If video is disabled, turn camera OFF (we're streaming black anyway)
+        if self._video_enabled:
+            logger.info("[JOIN] Video enabled - keeping camera ON for AI overlay")
+            await self._toggle_camera(camera_on=True)
+        else:
+            logger.info("[JOIN] Video disabled - turning camera OFF")
+            await self._toggle_camera(camera_on=False)
 
-            # Dismiss any popups that might block device selection
-            # (e.g., "Let people see you in Full HD", "Turn on 1080p", etc.)
-            logger.info("[JOIN] Dismissing any blocking popups...")
-            await self._dismiss_info_popups()
+    async def _locate_join_button(self, selector_templates: tuple[str, ...]) -> Any | None:
+        """Return the first visible join button, trying each button text with each selector template."""
+        for btn_text in self.JOIN_BUTTON_TEXTS:
+            try:
+                for template in selector_templates:
+                    selector = template.format(text=btn_text)
+                    locator = self.page.locator(selector)
+                    if await locator.count() > 0:
+                        logger.info("Found '%s' button with selector: %s", btn_text, selector)
+                        return locator.first
+            except BROWSER_ERRORS as e:
+                logger.debug("Error finding '%s': %s", btn_text, e)
+        return None
 
-            # Select MeetBot virtual devices before joining
-            # This ensures Google Meet uses our virtual devices instead of system defaults
-            logger.info("[JOIN] Selecting MeetBot virtual devices...")
-            await self._select_meetbot_devices()
+    async def _log_join_page_debug(self, meeting_id: str) -> None:
+        """Save a screenshot and log the visible page text to debug a missing join button."""
+        try:
+            screenshot_path = str(Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png")
+            await self.page.screenshot(path=screenshot_path)
+            logger.info("[JOIN] Debug screenshot saved to: %s", screenshot_path)
+        except BROWSER_ERRORS as e:
+            logger.warning("[JOIN] Could not save debug screenshot: %s", e)
 
-            # Also set devices programmatically via JavaScript MediaDevices API
-            # This is more reliable than clicking UI elements
-            logger.info("[JOIN] Setting devices programmatically via JS...")
-            await self._set_devices_via_js()
+        try:
+            body_text = await self.page.inner_text("body")
+            # Truncate to first 500 chars
+            logger.info("[JOIN] Page body text (first 500 chars): %s", body_text[:500])
+        except BROWSER_ERRORS as e:
+            logger.warning("[JOIN] Could not get page text: %s", e)
 
-            # Set camera state based on video_enabled setting
-            # If video is enabled, keep camera ON to show the AI overlay
-            # If video is disabled, turn camera OFF (we're streaming black anyway)
-            if self._video_enabled:
-                logger.info("[JOIN] Video enabled - keeping camera ON for AI overlay")
-                await self._toggle_camera(camera_on=True)
-            else:
-                logger.info("[JOIN] Video disabled - turning camera OFF")
-                await self._toggle_camera(camera_on=False)
+    async def _find_join_button(self, meeting_id: str) -> Any | None:
+        """Find the join button, retrying once after 3s (with debug output) if it isn't shown yet."""
+        logger.info("[JOIN] Looking for Join button...")
+        # Google Meet uses various button structures; sometimes the text is in a span or a Material dialog button.
+        join_button = await self._locate_join_button(
+            (
+                'button:has-text("{text}")',
+                'div[role="button"]:has-text("{text}")',
+                'span:has-text("{text}")',
+                '[data-mdc-dialog-action]:has-text("{text}")',
+            )
+        )
+        if join_button:
+            return join_button
 
-            # Click join button - try multiple selectors
-            logger.info("[JOIN] Looking for Join button...")
-            join_button = None
+        logger.info("[JOIN] No join button found on first try, waiting 3s and retrying...")
+        await self._log_join_page_debug(meeting_id)
+        await asyncio.sleep(3)
+        return await self._locate_join_button(
+            (
+                'button:has-text("{text}")',
+                'div[role="button"]:has-text("{text}")',
+                'span:has-text("{text}")',
+            )
+        )
 
-            # Try various join buttons in order of preference
-            join_button_texts = [
-                "Join now",
-                "Join anyway",  # When meeting hasn't started or scheduling conflict
-                "Switch here",  # When Google thinks another browser is already in the meeting
-                "Ask to join",  # When you need to be admitted
-            ]
-
-            for btn_text in join_button_texts:
-                if join_button:
-                    break
-                try:
-                    # Try multiple selector patterns - Google Meet uses various button structures
-                    selectors = [
-                        f'button:has-text("{btn_text}")',
-                        f'div[role="button"]:has-text("{btn_text}")',
-                        f'span:has-text("{btn_text}")',  # Sometimes the text is in a span
-                        # pylint: disable-next=line-too-long
-                        f'[data-mdc-dialog-action]:has-text("{btn_text}")',  # Material dialog buttons
-                    ]
-                    for selector in selectors:
-                        locator = self.page.locator(selector)
-                        if await locator.count() > 0:
-                            join_button = locator.first
-                            logger.info(
-                                "Found '%s' button with selector: %s",
-                                btn_text,
-                                selector,
-                            )
-                            break
-                except BROWSER_ERRORS as e:
-                    logger.debug("Error finding '%s': %s", btn_text, e)
-
-            # If no button found, wait and retry once
-            if not join_button:
-                logger.info("[JOIN] No join button found on first try, waiting 3s and retrying...")
-
-                # Take a screenshot for debugging
-                try:
-                    screenshot_path = str(Path(tempfile.gettempdir()) / f"meet_debug_{meeting_id}.png")
-                    await self.page.screenshot(path=screenshot_path)
-                    logger.info("[JOIN] Debug screenshot saved to: %s", screenshot_path)
-                except BROWSER_ERRORS as e:
-                    logger.warning("[JOIN] Could not save debug screenshot: %s", e)
-
-                # Log visible text on page for debugging
-                try:
-                    body_text = await self.page.inner_text("body")
-                    # Truncate to first 500 chars
-                    logger.info("[JOIN] Page body text (first 500 chars): %s", body_text[:500])
-                except BROWSER_ERRORS as e:
-                    logger.warning("[JOIN] Could not get page text: %s", e)
-
-                await asyncio.sleep(3)
-                for btn_text in join_button_texts:
-                    if join_button:
-                        break
-                    try:
-                        for selector in [
-                            f'button:has-text("{btn_text}")',
-                            f'div[role="button"]:has-text("{btn_text}")',
-                            f'span:has-text("{btn_text}")',
-                        ]:
-                            locator = self.page.locator(selector)
-                            if await locator.count() > 0:
-                                join_button = locator.first
-                                logger.info("[JOIN] Found '%s' button on retry", btn_text)
-                                break
-                    except BROWSER_ERRORS:
-                        logger.debug("Ignoring browser error", exc_info=True)
-
-            if join_button:
-                logger.info("[JOIN] Clicking join button...")
-                await join_button.click()
-                logger.info("[JOIN] Join button clicked successfully")
-
-                # Wait for meeting to load
-                await asyncio.sleep(3)
-
-                # Handle permissions dialog if it appears
-                # "Do you want people to hear you in the meeting?"
-                try:
-                    mic_button = self.page.locator('button:has-text("Microphone allowed")')
-                    if await mic_button.count() > 0:
-                        logger.info("Permissions dialog detected - clicking 'Microphone allowed'")
-                        await mic_button.click(force=True)
-                        await asyncio.sleep(2)
-                except BROWSER_ERRORS as e:
-                    logger.debug("No permissions dialog or error: %s", e)
-
-                # Handle device selection dialog if it appears
-                # This shows microphone and speaker dropdowns
-                # We use this opportunity to select the MeetBot virtual camera
-                # NOTE: Do NOT press Escape here - in Google Meet it can toggle camera!
-                try:
-                    device_dialog = self.page.locator('[aria-label="Settings"], [aria-label="Audio settings"]')
-                    if await device_dialog.count() > 0:
-                        logger.info("Device selection dialog detected")
-                        # Try to select the MeetBot camera before dismissing
-                        await self._select_meetbot_camera()
-                        # Click outside the dialog to close it instead of Escape
-                        # (Escape can toggle camera in Google Meet!)
-                        try:
-                            # Click on the main meeting area to close dialog
-                            await self.page.click("body", position={"x": 100, "y": 100})
-                            await asyncio.sleep(0.5)
-                        except BROWSER_ERRORS:
-                            logger.debug("Ignoring browser error", exc_info=True)
-                except BROWSER_ERRORS as e:
-                    logger.debug("No device dialog or error: %s", e)
-
-                # After permissions dialog, we may need to click Join again
-                # Look for "Join anyway" or "Join now" button
-                try:
-                    for btn_text in ["Join anyway", "Join now"]:
-                        join_again = self.page.locator(f'button:has-text("{btn_text}")')
-                        if await join_again.count() > 0:
-                            logger.info("Found '%s' after permissions - clicking", btn_text)
-                            await join_again.first.click()
-                            await asyncio.sleep(3)
-                            break
-                except BROWSER_ERRORS as e:
-                    logger.debug("No second join button needed: %s", e)
-
-                # Brief wait for meeting UI to stabilize
-                # NOTE: Removed generic "Close" button clicking - it was toggling camera!
-                # _dismiss_info_popups() handles safe popup dismissal
-                logger.info("[JOIN] Waiting 2s for meeting UI to stabilize...")
+    async def _handle_post_join_dialogs(self) -> None:
+        """Handle the mic-permission and device dialogs Meet may show after clicking join, then re-join if asked."""
+        # Handle permissions dialog if it appears
+        # "Do you want people to hear you in the meeting?"
+        try:
+            mic_button = self.page.locator('button:has-text("Microphone allowed")')
+            if await mic_button.count() > 0:
+                logger.info("Permissions dialog detected - clicking 'Microphone allowed'")
+                await mic_button.click(force=True)
                 await asyncio.sleep(2)
+        except BROWSER_ERRORS as e:
+            logger.debug("No permissions dialog or error: %s", e)
 
-                # Dismiss any info popups (like "Others may see your video differently")
-                await self._dismiss_info_popups()
+        # Handle device selection dialog if it appears
+        # This shows microphone and speaker dropdowns
+        # We use this opportunity to select the MeetBot virtual camera
+        # NOTE: Do NOT press Escape here - in Google Meet it can toggle camera!
+        try:
+            device_dialog = self.page.locator('[aria-label="Settings"], [aria-label="Audio settings"]')
+            if await device_dialog.count() > 0:
+                logger.info("Device selection dialog detected")
+                # Try to select the MeetBot camera before dismissing
+                await self._select_meetbot_camera()
+                # Click on the main meeting area to close the dialog instead of Escape
+                # (Escape can toggle camera in Google Meet!)
+                await self._click_body_to_close_dialog()
+        except BROWSER_ERRORS as e:
+            logger.debug("No device dialog or error: %s", e)
 
-                # Check if we're in the meeting
-                self.state.joined = True
-                logger.info("[JOIN] Meeting state set to joined=True")
+        # After permissions dialog, we may need to click Join again
+        # Look for "Join anyway" or "Join now" button
+        try:
+            for btn_text in ["Join anyway", "Join now"]:
+                join_again = self.page.locator(f'button:has-text("{btn_text}")')
+                if await join_again.count() > 0:
+                    logger.info("Found '%s' after permissions - clicking", btn_text)
+                    await join_again.first.click()
+                    await asyncio.sleep(3)
+                    break
+        except BROWSER_ERRORS as e:
+            logger.debug("No second join button needed: %s", e)
 
-                # Enable captions if configured
-                if self.config.auto_enable_captions:
-                    logger.info("[JOIN] Auto-enabling captions...")
-                    await self.enable_captions()
+    async def _click_body_to_close_dialog(self) -> None:
+        """Click the meeting area to close an open dialog."""
+        try:
+            await self.page.click("body", position={"x": 100, "y": 100})
+            await asyncio.sleep(0.5)
+        except BROWSER_ERRORS:
+            logger.debug("Ignoring browser error", exc_info=True)
 
-                # IMPORTANT: Google Meet may turn off camera due to privacy settings
-                # Always ensure camera is ON after joining if video is enabled
-                if self._video_enabled:
-                    logger.info("[JOIN] Ensuring camera is ON after join...")
-                    await asyncio.sleep(1.0)  # Wait for Meet to settle
+    async def _finish_join(self, meeting_id: str) -> None:
+        """After the join click: clear dialogs, mark joined, enable captions and turn the camera on if needed."""
+        # Wait for meeting to load
+        await asyncio.sleep(3)
+        await self._handle_post_join_dialogs()
 
-                    # First, select the MeetBot camera via Video settings dropdown
-                    await self._select_camera_in_meeting()
+        # Brief wait for meeting UI to stabilize
+        # NOTE: Removed generic "Close" button clicking - it was toggling camera!
+        # _dismiss_info_popups() handles safe popup dismissal
+        logger.info("[JOIN] Waiting 2s for meeting UI to stabilize...")
+        await asyncio.sleep(2)
 
-                    # Then turn on the camera
-                    await self._toggle_camera(camera_on=True)
+        # Dismiss any info popups (like "Others may see your video differently")
+        await self._dismiss_info_popups()
 
-                logger.info(
-                    "[JOIN] ========== SUCCESS: Joined meeting %s ==========",
-                    meeting_id,
-                )
-                return True
-            logger.error("[JOIN] ========== FAILED: Join button not found ==========")
-            logger.error("[JOIN] Current URL: %s", self.page.url)
-            self.state.errors.append("Join button not found")
-            return False
+        # Check if we're in the meeting
+        self.state.joined = True
+        logger.info("[JOIN] Meeting state set to joined=True")
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            error_msg = f"Failed to join meeting: {e}"
-            logger.exception("[JOIN] ========== EXCEPTION: %s ==========", error_msg)
-            self.state.errors.append(error_msg)
-            return False
+        # Enable captions if configured
+        if self.config.auto_enable_captions:
+            logger.info("[JOIN] Auto-enabling captions...")
+            await self.enable_captions()
+
+        # IMPORTANT: Google Meet may turn off camera due to privacy settings
+        # Always ensure camera is ON after joining if video is enabled
+        if self._video_enabled:
+            logger.info("[JOIN] Ensuring camera is ON after join...")
+            await asyncio.sleep(1.0)  # Wait for Meet to settle
+
+            # First, select the MeetBot camera via Video settings dropdown
+            await self._select_camera_in_meeting()
+
+            # Then turn on the camera
+            await self._toggle_camera(camera_on=True)
+
+        logger.info(
+            "[JOIN] ========== SUCCESS: Joined meeting %s ==========",
+            meeting_id,
+        )
 
     async def leave_meeting(self) -> bool:
         """Leave the current meeting."""
@@ -423,7 +456,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 logger.info("Left meeting")
                 return True
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except BROWSER_ERRORS:
             logger.exception("Failed to leave meeting")
 
         return False
@@ -455,7 +488,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             except asyncio.TimeoutError:
                 logger.warning("[%s] Timeout closing browser, forcing...", self._instance_id)
                 await self.force_kill()
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except BROWSER_ERRORS as e:
                 logger.warning("[%s] Error closing browser: %s", self._instance_id, e, exc_info=True)
             self.browser = None
 
@@ -464,7 +497,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 await asyncio.wait_for(self._playwright.stop(), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.warning("[%s] Timeout stopping playwright", self._instance_id)
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except BROWSER_ERRORS as e:
                 logger.warning("[%s] Error stopping playwright: %s", self._instance_id, e, exc_info=True)
             self._playwright = None
 
@@ -522,7 +555,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
             try:
                 await self._device_manager.cleanup(restore_browser_audio=True)
                 logger.info("[%s] Device cleanup completed", self._instance_id)
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except DEVICE_ERRORS as e:
                 logger.warning("[%s] Device cleanup error: %s", self._instance_id, e, exc_info=True)
             finally:
                 self._device_manager = None
@@ -530,10 +563,6 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
 
         # Also run orphan cleanup to catch anything else
         try:
-            from tool_modules.aa_meet_bot.src.virtual_devices import (  # pylint: disable=import-outside-toplevel
-                cleanup_orphaned_meetbot_devices,
-            )
-
             results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
             if results.get("removed_modules") or results.get("killed_processes"):
                 logger.info(
@@ -542,7 +571,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                     len(results.get("removed_modules", [])),
                     len(results.get("killed_processes", [])),
                 )
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except DEVICE_ERRORS as e:
             logger.warning("[%s] Orphan cleanup error: %s", self._instance_id, e, exc_info=True)
 
         # Unregister this instance
@@ -563,9 +592,6 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
         # Kill browser process
         if self._browser_pid:
             try:
-                import os  # pylint: disable=import-outside-toplevel
-                import signal  # pylint: disable=import-outside-toplevel
-
                 os.kill(self._browser_pid, signal.SIGKILL)
                 logger.info("[%s] Killed browser PID %s", self._instance_id, self._browser_pid)
                 killed = True
@@ -577,9 +603,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                 )
 
         # Try to find and kill by instance ID in cmdline
-        try:
-            import psutil  # pylint: disable=import-outside-toplevel
-
+        if HAVE_PSUTIL:
             for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
                     cmdline = proc.info.get("cmdline") or []
@@ -593,8 +617,6 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
                         killed = True
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
-        except ImportError:
-            pass
 
         # Clean up audio devices and RESTORE browser audio (force kill = unexpected)
         if self._device_manager:
@@ -610,7 +632,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        self._last_activity = datetime.now()  # noqa: DTZ005 - naive local time, matches meet_runtime
+        self._last_activity = datetime.now()
 
     def get_instance_info(self) -> dict:
         """Get information about this instance."""
@@ -631,7 +653,7 @@ class SessionAuthMixin:  # pylint: disable=missing-class-docstring,no-member
     @classmethod
     async def cleanup_hung_instances(cls, max_age_minutes: int = 120) -> list[str]:
         """Find and kill instances that haven't had activity for too long."""
-        now = datetime.now()  # noqa: DTZ005 - compared with naive _last_activity
+        now = datetime.now()
         killed = []
 
         for instance_id, controller in list(cls._instances.items()):

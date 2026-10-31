@@ -7,12 +7,6 @@ of bare ``Exception`` keeps genuine programming errors visible.
 
 import asyncio
 
-try:
-    from playwright.async_api import Error as PlaywrightError
-except ImportError:  # pragma: no cover - playwright is optional at import time
-
-    class PlaywrightError(Exception):  # type: ignore[no-redef]
-        """Stand-in used when playwright is not installed."""
-
+from playwright.async_api import Error as PlaywrightError
 
 BROWSER_ERRORS: tuple[type[BaseException], ...] = (PlaywrightError, asyncio.TimeoutError, OSError)

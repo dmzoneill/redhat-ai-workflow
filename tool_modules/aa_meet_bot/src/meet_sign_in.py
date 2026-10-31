@@ -17,11 +17,16 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from tool_modules.aa_meet_bot.src.browser_errors import BROWSER_ERRORS
+from tool_modules.aa_meet_bot.src.config import get_google_credentials
+from tool_modules.aa_sso.src.tools_basic import fill_sso_form
 
 if TYPE_CHECKING:
     from tool_modules.aa_meet_bot.src.browser_controller import GoogleMeetController
 
 logger = logging.getLogger(__name__)
+
+# Browser failures plus RuntimeError, which get_google_credentials raises when the credential fetch fails.
+SIGN_IN_ERRORS: tuple[type[BaseException], ...] = (*BROWSER_ERRORS, RuntimeError)
 
 
 def _is_meet_url(url: str) -> bool:
@@ -75,10 +80,6 @@ class MeetSignIn:
         Returns:
             True if sign-in successful, False otherwise.
         """
-        from tool_modules.aa_meet_bot.src.config import (  # pylint: disable=import-outside-toplevel
-            get_google_credentials,
-        )
-
         if not self.page:
             logger.error("Browser not initialized")
             return False
@@ -115,7 +116,7 @@ class MeetSignIn:
                 logger.warning("Sign-in flow completed but status unclear")
             return True
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except SIGN_IN_ERRORS as e:
             error_msg = f"Sign-in failed: {e}"
             logger.exception(error_msg)
             self.state.errors.append(error_msg)
@@ -174,24 +175,7 @@ class MeetSignIn:
         logger.info("Red Hat SSO page detected - using aa_sso helper")
 
         # Use the centralized SSO form filler from aa_sso module
-        try:
-            from tool_modules.aa_sso.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                fill_sso_form,
-            )
-
-            await fill_sso_form(self.page, username, password)
-        except ImportError:
-            # Fallback to inline implementation if aa_sso not available
-            logger.warning("aa_sso module not available, using inline SSO form fill")
-            await saml_username.fill(username)
-            await asyncio.sleep(0.5)
-            saml_password = await self.page.wait_for_selector("#password", timeout=5000)
-            if saml_password:
-                await saml_password.fill(password)
-                await asyncio.sleep(0.5)
-            submit_button = await self.page.wait_for_selector("#submit", timeout=5000)
-            if submit_button:
-                await submit_button.click()
+        await fill_sso_form(self.page, username, password)
 
         await asyncio.sleep(10)  # Wait for SSO processing and redirect
         logger.info("SSO login submitted, waiting for redirect to Meet...")
