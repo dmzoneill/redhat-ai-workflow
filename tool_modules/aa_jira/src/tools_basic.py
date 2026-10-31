@@ -5,9 +5,13 @@ Uses the rh-issue CLI for Red Hat Jira operations.
 Authentication: JIRA_JPAT environment variable.
 """
 
+import asyncio
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any, cast
 
+import yaml
 from fastmcp import FastMCP
 
 # Setup project path for server imports (must be before server imports)
@@ -23,18 +27,23 @@ from server.utils import get_project_root, load_config, run_cmd
 # Setup project path for server imports
 
 
+def _write_temp_yaml(content: str) -> str:
+    """Write content to a named temporary .yaml file and return its path."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(content)
+        return str(f.name)
+
+
 def _get_jira_url() -> str:
     """Get Jira URL from config."""
     config = load_config()
-    return cast(dict, config.get("jira", {})).get("url", "https://issues.redhat.com")
+    return str(cast(dict, config.get("jira", {})).get("url", "https://issues.redhat.com"))
 
 
 logger = logging.getLogger(__name__)
 
 
-async def run_rh_issue(
-    args: list[str], timeout: int = 30, env: dict[str, str] | None = None
-) -> tuple[bool, str]:
+async def run_rh_issue(args: list[str], timeout: int = 30, env: dict[str, str] | None = None) -> tuple[bool, str]:
     """Run rh-issue command through user's shell environment.
 
     Uses unified run_cmd which sources ~/.bashrc for:
@@ -112,23 +121,13 @@ def _build_story_yaml_fields(
 ) -> dict:
     """Build YAML fields specific to story issues with defaults."""
     return {
-        "User Story": (
-            convert_fn(user_story)
-            if user_story
-            else f"As a user, I want {summary.lower()}."
-        ),
+        "User Story": (convert_fn(user_story) if user_story else f"As a user, I want {summary.lower()}."),
         "Acceptance Criteria": (
-            convert_fn(acceptance_criteria)
-            if acceptance_criteria
-            else "* Functionality works as described"
+            convert_fn(acceptance_criteria) if acceptance_criteria else "* Functionality works as described"
         ),
-        "Supporting Documentation": (
-            convert_fn(supporting_documentation) if supporting_documentation else "N/A"
-        ),
+        "Supporting Documentation": (convert_fn(supporting_documentation) if supporting_documentation else "N/A"),
         "Definition of Done": (
-            convert_fn(definition_of_done)
-            if definition_of_done
-            else "* Code reviewed and merged\n* Tests pass"
+            convert_fn(definition_of_done) if definition_of_done else "* Code reviewed and merged\n* Tests pass"
         ),
     }
 
@@ -276,9 +275,7 @@ async def _jira_get_active_sprint_impl(project: str = "AAP") -> dict:
     return sprint_info
 
 
-async def _jira_get_sprint_issues_impl(
-    sprint_id: int, max_results: int = 100
-) -> list[dict]:
+async def _jira_get_sprint_issues_impl(sprint_id: int, max_results: int = 100) -> list[dict]:
     """
     Get all issues in a sprint.
 
@@ -292,9 +289,7 @@ async def _jira_get_sprint_issues_impl(
     import re  # pylint: disable=import-outside-toplevel
 
     jql = f"sprint = {sprint_id}"
-    success, output = await run_rh_issue(
-        ["search", jql, "--max-results", str(max_results)], timeout=60
-    )
+    success, output = await run_rh_issue(["search", jql, "--max-results", str(max_results)], timeout=60)
 
     if not success:
         logger.error("Failed to get sprint issues: %s", output)
@@ -307,11 +302,7 @@ async def _jira_get_sprint_issues_impl(
     lines = output.strip().split("\n")
 
     # Skip header and separator lines
-    data_lines = [
-        line
-        for line in lines
-        if line.strip() and not line.startswith("-") and "|" in line
-    ]
+    data_lines = [line for line in lines if line.strip() and not line.startswith("-") and "|" in line]
 
     for line in data_lines[1:]:  # Skip header row
         parts = [p.strip() for p in line.split("|")]
@@ -369,9 +360,7 @@ async def _jira_add_comment_impl(issue_key: str, comment: str) -> str:
         Confirmation of the comment.
     """
     # rh-issue add-comment requires -t flag for comment text and --no-ai to skip AI improvement
-    success, output = await run_rh_issue(
-        ["add-comment", issue_key, "-t", comment, "--no-ai"]
-    )
+    success, output = await run_rh_issue(["add-comment", issue_key, "-t", comment, "--no-ai"])
 
     if not success:
         return f"❌ Failed to add comment: {output}"
@@ -506,11 +495,6 @@ async def _jira_create_issue_impl(
             priority="major"
         )
     """
-    import tempfile  # pylint: disable=import-outside-toplevel
-    from pathlib import Path  # pylint: disable=import-outside-toplevel
-
-    import yaml  # pylint: disable=import-outside-toplevel
-
     # Normalize issue type to lowercase
     valid_types = {"bug", "story", "task", "epic", "spike", "subtask"}
     issue_type_normalized = issue_type.lower().strip()
@@ -525,7 +509,7 @@ async def _jira_create_issue_impl(
     def convert(text: str) -> str:
         """Convert markdown if enabled and converter available."""
         if convert_markdown and markdown_to_jira and text:
-            return markdown_to_jira(text)
+            return str(markdown_to_jira(text))
         return text
 
     # Build YAML data
@@ -544,13 +528,9 @@ async def _jira_create_issue_impl(
     )
 
     # Write YAML to temp file
-    yaml_content = yaml.dump(
-        yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=False
-    )
+    yaml_content = yaml.dump(yaml_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-        f.write(yaml_content)
-        input_file = f.name
+    input_file = await asyncio.to_thread(_write_temp_yaml, yaml_content)
 
     try:
         # Build CLI args
@@ -611,13 +591,8 @@ async def _jira_create_issue_impl(
                 else:
                     output += f"\n\n⚠️ Issue created but failed to set priority: {priority_output}"
         else:
-            valid_options = (
-                "blocker, critical, major, normal, minor "
-                "(or: highest, high, medium, low, lowest)"
-            )
-            output += (
-                f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
-            )
+            valid_options = "blocker, critical, major, normal, minor (or: highest, high, medium, low, lowest)"
+            output += f"\n\n⚠️ Invalid priority '{priority}' ignored. Valid: {valid_options}"
 
     return _parse_create_issue_result(success, output)
 
@@ -886,9 +861,7 @@ async def _jira_view_issue_json_impl(issue_key: str) -> str:
             data[key] = value
 
     # Extract description section if present
-    desc_match = re.search(
-        r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL
-    )
+    desc_match = re.search(r"📝 DESCRIPTION\s*-+\s*(.*?)(?=\n={5,}|\Z)", output, re.DOTALL)
     if desc_match:
         data["description"] = desc_match.group(1).strip()
 
@@ -911,7 +884,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the comment.
         """
-        return await _jira_add_comment_impl(issue_key, comment)
+        result: str = await _jira_add_comment_impl(issue_key, comment)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -931,7 +905,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the link.
         """
-        return await _jira_add_link_impl(from_issue, to_issue, link_type)
+        result: str = await _jira_add_link_impl(from_issue, to_issue, link_type)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -946,7 +921,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the assignment.
         """
-        return await _jira_assign_impl(issue_key, assignee)
+        result: str = await _jira_assign_impl(issue_key, assignee)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -961,7 +937,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Returns:
             The cloned issue key and details.
         """
-        return await _jira_clone_issue_impl(issue_key, new_summary)
+        result: str = await _jira_clone_issue_impl(issue_key, new_summary)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1020,7 +997,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
                 priority="major"
             )
         """
-        return await _jira_create_issue_impl(
+        result: str = await _jira_create_issue_impl(
             issue_type,
             summary,
             description,
@@ -1036,6 +1013,7 @@ def _register_write_tools(registry: ToolRegistry) -> None:
             convert_markdown,
             priority,
         )
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1050,7 +1028,8 @@ def _register_write_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the transition.
         """
-        return await _jira_transition_impl(issue_key, status)
+        result: str = await _jira_transition_impl(issue_key, status)
+        return result
 
 
 def _register_update_tools(registry: ToolRegistry) -> None:
@@ -1069,7 +1048,8 @@ def _register_update_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the epic link.
         """
-        return await _jira_set_epic_impl(issue_key, epic_key)
+        result: str = await _jira_set_epic_impl(issue_key, epic_key)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1084,7 +1064,8 @@ def _register_update_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the priority change.
         """
-        return await _jira_set_priority_impl(issue_key, priority)
+        result: str = await _jira_set_priority_impl(issue_key, priority)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1099,7 +1080,8 @@ def _register_update_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the status change.
         """
-        return await _jira_set_status_impl(issue_key, status)
+        result: str = await _jira_set_status_impl(issue_key, status)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1114,7 +1096,8 @@ def _register_update_tools(registry: ToolRegistry) -> None:
         Returns:
             Confirmation of the story points update.
         """
-        return await _jira_set_story_points_impl(issue_key, points)
+        result: str = await _jira_set_story_points_impl(issue_key, points)
+        return result
 
 
 def _register_read_tools(registry: ToolRegistry) -> None:
@@ -1132,7 +1115,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             Issue details.
         """
-        return await _jira_get_issue_impl(issue_key)
+        result: str = await _jira_get_issue_impl(issue_key)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1143,7 +1127,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             List of blocked issues and what's blocking them.
         """
-        return await _jira_list_blocked_impl()
+        result: str = await _jira_list_blocked_impl()
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1163,7 +1148,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             List of issues matching the filters.
         """
-        return await _jira_list_issues_impl(project, status, assignee)
+        result: str = await _jira_list_issues_impl(project, status, assignee)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1177,7 +1163,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             List of your assigned issues.
         """
-        return await _jira_my_issues_impl(status)
+        result: str = await _jira_my_issues_impl(status)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1192,7 +1179,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             List of matching issues.
         """
-        return await _jira_search_impl(jql, max_results)
+        result: str = await _jira_search_impl(jql, max_results)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1206,7 +1194,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             Detailed issue information including status, description, acceptance criteria.
         """
-        return await _jira_view_issue_impl(issue_key)
+        result: str = await _jira_view_issue_impl(issue_key)
+        return result
 
     @auto_heal()
     @registry.tool()
@@ -1220,7 +1209,8 @@ def _register_read_tools(registry: ToolRegistry) -> None:
         Returns:
             Issue data in a parseable key-value format.
         """
-        return await _jira_view_issue_json_impl(issue_key)
+        result: str = await _jira_view_issue_json_impl(issue_key)
+        return result
 
 
 def register_tools(server: "FastMCP") -> int:
