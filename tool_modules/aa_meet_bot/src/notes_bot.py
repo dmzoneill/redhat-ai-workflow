@@ -131,7 +131,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
             return True
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to initialize notes bot: %s", e)
+            logger.exception("Failed to initialize notes bot")
             self.state.errors.append(str(e))
             return False
 
@@ -172,6 +172,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
             if killed > 0:
                 logger.info("%sKilled %s tracked audio capture processes", prefix, killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("%sAudio capture cleanup failed: %s", prefix, e, exc_info=True)
             results["errors"].append(f"Audio capture cleanup: {e}")
 
         # 2. Run comprehensive orphan cleanup (modules, parec, pipes, video)
@@ -209,7 +210,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
         # pylint: disable=broad-exception-caught
         except Exception as e:  # pylint: disable=broad-exception-caught
             results["errors"].append(f"Orphan cleanup: {e}")
-            logger.warning("%sError during orphan cleanup: %s", prefix, e)
+            logger.warning("%sError during orphan cleanup: %s", prefix, e, exc_info=True)
 
         return results
 
@@ -236,7 +237,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
                 return False
             return True  # pylint: disable=broad-exception-caught
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to initialize browser: %s", e)
+            logger.exception("Failed to initialize browser")
             self.state.errors.append(str(e))
             self._controller = None
             return False
@@ -373,7 +374,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
 
                 notify_meeting_joined(self.state.title, mode)
             except Exception:  # pylint: disable=broad-exception-caught
-                pass
+                logger.debug("Ignored error during best-effort step", exc_info=True)
 
             # Start buffer flush task
             self._flush_task = asyncio.create_task(self._flush_loop())
@@ -402,7 +403,7 @@ class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=t
             return True
         # pylint: disable=broad-exception-caught
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to join meeting: %s", e)
+            logger.exception("Failed to join meeting")
             self.state.status = "error"
             self.state.errors.append(str(e))
             return False
