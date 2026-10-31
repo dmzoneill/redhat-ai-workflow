@@ -23,11 +23,43 @@ from tool_modules.aa_slack.src.slack_message_builder import simplify_channel_his
 # Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
 _RNG = secrets.SystemRandom()
 
+
+def _multipart_body(boundary: str, parts: list[tuple[str, str]]) -> str:
+    """Encode (name, value) pairs as a multipart/form-data body with the given boundary."""
+    body_parts = []
+    for name, value in parts:
+        body_parts.extend([f"--{boundary}", f'Content-Disposition: form-data; name="{name}"', "", value])
+    body_parts.extend([f"--{boundary}--", ""])
+    return "\r\n".join(body_parts)
+
+
 logger = logging.getLogger("tool_modules.aa_slack.src.slack_session")
 
 
 class SlackSessionQuery:  # pylint: disable=no-member
     """Slack search, membership, and profile methods."""
+
+    def _user_cache_fields(self, u: dict[str, Any]) -> dict[str, Any]:
+        """Common cache fields for a Slack user record, with the best available avatar URL."""
+        user_id = u.get("id", "")
+        profile = u.get("profile", {})
+        # Prefer the constructed avatar URL, fall back to the profile image URLs
+        avatar_hash = self.extract_avatar_hash(profile)
+        if avatar_hash and user_id:
+            avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
+        else:
+            avatar_url = profile.get("image_original", profile.get("image_72", ""))
+        return {
+            "user_id": user_id,
+            "user_name": u.get("name", ""),
+            "display_name": profile.get("display_name", ""),
+            "real_name": profile.get("real_name", ""),
+            "email": profile.get("email", ""),
+            "title": profile.get("title", ""),
+            "avatar_url": avatar_url,
+            "avatar_hash": avatar_hash,
+            "pronouns": profile.get("pronouns", ""),
+        }
 
     # Declared for mixins that read sibling state.
     SLACK_HOST: Any
@@ -309,29 +341,11 @@ class SlackSessionQuery:  # pylint: disable=no-member
             # Convert to a simpler format for caching
             results = []
             for u in users:
-                user_id = u.get("id", "")
-                profile = u.get("profile", {})
-
-                # Get avatar URL
-                avatar_hash = self.extract_avatar_hash(profile)
-                if avatar_hash and user_id:
-                    avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
-                else:
-                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
-
                 results.append(
                     {
-                        "user_id": user_id,
-                        "user_name": u.get("name", ""),
-                        "display_name": profile.get("display_name", ""),
-                        "real_name": profile.get("real_name", ""),
-                        "email": profile.get("email", ""),
-                        "title": profile.get("title", ""),
-                        "avatar_url": avatar_url,
-                        "avatar_hash": avatar_hash,
-                        "pronouns": profile.get("pronouns", ""),
-                        "status_text": profile.get("status_text", ""),
-                        "status_emoji": profile.get("status_emoji", ""),
+                        **self._user_cache_fields(u),
+                        "status_text": u.get("profile", {}).get("status_text", ""),
+                        "status_emoji": u.get("profile", {}).get("status_emoji", ""),
                         "is_bot": u.get("is_bot", False),
                         "is_admin": u.get("is_admin", False),
                         "deleted": u.get("deleted", False),
@@ -398,16 +412,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         ]
 
         # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
+        body = _multipart_body(boundary, parts)
 
         headers = {
             "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -511,16 +516,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             parts.append(("latest", latest))
 
         # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
+        body = _multipart_body(boundary, parts)
 
         headers = {
             "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -580,27 +576,9 @@ class SlackSessionQuery:  # pylint: disable=no-member
             # Convert to a simpler format for caching
             results = []
             for u in users:
-                user_id = u.get("id", "")
-                profile = u.get("profile", {})
-
-                # Get avatar URL - prefer constructed URL, fall back to profile URLs
-                avatar_hash = self.extract_avatar_hash(profile)
-                if avatar_hash and user_id:
-                    avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
-                else:
-                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
-
                 results.append(
                     {
-                        "user_id": user_id,
-                        "user_name": u.get("name", ""),
-                        "display_name": profile.get("display_name", ""),
-                        "real_name": profile.get("real_name", ""),
-                        "email": profile.get("email", ""),
-                        "title": profile.get("title", ""),
-                        "avatar_url": avatar_url,
-                        "avatar_hash": avatar_hash,
-                        "pronouns": profile.get("pronouns", ""),
+                        **self._user_cache_fields(u),
                         "is_bot": u.get("is_bot", False),
                         "is_admin": u.get("is_admin", False),
                         "deleted": u.get("deleted", False),
@@ -663,16 +641,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         ]
 
         # Build the multipart body
-        body_parts = []
-        for name, value in parts:
-            body_parts.append(f"--{boundary}")
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-            body_parts.append("")
-            body_parts.append(value)
-        body_parts.append(f"--{boundary}--")
-        body_parts.append("")
-
-        body = "\r\n".join(body_parts)
+        body = _multipart_body(boundary, parts)
 
         headers = {
             "Content-Type": f"multipart/form-data; boundary={boundary}",
@@ -753,17 +722,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 ("_x_app_name", "client"),
             ]
 
-            body_parts = []
-            for name, value in form_parts:
-                body_parts.append(f"--{boundary}")
-                body_parts.append(f'Content-Disposition: form-data; name="{name}"')
-                body_parts.append("")
-                body_parts.append(value)
-
-            body_parts.append(f"--{boundary}--")
-            body_parts.append("")
-
-            body = "\r\n".join(body_parts)
+            body = _multipart_body(boundary, form_parts)
 
             headers = {
                 "User-Agent": self.USER_AGENT,
