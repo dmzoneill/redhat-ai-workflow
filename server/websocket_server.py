@@ -16,13 +16,26 @@ import json
 import logging
 import subprocess
 import uuid
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Any
 
 from server.timeouts import Timeouts
 
 logger = logging.getLogger(__name__)
+
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 # Try to import websockets
 try:
@@ -44,7 +57,7 @@ class SkillState:
     total_steps: int
     current_step: int = 0
     status: str = "running"  # running, completed, failed
-    started_at: datetime = field(default_factory=datetime.now)
+    started_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
     source: str = "chat"  # chat, cron, slack, manual, api
 
 
@@ -90,9 +103,7 @@ class SkillWebSocketServer:
     async def start(self):
         """Start the WebSocket server."""
         if not WEBSOCKETS_AVAILABLE:
-            logger.warning(
-                "WebSocket server not started - websockets package not available"
-            )
+            logger.warning("WebSocket server not started - websockets package not available")
             return
 
         if self._started:
@@ -197,9 +208,7 @@ class SkillWebSocketServer:
                                 "remember": data.get("remember", "none"),
                             }
                         )
-                    logger.info(
-                        "Confirmation %s responded: %s", conf_id, data["response"]
-                    )
+                    logger.info("Confirmation %s responded: %s", conf_id, data["response"])
 
             elif msg_type == "heartbeat":
                 await websocket.send(json.dumps({"type": "heartbeat_ack"}))
@@ -217,8 +226,8 @@ class SkillWebSocketServer:
             logger.error("Invalid JSON message: %s", e)
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Error handling WebSocket message: %s", e)
+        except Exception:
+            logger.exception("Error handling WebSocket message")
 
     async def broadcast(self, event: dict):
         """Broadcast event to all connected clients."""
@@ -230,9 +239,7 @@ class SkillWebSocketServer:
 
         message = json.dumps(event, default=str)
         # Send to all clients, ignore failures
-        results = await asyncio.gather(
-            *[client.send(message) for client in clients_copy], return_exceptions=True
-        )
+        results = await asyncio.gather(*[client.send(message) for client in clients_copy], return_exceptions=True)
 
         # Log any errors
         for _i, result in enumerate(results):
@@ -249,12 +256,13 @@ class SkillWebSocketServer:
         Returns:
             Number of skills removed
         """
-        now = datetime.now()
+        now = datetime.now().astimezone()
         stale_ids = []
 
         async with self._skills_lock:
             for skill_id, skill in self.running_skills.items():
-                age = (now - skill.started_at).total_seconds()
+                # astimezone() also accepts naive (local-time) values from older callers
+                age = (now - skill.started_at.astimezone()).total_seconds()
                 if age > MAX_SKILL_AGE_SECONDS:
                     stale_ids.append(skill_id)
 
@@ -269,9 +277,7 @@ class SkillWebSocketServer:
                     key=lambda k: self.running_skills[k].started_at,
                 )
                 del self.running_skills[oldest_id]
-                logger.warning(
-                    "Removed oldest skill %s (exceeded max count)", oldest_id
-                )
+                logger.warning("Removed oldest skill %s (exceeded max count)", oldest_id)
                 stale_ids.append(oldest_id)
 
         return len(stale_ids)
@@ -304,14 +310,12 @@ class SkillWebSocketServer:
                 "total_steps": total_steps,
                 "inputs": inputs or {},
                 "source": source,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug("Skill started: %s (%s) source=%s", skill_name, skill_id, source)
 
-    async def skill_completed(
-        self, skill_id: str, total_duration_ms: int | None = None
-    ):
+    async def skill_completed(self, skill_id: str, total_duration_ms: int | None = None):
         """Notify that a skill has completed successfully."""
         async with self._skills_lock:
             if skill_id in self.running_skills:
@@ -322,17 +326,15 @@ class SkillWebSocketServer:
                 "type": "skill_completed",
                 "skill_id": skill_id,
                 "total_duration_ms": total_duration_ms,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug("Skill completed: %s", skill_id)
 
         # Remove from running skills after a delay
-        asyncio.create_task(self._remove_skill_delayed(skill_id, delay=5.0))
+        _spawn_background(self._remove_skill_delayed(skill_id, delay=5.0))
 
-    async def skill_failed(
-        self, skill_id: str, error: str, total_duration_ms: int | None = None
-    ):
+    async def skill_failed(self, skill_id: str, error: str, total_duration_ms: int | None = None):
         """Notify that a skill has failed."""
         async with self._skills_lock:
             if skill_id in self.running_skills:
@@ -344,13 +346,13 @@ class SkillWebSocketServer:
                 "skill_id": skill_id,
                 "error": error,
                 "total_duration_ms": total_duration_ms,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug("Skill failed: %s - %s", skill_id, error)
 
         # Remove from running skills after a delay
-        asyncio.create_task(self._remove_skill_delayed(skill_id, delay=10.0))
+        _spawn_background(self._remove_skill_delayed(skill_id, delay=10.0))
 
     async def _remove_skill_delayed(self, skill_id: str, delay: float):
         """Remove a skill from running_skills after a delay."""
@@ -360,9 +362,7 @@ class SkillWebSocketServer:
 
     # ==================== Step Events ====================
 
-    async def step_started(
-        self, skill_id: str, step_index: int, step_name: str, description: str = ""
-    ):
+    async def step_started(self, skill_id: str, step_index: int, step_name: str, description: str = ""):
         """Notify that a step has started."""
         async with self._skills_lock:
             if skill_id in self.running_skills:
@@ -375,14 +375,12 @@ class SkillWebSocketServer:
                 "step_index": step_index,
                 "step_name": step_name,
                 "description": description,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug("Step started: %s [%s] %s", skill_id, step_index, step_name)
 
-    async def step_completed(
-        self, skill_id: str, step_index: int, step_name: str, duration_ms: int
-    ):
+    async def step_completed(self, skill_id: str, step_index: int, step_name: str, duration_ms: int):
         """Notify that a step has completed."""
         await self.broadcast(
             {
@@ -391,7 +389,7 @@ class SkillWebSocketServer:
                 "step_index": step_index,
                 "step_name": step_name,
                 "duration_ms": duration_ms,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug(
@@ -402,9 +400,7 @@ class SkillWebSocketServer:
             duration_ms,
         )
 
-    async def step_failed(
-        self, skill_id: str, step_index: int, step_name: str, error: str
-    ):
+    async def step_failed(self, skill_id: str, step_index: int, step_name: str, error: str):
         """Notify that a step has failed."""
         await self.broadcast(
             {
@@ -413,12 +409,10 @@ class SkillWebSocketServer:
                 "step_index": step_index,
                 "step_name": step_name,
                 "error": error,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
-        logger.debug(
-            "Step failed: %s [%s] %s - %s", skill_id, step_index, step_name, error
-        )
+        logger.debug("Step failed: %s [%s] %s - %s", skill_id, step_index, step_name, error)
 
     # ==================== Auto-Heal Events ====================
 
@@ -439,7 +433,7 @@ class SkillWebSocketServer:
                 "error_type": error_type,
                 "fix_action": fix_action,
                 "error_snippet": error_snippet[:200] if error_snippet else "",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug(
@@ -450,9 +444,7 @@ class SkillWebSocketServer:
             fix_action,
         )
 
-    async def auto_heal_completed(
-        self, skill_id: str, step_index: int, fix_action: str, success: bool
-    ):
+    async def auto_heal_completed(self, skill_id: str, step_index: int, fix_action: str, success: bool):
         """Notify that auto-heal has completed."""
         await self.broadcast(
             {
@@ -461,7 +453,7 @@ class SkillWebSocketServer:
                 "step_index": step_index,
                 "fix_action": fix_action,
                 "success": success,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug(
@@ -500,7 +492,7 @@ class SkillWebSocketServer:
             options=options,
             claude_suggestion=claude_suggestion,
             timeout_seconds=timeout_seconds,
-            created_at=datetime.now(),
+            created_at=datetime.now().astimezone(),
             future=loop.create_future(),
         )
 
@@ -530,9 +522,7 @@ class SkillWebSocketServer:
 
         # Wait for response with timeout
         try:
-            result = await asyncio.wait_for(
-                confirmation.future, timeout=timeout_seconds
-            )
+            result: dict = await asyncio.wait_for(confirmation.future, timeout=timeout_seconds)
 
             # Broadcast that confirmation was answered
             await self.broadcast(
@@ -560,9 +550,7 @@ class SkillWebSocketServer:
 
             # Try Zenity fallback if no clients connected
             if not self.clients:
-                zenity_result = await self._zenity_fallback(
-                    prompt, options, claude_suggestion
-                )
+                zenity_result = await self._zenity_fallback(prompt, options, claude_suggestion)
                 if zenity_result:
                     return zenity_result
 
@@ -626,9 +614,7 @@ class SkillWebSocketServer:
         """Play notification sound (non-blocking)."""
         await asyncio.to_thread(self._play_notification_sound_sync)
 
-    async def _zenity_fallback(
-        self, prompt: str, options: list[str], claude_suggestion: str
-    ) -> dict | None:
+    async def _zenity_fallback(self, prompt: str, options: list[str], claude_suggestion: str) -> dict | None:
         """Fallback to Zenity dialog if no WebSocket clients connected."""
         try:
             # Build Zenity command
@@ -670,7 +656,7 @@ class SkillWebSocketServer:
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug("Zenity fallback failed: %s", e)
+            logger.debug("Zenity fallback failed: %s", e, exc_info=True)
             return None
 
     # ==================== Memory Query Events ====================
@@ -688,7 +674,7 @@ class SkillWebSocketServer:
                 "query_id": query_id,
                 "query": query,
                 "sources": sources,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug("Memory query started: %s - %s...", query_id, query[:50])
@@ -710,7 +696,7 @@ class SkillWebSocketServer:
                 "sources_queried": sources_queried,
                 "result_count": result_count,
                 "latency_ms": latency_ms,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug(
@@ -737,7 +723,7 @@ class SkillWebSocketServer:
                 "intent": intent,
                 "confidence": confidence,
                 "sources_suggested": sources_suggested,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
         )
         logger.debug(
@@ -751,7 +737,7 @@ class SkillWebSocketServer:
 # ==================== Global Instance ====================
 
 # pylint: disable-next=invalid-name
-_ws_server: Optional[SkillWebSocketServer] = None
+_ws_server: SkillWebSocketServer | None = None
 
 
 def get_websocket_server() -> SkillWebSocketServer:
