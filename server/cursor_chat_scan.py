@@ -8,9 +8,9 @@ import json
 import logging
 import re
 import sqlite3
-import subprocess
 from collections import defaultdict
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -212,9 +212,8 @@ def _message_role(msg_type: Any) -> str:
     return {1: "user", 2: "assistant"}.get(msg_type, "system")
 
 
-def _parse_bubble(line: str, summary: dict, issue_keys: set[str]) -> dict:
-    """Parse one ``key|json`` output line into a message, updating summary counts."""
-    key, value = line.split("|", 1)
+def _parse_bubble(key: str, value: str | bytes, summary: dict, issue_keys: set[str]) -> dict:
+    """Parse one bubble row (key and JSON value) into a message, updating summary counts."""
     data = json.loads(value)
 
     parts = key.split(":")
@@ -259,26 +258,22 @@ def _read_chat_bubbles(chat_id: str, max_messages: int, result: dict[str, Any]) 
         logger.debug("Cursor global storage not found")
         return
 
-    # chat_id is validated as a UUID by the caller
-    query = f"SELECT key, value FROM cursorDiskKV WHERE key LIKE 'bubbleId:{chat_id}:%'"
-    db_result = subprocess.run(
-        ["sqlite3", str(global_db), query],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    if db_result.returncode != 0:
-        logger.debug("Failed to query Cursor global DB: %s", db_result.stderr)
+    try:
+        with closing(sqlite3.connect(global_db, timeout=30)) as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM cursorDiskKV WHERE key LIKE ?", (f"bubbleId:{chat_id}:%",)
+            ).fetchall()
+    except sqlite3.Error as e:
+        logger.debug("Failed to query Cursor global DB: %s", e)
         return
 
     messages_raw = []
     all_issue_keys: set[str] = set()
-    for line in db_result.stdout.strip().split("\n"):
-        if not line or "|" not in line:
+    for key, value in rows:
+        if not value:
             continue
         try:
-            messages_raw.append(_parse_bubble(line, result["summary"], all_issue_keys))
+            messages_raw.append(_parse_bubble(key, value, result["summary"], all_issue_keys))
         except (json.JSONDecodeError, ValueError, KeyError) as e:
             logger.debug("Error parsing bubble: %s", e)
 
@@ -332,8 +327,6 @@ def get_cursor_chat_content(chat_id: str, max_messages: int = 50) -> dict:
 
     try:
         _read_chat_bubbles(chat_id, max_messages, result)
-    except subprocess.TimeoutExpired:
-        logger.warning("Timeout extracting Cursor chat content")
     # Best-effort: log and continue.
     except CURSOR_DB_ERRORS as e:
         logger.warning("Error extracting Cursor chat content: %s", e)
@@ -614,14 +607,13 @@ def get_cursor_chat_projects(chat_ids: list[str] | None = None) -> dict[str, str
         return {}
 
 
-def _record_transcript_line(line: str, issue_keys: list[str] | None, issue_meetings: dict) -> None:
-    """Count the issue references of one ``id|||text|||title|||start`` row."""
-    parts = line.split("|||")
-    if len(parts) < 4:
+def _record_transcript_row(row: tuple, issue_keys: list[str] | None, issue_meetings: dict) -> None:
+    """Count the issue references of one (meeting_id, text, title, scheduled_start) row."""
+    if len(row) < 4:
         return
-    meeting_id = int(parts[0])
-    text, title = parts[1], parts[2]
-    date = parts[3][:10] if parts[3] else ""  # Just the date part
+    meeting_id = int(row[0])
+    text, title = row[1] or "", row[2] or ""
+    date = str(row[3])[:10] if row[3] else ""  # Just the date part
 
     found_numbers = {match.group(1) for pattern in _SPOKEN_ISSUE_PATTERNS for match in pattern.finditer(text)}
     for number in found_numbers:
@@ -665,26 +657,20 @@ def get_meeting_transcript_issue_keys(
             logger.debug("Meet bot database not found")
             return {}
 
-        result = subprocess.run(
-            ["sqlite3", "-separator", "|||", str(db_path), _TRANSCRIPTS_SQL],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        if result.returncode != 0:
-            logger.debug("Failed to query meet bot DB: %s", result.stderr)
+        try:
+            with closing(sqlite3.connect(db_path, timeout=30)) as conn:
+                rows = conn.execute(_TRANSCRIPTS_SQL).fetchall()
+        except sqlite3.Error as e:
+            logger.debug("Failed to query meet bot DB: %s", e)
             return {}
 
         # {issue_key: {meeting_id: {"title": ..., "date": ..., "count": N}}}
         issue_meetings: dict[str, dict[int, dict]] = defaultdict(
             lambda: defaultdict(lambda: {"title": "", "date": "", "count": 0})
         )
-        for line in result.stdout.strip().split("\n"):
-            if not line or "|||" not in line:
-                continue
+        for row in rows:
             try:
-                _record_transcript_line(line, issue_keys, issue_meetings)
+                _record_transcript_row(row, issue_keys, issue_meetings)
             except (ValueError, IndexError):
                 continue
 
@@ -699,9 +685,6 @@ def get_meeting_transcript_issue_keys(
             logger.info("Found %s issue(s) mentioned in meeting transcripts", len(result_map))
         return result_map
 
-    except subprocess.TimeoutExpired:
-        logger.warning("Timeout scanning meet bot DB for issue keys")
-        return {}
     # Best-effort: log and continue.
     except CURSOR_DB_ERRORS as e:
         logger.warning("Error scanning meeting transcripts for issue keys: %s", e)

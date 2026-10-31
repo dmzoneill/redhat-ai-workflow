@@ -1,9 +1,10 @@
 """Tests for Cursor workspace database access (server.cursor_chat_db)."""
 
 import json
-import subprocess
+import sqlite3
+from contextlib import closing
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from server.workspace_state import (
     get_cursor_chat_content,
@@ -18,6 +19,24 @@ from server.workspace_state import (
     inject_context_to_cursor_chat,
     list_cursor_chats,
 )
+
+_COMPOSER_KEY = "composer.composerData"
+
+
+def write_state_db(db_file: Path, composer_value: str | None = None) -> None:
+    """Create a Cursor-style state.vscdb with ItemTable; store ``composer_value`` when given."""
+    with closing(sqlite3.connect(db_file)) as conn:
+        conn.execute("CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB)")
+        if composer_value is not None:
+            conn.execute("INSERT INTO ItemTable (key, value) VALUES (?, ?)", (_COMPOSER_KEY, composer_value))
+        conn.commit()
+
+
+def read_state_db(db_file: Path) -> dict:
+    """Read back the stored composer JSON."""
+    with closing(sqlite3.connect(db_file)) as conn:
+        row = conn.execute("SELECT value FROM ItemTable WHERE key = ?", (_COMPOSER_KEY,)).fetchone()
+    return json.loads(row[0])
 
 
 class TestCursorChatFunctions:
@@ -217,14 +236,7 @@ class TestGetCursorChatInfoFromDb:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")  # Empty file
 
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chat_id, chat_name = get_cursor_chat_info_from_db("file:///my-project")
             assert chat_id is None
             assert chat_name is None
@@ -237,16 +249,9 @@ class TestGetCursorChatInfoFromDb:
         workspace_json = ws_dir / "workspace.json"
         workspace_json.write_text(json.dumps({"folder": "file:///my-project"}))
         db_file = ws_dir / "state.vscdb"
-        db_file.write_text("")
+        write_state_db(db_file, json.dumps({"allComposers": []}))
 
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({"allComposers": []})
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chat_id, chat_name = get_cursor_chat_info_from_db("file:///my-project")
             assert chat_id is None
             assert chat_name is None
@@ -259,23 +264,19 @@ class TestGetCursorChatInfoFromDb:
         workspace_json = ws_dir / "workspace.json"
         workspace_json.write_text(json.dumps({"folder": "file:///my-project"}))
         db_file = ws_dir / "state.vscdb"
-        db_file.write_text("")
-
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps(
-            {
-                "allComposers": [
-                    {"composerId": "c1", "isArchived": True, "lastUpdatedAt": 1000},
-                    {"composerId": "c2", "isDraft": True, "lastUpdatedAt": 2000},
-                ]
-            }
+        write_state_db(
+            db_file,
+            json.dumps(
+                {
+                    "allComposers": [
+                        {"composerId": "c1", "isArchived": True, "lastUpdatedAt": 1000},
+                        {"composerId": "c2", "isDraft": True, "lastUpdatedAt": 2000},
+                    ]
+                }
+            ),
         )
 
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chat_id, chat_name = get_cursor_chat_info_from_db("file:///my-project")
             assert chat_id is None
             assert chat_name is None
@@ -288,24 +289,20 @@ class TestGetCursorChatInfoFromDb:
         workspace_json = ws_dir / "workspace.json"
         workspace_json.write_text(json.dumps({"folder": "file:///my-project"}))
         db_file = ws_dir / "state.vscdb"
-        db_file.write_text("")
-
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps(
-            {
-                "allComposers": [
-                    {"composerId": "c1", "name": "Old Chat", "lastUpdatedAt": 1000},
-                    {"composerId": "c2", "name": "New Chat", "lastUpdatedAt": 3000},
-                    {"composerId": "c3", "name": "Middle Chat", "lastUpdatedAt": 2000},
-                ]
-            }
+        write_state_db(
+            db_file,
+            json.dumps(
+                {
+                    "allComposers": [
+                        {"composerId": "c1", "name": "Old Chat", "lastUpdatedAt": 1000},
+                        {"composerId": "c2", "name": "New Chat", "lastUpdatedAt": 3000},
+                        {"composerId": "c3", "name": "Middle Chat", "lastUpdatedAt": 2000},
+                    ]
+                }
+            ),
         )
 
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chat_id, chat_name = get_cursor_chat_info_from_db("file:///my-project")
             assert chat_id == "c2"
             assert chat_name == "New Chat"
@@ -388,7 +385,6 @@ class TestListCursorChats:
         workspace_json = ws_dir / "workspace.json"
         workspace_json.write_text(json.dumps({"folder": "file:///my-project"}))
         db_file = ws_dir / "state.vscdb"
-        db_file.write_text("")
 
         composer_data = {
             "allComposers": [
@@ -416,14 +412,9 @@ class TestListCursorChats:
             ],
             "lastFocusedComposerIds": ["c2"],
         }
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps(composer_data)
+        write_state_db(db_file, json.dumps(composer_data))
 
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chats, active_id = list_cursor_chats("file:///my-project")
 
         assert len(chats) == 2  # c1 and c2 only (c3 ghost, c4 archived)
@@ -454,14 +445,7 @@ class TestListCursorChats:
         db_file = ws_dir / "state.vscdb"
         db_file.write_text("")
 
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chats, _active_id = list_cursor_chats("file:///my-project")
             assert chats == []
 
@@ -494,55 +478,29 @@ class TestListCursorChats:
         """Deduplicates chats when same ID appears in multiple workspace dirs."""
         ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
 
-        for i, _ts in enumerate([1000, 2000]):
+        for i, (name, ts) in enumerate([("Old", 1000), ("New", 2000)]):
             ws_dir = ws_storage / f"dir{i}"
             ws_dir.mkdir(parents=True)
             (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///project"}))
-            (ws_dir / "state.vscdb").write_text("")
+            composer = {"composerId": "c1", "name": name, "createdAt": 1000, "lastUpdatedAt": ts}
+            write_state_db(
+                ws_dir / "state.vscdb",
+                json.dumps({"allComposers": [composer], "lastFocusedComposerIds": []}),
+            )
 
-        mock_results = [
-            MagicMock(
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "allComposers": [
-                            {
-                                "composerId": "c1",
-                                "name": "Old",
-                                "createdAt": 1000,
-                                "lastUpdatedAt": 1000,
-                            }
-                        ],
-                        "lastFocusedComposerIds": [],
-                    }
-                ),
-            ),
-            MagicMock(
-                returncode=0,
-                stdout=json.dumps(
-                    {
-                        "allComposers": [
-                            {
-                                "composerId": "c1",
-                                "name": "New",
-                                "createdAt": 1000,
-                                "lastUpdatedAt": 2000,
-                            }
-                        ],
-                        "lastFocusedComposerIds": [],
-                    }
-                ),
-            ),
-        ]
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", side_effect=mock_results),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             chats, _active_id = list_cursor_chats("file:///project")
 
         assert len(chats) == 1
         assert chats[0]["name"] == "New"  # Should keep the newer one
+
+
+def _test_workspace(tmp_path: Path) -> Path:
+    """Create a workspaceStorage dir whose workspace.json points at file:///test."""
+    ws_dir = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage" / "dir1"
+    ws_dir.mkdir(parents=True)
+    (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
+    return ws_dir
 
 
 class TestInjectContextToCursorChat:
@@ -578,116 +536,84 @@ class TestInjectContextToCursorChat:
             assert result is False
 
     def test_read_failure(self, tmp_path):
-        """Returns False when reading composer data fails."""
-        ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
-        ws_dir = ws_storage / "dir1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
-        (ws_dir / "state.vscdb").write_text("")
+        """Returns False when reading composer data fails (no ItemTable)."""
+        ws_dir = _test_workspace(tmp_path)
+        (ws_dir / "state.vscdb").write_bytes(b"")
 
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 1
-        mock_result.stderr = "error"
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             result = inject_context_to_cursor_chat("file:///test")
             assert result is False
 
     def test_creates_new_chat(self, tmp_path):
-        """Successfully creates a new chat entry."""
-        ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
-        ws_dir = ws_storage / "dir1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
-        (ws_dir / "state.vscdb").write_text("")
+        """Successfully creates a new chat entry and stores it."""
+        ws_dir = _test_workspace(tmp_path)
+        db_file = ws_dir / "state.vscdb"
+        write_state_db(db_file, json.dumps({"allComposers": [], "lastFocusedComposerIds": []}))
 
-        # First call: read composer data (empty)
-        read_result = MagicMock(returncode=0, stdout="")
-        # Second call: write update (success)
-        write_result = MagicMock(returncode=0)
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", side_effect=[read_result, write_result]),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             result = inject_context_to_cursor_chat(
                 "file:///test",
                 context={"persona": "developer", "name": "Test Chat"},
                 system_message="You are a developer",
             )
-            assert result is True
+        assert result is True
+        stored = read_state_db(db_file)
+        assert len(stored["allComposers"]) == 1
+        assert stored["lastFocusedComposerIds"] == [stored["allComposers"][0]["composerId"]]
+
+    def test_creates_new_chat_without_existing_data(self, tmp_path):
+        """Succeeds when the composer row does not exist yet."""
+        ws_dir = _test_workspace(tmp_path)
+        write_state_db(ws_dir / "state.vscdb")
+
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            assert inject_context_to_cursor_chat("file:///test", context={"name": "Test Chat"}) is True
 
     def test_updates_existing_chat(self, tmp_path):
-        """Updates an existing chat entry."""
-        ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
-        ws_dir = ws_storage / "dir1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
-        (ws_dir / "state.vscdb").write_text("")
-
+        """Updates an existing chat entry, keeping quotes intact (parameterised write)."""
+        ws_dir = _test_workspace(tmp_path)
+        db_file = ws_dir / "state.vscdb"
         existing_data = {
-            "allComposers": [
-                {
-                    "composerId": "12345678-1234-5678-1234-567812345678",
-                    "name": "Old Name",
-                }
-            ],
+            "allComposers": [{"composerId": "12345678-1234-5678-1234-567812345678", "name": "Old Name"}],
             "lastFocusedComposerIds": [],
         }
-        read_result = MagicMock(returncode=0, stdout=json.dumps(existing_data))
-        write_result = MagicMock(returncode=0)
+        write_state_db(db_file, json.dumps(existing_data))
 
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", side_effect=[read_result, write_result]),
-        ):
+        with patch("pathlib.Path.home", return_value=tmp_path):
             result = inject_context_to_cursor_chat(
                 "file:///test",
                 chat_id="12345678-1234-5678-1234-567812345678",
-                context={"persona": "devops"},
+                context={"persona": "devops", "name": "Dave's chat"},
             )
-            assert result is True
+        assert result is True
+        stored = read_state_db(db_file)
+        assert len(stored["allComposers"]) == 1
+        assert stored["allComposers"][0]["composerId"] == "12345678-1234-5678-1234-567812345678"
+        assert "Dave's chat" in json.dumps(stored)
 
     def test_rejects_invalid_chat_id(self, tmp_path):
-        """Returns False for non-UUID chat_id."""
-        ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
-        ws_dir = ws_storage / "dir1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
-        (ws_dir / "state.vscdb").write_text("")
+        """Returns False for non-UUID chat_id and leaves the DB untouched."""
+        ws_dir = _test_workspace(tmp_path)
+        db_file = ws_dir / "state.vscdb"
+        original = {"allComposers": [], "lastFocusedComposerIds": []}
+        write_state_db(db_file, json.dumps(original))
 
-        read_result = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"allComposers": [], "lastFocusedComposerIds": []}),
-        )
-
-        with (
-            patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", return_value=read_result),
-        ):
-            result = inject_context_to_cursor_chat(
-                "file:///test",
-                chat_id="not-a-valid-uuid",
-            )
-            assert result is False
+        with patch("pathlib.Path.home", return_value=tmp_path):
+            result = inject_context_to_cursor_chat("file:///test", chat_id="x'; DROP TABLE ItemTable; --")
+        assert result is False
+        assert read_state_db(db_file) == original
 
     def test_write_failure(self, tmp_path):
         """Returns False when writing to DB fails."""
-        ws_storage = tmp_path / ".config" / "Cursor" / "User" / "workspaceStorage"
-        ws_dir = ws_storage / "dir1"
-        ws_dir.mkdir(parents=True)
-        (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///test"}))
-        (ws_dir / "state.vscdb").write_text("")
-
-        read_result = MagicMock(returncode=0, stdout="")
-        write_result = MagicMock(returncode=1, stderr="write error")
+        ws_dir = _test_workspace(tmp_path)
+        write_state_db(ws_dir / "state.vscdb", json.dumps({"allComposers": []}))
 
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
-            patch("subprocess.run", side_effect=[read_result, write_result]),
+            patch(
+                "server.cursor_chat_db._write_composer_value",
+                side_effect=sqlite3.OperationalError("attempt to write a readonly database"),
+            ),
         ):
             result = inject_context_to_cursor_chat("file:///test")
             assert result is False

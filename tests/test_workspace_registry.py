@@ -17,6 +17,7 @@ from server.workspace_state import (
     get_default_persona,
     get_workspace_state,
 )
+from tests.workspace_patches import offline_registry
 
 
 class TestWorkspaceRegistry:
@@ -619,14 +620,7 @@ class TestWorkspaceRegistryAdvanced:
         """cleanup_stale keeps stale workspaces that still have sessions."""
         state = WorkspaceRegistry.get_or_create("file:///ws-sessions", ensure_session=False)
         state.last_activity = datetime.now(tz=timezone.utc) - timedelta(hours=48)
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             state.create_session(name="still-active")
 
         with (
@@ -708,14 +702,7 @@ class TestWorkspaceRegistryAdvanced:
     def test_sync_sessions_with_cursor_specific_ids(self):
         """sync_sessions_with_cursor only syncs matching workspaces."""
         state = WorkspaceRegistry.get_or_create("file:///ws1", ensure_session=False)
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s = state.create_session()
 
         with (
@@ -740,14 +727,7 @@ class TestWorkspaceRegistryAdvanced:
         """get_all_sessions fills in workspace project when session has none."""
         state = WorkspaceRegistry.get_or_create("file:///ws1", ensure_session=False)
         state.project = "workspace-proj"
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s = state.create_session()
             s.project = None  # No per-session project
 

@@ -8,10 +8,10 @@ Cursor keeps one ``workspaceStorage/<hash>/`` directory per opened folder; each 
 import json
 import logging
 import sqlite3
-import subprocess
 import time
 import uuid
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -24,11 +24,11 @@ CURSOR_DB_ERRORS: tuple[type[Exception], ...] = (
     KeyError,
     TypeError,
     AttributeError,
-    subprocess.SubprocessError,
     sqlite3.Error,
 )
 
-_COMPOSER_QUERY = "SELECT value FROM ItemTable WHERE key = 'composer.composerData'"
+_COMPOSER_KEY = "composer.composerData"
+_DB_TIMEOUT_SECONDS = 5
 
 
 def _cursor_workspace_storage() -> Path:
@@ -49,19 +49,25 @@ def _storage_folder_uri(storage_dir: Path) -> str | None:
     return json.loads(workspace_json.read_text()).get("folder", "")
 
 
-def _run_sqlite(db_path: Path, query: str) -> subprocess.CompletedProcess:
-    """Run one query with the sqlite3 CLI (5 second timeout)."""
-    return subprocess.run(
-        ["sqlite3", str(db_path), query],
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
+def _read_composer_value(db_path: Path) -> str:
+    """Raw composer JSON stored in ``db_path`` ('' when absent); raises sqlite3.Error."""
+    with closing(sqlite3.connect(db_path, timeout=_DB_TIMEOUT_SECONDS)) as conn:
+        row = conn.execute("SELECT value FROM ItemTable WHERE key = ?", (_COMPOSER_KEY,)).fetchone()
+    value = row[0] if row else None
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    return (value or "").strip()
+
+
+def _write_composer_value(db_path: Path, value: str) -> None:
+    """Store composer JSON in ``db_path`` (committed); raises sqlite3.Error."""
+    with closing(sqlite3.connect(db_path, timeout=_DB_TIMEOUT_SECONDS)) as conn:
+        conn.execute("UPDATE ItemTable SET value = ? WHERE key = ?", (value, _COMPOSER_KEY))
+        conn.commit()
 
 
 def _valid_chat_id(chat_id: str) -> bool:
-    """True when ``chat_id`` is a UUID (guards the SQL built from it)."""
+    """True when ``chat_id`` is a UUID."""
     try:
         uuid.UUID(chat_id)
     except (ValueError, TypeError, AttributeError):
@@ -124,13 +130,17 @@ def get_cursor_chat_info_from_db(workspace_uri: str) -> tuple[str | None, str | 
             if not db_path.exists():
                 continue
 
-            result = _run_sqlite(db_path, _COMPOSER_QUERY)
-            if result.returncode != 0 or not result.stdout.strip():
+            try:
+                value = _read_composer_value(db_path)
+            except sqlite3.Error as e:
+                logger.debug("Could not read composer data in %s: %s", db_path, e)
+                return None, None
+            if not value:
                 logger.debug("No composer data in %s", db_path)
                 return None, None
 
             try:
-                composer_data = json.loads(result.stdout.strip())
+                composer_data = json.loads(value)
             except json.JSONDecodeError as e:
                 logger.debug("Error parsing workspace.json in %s: %s", storage_dir, e)
                 continue
@@ -183,11 +193,15 @@ def _read_composer_data(storage_dir: Path) -> dict | None:
     db_path = storage_dir / "state.vscdb"
     if not db_path.exists():
         return None
-    result = _run_sqlite(db_path, _COMPOSER_QUERY)
-    if result.returncode != 0 or not result.stdout.strip():
+    try:
+        value = _read_composer_value(db_path)
+    except sqlite3.Error as e:
+        logger.debug("Could not read composer data in %s: %s", db_path, e)
+        return None
+    if not value:
         return None
     try:
-        return json.loads(result.stdout.strip())
+        return json.loads(value)
     except (json.JSONDecodeError, KeyError):
         return None
 
@@ -322,18 +336,15 @@ def _inject_into_storage(storage_dir: Path, chat_id: str | None, context: dict |
         logger.warning("Cursor state.vscdb not found at %s", db_path)
         return False
 
-    result = _run_sqlite(db_path, _COMPOSER_QUERY)
-    if result.returncode != 0:
-        logger.warning("Failed to read composer data: %s", result.stderr)
+    try:
+        value = _read_composer_value(db_path)
+    except sqlite3.Error as e:
+        logger.warning("Failed to read composer data: %s", e)
         return False
 
-    composer_data: dict[str, Any] = (
-        json.loads(result.stdout.strip())
-        if result.stdout.strip()
-        else {"allComposers": [], "lastFocusedComposerIds": []}
-    )
+    composer_data: dict[str, Any] = json.loads(value) if value else {"allComposers": [], "lastFocusedComposerIds": []}
 
-    # Generate a new chat ID if not provided, or validate provided one (it ends up in SQL)
+    # Generate a new chat ID if not provided, or validate the provided one
     if chat_id is None:
         chat_id = str(uuid.uuid4())
     elif not _valid_chat_id(chat_id):
@@ -341,12 +352,11 @@ def _inject_into_storage(storage_dir: Path, chat_id: str | None, context: dict |
 
     _upsert_focused_chat(composer_data, chat_id, context.get("name") if context else None)
 
-    # Write back to database (single quotes escaped for SQLite)
-    json_value = json.dumps(composer_data).replace("'", "''")
-    update_query = f"UPDATE ItemTable SET value = '{json_value}' WHERE key = 'composer.composerData'"
-    result = _run_sqlite(db_path, update_query)
-    if result.returncode != 0:
-        logger.warning("Failed to update composer data: %s", result.stderr)
+    # Write back to database (parameterised)
+    try:
+        _write_composer_value(db_path, json.dumps(composer_data))
+    except sqlite3.Error as e:
+        logger.warning("Failed to update composer data: %s", e)
         return False
 
     logger.info("Injected context into Cursor chat %s", chat_id)

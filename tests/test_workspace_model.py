@@ -10,6 +10,7 @@ from server.workspace_state import (
     WorkspaceState,
     get_default_persona,
 )
+from tests.workspace_patches import offline_registry
 
 
 class TestWorkspaceState:
@@ -174,14 +175,7 @@ class TestWorkspaceStateAdvanced:
     def test_get_or_create_session_returns_existing(self):
         """get_or_create_session returns active session if one exists."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s1 = state.create_session(persona="developer", name="existing")
             s2 = state.get_or_create_session(persona="devops")
             assert s1.session_id == s2.session_id  # same session
@@ -190,14 +184,7 @@ class TestWorkspaceStateAdvanced:
         """get_or_create_session creates session when none exists."""
         state = WorkspaceState(workspace_uri="file:///test")
         assert state.get_active_session() is None
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s = state.get_or_create_session(persona="developer")
             assert s is not None
             assert s.persona == "developer"
@@ -205,14 +192,7 @@ class TestWorkspaceStateAdvanced:
     def test_remove_session_sets_active_to_none(self):
         """Removing the only session sets active to None."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             state.remove_session(session.session_id)
             assert state.active_session_id is None
@@ -221,14 +201,7 @@ class TestWorkspaceStateAdvanced:
     def test_cleanup_stale_sessions(self):
         """cleanup_stale_sessions removes stale sessions not in Cursor."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s1 = state.create_session(name="stale")
             s1.last_activity = datetime.now(tz=timezone.utc) - timedelta(hours=48)
 
@@ -244,14 +217,7 @@ class TestWorkspaceStateAdvanced:
     def test_cleanup_stale_sessions_keeps_cursor_sessions(self):
         """cleanup_stale_sessions keeps stale sessions that are still in Cursor."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             s1 = state.create_session(name="stale-but-in-cursor")
             s1.last_activity = datetime.now(tz=timezone.utc) - timedelta(hours=48)
 
@@ -342,14 +308,7 @@ class TestWorkspaceStateBackwardCompat:
     def test_backward_compat_branch_setter_with_session(self):
         """branch setter sets branch on active session."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             state.branch = "my-branch"
             assert session.branch == "my-branch"
@@ -357,14 +316,7 @@ class TestWorkspaceStateBackwardCompat:
     def test_backward_compat_active_tools_setter_with_session(self):
         """active_tools setter on workspace delegates to session."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             state.active_tools = {"a", "b"}
             assert session.static_tool_count == 2
@@ -372,28 +324,14 @@ class TestWorkspaceStateBackwardCompat:
     def test_backward_compat_started_at_with_session(self):
         """started_at returns session's started_at when session exists."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             assert state.started_at == session.started_at
 
     def test_backward_compat_tool_filter_cache_with_session(self):
         """tool_filter_cache returns session's cache when session exists."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             session.tool_filter_cache["key"] = ["tool"]
             assert state.tool_filter_cache == {"key": ["tool"]}
@@ -401,14 +339,7 @@ class TestWorkspaceStateBackwardCompat:
     def test_backward_compat_clear_filter_cache_with_session(self):
         """clear_filter_cache clears session's cache."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             session.tool_filter_cache["key"] = ["tool"]
             state.clear_filter_cache()
@@ -441,14 +372,7 @@ class TestCreateSessionAdvanced:
     def test_create_session_uses_cursor_chat_id(self):
         """create_session uses Cursor's chat ID when available."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=("cursor-uuid-123", "My Chat"),
-            ),
-        ):
+        with offline_registry(("cursor-uuid-123", "My Chat")):
             session = state.create_session()
 
         assert session.session_id == "cursor-uuid-123"
@@ -457,14 +381,7 @@ class TestCreateSessionAdvanced:
     def test_create_session_uses_cursor_name_no_explicit_name(self):
         """create_session uses Cursor chat name when no explicit name given."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=("id1", "Cursor Name"),
-            ),
-        ):
+        with offline_registry(("id1", "Cursor Name")):
             session = state.create_session()
 
         assert session.name == "Cursor Name"
@@ -472,14 +389,7 @@ class TestCreateSessionAdvanced:
     def test_create_session_explicit_name_overrides_cursor(self):
         """create_session explicit name overrides Cursor name."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=("id1", "Cursor Name"),
-            ),
-        ):
+        with offline_registry(("id1", "Cursor Name")):
             session = state.create_session(name="My Explicit Name")
 
         assert session.name == "My Explicit Name"
@@ -487,14 +397,7 @@ class TestCreateSessionAdvanced:
     def test_create_session_fallback_id_when_cursor_unavailable(self):
         """create_session generates fallback ID when Cursor info unavailable."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
 
         assert session.session_id is not None
@@ -516,14 +419,7 @@ class TestCreateSessionAdvanced:
         state = WorkspaceState(workspace_uri="file:///test")
         state.project = "ws-project"
         state.is_auto_detected = True
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
 
         assert session.project == "ws-project"
@@ -533,14 +429,7 @@ class TestCreateSessionAdvanced:
         """create_session uses explicit project over workspace project."""
         state = WorkspaceState(workspace_uri="file:///test")
         state.project = "ws-project"
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session(project="explicit-project", is_project_auto_detected=False)
 
         assert session.project == "explicit-project"
@@ -549,14 +438,7 @@ class TestCreateSessionAdvanced:
     def test_get_active_session_refreshes_tools(self):
         """get_active_session refreshes static_tool_count when zero."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             session.static_tool_count = 0
 
@@ -567,14 +449,7 @@ class TestCreateSessionAdvanced:
     def test_get_active_session_no_refresh(self):
         """get_active_session with refresh_tools=False doesn't update count."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with (
-            patch("server.workspace_model.loaded_tool_names", return_value=set()),
-            patch.object(WorkspaceRegistry, "save_to_disk"),
-            patch(
-                "server.cursor_chat_db.get_cursor_chat_info_from_db",
-                return_value=(None, None),
-            ),
-        ):
+        with offline_registry():
             session = state.create_session()
             session.static_tool_count = 0
 

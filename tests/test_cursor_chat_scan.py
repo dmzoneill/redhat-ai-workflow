@@ -2,7 +2,8 @@
 
 import json
 import sqlite3
-import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,26 @@ from server.workspace_state import (
     get_cursor_chat_projects,
     get_meeting_transcript_issue_keys,
 )
+
+
+def _conn_returning(rows: list[tuple]) -> MagicMock:
+    """A mock sqlite3 connection whose execute().fetchall() returns ``rows``."""
+    conn = MagicMock(spec=sqlite3.Connection)
+    conn.execute.return_value.fetchall.return_value = rows
+    return conn
+
+
+@contextmanager
+def _meetings_db(rows_or_error: list[tuple] | sqlite3.Error) -> Iterator[None]:
+    """Point the meet bot DB at an existing file backed by a mocked connection."""
+    if isinstance(rows_or_error, sqlite3.Error):
+        connect = patch("sqlite3.connect", side_effect=rows_or_error)
+    else:
+        connect = patch("sqlite3.connect", return_value=_conn_returning(rows_or_error))
+    db_file = MagicMock(spec=Path)
+    db_file.exists.return_value = True
+    with patch("server.paths.MEETINGS_DB_FILE", new=db_file), connect:
+        yield
 
 
 class TestFormatSessionContextForJira:
@@ -67,13 +88,8 @@ class TestFormatSessionContextForJira:
     def test_with_key_actions(self):
         """Format extracts key actions from assistant tool results."""
         chat_content = {
-            "summary": {
-                "user_messages": 0,
-                "assistant_messages": 0,
-                "tool_calls": 0,
-                "code_changes": 0,
-                "issue_keys": [],
-            },
+            "summary": dict.fromkeys(("user_messages", "assistant_messages", "tool_calls", "code_changes"), 0)
+            | {"issue_keys": []},
             "messages": [
                 {
                     "type": "assistant",
@@ -147,13 +163,8 @@ class TestFormatSessionContextForJira:
         session.last_activity = datetime(2025, 1, 15, 10, 45, tzinfo=timezone.utc)
 
         chat_content = {
-            "summary": {
-                "user_messages": 0,
-                "assistant_messages": 0,
-                "tool_calls": 0,
-                "code_changes": 0,
-                "issue_keys": [],
-            },
+            "summary": dict.fromkeys(("user_messages", "assistant_messages", "tool_calls", "code_changes"), 0)
+            | {"issue_keys": []},
             "messages": [],
         }
         result = format_session_context_for_jira(chat_content, session=session)
@@ -243,7 +254,7 @@ class TestGetCursorChatIssueKeysDetailed:
 
 
 class TestGetCursorChatContentDetailed:
-    """Tests for get_cursor_chat_content with mocked subprocess."""
+    """Tests for get_cursor_chat_content with a mocked sqlite3 connection."""
 
     def test_valid_uuid_no_db(self):
         """Returns empty result when global DB doesn't exist."""
@@ -253,25 +264,32 @@ class TestGetCursorChatContentDetailed:
 
     def test_valid_uuid_db_query_fails(self):
         """Returns empty result when DB query fails."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 1
-        mock_result.stderr = "error"
-
-        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("sqlite3.connect", side_effect=sqlite3.OperationalError("no such table: cursorDiskKV")),
+        ):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
             assert result["message_count"] == 0
 
+    def test_query_is_parameterised(self):
+        """The chat id is bound as a LIKE parameter, never formatted into the SQL."""
+        conn = _conn_returning([])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=conn):
+            get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
+        sql, params = conn.execute.call_args.args
+        assert "?" in sql
+        assert "12345678" not in sql
+        assert params == ("bubbleId:12345678-1234-5678-1234-567812345678:%",)
+        conn.close.assert_called_once()
+
     def test_parses_messages(self):
-        """Parses user and assistant messages from DB output."""
+        """Parses user and assistant messages from DB rows."""
         bid = "bubbleId:12345678-1234-5678-1234-567812345678"
         msg1 = json.dumps({"type": 1, "text": "Hello", "createdAt": 1700000000000})
         msg2 = json.dumps({"type": 2, "text": "Hi there! AAP-12345", "createdAt": 1700000001000})
-        lines = [f"{bid}:1|{msg1}", f"{bid}:2|{msg2}"]
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "\n".join(lines)
+        conn = _conn_returning([(f"{bid}:1", msg1), (f"{bid}:2", msg2)])
 
-        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=conn):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
 
         assert result["message_count"] == 2
@@ -288,57 +306,49 @@ class TestGetCursorChatContentDetailed:
             "toolResults": [{"result": "Success: deployed to stage"}],
             "attachedCodeChunks": [{"filePath": "/src/main.py"}],
         }
-        line = f"bubbleId:12345678-1234-5678-1234-567812345678:1|{json.dumps(msg_data)}"
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = line
+        conn = _conn_returning([("bubbleId:12345678-1234-5678-1234-567812345678:1", json.dumps(msg_data))])
 
-        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=conn):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
 
         assert result["summary"]["tool_calls"] == 1
         assert result["summary"]["code_changes"] == 1
 
-    def test_handles_timeout(self):
-        """Handles subprocess timeout gracefully."""
+    def test_handles_locked_db(self):
+        """Handles a locked database gracefully."""
         with (
             patch("pathlib.Path.exists", return_value=True),
-            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("sqlite3", 30)),
+            patch("sqlite3.connect", side_effect=sqlite3.OperationalError("database is locked")),
         ):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
             assert result["message_count"] == 0
 
-    def test_handles_malformed_lines(self):
-        """Handles lines without pipe separator."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "no pipe here\n\nsome-key-only"
+    def test_handles_malformed_rows(self):
+        """Skips rows with empty or non-JSON values."""
+        conn = _conn_returning([("bubbleId:x:1", ""), ("bubbleId:x:2", "not json")])
 
-        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=conn):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
             assert result["message_count"] == 0
 
     def test_max_messages_limit(self):
         """Respects max_messages limit."""
-        lines = []
+        rows = []
         for i in range(10):
             msg = json.dumps({"type": 1, "text": f"msg {i}", "createdAt": 1700000000000 + i * 1000})
-            lines.append(f"bubbleId:12345678-1234-5678-1234-567812345678:{i}|{msg}")
+            rows.append((f"bubbleId:12345678-1234-5678-1234-567812345678:{i}", msg))
+        conn = _conn_returning(rows)
 
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "\n".join(lines)
-
-        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=conn):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678", max_messages=3)
             assert len(result["messages"]) == 3
             assert result["message_count"] == 10
 
-    def test_handles_general_exception(self):
-        """Handles general exception."""
+    def test_handles_general_db_error(self):
+        """Handles a generic sqlite3 error."""
         with (
             patch("pathlib.Path.exists", return_value=True),
-            patch("subprocess.run", side_effect=subprocess.SubprocessError("unexpected")),
+            patch("sqlite3.connect", side_effect=sqlite3.DatabaseError("file is not a database")),
         ):
             result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
             assert result["message_count"] == 0
@@ -558,39 +568,21 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_finds_standard_pattern(self):
         """Finds AAP-XXXXX pattern in transcripts."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "1|||Discussing AAP-12345 today|||Sprint Planning|||2025-01-20T10:00:00"
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with _meetings_db([(1, "Discussing AAP-12345 today", "Sprint Planning", "2025-01-20T10:00:00")]):
             result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
         assert result["AAP-12345"][0]["meeting_id"] == 1
         assert result["AAP-12345"][0]["title"] == "Sprint Planning"
+        assert result["AAP-12345"][0]["date"] == "2025-01-20"
 
     def test_finds_spoken_pattern(self):
         """Finds spoken patterns like 'issue 12345' or 'ticket 12345'."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = (
-            "1|||Let's talk about issue 12345|||Standup|||2025-01-20\n"
-            "2|||ticket 67890 is blocked|||Standup|||2025-01-21"
-        )
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        rows = [
+            (1, "Let's talk about issue 12345", "Standup", "2025-01-20"),
+            (2, "ticket 67890 is blocked", "Standup", "2025-01-21"),
+        ]
+        with _meetings_db(rows):
             result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
@@ -598,81 +590,43 @@ class TestGetMeetingTranscriptIssueKeys:
 
     def test_filters_by_issue_keys(self):
         """Filters results to specific issue keys when provided."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "1|||AAP-12345 and AAP-99999|||Meeting|||2025-01-20"
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        with _meetings_db([(1, "AAP-12345 and AAP-99999", "Meeting", "2025-01-20")]):
             result = get_meeting_transcript_issue_keys(issue_keys=["AAP-12345"])
 
         assert "AAP-12345" in result
         assert "AAP-99999" not in result
 
     def test_handles_query_failure(self):
-        """Handles subprocess failure gracefully."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 1
-        mock_result.stderr = "error"
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        """Handles a sqlite3 query failure gracefully."""
+        with _meetings_db(sqlite3.OperationalError("no such table: transcripts")):
             result = get_meeting_transcript_issue_keys()
             assert not result
 
-    def test_handles_timeout(self):
-        """Handles subprocess timeout."""
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("sqlite3", 30)),
-        ):
+    def test_handles_locked_db(self):
+        """Handles a locked database."""
+        with _meetings_db(sqlite3.OperationalError("database is locked")):
             result = get_meeting_transcript_issue_keys()
             assert not result
 
-    def test_handles_malformed_lines(self):
-        """Handles lines with insufficient parts."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = "1|||only two parts\n\ninvalid"
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+    def test_handles_malformed_rows(self):
+        """Skips rows with too few columns or a non-numeric meeting id."""
+        with _meetings_db([(1, "only two parts"), ("abc", "AAP-12345", "T", "2025-01-20")]):
             result = get_meeting_transcript_issue_keys()
             assert not result
+
+    def test_handles_null_columns(self):
+        """NULL text/title/start columns are treated as empty."""
+        with _meetings_db([(1, None, None, None), (2, "AAP-12345", None, None)]):
+            result = get_meeting_transcript_issue_keys()
+        assert result["AAP-12345"][0] == {"meeting_id": 2, "title": "", "date": "", "matches": 1}
 
     def test_aggregates_matches_across_entries(self):
         """Aggregates match counts across transcript entries."""
-        mock_result = MagicMock(spec=subprocess.CompletedProcess)
-        mock_result.returncode = 0
-        mock_result.stdout = (
-            "1|||AAP-12345 mentioned here|||Sprint|||2025-01-20\n1|||AAP-12345 mentioned again|||Sprint|||2025-01-20"
-        )
-
-        with (
-            patch(
-                "server.paths.MEETINGS_DB_FILE",
-                new=MagicMock(exists=MagicMock(return_value=True)),
-            ),
-            patch("subprocess.run", return_value=mock_result),
-        ):
+        rows = [
+            (1, "AAP-12345 mentioned here", "Sprint", "2025-01-20"),
+            (1, "AAP-12345 mentioned again", "Sprint", "2025-01-20"),
+        ]
+        with _meetings_db(rows):
             result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
