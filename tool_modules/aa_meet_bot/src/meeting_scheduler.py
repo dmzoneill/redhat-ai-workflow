@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 from googleapiclient.errors import HttpError
+from playwright.async_api import Error as PlaywrightError
 
 from server.paths import MEETBOT_SCREENSHOTS_DIR
 from server.state_manager import state as state_manager
@@ -47,10 +48,13 @@ RECOVERABLE_ERRORS: tuple[type[Exception], ...] = (
     OSError,
     RuntimeError,
     ValueError,
+    TypeError,
+    AttributeError,
     LookupError,
     asyncio.TimeoutError,
     aiosqlite.Error,
     HttpError,
+    PlaywrightError,
 )
 
 # Timezone from config.json (meet_bot.timezone > schedules.timezone > google_calendar.timezone)

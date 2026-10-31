@@ -31,7 +31,14 @@ logger = logging.getLogger(__name__)
 
 # Audio device cleanup shells out to pactl/pw tools: OS errors, timeouts and tool failures (RuntimeError).
 # Join failures: browser errors plus RuntimeError from sign-in/device setup.
-JOIN_ERRORS: tuple[type[BaseException], ...] = (*BROWSER_ERRORS, RuntimeError)
+JOIN_ERRORS: tuple[type[BaseException], ...] = (
+    *BROWSER_ERRORS,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    KeyError,
+)
 
 DEVICE_ERRORS: tuple[type[BaseException], ...] = (OSError, RuntimeError, asyncio.TimeoutError)
 
