@@ -37,15 +37,14 @@ import logging
 from datetime import datetime
 
 # Sprint daemon owns its own state file - no shared file with other services
+from server.utils import load_config
 from services.base.daemon import BaseDaemon
 from services.base.dbus import DaemonDBusBase
 from services.base.sleep_wake import SleepWakeAwareDaemon
 from services.sprint.bot.workflow_config import (
     WorkflowConfig,
 )
-from services.sprint.daemon_common import (
-    _add_timeline_event,
-)
+from services.sprint.daemon_common import RECOVERABLE_ERRORS, _add_timeline_event
 from services.sprint.daemon_handlers import SprintDBusHandlersMixin
 
 __all__ = ["SprintDaemon", "_add_timeline_event"]
@@ -80,8 +79,6 @@ class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase
         self._last_review_check: datetime | None = None
 
         # Configuration - read from config.json sprint section
-        from server.utils import load_config  # pylint: disable=import-outside-toplevel
-
         full_config = load_config()
         sprint_config = full_config.get("sprint", {})
         scheduling = sprint_config.get("scheduling", {})
@@ -267,7 +264,7 @@ class SprintDaemon(SprintDBusHandlersMixin, SleepWakeAwareDaemon, DaemonDBusBase
             except asyncio.CancelledError:
                 logger.info("Main loop cancelled")
                 break
-            except Exception:  # pylint: disable=broad-exception-caught
+            except RECOVERABLE_ERRORS:
                 logger.exception("Error in main loop")
                 if await self._wait_with_shutdown(60):
                     break

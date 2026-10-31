@@ -12,6 +12,7 @@ from services.sprint.bot.execution_tracer import (
 )
 from services.sprint.daemon_common import (
     PROJECT_ROOT,
+    RECOVERABLE_ERRORS,
     SPRINT_STATE_FILE,
     _add_timeline_event,
     _local_now,
@@ -178,7 +179,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         try:
             await self._refresh_from_jira()
             return {"success": True, "message": "Refreshed from Jira"}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to refresh from Jira via D-Bus")
             return {"success": False, "error": str(e)}
 
@@ -348,7 +349,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             state = self._load_state()
             history = state.get("sprint_history", [])
             return {"success": True, "history": history}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to get sprint history")
             return {"success": False, "error": str(e), "history": []}
 
@@ -371,7 +372,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             trace = yaml.safe_load(trace_file.read_text(encoding="utf-8"))
 
             return {"success": True, "trace": trace}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to get trace for %s", issue_key)
             return {"success": False, "error": str(e)}
 
@@ -402,7 +403,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             # Sort by started_at descending
             traces.sort(key=lambda t: t.get("started_at", ""), reverse=True)
             return {"success": True, "traces": traces}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to list traces")
             return {"success": False, "error": str(e), "traces": []}
 
@@ -423,13 +424,13 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
 
         return {"success": True, "work_log": work_log}
 
-    async def _handle_write_state(self, params: dict) -> dict:  # pylint: disable=unused-argument
+    async def _handle_write_state(self, *_args, **_kwargs) -> dict:
         """Write state to file immediately (for UI refresh requests)."""
         try:
             state = self._load_state()
             self._save_state(state)
             return {"success": True, "file": str(SPRINT_STATE_FILE)}
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to save sprint state via D-Bus")
             return {"success": False, "error": str(e)}
 
@@ -539,7 +540,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         state = self._load_state()
         target_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), target_issue)
 
-        if result.get("success"):  # pylint: disable=no-else-return
+        if result.get("success"):
             self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
             await self._transition_jira_issue(issue_key, self.jira_status_in_review)
             self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
@@ -568,26 +569,25 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
                 "message": f"Completed {issue_key}",
                 "mode": "background",
             }
-        else:
-            error_reason = result.get("error", "Background processing failed")
-            tracer.mark_blocked(error_reason)
+        error_reason = result.get("error", "Background processing failed")
+        tracer.mark_blocked(error_reason)
 
-            _add_timeline_event(
-                target_issue,
-                {
-                    "timestamp": _local_now().isoformat(),
-                    "action": "background_blocked",
-                    "description": f"Bot blocked: {error_reason}",
-                },
-            )
-            target_issue["approvalStatus"] = "blocked"
-            target_issue["waitingReason"] = error_reason
-            target_issue["hasWorkLog"] = True
-            target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
-            state["processingIssue"] = None
-            self._save_state(state)
+        _add_timeline_event(
+            target_issue,
+            {
+                "timestamp": _local_now().isoformat(),
+                "action": "background_blocked",
+                "description": f"Bot blocked: {error_reason}",
+            },
+        )
+        target_issue["approvalStatus"] = "blocked"
+        target_issue["waitingReason"] = error_reason
+        target_issue["hasWorkLog"] = True
+        target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
+        state["processingIssue"] = None
+        self._save_state(state)
 
-            return {"success": False, "error": error_reason, "mode": "background"}
+        return {"success": False, "error": error_reason, "mode": "background"}
 
     # pylint: disable-next=too-many-locals
     async def _handle_open_in_cursor(self, params: dict) -> dict:
@@ -661,7 +661,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
 
             return {"success": False, "error": "Failed to create Cursor chat"}
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to open %s in Cursor", issue_key)
             return {"success": False, "error": str(e)}
 
@@ -820,7 +820,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         state = self._load_state()
         next_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), next_issue)
 
-        if result.get("success"):  # pylint: disable=no-else-return
+        if result.get("success"):
             # Transition Jira issue to "In Review" (work completed, MR created)
             self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
 
@@ -859,28 +859,27 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             self._save_state(state)
             self._issues_processed += 1
             return result
-        else:
-            # Bot is blocked - keep in "In Progress" but mark as blocked with reason
-            # Do NOT transition Jira status - it stays "In Progress"
-            error_reason = result.get("error", "Background processing failed")
+        # Bot is blocked - keep in "In Progress" but mark as blocked with reason
+        # Do NOT transition Jira status - it stays "In Progress"
+        error_reason = result.get("error", "Background processing failed")
 
-            tracer.mark_blocked(error_reason)
+        tracer.mark_blocked(error_reason)
 
-            _add_timeline_event(
-                next_issue,
-                {
-                    "timestamp": _local_now().isoformat(),
-                    "action": "background_blocked",
-                    "description": f"Bot blocked: {error_reason}",
-                },
-            )
-            next_issue["approvalStatus"] = "blocked"
-            next_issue["waitingReason"] = error_reason
-            # jiraStatus stays as "In Progress" - issue is not done, just blocked
-            next_issue["hasWorkLog"] = True
-            next_issue["hasTrace"] = True
-            next_issue["tracePath"] = str(tracer.trace_path)
-            next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
-            state["processingIssue"] = None
-            self._save_state(state)
-            return result
+        _add_timeline_event(
+            next_issue,
+            {
+                "timestamp": _local_now().isoformat(),
+                "action": "background_blocked",
+                "description": f"Bot blocked: {error_reason}",
+            },
+        )
+        next_issue["approvalStatus"] = "blocked"
+        next_issue["waitingReason"] = error_reason
+        # jiraStatus stays as "In Progress" - issue is not done, just blocked
+        next_issue["hasWorkLog"] = True
+        next_issue["hasTrace"] = True
+        next_issue["tracePath"] = str(tracer.trace_path)
+        next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
+        state["processingIssue"] = None
+        self._save_state(state)
+        return result

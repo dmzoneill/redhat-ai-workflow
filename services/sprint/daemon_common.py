@@ -7,8 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+from dbus_next.errors import DBusError
+
 # Sprint daemon owns its own state file - no shared file with other services
 from server.paths import SPRINT_STATE_FILE_V2
+from services.base.dbus import DBUS_AVAILABLE, MessageBus
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
@@ -17,6 +21,20 @@ SPRINT_STATE_FILE = SPRINT_STATE_FILE_V2
 SPRINT_WORK_DIR = PROJECT_ROOT / "memory" / "state" / "sprint_work"
 
 logger = logging.getLogger(__name__)
+
+# Failures a daemon step or D-Bus handler reports instead of crashing the service:
+# I/O and subprocess errors, bad payloads, D-Bus/RPC failures and timeouts.
+RECOVERABLE_ERRORS: tuple[type[BaseException], ...] = (
+    OSError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    LookupError,
+    AttributeError,
+    asyncio.TimeoutError,
+    yaml.YAMLError,
+    DBusError,
+)
 
 
 def _local_now() -> datetime:
@@ -57,8 +75,8 @@ async def spawn_claude_cli(claude_path: str, prompt: str) -> Process:
 
 async def connect_chat_interface() -> tuple[Any, Any]:
     """Connect to the VS Code extension's chat D-Bus service; returns ``(bus, chat_interface)``."""
-    from dbus_next.aio import MessageBus  # pylint: disable=import-outside-toplevel
-
+    if not DBUS_AVAILABLE:
+        raise RuntimeError("dbus-next is not installed")
     bus = await MessageBus().connect()
     introspection = await bus.introspect("com.aiworkflow.Chat", "/com/aiworkflow/Chat")
     proxy = bus.get_proxy_object("com.aiworkflow.Chat", "/com/aiworkflow/Chat", introspection)

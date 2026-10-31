@@ -13,6 +13,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 # Sprint daemon owns its own state file - no shared file with other services
+from server.utils import load_config
 from services.sprint.bot.execution_tracer import (
     ExecutionTracer,
     StepStatus,
@@ -25,6 +26,7 @@ from services.sprint.bot.workflow_config import (
     get_workflow_config,
 )
 from services.sprint.daemon_common import (
+    RECOVERABLE_ERRORS,
     SPRINT_STATE_FILE,
     _add_timeline_event,
     _local_now,
@@ -32,6 +34,19 @@ from services.sprint.daemon_common import (
     spawn_claude_cli,
 )
 from services.sprint.sprint_history_tracker import SprintHistoryTracker
+from tool_modules.aa_jira.src.tools_basic import jira_get_active_sprint
+from tool_modules.aa_workflow.src.sprint_bot import (
+    SprintBotConfig,
+    WorkingHours,
+    fetch_sprint_issues,
+    to_sprint_issue_format,
+)
+from tool_modules.aa_workflow.src.sprint_history import (
+    SprintIssue,
+    load_sprint_state,
+    save_sprint_state,
+)
+from tool_modules.aa_workflow.src.sprint_prioritizer import prioritize_issues
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +127,7 @@ class SprintStateMixin:
                     logger.debug("OS operation failed: %s", exc)
                 raise
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to save state")
 
     def _export_workflow_config(self) -> dict:
@@ -199,24 +214,6 @@ class SprintStateMixin:
         logger.info("Refreshing sprint issues from Jira...")
 
         try:
-            from tool_modules.aa_jira.src.tools_basic import (  # pylint: disable=import-outside-toplevel
-                jira_get_active_sprint,
-            )
-            from tool_modules.aa_workflow.src.sprint_bot import (  # pylint: disable=import-outside-toplevel
-                SprintBotConfig,
-                WorkingHours,
-                fetch_sprint_issues,
-                to_sprint_issue_format,
-            )
-            from tool_modules.aa_workflow.src.sprint_history import (  # pylint: disable=import-outside-toplevel
-                SprintIssue,
-                load_sprint_state,
-                save_sprint_state,
-            )
-            from tool_modules.aa_workflow.src.sprint_prioritizer import (  # pylint: disable=import-outside-toplevel
-                prioritize_issues,
-            )
-
             config = SprintBotConfig(
                 working_hours=WorkingHours(),
                 jira_project=self._config.get("jira_project", "AAP"),
@@ -247,8 +244,6 @@ class SprintStateMixin:
                 return
 
             # Filter to only show issues assigned to current user
-            from server.utils import load_config  # pylint: disable=import-outside-toplevel
-
             user_config = load_config()
             user_info = user_config.get("user", {})
             jira_username = user_info.get("jira_username", "")
@@ -332,7 +327,7 @@ class SprintStateMixin:
             )
             self._last_jira_refresh = _local_now()
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to refresh sprint")
 
             logger.debug(traceback.format_exc())
@@ -386,8 +381,8 @@ class SprintStateMixin:
                 continue
 
             try:
-                await self._check_single_review_issue(issue, dont_merge_patterns, state)
-            except Exception:  # pylint: disable=broad-exception-caught
+                await self._check_single_review_issue(issue, dont_merge_patterns)
+            except RECOVERABLE_ERRORS:
                 logger.exception("Error checking review issue %s", issue_key)
                 continue
 
@@ -395,7 +390,7 @@ class SprintStateMixin:
         self._save_state(state)
 
     # pylint: disable-next=too-many-locals
-    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list, state: dict) -> None:
+    async def _check_single_review_issue(self, issue: dict, dont_merge_patterns: list) -> None:
         """Check a single issue in Review and try to merge/close if ready."""
         issue_key = issue.get("key")
         logger.info("Checking review status for %s", _log_safe(issue_key))
@@ -466,7 +461,7 @@ Also output the MR ID if found: [MR_ID: <number>]
 
             if mr_status == "READY_TO_MERGE" and mr_id and issue_key:
                 # Merge the MR and transition to Done
-                await self._merge_and_close(issue_key, mr_id, issue, state)
+                await self._merge_and_close(issue_key, mr_id, issue)
 
             elif mr_status == "APPROVED_WITH_HOLD":
                 # Log but don't merge
@@ -491,11 +486,10 @@ Also output the MR ID if found: [MR_ID: <number>]
             elif mr_status == "NO_MR":
                 logger.warning("%s: No MR found but issue is in Review", _log_safe(issue_key))
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error checking MR status for %s", _log_safe(issue_key))
 
-    # pylint: disable-next=unused-argument
-    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict, state: dict) -> None:
+    async def _merge_and_close(self, issue_key: str, mr_id: int, issue: dict) -> None:
         """Merge an MR and transition the Jira issue to Done."""
         logger.info("Merging MR !%s and closing %s", _log_safe(mr_id), _log_safe(issue_key))
 
@@ -577,7 +571,7 @@ Also output the MR ID if found: [MR_ID: <number>]
             else:
                 logger.warning("Could not parse merge result for %s", _log_safe(issue_key))
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error merging/closing %s", _log_safe(issue_key))
 
     # ==================== Issue Processing ====================
@@ -720,15 +714,14 @@ Also output the MR ID if found: [MR_ID: <number>]
                 logger.warning("Jira transition timed out for %s", _log_safe(issue_key))
                 return False
 
-            if process.returncode == 0:  # pylint: disable=no-else-return
+            if process.returncode == 0:
                 logger.info("Transitioned %s to %s", _log_safe(issue_key), _log_safe(target_status))
                 return True
-            else:
-                error = stderr.decode("utf-8", errors="replace") if stderr else ""
-                logger.warning("Failed to transition %s: %s", _log_safe(issue_key), _log_safe(error[:200]))
-                return False
+            error = stderr.decode("utf-8", errors="replace") if stderr else ""
+            logger.warning("Failed to transition %s: %s", _log_safe(issue_key), _log_safe(error[:200]))
+            return False
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Error transitioning %s", _log_safe(issue_key))
             return False
 
