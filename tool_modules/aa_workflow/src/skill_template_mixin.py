@@ -43,9 +43,7 @@ class SkillTemplateMixin:
             return text
 
         is_slack = self.inputs.get("slack_format", False)
-        gitlab_url = self.config.get("gitlab", {}).get(
-            "url", "https://gitlab.cee.redhat.com"
-        )
+        gitlab_url = self.config.get("gitlab", {}).get("url", "https://gitlab.cee.redhat.com")
         project = "automation-analytics/automation-analytics-backend"
 
         pattern = re.compile(r"!(\d+)")
@@ -102,9 +100,10 @@ class SkillTemplateMixin:
                         return match.group(0)
                 return str(value) if value is not None else ""
             except Exception:  # pylint: disable=broad-exception-caught
+                logger.debug("Template variable lookup failed", exc_info=True)
                 return match.group(0)
 
-        return re.sub(r"\{\{\s*([^}]+)\s*\}\}", replace_var, str(text))
+        return re.sub(r"\{\{\s*([^\s}][^}]*)\}\}", replace_var, str(text))
 
     def _template(self, text: str) -> str:
         """Resolve {{ variable }} templates in text using Jinja2 if available.
@@ -141,6 +140,7 @@ class SkillTemplateMixin:
         except ImportError:
             return self._template_with_regex_fallback(text)
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Template error", exc_info=True)
             self._debug(f"Template error: {e}")
             return text
 
@@ -214,9 +214,11 @@ class SkillTemplateMixin:
                 self._debug(f"  → Result: {result}")
                 return bool(result)
             except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.debug("Condition evaluation failed; defaulting to False", exc_info=True)
                 self._debug(f"  → Error: {e}, defaulting to False")
                 return False
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Jinja eval error", exc_info=True)
             self._debug(f"  → Jinja eval error: {e}, defaulting to False")
             return False
 
