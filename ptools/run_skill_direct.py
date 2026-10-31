@@ -1,6 +1,11 @@
+"""Run the coffee skill directly through SkillExecutor (debug helper)."""
+
 import asyncio
+import importlib
 import sys
 from pathlib import Path
+
+import yaml
 
 # Add project root to sys.path first to ensure 'server' package is found correctly
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -12,14 +17,14 @@ WORKFLOW_SRC = PROJECT_ROOT / "tool_modules" / "aa_workflow" / "src"
 if str(WORKFLOW_SRC) not in sys.path:
     sys.path.append(str(WORKFLOW_SRC))
 
-import yaml  # noqa: E402
-from skill_engine import SkillExecutor, SkillExecutorConfig  # noqa: E402
 
+async def run_coffee() -> None:
+    """Load skills/coffee.yaml and execute it with debug output."""
+    # Imported after sys.path setup above (skill_engine lives in tool_modules/aa_workflow/src).
+    skill_engine = importlib.import_module("skill_engine")
 
-async def run_coffee():
     skill_file = PROJECT_ROOT / "skills" / "coffee.yaml"
-    with open(skill_file, encoding="utf-8") as f:
-        skill = yaml.safe_load(f)
+    skill = yaml.safe_load(await asyncio.to_thread(skill_file.read_text, encoding="utf-8"))
 
     # Inputs for coffee skill
     inputs = {
@@ -29,8 +34,8 @@ async def run_coffee():
         "slack_format": False,
     }
 
-    direct_config = SkillExecutorConfig(debug=True, emit_events=False)
-    executor = SkillExecutor(
+    direct_config = skill_engine.SkillExecutorConfig(debug=True, emit_events=False)
+    executor = skill_engine.SkillExecutor(
         skill=skill,
         inputs=inputs,
         config=direct_config,
