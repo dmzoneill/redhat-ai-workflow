@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import shutil
+from typing import ClassVar
 
 # Sprint daemon owns its own state file - no shared file with other services
 from services.sprint.bot.execution_tracer import (
@@ -28,81 +29,6 @@ class SprintWorkMixin(SprintStateMixin):
     """Sprint daemon issue execution in Cursor chats or the background Claude CLI."""
 
     # pylint: disable-next=too-many-statements
-    def _build_cursor_context_prompt(self, issue_key: str, work_log: dict) -> str:
-        """Build a comprehensive context prompt for continuing work in Cursor."""
-        parts = []
-
-        # Header
-        parts.append(f"# Continuing Work on {issue_key}")
-        parts.append("")
-
-        # Issue details
-        parts.append("## Issue Details")
-        parts.append(f"- **Summary**: {work_log.get('summary', 'N/A')}")
-        parts.append(f"- **Type**: {work_log.get('issue_type', 'N/A')}")
-        if work_log.get("story_points"):
-            parts.append(f"- **Story Points**: {work_log.get('story_points')}")
-        parts.append("")
-
-        # Background work summary
-        parts.append("## Background Work Summary")
-        parts.append(f"- **Status**: {work_log.get('status', 'unknown')}")
-        parts.append(f"- **Started**: {work_log.get('started', 'N/A')}")
-        parts.append(f"- **Completed**: {work_log.get('completed', 'N/A')}")
-        parts.append("")
-
-        # Outcome
-        outcome = work_log.get("outcome", {})
-        if any(outcome.values()):
-            parts.append("## Work Completed")
-            if outcome.get("commits"):
-                parts.append(f"- **Commits**: {', '.join(outcome['commits'][:5])}")
-            if outcome.get("merge_requests"):
-                parts.append(f"- **Merge Requests**: {', '.join(outcome['merge_requests'])}")
-            if outcome.get("files_changed"):
-                parts.append(f"- **Files Changed**: {', '.join(outcome['files_changed'][:10])}")
-            if outcome.get("branches_created"):
-                parts.append(f"- **Branches**: {', '.join(outcome['branches_created'])}")
-            parts.append("")
-
-        # Actions log (last 10)
-        actions = work_log.get("actions", [])
-        if actions:
-            parts.append("## Recent Actions")
-            for action in actions[-10:]:
-                timestamp = action.get("timestamp", "")[:19]  # Trim to datetime
-                action_type = action.get("type", "")
-                details = action.get("details", "")
-                parts.append(f"- [{timestamp}] **{action_type}**: {details}")
-            parts.append("")
-
-        # Suggested next steps
-        cursor_context = work_log.get("cursor_context", {})
-        if cursor_context.get("suggested_prompt"):
-            parts.append("## Suggested Next Steps")
-            parts.append(cursor_context["suggested_prompt"])
-            parts.append("")
-
-        # Files to review
-        if cursor_context.get("files_to_review"):
-            parts.append("## Files to Review")
-            for f in cursor_context["files_to_review"]:
-                parts.append(f"- `{f}`")
-            parts.append("")
-
-        # Error info if failed
-        if work_log.get("error"):
-            parts.append("## Error Information")
-            parts.append(f"```\n{work_log['error']}\n```")
-            parts.append("")
-
-        # Instructions
-        parts.append("---")
-        parts.append("Please review the above context and continue working on this issue.")
-        parts.append('Load the developer persona if needed: `persona_load("developer")`')
-
-        return "\n".join(parts)
-
     async def _process_in_cursor(self, issue: dict, state: dict) -> dict:
         """Process an issue by opening a Cursor chat (foreground mode).
 
@@ -278,14 +204,14 @@ class SprintWorkMixin(SprintStateMixin):
         logger.info("Running %s in background mode (Claude CLI)", _log_safe(issue_key))
 
         # Initialize work log
-        work_log = self._init_work_log(issue)
-        self._save_work_log(issue_key, work_log)
+        work_log = self._history.init_work_log(issue)
+        self._history.save_work_log(issue_key, work_log)
 
-        self._log_action(issue_key, "started", "Background processing started")
+        self._history.log_action(issue_key, "started", "Background processing started")
         self._trace_step(
             tracer,
             "init_work_log",
-            outputs={"work_log_path": str(self._get_work_log_path(issue_key))},
+            outputs={"work_log_path": str(self._history.get_work_log_path(issue_key))},
         )
 
         # Emit toast notification for issue started
@@ -301,7 +227,7 @@ class SprintWorkMixin(SprintStateMixin):
         try:
             claude_path = shutil.which("claude")
             if not claude_path:
-                self._log_action(issue_key, "error", "Claude CLI not found")
+                self._history.log_action(issue_key, "error", "Claude CLI not found")
                 self._trace_step(
                     tracer,
                     "check_claude_cli",
@@ -311,7 +237,7 @@ class SprintWorkMixin(SprintStateMixin):
                 tracer.mark_failed("Claude CLI not found")
                 work_log["status"] = "failed"
                 work_log["error"] = "Claude CLI not found"
-                self._save_work_log(issue_key, work_log)
+                self._history.save_work_log(issue_key, work_log)
                 return {"success": False, "error": "Claude CLI not found"}
 
             self._trace_step(tracer, "check_claude_cli", outputs={"claude_path": claude_path})
@@ -319,7 +245,7 @@ class SprintWorkMixin(SprintStateMixin):
             # Build the unified work prompt
             prompt = self._build_work_prompt(issue)
 
-            self._log_action(
+            self._history.log_action(
                 issue_key,
                 "claude_started",
                 "Started Claude CLI execution",
@@ -344,7 +270,7 @@ class SprintWorkMixin(SprintStateMixin):
                 process.kill()
                 await process.wait()
                 timeout_mins = cli_timeout // 60
-                self._log_action(
+                self._history.log_action(
                     issue_key,
                     "timeout",
                     f"Claude CLI timed out after {timeout_mins} minutes",
@@ -355,7 +281,7 @@ class SprintWorkMixin(SprintStateMixin):
                     error=f"Timeout after {timeout_mins} minutes",
                 )
                 tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
-                work_log = self._load_work_log(issue_key)
+                work_log = self._history.load_work_log(issue_key)
                 work_log["status"] = "timeout"
                 work_log["completed"] = _local_now().isoformat()
                 work_log["cursor_context"]["can_continue"] = True
@@ -363,14 +289,14 @@ class SprintWorkMixin(SprintStateMixin):
                     f"Continue working on {issue_key}. The background process timed out. "
                     "Review the work log and continue from where it left off."
                 )
-                self._save_work_log(issue_key, work_log)
+                self._history.save_work_log(issue_key, work_log)
                 return {"success": False, "error": "Claude CLI timed out"}
 
             output = stdout.decode("utf-8", errors="replace") if stdout else ""
             error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
 
             # Update work log with results
-            work_log = self._load_work_log(issue_key)
+            work_log = self._history.load_work_log(issue_key)
             work_log["completed"] = _local_now().isoformat()
 
             # Parse output to extract useful information
@@ -398,7 +324,7 @@ class SprintWorkMixin(SprintStateMixin):
 
             if bot_status["status"] == "COMPLETED":  # pylint: disable=no-else-return
                 work_log["status"] = "completed"
-                self._log_action(
+                self._history.log_action(
                     issue_key,
                     "completed",
                     "Background processing completed successfully",
@@ -424,9 +350,11 @@ class SprintWorkMixin(SprintStateMixin):
 
                 # Create context for continuing in Cursor
                 work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(issue_key, work_log)
+                work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
+                    issue_key, work_log
+                )
 
-                self._save_work_log(issue_key, work_log)
+                self._history.save_work_log(issue_key, work_log)
                 logger.info("Background processing completed for %s", _log_safe(issue_key))
                 return {
                     "success": True,
@@ -438,7 +366,7 @@ class SprintWorkMixin(SprintStateMixin):
                 blocked_reason = bot_status.get("reason", "Unknown reason")
                 work_log["status"] = "blocked"
                 work_log["blocked_reason"] = blocked_reason
-                self._log_action(issue_key, "blocked", f"Bot blocked: {blocked_reason}")
+                self._history.log_action(issue_key, "blocked", f"Bot blocked: {blocked_reason}")
 
                 # Emit toast notification for issue blocked
                 try:
@@ -464,7 +392,7 @@ class SprintWorkMixin(SprintStateMixin):
                     "Please provide the needed information or continue the work."
                 )
 
-                self._save_work_log(issue_key, work_log)
+                self._history.save_work_log(issue_key, work_log)
                 logger.warning(
                     "Background processing blocked for %s: %s", _log_safe(issue_key), _log_safe(blocked_reason)
                 )
@@ -479,7 +407,7 @@ class SprintWorkMixin(SprintStateMixin):
                 error_reason = bot_status.get("error") or error_output[:500]
                 work_log["status"] = "failed"
                 work_log["error"] = error_reason
-                self._log_action(
+                self._history.log_action(
                     issue_key,
                     "failed",
                     f"Background processing failed: {error_reason[:200]}",
@@ -498,7 +426,7 @@ class SprintWorkMixin(SprintStateMixin):
                     "Please investigate and continue the work."
                 )
 
-                self._save_work_log(issue_key, work_log)
+                self._history.save_work_log(issue_key, work_log)
                 logger.warning(
                     "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_reason[:200])
                 )
@@ -508,16 +436,16 @@ class SprintWorkMixin(SprintStateMixin):
                 # No explicit status - assume completed if return code is 0
                 if process.returncode == 0:  # pylint: disable=no-else-return
                     work_log["status"] = "completed"
-                    self._log_action(
+                    self._history.log_action(
                         issue_key,
                         "completed",
                         "Background processing completed (no explicit status)",
                     )
                     work_log["cursor_context"]["can_continue"] = True
-                    work_log["cursor_context"]["suggested_prompt"] = self._generate_continuation_prompt(
+                    work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
                         issue_key, work_log
                     )
-                    self._save_work_log(issue_key, work_log)
+                    self._history.save_work_log(issue_key, work_log)
                     logger.info("Background processing completed for %s", _log_safe(issue_key))
                     return {
                         "success": True,
@@ -526,13 +454,13 @@ class SprintWorkMixin(SprintStateMixin):
                 else:
                     work_log["status"] = "failed"
                     work_log["error"] = error_output[:500]
-                    self._log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
+                    self._history.log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
                     work_log["cursor_context"]["can_continue"] = True
                     retry_prompt = (
                         f"The background process for {issue_key} failed. Please investigate and continue the work."
                     )
                     work_log["cursor_context"]["suggested_prompt"] = retry_prompt
-                    self._save_work_log(issue_key, work_log)
+                    self._history.save_work_log(issue_key, work_log)
                     logger.warning(
                         "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
                     )
@@ -542,8 +470,8 @@ class SprintWorkMixin(SprintStateMixin):
                     }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            self._log_action(issue_key, "error", f"Exception: {e!s}")
-            work_log = self._load_work_log(issue_key)
+            self._history.log_action(issue_key, "error", f"Exception: {e!s}")
+            work_log = self._history.load_work_log(issue_key)
             work_log["status"] = "failed"
             work_log["error"] = str(e)
             work_log["completed"] = _local_now().isoformat()
@@ -552,38 +480,31 @@ class SprintWorkMixin(SprintStateMixin):
                 f"The background process for {issue_key} encountered an error: {e!s}. "
                 "Please investigate and continue the work."
             )
-            self._save_work_log(issue_key, work_log)
+            self._history.save_work_log(issue_key, work_log)
             logger.exception("Background processing error for %s", _log_safe(issue_key))
             return {"success": False, "error": str(e)}
 
+    _STATUS_DETAIL_KEYS: ClassVar[dict[str, str]] = {"BLOCKED": "reason", "FAILED": "error"}
+
     def _parse_bot_status(self, output: str) -> dict:
-        """Parse the bot status marker from Claude CLI output.
+        """Parse the ``[SPRINT_BOT_STATUS: COMPLETED|BLOCKED|FAILED] reason|error: ...`` marker.
 
-        Looks for lines like:
-        - [SPRINT_BOT_STATUS: COMPLETED]
-        - [SPRINT_BOT_STATUS: BLOCKED] reason: Need clarification
-        - [SPRINT_BOT_STATUS: FAILED] error: Could not find file
-
-        Returns dict with 'status' and optional 'reason' or 'error'.
+        Returns a dict with ``status`` plus ``reason`` (BLOCKED) or ``error`` (FAILED) when given,
+        or ``{"status": "UNKNOWN"}`` when no marker is present.
         """
-
-        # Look for status marker
-        status_pattern = r"\[SPRINT_BOT_STATUS:\s*(COMPLETED|BLOCKED|FAILED)\](?:\s*(?:reason|error):\s*(.+))?"
-        match = re.search(status_pattern, output, re.IGNORECASE)
-
-        if match:
-            status = match.group(1).upper()
-            detail = match.group(2).strip() if match.group(2) else None
-
-            result = {"status": status}
-            if status == "BLOCKED" and detail:
-                result["reason"] = detail
-            elif status == "FAILED" and detail:
-                result["error"] = detail
-
-            return result
-
-        return {"status": "UNKNOWN"}
+        match = re.search(
+            r"\[SPRINT_BOT_STATUS:\s*(COMPLETED|BLOCKED|FAILED)\](?:\s*(?:reason|error):\s*(.+))?",
+            output,
+            re.IGNORECASE,
+        )
+        if not match:
+            return {"status": "UNKNOWN"}
+        status = match.group(1).upper()
+        parsed = {"status": status}
+        detail_key = self._STATUS_DETAIL_KEYS.get(status)
+        if detail_key and match.group(2):
+            parsed[detail_key] = match.group(2).strip()
+        return parsed
 
     def _parse_background_output(self, issue_key: str, output: str, work_log: dict) -> None:
         """Parse Claude CLI output to extract commits, MRs, files changed, etc."""
@@ -596,7 +517,7 @@ class SprintWorkMixin(SprintStateMixin):
         commits = re.findall(commit_pattern, output)
         if commits:
             work_log["outcome"]["commits"].extend(commits)
-            self._log_action(
+            self._history.log_action(
                 issue_key,
                 "commits_created",
                 f"Created {len(commits)} commit(s)",
@@ -609,7 +530,7 @@ class SprintWorkMixin(SprintStateMixin):
         mrs = [m for match in mr_matches for m in match if m]
         if mrs:
             work_log["outcome"]["merge_requests"].extend(mrs)
-            self._log_action(
+            self._history.log_action(
                 issue_key,
                 "mr_created",
                 "Created/referenced MR(s)",
@@ -628,44 +549,6 @@ class SprintWorkMixin(SprintStateMixin):
         branches = re.findall(branch_pattern, output, re.IGNORECASE)
         if branches:
             work_log["outcome"]["branches_created"].extend(list(set(branches)))
-
-    def _generate_continuation_prompt(self, issue_key: str, work_log: dict) -> str:
-        """Generate a prompt for continuing work in Cursor."""
-        status = work_log.get("status", "unknown")
-        summary = work_log.get("summary", "")
-        commits = work_log.get("outcome", {}).get("commits", [])
-        mrs = work_log.get("outcome", {}).get("merge_requests", [])
-        files = work_log.get("outcome", {}).get("files_changed", [])
-
-        prompt_parts = [f"Continue working on {issue_key}: {summary}"]
-        prompt_parts.append("")
-        prompt_parts.append("## Background Work Summary")
-        prompt_parts.append(f"- Status: {status}")
-
-        if commits:
-            prompt_parts.append(f"- Commits created: {', '.join(commits[:5])}")
-        if mrs:
-            prompt_parts.append(f"- Merge requests: {', '.join(mrs)}")
-        if files:
-            prompt_parts.append(f"- Files modified: {', '.join(files[:5])}")
-
-        prompt_parts.append("")
-        prompt_parts.append("## Next Steps")
-
-        if status == "completed":
-            prompt_parts.append("The background work completed successfully. Please:")
-            prompt_parts.append("1. Review the changes made")
-            prompt_parts.append("2. Run tests to verify the implementation")
-            prompt_parts.append("3. Check if the MR needs any updates")
-        elif status == "failed":
-            prompt_parts.append("The background work failed. Please:")
-            prompt_parts.append("1. Review the error in the work log")
-            prompt_parts.append("2. Investigate the issue")
-            prompt_parts.append("3. Complete the implementation")
-        else:
-            prompt_parts.append("Please review the work done and continue as needed.")
-
-        return "\n".join(prompt_parts)
 
     async def _is_cursor_available(self) -> bool:
         """Check if Cursor/VS Code is available via D-Bus."""

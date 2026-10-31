@@ -10,10 +10,7 @@ import tempfile
 import traceback
 from datetime import datetime, time
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
-
-import yaml
 
 # Sprint daemon owns its own state file - no shared file with other services
 from services.sprint.bot.execution_tracer import (
@@ -29,18 +26,21 @@ from services.sprint.bot.workflow_config import (
 )
 from services.sprint.daemon_common import (
     SPRINT_STATE_FILE,
-    SPRINT_WORK_DIR,
     _add_timeline_event,
     _local_now,
     _log_safe,
     spawn_claude_cli,
 )
+from services.sprint.sprint_history_tracker import SprintHistoryTracker
 
 logger = logging.getLogger(__name__)
 
 
 class SprintStateMixin:
     """Sprint daemon state file, Jira sync, work log and tracing helpers."""
+
+    # Stateless helper owning work-log files and Cursor context prompts
+    _history = SprintHistoryTracker()
 
     # Set by SprintDaemon.__init__
     _config: dict
@@ -287,48 +287,26 @@ class SprintStateMixin:
             new_issues = []
             for issue_data in sprint_issues:
                 key = issue_data["key"]
-
-                if key in existing_by_key:
-                    # Preserve existing state
-                    existing = existing_by_key[key]
-                    new_issues.append(
-                        SprintIssue(
-                            key=key,
-                            summary=issue_data["summary"],
-                            story_points=issue_data.get("storyPoints", 0),
-                            priority=issue_data.get("priority", "Major"),
-                            jira_status=issue_data.get("jiraStatus", "New"),
-                            assignee=issue_data.get("assignee", ""),
-                            approval_status=existing.approval_status,  # Preserve
-                            waiting_reason=existing.waiting_reason,  # Preserve
-                            priority_reasoning=issue_data.get("priorityReasoning", []),
-                            estimated_actions=issue_data.get("estimatedActions", []),
-                            chat_id=existing.chat_id,  # Preserve
-                            timeline=existing.timeline,  # Preserve
-                            issue_type=issue_data.get("issueType", "Story"),
-                            created=issue_data.get("created", ""),
-                        )
+                # Preserve approval status, waiting reason, chat ID and timeline of known issues
+                existing = existing_by_key.get(key)
+                new_issues.append(
+                    SprintIssue(
+                        key=key,
+                        summary=issue_data["summary"],
+                        story_points=issue_data.get("storyPoints", 0),
+                        priority=issue_data.get("priority", "Major"),
+                        jira_status=issue_data.get("jiraStatus", "New"),
+                        assignee=issue_data.get("assignee", ""),
+                        approval_status=existing.approval_status if existing else "pending",
+                        waiting_reason=existing.waiting_reason if existing else None,
+                        priority_reasoning=issue_data.get("priorityReasoning", []),
+                        estimated_actions=issue_data.get("estimatedActions", []),
+                        chat_id=existing.chat_id if existing else None,
+                        timeline=existing.timeline if existing else [],
+                        issue_type=issue_data.get("issueType", "Story"),
+                        created=issue_data.get("created", ""),
                     )
-                else:
-                    # New issue
-                    new_issues.append(
-                        SprintIssue(
-                            key=key,
-                            summary=issue_data["summary"],
-                            story_points=issue_data.get("storyPoints", 0),
-                            priority=issue_data.get("priority", "Major"),
-                            jira_status=issue_data.get("jiraStatus", "New"),
-                            assignee=issue_data.get("assignee", ""),
-                            approval_status="pending",
-                            waiting_reason=None,
-                            priority_reasoning=issue_data.get("priorityReasoning", []),
-                            estimated_actions=issue_data.get("estimatedActions", []),
-                            chat_id=None,
-                            timeline=[],
-                            issue_type=issue_data.get("issueType", "Story"),
-                            created=issue_data.get("created", ""),
-                        )
-                    )
+                )
 
             # Calculate points for sprint info
             total_points = sum(i.story_points for i in new_issues)
@@ -787,70 +765,6 @@ Also output the MR ID if found: [MR_ID: <number>]
         return self.workflow_config.is_actionable(issue)
 
     # ==================== Background Execution ====================
-
-    def _get_work_log_path(self, issue_key: str) -> Path:
-        """Get the path to the work log file for an issue."""
-        return SPRINT_WORK_DIR / f"{issue_key}.yaml"
-
-    def _load_work_log(self, issue_key: str) -> dict:
-        """Load the work log for an issue."""
-        path = self._get_work_log_path(issue_key)
-        if path.exists():
-            return yaml.safe_load(path.read_text()) or {}
-        return {}
-
-    def _save_work_log(self, issue_key: str, work_log: dict) -> None:
-        """Save the work log for an issue."""
-
-        SPRINT_WORK_DIR.mkdir(parents=True, exist_ok=True)
-        path = self._get_work_log_path(issue_key)
-        path.write_text(yaml.dump(work_log, default_flow_style=False, sort_keys=False))
-
-    def _init_work_log(self, issue: dict) -> dict:
-        """Initialize a new work log for an issue."""
-        return {
-            "issue_key": issue["key"],
-            "summary": issue.get("summary", ""),
-            "description": issue.get("description", ""),
-            "issue_type": issue.get("issueType", "Story"),
-            "story_points": issue.get("storyPoints"),
-            "jira_status": issue.get("jiraStatus", ""),
-            "started": _local_now().isoformat(),
-            "status": "in_progress",
-            "execution_mode": "background",
-            "persona_used": "developer",
-            "actions": [],
-            "outcome": {
-                "commits": [],
-                "merge_requests": [],
-                "files_changed": [],
-                "branches_created": [],
-            },
-            # Context for loading into Cursor later
-            "cursor_context": {
-                "can_continue": True,
-                "suggested_prompt": "",
-                "files_to_review": [],
-                "next_steps": [],
-            },
-        }
-
-    def _log_action(self, issue_key: str, action_type: str, details: str, data: dict | None = None) -> None:
-        """Log an action to the work log."""
-        work_log = self._load_work_log(issue_key)
-        if not work_log:
-            return
-
-        action: dict[str, Any] = {
-            "timestamp": _local_now().isoformat(),
-            "type": action_type,
-            "details": details,
-        }
-        if data:
-            action["data"] = data
-
-        work_log.setdefault("actions", []).append(action)
-        self._save_work_log(issue_key, work_log)
 
     # ==================== Main Loop ====================
 

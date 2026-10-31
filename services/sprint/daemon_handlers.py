@@ -417,7 +417,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         if not issue_key:
             return {"success": False, "error": "issue_key required"}
 
-        work_log = self._load_work_log(issue_key)
+        work_log = self._history.load_work_log(issue_key)
         if not work_log:
             return {"success": False, "error": f"No work log found for {issue_key}"}
 
@@ -551,14 +551,14 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
                     "timestamp": _local_now().isoformat(),
                     "action": "background_completed",
                     "description": "Background processing completed - moved to review",
-                    "workLogPath": str(self._get_work_log_path(issue_key)),
+                    "workLogPath": str(self._history.get_work_log_path(issue_key)),
                     "jiraTransition": self.jira_status_in_review,
                 },
             )
             target_issue["approvalStatus"] = "completed"
             target_issue["jiraStatus"] = self.jira_status_in_review
             target_issue["hasWorkLog"] = True
-            target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
             state["processingIssue"] = None
             self._save_state(state)
             self._issues_processed += 1
@@ -583,7 +583,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             target_issue["approvalStatus"] = "blocked"
             target_issue["waitingReason"] = error_reason
             target_issue["hasWorkLog"] = True
-            target_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
             state["processingIssue"] = None
             self._save_state(state)
 
@@ -601,7 +601,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             return {"success": False, "error": "issue_key required"}
 
         # Load work log
-        work_log = self._load_work_log(issue_key)
+        work_log = self._history.load_work_log(issue_key)
         if not work_log:
             return {"success": False, "error": f"No work log found for {issue_key}"}
 
@@ -614,7 +614,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             }
 
         # Build the context prompt from the work log
-        prompt = self._build_cursor_context_prompt(issue_key, work_log)
+        prompt = self._history.build_cursor_context_prompt(issue_key, work_log)
 
         # Create a Cursor chat with this context
         try:
@@ -845,14 +845,14 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
                     "timestamp": _local_now().isoformat(),
                     "action": "background_completed",
                     "description": "Background processing completed - moved to review",
-                    "workLogPath": str(self._get_work_log_path(issue_key)),
+                    "workLogPath": str(self._history.get_work_log_path(issue_key)),
                     "jiraTransition": self.jira_status_in_review,
                 },
             )
             next_issue["approvalStatus"] = "completed"
             next_issue["jiraStatus"] = self.jira_status_in_review
             next_issue["hasWorkLog"] = True
-            next_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
             next_issue["hasTrace"] = True
             next_issue["tracePath"] = str(tracer.trace_path)
             state["processingIssue"] = None
@@ -880,7 +880,7 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             next_issue["hasWorkLog"] = True
             next_issue["hasTrace"] = True
             next_issue["tracePath"] = str(tracer.trace_path)
-            next_issue["workLogPath"] = str(self._get_work_log_path(issue_key))
+            next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
             state["processingIssue"] = None
             self._save_state(state)
             return result
