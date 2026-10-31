@@ -4,21 +4,21 @@ Provides 21 tools for managing ephemeral namespaces and deploying apps.
 """
 
 import logging
+from typing import TypedDict
 
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from mcp.types import TextContent  # pylint: disable=wrong-import-order
-
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
 from server.utils import run_cmd, truncate_output
 
-from .common import get_app_config, get_ephemeral_kubeconfig, run_bonfire
+from .common import aa_deploy_args, deploy_failure_text, get_app_config, get_ephemeral_kubeconfig, run_bonfire
 
 logger = logging.getLogger(__name__)
 
@@ -44,47 +44,51 @@ async def _bonfire_apps_dependencies_impl(component: str) -> list[TextContent]:
     ]
 
 
-# pylint: disable-next=too-many-arguments,too-many-locals,too-many-positional-arguments
-async def _bonfire_deploy_impl(
-    app: str,
-    namespace: str = "",
-    source: str = "appsre",
-    target_env: str = "insights-ephemeral",
-    ref_env: str = "",
-    set_image_tag: str = "",
-    set_template_ref: str = "",
-    component: str = "",
-    timeout: int = 600,
-    no_get_dependencies: bool = False,
-    single_replicas: bool = True,
-    reserve: bool = False,
-) -> list[TextContent]:
-    """Implementation of bonfire_deploy tool."""
+class DeployOptions(TypedDict):
+    """Options for ``bonfire deploy`` (mirrors the bonfire_deploy tool parameters)."""
+
+    namespace: str
+    source: str
+    target_env: str
+    ref_env: str
+    set_image_tag: str
+    set_template_ref: str
+    component: str
+    timeout: int
+    no_get_dependencies: bool
+    single_replicas: bool
+    reserve: bool
+
+
+def _deploy_args(app: str, opts: DeployOptions) -> list[str]:
+    """Build the ``bonfire deploy`` argument list."""
     apps = app.split() if " " in app else [app]
-    args = ["deploy"] + apps
+    args = ["deploy", *apps]
+    args.extend(["--source", opts["source"], "--target-env", opts["target_env"], "--timeout", str(opts["timeout"])])
+    for flag, value in (
+        ("--namespace", opts["namespace"]),
+        ("--ref-env", opts["ref_env"]),
+        ("--set-image-tag", opts["set_image_tag"]),
+        ("--set-template-ref", opts["set_template_ref"]),
+        ("--component", opts["component"]),
+    ):
+        if value:
+            args.extend([flag, value])
+    for flag, enabled in (
+        ("--no-get-dependencies", opts["no_get_dependencies"]),
+        ("--single-replicas", opts["single_replicas"]),
+        ("--reserve", opts["reserve"]),
+    ):
+        if enabled:
+            args.append(flag)
+    return args
 
-    args.extend(["--source", source])
-    args.extend(["--target-env", target_env])
-    args.extend(["--timeout", str(timeout)])
 
-    if namespace:
-        args.extend(["--namespace", namespace])
-    if ref_env:
-        args.extend(["--ref-env", ref_env])
-    if set_image_tag:
-        args.extend(["--set-image-tag", set_image_tag])
-    if set_template_ref:
-        args.extend(["--set-template-ref", set_template_ref])
-    if component:
-        args.extend(["--component", component])
-    if no_get_dependencies:
-        args.append("--no-get-dependencies")
-    if single_replicas:
-        args.append("--single-replicas")
-    if reserve:
-        args.append("--reserve")
+async def _bonfire_deploy_impl(app: str, opts: DeployOptions) -> list[TextContent]:
+    """Implementation of bonfire_deploy tool."""
+    args = _deploy_args(app, opts)
 
-    success, output = await run_bonfire(args, timeout=timeout + 120)
+    success, output = await run_bonfire(args, timeout=opts["timeout"] + 120)
 
     if not success:
         return [TextContent(type="text", text=f"❌ Deployment failed:\n\n```\n{output}\n```")]
@@ -106,30 +110,8 @@ async def _bonfire_deploy_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-# pylint: disable-next=too-many-locals,too-many-return-statements
-async def _bonfire_deploy_aa_impl(
-    namespace: str,
-    template_ref: str,
-    image_tag: str,
-    billing: bool = False,
-    timeout: int = 900,
-) -> list[TextContent]:
-    """Implementation of bonfire_deploy_aa tool."""
-    # Load app config from config.json
-    app_cfg = get_app_config(billing=billing)
-    component = app_cfg["component"]
-    image_base = app_cfg["image_base"]
-    app_name = app_cfg["app_name"]
-    ref_env = app_cfg["ref_env"]
-
-    if not image_base:
-        return [
-            TextContent(
-                type="text",
-                text="❌ image_base not configured in config.json bonfire.apps section",
-            )
-        ]
-
+def _validate_aa_refs(template_ref: str, image_tag: str, image_base: str) -> tuple[str | None, str | None]:
+    """Validate template_ref (40-char SHA) and image_tag (64-hex digest); returns (digest, None) or (None, error)."""
     # VALIDATE template_ref: Must be FULL 40-char git commit SHA
     if len(template_ref) != 40:
         err_msg = (
@@ -139,7 +121,7 @@ async def _bonfire_deploy_aa_impl(
             "**Fix:** Get the full SHA:\n"
             f"```bash\ngit rev-parse {template_ref}\n```"
         )
-        return [TextContent(type="text", text=err_msg)]
+        return None, err_msg
 
     # Strip sha256: prefix if present
     digest = image_tag
@@ -147,10 +129,8 @@ async def _bonfire_deploy_aa_impl(
 
     # VALIDATE image_tag: Must be 64-char sha256 digest
     if len(digest) != 64:
-        return [
-            TextContent(
-                type="text",
-                text=f"""❌ **Invalid image_tag: `{image_tag}` ({len(digest)} chars)**
+        return None, (
+            f"""❌ **Invalid image_tag: `{image_tag}` ({len(digest)} chars)**
 
 image_tag must be the 64-char sha256 digest from the built image (NOT the git SHA).
 
@@ -162,22 +142,22 @@ image_tag must be the 64-char sha256 digest from the built image (NOT the git SH
 **Or via CLI:**
 ```bash
 skopeo inspect docker://{image_base}:{template_ref} | jq -r '.Digest' | cut -d: -f2
-```""",
-            )
-        ]
+```"""
+        )
 
     # Validate digest is hex
     if not all(c in "0123456789abcdef" for c in digest.lower()):
-        return [
-            TextContent(
-                type="text",
-                text=f"""❌ **Invalid digest format: `{digest}`**
+        return None, (
+            f"""❌ **Invalid digest format: `{digest}`**
 
-Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
-            )
-        ]
+Expected 64 hex characters (0-9, a-f). Got non-hex characters."""
+        )
 
-    # HARD STOP: Check if image exists in Quay before deploying
+    return digest, None
+
+
+async def _check_aa_image_exists(template_ref: str, image_base: str) -> str | None:
+    """HARD STOP check that the Konflux image exists in Quay; returns an error message or None."""
     repository = "aap-aa-tenant/aap-aa-main/automation-analytics-backend-main"
     image_ref = f"docker://quay.io/redhat-user-workloads/{repository}:{template_ref}"
 
@@ -191,17 +171,9 @@ Expected 64 hex characters (0-9, a-f). Got non-hex characters.""",
     if not check_success or "manifest unknown" in check_output.lower():
         # Check if it was a timeout
         if "timed out" in check_output.lower():
-            return [
-                TextContent(
-                    type="text",
-                    text="❌ Image check timed out. Verify image exists before retrying.",
-                )
-            ]
+            return "❌ Image check timed out. Verify image exists before retrying."
 
-        return [
-            TextContent(
-                type="text",
-                text=f"""❌ **STOP: Image not found in Quay**
+        return f"""❌ **STOP: Image not found in Quay**
 
 The image for commit `{template_ref[:12]}...` does not exist in redhat-user-workloads.
 
@@ -217,92 +189,80 @@ The image for commit `{template_ref[:12]}...` does not exist in redhat-user-work
 2. Wait for the build to complete
 3. Retry once the image is available
 
-**DO NOT** proceed with deployment - it will fail with ImagePullBackOff.""",
+**DO NOT** proceed with deployment - it will fail with ImagePullBackOff."""
+
+    return None
+
+
+async def _bonfire_deploy_aa_impl(
+    namespace: str,
+    template_ref: str,
+    image_tag: str,
+    billing: bool = False,
+    timeout: int = 900,
+) -> list[TextContent]:
+    """Implementation of bonfire_deploy_aa tool."""
+    # Load app config from config.json
+    app_cfg = get_app_config(billing=billing)
+    image_base = app_cfg["image_base"]
+
+    if not image_base:
+        return [
+            TextContent(
+                type="text",
+                text="❌ image_base not configured in config.json bonfire.apps section",
             )
         ]
 
+    digest, error = _validate_aa_refs(template_ref, image_tag, image_base)
+    if error or digest is None:
+        return [TextContent(type="text", text=error or "❌ Invalid image_tag")]
+
+    # HARD STOP: Check if image exists in Quay before deploying
+    image_error = await _check_aa_image_exists(template_ref, image_base)
+    if image_error:
+        return [TextContent(type="text", text=image_error)]
+
     logger.info("Image verified, proceeding with deploy")
 
-    # Build the exact command matching ITS pattern
-    args = [
-        "deploy",
-        "--source=appsre",
-        "--ref-env",
-        ref_env,
-        "--namespace",
-        namespace,
-        "--timeout",
-        str(timeout),
-        "--optional-deps-method",
-        "hybrid",
-        "--frontends",
-        "false",
-        "--component",
-        component,
-        "--no-remove-resources",
-        "all",
-        "--set-template-ref",
-        f"{component}={template_ref}",
-        "--set-parameter",
-        f"{component}/IMAGE={image_base}@sha256",
-        "--set-parameter",
-        f"{component}/IMAGE_TAG={digest}",
-        app_name,
-    ]
+    args = aa_deploy_args(app_cfg, namespace, timeout, (template_ref, digest))
 
     # Log the full command for debugging
-    kubeconfig = get_ephemeral_kubeconfig()
-    cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
+    cmd_preview = f"KUBECONFIG={get_ephemeral_kubeconfig()} bonfire {' '.join(args)}"
     # Log only the bonfire arguments; the kubeconfig path stays out of logs.
     logger.info("Deploying AA: bonfire %s", " ".join(args))
 
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
     if not success:
-        # Include the command in error output for debugging
-        return [
-            TextContent(
-                type="text",
-                text=f"""❌ AA {"billing" if billing else "main"} deployment failed
+        text = deploy_failure_text(f"❌ AA {'billing' if billing else 'main'} deployment failed", cmd_preview, output)
+        return [TextContent(type="text", text=text)]
 
-**Command:**
-```bash
-{cmd_preview}
-```
-
-**Output:**
-```
-{output}
-```""",
-            )
+    text = "\n".join(
+        [
+            f"## ✅ Deployed Automation Analytics ({'billing' if billing else 'main'})",
+            "",
+            f"**Namespace:** `{namespace}`",
+            f"**Component:** `{app_cfg['component']}`",
+            f"**Template Ref:** `{template_ref}`",
+            f"**Image Digest:** `{digest[:16]}...`",
+            "",
+            "**Command used:**",
+            "```bash",
+            cmd_preview,
+            "```",
+            "",
+            "**Output:**",
+            "```",
+            truncate_output(output, 5000, mode="tail"),
+            "```",
+            "",
+            "**Next steps:**",
+            f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`",
+            f"- Run IQE tests: `bonfire_deploy_iqe_cji(namespace='{namespace}')`",
         ]
-
-    display_output = truncate_output(output, 5000, mode="tail")
-
-    lines = [
-        f"## ✅ Deployed Automation Analytics ({'billing' if billing else 'main'})",
-        "",
-        f"**Namespace:** `{namespace}`",
-        f"**Component:** `{component}`",
-        f"**Template Ref:** `{template_ref}`",
-        f"**Image Digest:** `{digest[:16]}...`",
-        "",
-        "**Command used:**",
-        "```bash",
-        cmd_preview,
-        "```",
-        "",
-        "**Output:**",
-        "```",
-        display_output,
-        "```",
-        "",
-        "**Next steps:**",
-        f"- Check pods: `kubectl_get_pods(namespace='{namespace}', environment='ephemeral')`",
-        f"- Run IQE tests: `bonfire_deploy_iqe_cji(namespace='{namespace}')`",
-    ]
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    )
+    return [TextContent(type="text", text=text)]
 
 
 async def _bonfire_namespace_describe_impl(namespace: str) -> list[TextContent]:
@@ -380,16 +340,18 @@ If you're sure you want to release it, call with `force=True` (not recommended).
     return [TextContent(type="text", text=f"✅ Namespace `{namespace}` released\n\n{output}")]
 
 
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-async def _bonfire_namespace_reserve_impl(
-    duration: str = "1h",
-    pool: str = "default",
-    requester: str = "",
-    name: str = "",
-    timeout: int = 600,
-    force: bool = True,
-) -> list[TextContent]:
+class ReserveOptions(TypedDict):
+    """Options for ``bonfire namespace reserve``."""
+
+    requester: str
+    name: str
+    timeout: int
+    force: bool
+
+
+async def _bonfire_namespace_reserve_impl(duration: str, pool: str, opts: ReserveOptions) -> list[TextContent]:
     """Implementation of bonfire_namespace_reserve tool."""
+    requester, name, timeout, force = opts["requester"], opts["name"], opts["timeout"], opts["force"]
     args = ["namespace", "reserve"]
     args.extend(["--duration", duration])
     args.extend(["--pool", pool])
@@ -476,6 +438,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # MCP tool schema is generated from this signature; parameters are the public tool API.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_deploy(
         app: str,
@@ -513,17 +476,19 @@ def register_tools(server: "FastMCP") -> int:
         """
         return await _bonfire_deploy_impl(
             app,
-            namespace,
-            source,
-            target_env,
-            ref_env,
-            set_image_tag,
-            set_template_ref,
-            component,
-            timeout,
-            no_get_dependencies,
-            single_replicas,
-            reserve,
+            DeployOptions(
+                namespace=namespace,
+                source=source,
+                target_env=target_env,
+                ref_env=ref_env,
+                set_image_tag=set_image_tag,
+                set_template_ref=set_template_ref,
+                component=component,
+                timeout=timeout,
+                no_get_dependencies=no_get_dependencies,
+                single_replicas=single_replicas,
+                reserve=reserve,
+            ),
         )
 
     @auto_heal_ephemeral()
@@ -631,6 +596,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # MCP tool schema is generated from this signature; parameters are the public tool API.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_namespace_reserve(
         duration: str = "1h",
@@ -654,7 +620,9 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Reserved namespace name.
         """
-        return await _bonfire_namespace_reserve_impl(duration, pool, requester, name, timeout, force)
+        return await _bonfire_namespace_reserve_impl(
+            duration, pool, ReserveOptions(requester=requester, name=name, timeout=timeout, force=force)
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()
