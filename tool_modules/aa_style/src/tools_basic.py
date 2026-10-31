@@ -11,7 +11,6 @@ Provides tools for analyzing writing style and generating personalized personas:
 import asyncio
 import json
 import logging
-import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -546,17 +545,7 @@ def _select_diverse_examples(messages: list[dict], count: int) -> list[dict]:
 
 def _has_emoji(text: str) -> bool:
     """Check if text contains emoji."""
-    emoji_pattern = re.compile(
-        "["
-        "\U0001f600-\U0001f64f"  # emoticons
-        "\U0001f300-\U0001f5ff"  # symbols & pictographs
-        "\U0001f680-\U0001f6ff"  # transport & map
-        "\U0001f1e0-\U0001f1ff"  # flags
-        "\U00002702-\U000027b0"
-        "\U000024c2-\U0001f251"
-        "]+"
-    )
-    return bool(emoji_pattern.search(text))
+    return bool(StyleAnalyzer.EMOJI_PATTERN.search(text))
 
 
 def _generate_persona_yaml(name: str, tools: list[str]) -> dict:
