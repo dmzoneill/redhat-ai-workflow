@@ -1,8 +1,11 @@
 # pylint: disable=duplicate-code,cyclic-import
 """Split from skill_engine.py so the public module stays importable."""
 
+import asyncio
 import json
 import logging
+import time
+from collections.abc import Coroutine
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +14,17 @@ from .skill_support import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 class SkillRunMixin:  # pylint: disable=too-few-public-methods
@@ -37,9 +51,8 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
     ws_server: Any
 
     # pylint: disable-next=too-many-branches,too-many-locals,too-many-statements
-    async def execute(self) -> str:  # noqa: C901
+    async def execute(self) -> str:
         """Execute all steps and return the result."""
-        import time  # pylint: disable=import-outside-toplevel
 
         self.start_time = time.time()
 
@@ -54,9 +67,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
 
         # Emit skill start event (WebSocket)
         if self.ws_server and self.ws_server.is_running:
-            import asyncio  # pylint: disable=import-outside-toplevel
-
-            asyncio.create_task(
+            _spawn_background(
                 self.ws_server.skill_started(
                     skill_id=self.skill_id,
                     skill_name=skill_name,
@@ -66,16 +77,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 )
             )
 
-        for inp in self.skill.get("inputs", []):
-            name = inp["name"]
-            if name not in self.inputs and "default" in inp:
-                # Template the default value to resolve variables like {{ today }}
-                default_val = inp["default"]
-                if isinstance(default_val, str) and "{{" in default_val:
-                    default_val = self._template(default_val)
-                self.inputs[name] = default_val
-                self.context["inputs"] = self.inputs
-                self._debug(f"Applied default: {name} = {default_val}")
+        self._apply_input_defaults()
 
         defaults = self.skill.get("defaults", {})
         self.context["defaults"] = defaults
@@ -98,16 +100,13 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
             step_name = step.get("name", f"step_{step_num}")
             step_start_time = time.time()
 
-            if "condition" in step:
-                if not self._eval_condition(step["condition"]):
-                    self._debug(f"Skipping step '{step_name}' - condition false")
-                    output_lines.append(
-                        f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n"
-                    )
-                    # Emit step skipped event
-                    if self.event_emitter:
-                        self.event_emitter.step_skipped(step_index, "condition false")
-                    continue
+            if "condition" in step and not self._eval_condition(step["condition"]):
+                self._debug(f"Skipping step '{step_name}' - condition false")
+                output_lines.append(f"⏭️ **Step {step_num}: {step_name}** - *skipped (condition false)*\n")
+                # Emit step skipped event
+                if self.event_emitter:
+                    self.event_emitter.step_skipped(step_index, "condition false")
+                continue
 
             # Emit step start event (file-based)
             if self.event_emitter:
@@ -115,10 +114,8 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
 
             # Emit step start event (WebSocket)
             if self.ws_server and self.ws_server.is_running:
-                import asyncio  # pylint: disable=import-outside-toplevel
-
                 description = step.get("description", "")
-                asyncio.create_task(
+                _spawn_background(
                     self.ws_server.step_started(
                         skill_id=self.skill_id,
                         step_index=step_index,
@@ -134,7 +131,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                     if self.event_emitter:
                         total_time = time.time() - (self.start_time or 0.0)
                         self.event_emitter.skill_complete(True, int(total_time * 1000))
-                    return early_return
+                    return str(early_return)
                 continue
 
             step_success = True
@@ -144,13 +141,9 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 # Check for memory operations
                 tool_name = step.get("tool", "")
                 if self.event_emitter:
-                    self._emit_memory_events_for_tool(
-                        step_index, tool_name, step.get("args", {})
-                    )
+                    self._emit_memory_events_for_tool(step_index, tool_name, step.get("args", {}))
 
-                should_continue = await self._process_tool_step(
-                    step, step_num, step_name, output_lines
-                )
+                should_continue = await self._process_tool_step(step, step_num, step_name, output_lines)
 
                 # Check step result
                 if self.step_results:
@@ -163,85 +156,17 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                     # Emit step failed event
                     if self.event_emitter:
                         duration_ms = int((time.time() - step_start_time) * 1000)
-                        self.event_emitter.step_failed(
-                            step_index, duration_ms, step_error or "Step failed"
-                        )
+                        self.event_emitter.step_failed(step_index, duration_ms, step_error or "Step failed")
                     break
 
             elif "compute" in step:
-                output_name = step.get("output", step_name)
-                output_lines.append(f"🧮 **Step {step_num}: {step_name}** (compute)")
-
-                try:
-                    result = self._exec_compute(step["compute"], output_name)
-
-                    # Check if compute returned an error string
-                    if isinstance(result, str) and result.startswith("<compute error:"):
-                        step_success = False
-                        step_error = result
-                        output_lines.append(f"   ❌ {result}\n")
-                        self._debug(f"Compute step '{step_name}' failed: {result}")
-
-                        # Store error result in context so dependent steps can check
-                        self.context[output_name] = None
-                        self.context[f"{output_name}_error"] = result
-
-                        # Record step failure
-                        self.step_results.append(
-                            {
-                                "step": step_name,
-                                "compute": True,
-                                "success": False,
-                                "error": result,
-                            }
-                        )
-                    else:
-                        self.context[output_name] = result
-                        output_lines.append(
-                            f"   → `{output_name}` = {str(result)[:100]}\n"
-                        )
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    step_success = False
-                    step_error = str(e)
-                    output_lines.append(f"   ❌ Error: {e}\n")
+                step_success, step_error = self._run_compute_step(step, step_num, step_name, output_lines)
 
             elif "description" in step:
                 output_lines.append(f"📝 **Step {step_num}: {step_name}** (manual)")
                 output_lines.append(f"   {self._template(step['description'])}\n")
 
-            # Emit step complete/failed event (file-based)
-            if self.event_emitter:
-                duration_ms = int((time.time() - step_start_time) * 1000)
-                if step_success:
-                    self.event_emitter.step_complete(step_index, duration_ms)
-                else:
-                    self.event_emitter.step_failed(
-                        step_index, duration_ms, step_error or "Unknown error"
-                    )
-
-            # Emit step complete/failed event (WebSocket)
-            if self.ws_server and self.ws_server.is_running:
-                import asyncio  # pylint: disable=import-outside-toplevel
-
-                duration_ms = int((time.time() - step_start_time) * 1000)
-                if step_success:
-                    asyncio.create_task(
-                        self.ws_server.step_completed(
-                            skill_id=self.skill_id,
-                            step_index=step_index,
-                            step_name=step_name,
-                            duration_ms=duration_ms,
-                        )
-                    )
-                else:
-                    asyncio.create_task(
-                        self.ws_server.step_failed(
-                            skill_id=self.skill_id,
-                            step_index=step_index,
-                            step_name=step_name,
-                            error=step_error or "Unknown error",
-                        )
-                    )
+            self._emit_step_finished(step_index, step_name, step_start_time, step_success, step_error)
 
         self._format_skill_outputs(output_lines)
 
@@ -254,46 +179,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
             f"\n---\n⏱️ *Completed in {total_time:.2f}s* | ✅ {success_count} succeeded | ❌ {fail_count} failed"
         )
 
-        # Emit skill complete event (file-based)
-        if self.event_emitter:
-            overall_success = fail_count == 0
-            self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
-            # Clear the global emitter
-            try:
-                from .skill_execution_events import (  # pylint: disable=import-outside-toplevel
-                    set_emitter,
-                )
-
-                set_emitter(None)
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
-
-        # Emit skill complete event (WebSocket)
-        if self.ws_server and self.ws_server.is_running:
-            import asyncio  # pylint: disable=import-outside-toplevel
-
-            overall_success = fail_count == 0
-            if overall_success:
-                asyncio.create_task(
-                    self.ws_server.skill_completed(
-                        skill_id=self.skill_id,
-                        total_duration_ms=int(total_time * 1000),
-                    )
-                )
-            else:
-                # Get last error from step_results
-                last_error = "Skill failed"
-                for r in reversed(self.step_results):
-                    if not r.get("success") and r.get("error"):
-                        last_error = r["error"]
-                        break
-                asyncio.create_task(
-                    self.ws_server.skill_failed(
-                        skill_id=self.skill_id,
-                        error=last_error,
-                        total_duration_ms=int(total_time * 1000),
-                    )
-                )
+        self._emit_skill_finished(total_time, fail_count)
 
         # Track skill execution in agent stats
         try:
@@ -307,6 +193,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 total_steps=len(self.skill.get("steps", [])),
             )
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to record skill stats", exc_info=True)
             self._debug(f"Failed to record skill stats: {e}")
 
         # Extract and save learnings from successful skill execution
@@ -320,9 +207,137 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
 
         return "\n".join(output_lines)
 
-    def _emit_memory_events_for_tool(
-        self, step_index: int, tool_name: str, args: dict
+    def _apply_input_defaults(self) -> None:
+        """Fill missing inputs from their declared defaults (templated)."""
+        for inp in self.skill.get("inputs", []):
+            name = inp["name"]
+            if name not in self.inputs and "default" in inp:
+                # Template the default value to resolve variables like {{ today }}
+                default_val = inp["default"]
+                if isinstance(default_val, str) and "{{" in default_val:
+                    default_val = self._template(default_val)
+                self.inputs[name] = default_val
+                self.context["inputs"] = self.inputs
+                self._debug(f"Applied default: {name} = {default_val}")
+
+    def _run_compute_step(
+        self, step: dict, step_num: int, step_name: str, output_lines: list[str]
+    ) -> tuple[bool, str | None]:
+        """Run a compute step and record its result; return (success, error)."""
+        step_success = True
+        step_error: str | None = None
+        output_name = step.get("output", step_name)
+        output_lines.append(f"🧮 **Step {step_num}: {step_name}** (compute)")
+
+        try:
+            result = self._exec_compute(step["compute"], output_name)
+
+            # Check if compute returned an error string
+            if isinstance(result, str) and result.startswith("<compute error:"):
+                step_success = False
+                step_error = result
+                output_lines.append(f"   ❌ {result}\n")
+                self._debug(f"Compute step '{step_name}' failed: {result}")
+
+                # Store error result in context so dependent steps can check
+                self.context[output_name] = None
+                self.context[f"{output_name}_error"] = result
+
+                # Record step failure
+                self.step_results.append(
+                    {
+                        "step": step_name,
+                        "compute": True,
+                        "success": False,
+                        "error": result,
+                    }
+                )
+            else:
+                self.context[output_name] = result
+                output_lines.append(f"   → `{output_name}` = {str(result)[:100]}\n")
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("❌ Error", exc_info=True)
+            step_success = False
+            step_error = str(e)
+            output_lines.append(f"   ❌ Error: {e}\n")
+        return step_success, step_error
+
+    def _emit_step_finished(
+        self, step_index: int, step_name: str, step_start_time: float, step_success: bool, step_error: str | None
     ) -> None:
+        """Emit step complete/failed events (file-based and WebSocket)."""
+        # Emit step complete/failed event (file-based)
+        if self.event_emitter:
+            duration_ms = int((time.time() - step_start_time) * 1000)
+            if step_success:
+                self.event_emitter.step_complete(step_index, duration_ms)
+            else:
+                self.event_emitter.step_failed(step_index, duration_ms, step_error or "Unknown error")
+
+        # Emit step complete/failed event (WebSocket)
+        if self.ws_server and self.ws_server.is_running:
+            duration_ms = int((time.time() - step_start_time) * 1000)
+            if step_success:
+                _spawn_background(
+                    self.ws_server.step_completed(
+                        skill_id=self.skill_id,
+                        step_index=step_index,
+                        step_name=step_name,
+                        duration_ms=duration_ms,
+                    )
+                )
+            else:
+                _spawn_background(
+                    self.ws_server.step_failed(
+                        skill_id=self.skill_id,
+                        step_index=step_index,
+                        step_name=step_name,
+                        error=step_error or "Unknown error",
+                    )
+                )
+
+    def _emit_skill_finished(self, total_time: float, fail_count: int) -> None:
+        """Emit skill complete/failed events (file-based and WebSocket)."""
+        # Emit skill complete event (file-based)
+        if self.event_emitter:
+            overall_success = fail_count == 0
+            self.event_emitter.skill_complete(overall_success, int(total_time * 1000))
+            # Clear the global emitter
+            try:
+                from .skill_execution_events import (  # pylint: disable=import-outside-toplevel
+                    set_emitter,
+                )
+
+                set_emitter(None)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.debug("Suppressed error: %s", exc, exc_info=True)
+
+        # Emit skill complete event (WebSocket)
+        if self.ws_server and self.ws_server.is_running:
+            overall_success = fail_count == 0
+            if overall_success:
+                _spawn_background(
+                    self.ws_server.skill_completed(
+                        skill_id=self.skill_id,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
+            else:
+                # Get last error from step_results
+                last_error = "Skill failed"
+                for r in reversed(self.step_results):
+                    if not r.get("success") and r.get("error"):
+                        last_error = r["error"]
+                        break
+                _spawn_background(
+                    self.ws_server.skill_failed(
+                        skill_id=self.skill_id,
+                        error=last_error,
+                        total_duration_ms=int(total_time * 1000),
+                    )
+                )
+
+    def _emit_memory_events_for_tool(self, step_index: int, tool_name: str, args: dict) -> None:
         """Emit memory read/write events based on tool being called."""
         if not self.event_emitter:
             return
@@ -438,7 +453,7 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 # Add the learning
                 knowledge["learned_from_tasks"].append(
                     {
-                        "date": datetime.now().strftime("%Y-%m-%d"),
+                        "date": datetime.now().astimezone().strftime("%Y-%m-%d"),
                         "task": task,
                         "learning": learning,
                         "skill": skill_name,
@@ -449,12 +464,8 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 knowledge["learned_from_tasks"] = knowledge["learned_from_tasks"][-50:]
 
                 # Slightly increase confidence
-                current_confidence = knowledge.get("metadata", {}).get(
-                    "confidence", 0.5
-                )
-                knowledge["metadata"]["confidence"] = min(
-                    current_confidence + 0.01, 1.0
-                )
+                current_confidence = knowledge.get("metadata", {}).get("confidence", 0.5)
+                knowledge["metadata"]["confidence"] = min(current_confidence + 0.01, 1.0)
 
                 # Save
                 _save_knowledge(persona, project, knowledge)
@@ -464,4 +475,5 @@ class SkillRunMixin:  # pylint: disable=too-few-public-methods
                 output_lines.append(f"\n📚 *Learning recorded: {learning}*")
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to extract/save learnings", exc_info=True)
             self._debug(f"Failed to extract/save learnings: {e}")
