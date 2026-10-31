@@ -355,9 +355,7 @@ class TestWorkspaceRegistry:
 
     def test_auto_session_creation_sync(self):
         """Test that ensure_session=True auto-creates a session."""
-        state = WorkspaceRegistry.get_or_create(
-            "file:///auto-session-test", ensure_session=True
-        )
+        state = WorkspaceRegistry.get_or_create("file:///auto-session-test", ensure_session=True)
 
         # Session should be auto-created
         assert state.session_count() == 1
@@ -495,9 +493,7 @@ class TestProjectDetection:
         }
 
         with patch("server.utils.load_config", return_value=mock_config):
-            result = WorkspaceRegistry._detect_project(
-                "file:///home/user/src/test-project"
-            )
+            result = WorkspaceRegistry._detect_project("file:///home/user/src/test-project")
 
         assert result == "test-project"
 
@@ -511,9 +507,7 @@ class TestProjectDetection:
         }
 
         with patch("server.utils.load_config", return_value=mock_config):
-            result = WorkspaceRegistry._detect_project(
-                "file:///home/user/src/test-project/src/module"
-            )
+            result = WorkspaceRegistry._detect_project("file:///home/user/src/test-project/src/module")
 
         assert result == "test-project"
 
@@ -610,15 +604,9 @@ class TestMultiWorkspaceIntegration:
         ctx_infra = self._create_mock_ctx("file:///home/user/src/infrastructure")
 
         # Initialize all workspaces (ensure_session=False to avoid auto-session)
-        state_backend = await WorkspaceRegistry.get_for_ctx(
-            ctx_backend, ensure_session=False
-        )
-        state_frontend = await WorkspaceRegistry.get_for_ctx(
-            ctx_frontend, ensure_session=False
-        )
-        state_infra = await WorkspaceRegistry.get_for_ctx(
-            ctx_infra, ensure_session=False
-        )
+        state_backend = await WorkspaceRegistry.get_for_ctx(ctx_backend, ensure_session=False)
+        state_frontend = await WorkspaceRegistry.get_for_ctx(ctx_frontend, ensure_session=False)
+        state_infra = await WorkspaceRegistry.get_for_ctx(ctx_infra, ensure_session=False)
 
         # Create sessions with different contexts
         session_backend = state_backend.create_session(persona="developer")
@@ -840,17 +828,13 @@ class TestWorkspaceRegistryPersistence:
         ):
 
             # Create workspaces with sessions (ensure_session=False to avoid auto-create)
-            ws1 = WorkspaceRegistry.get_or_create(
-                "file:///workspace1", ensure_session=False
-            )
+            ws1 = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
             ws1.project = "project1"
             session1 = ws1.create_session(persona="developer", name="Dev Session")
             session1.issue_key = "AAP-12345"
             session1.branch = "feature-branch"
 
-            ws2 = WorkspaceRegistry.get_or_create(
-                "file:///workspace2", ensure_session=False
-            )
+            ws2 = WorkspaceRegistry.get_or_create("file:///workspace2", ensure_session=False)
             ws2.project = "project2"
             ws2.create_session(persona="devops", name="DevOps Session")
 
@@ -887,7 +871,7 @@ class TestWorkspaceRegistryPersistence:
             assert restored_ws1.project == "project1"
             assert len(restored_ws1.sessions) == 1
 
-            restored_session1 = list(restored_ws1.sessions.values())[0]
+            restored_session1 = next(iter(restored_ws1.sessions.values()))
             assert restored_session1.persona == "developer"
             assert restored_session1.issue_key == "AAP-12345"
             assert restored_session1.branch == "feature-branch"
@@ -905,9 +889,7 @@ class TestWorkspaceRegistryPersistence:
         ):
 
             # Create a workspace (ensure_session=False to avoid auto-create)
-            ws = WorkspaceRegistry.get_or_create(
-                "file:///workspace1", ensure_session=False
-            )
+            ws = WorkspaceRegistry.get_or_create("file:///workspace1", ensure_session=False)
             ws.create_session()
 
             # Try to restore - should do nothing since registry is not empty
@@ -1022,7 +1004,7 @@ class TestGetDefaultPersona:
     def test_returns_from_config(self):
         """get_default_persona reads from config agent.default_persona."""
         mock_cfg = {"agent": {"default_persona": "developer"}}
-        with patch("server.workspace_state.load_config", mock_cfg, create=True):
+        with patch("server.utils.load_config", mock_cfg, create=True):
             # We need to patch the import inside the function
             with patch("server.utils.load_config", return_value=mock_cfg):
                 result = get_default_persona()
@@ -1249,7 +1231,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s1 = state.create_session(persona="developer", name="existing")
@@ -1263,7 +1245,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s = state.get_or_create_session(persona="developer")
@@ -1276,7 +1258,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1290,7 +1272,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s1 = state.create_session(name="stale")
@@ -1298,9 +1280,7 @@ class TestWorkspaceStateAdvanced:
 
                     s2 = state.create_session(name="fresh")
 
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_ids", return_value=set()
-                    ):
+                    with patch("server.cursor_chat_db.get_cursor_chat_ids", return_value=set()):
                         removed = state.cleanup_stale_sessions(max_age_hours=24)
 
                     assert removed == 1
@@ -1313,7 +1293,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s1 = state.create_session(name="stale-but-in-cursor")
@@ -1321,7 +1301,7 @@ class TestWorkspaceStateAdvanced:
 
                     # Cursor still has this session
                     with patch(
-                        "server.workspace_state.get_cursor_chat_ids",
+                        "server.cursor_chat_db.get_cursor_chat_ids",
                         return_value={s1.session_id},
                     ):
                         removed = state.cleanup_stale_sessions(max_age_hours=24)
@@ -1364,9 +1344,7 @@ class TestWorkspaceStateAdvanced:
     def test_get_loaded_tools_exception(self):
         """_get_loaded_tools returns empty set on exception."""
         state = WorkspaceState(workspace_uri="file:///test")
-        with patch(
-            "server.persona_loader.get_loader", side_effect=ImportError("No module")
-        ):
+        with patch("server.persona_loader.get_loader", side_effect=ImportError("No module")):
             tools = state._get_loaded_tools()
             assert tools == set()
 
@@ -1404,7 +1382,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1417,7 +1395,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1430,7 +1408,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1442,7 +1420,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1455,7 +1433,7 @@ class TestWorkspaceStateAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -1496,20 +1474,16 @@ class TestWorkspaceRegistryAdvanced:
 
     def test_touch_nonexistent_workspace(self):
         """WorkspaceRegistry.touch() does nothing for unknown workspace."""
-        WorkspaceRegistry.touch(
-            "file:///unknown"
-        )  # Test verifies no exception is raised
+        WorkspaceRegistry.touch("file:///unknown")  # Test verifies no exception is raised
         assert WorkspaceRegistry.get("file:///unknown") is None
 
     def test_cleanup_stale_removes_empty_stale(self):
         """cleanup_stale removes workspaces with no sessions and stale."""
-        state = WorkspaceRegistry.get_or_create(
-            "file:///stale-ws", ensure_session=False
-        )
+        state = WorkspaceRegistry.get_or_create("file:///stale-ws", ensure_session=False)
         state.last_activity = datetime.now() - timedelta(hours=48)
         assert state.session_count() == 0
 
-        with patch("server.workspace_state.get_cursor_chat_ids", return_value=set()):
+        with patch("server.cursor_chat_db.get_cursor_chat_ids", return_value=set()):
             removed = WorkspaceRegistry.cleanup_stale(max_age_hours=24)
 
         assert removed == 1
@@ -1518,26 +1492,24 @@ class TestWorkspaceRegistryAdvanced:
     def test_cleanup_stale_keeps_active(self):
         """cleanup_stale keeps workspaces with recent activity."""
         WorkspaceRegistry.get_or_create("file:///active-ws", ensure_session=False)
-        with patch("server.workspace_state.get_cursor_chat_ids", return_value=set()):
+        with patch("server.cursor_chat_db.get_cursor_chat_ids", return_value=set()):
             removed = WorkspaceRegistry.cleanup_stale(max_age_hours=24)
         assert removed == 0
         assert WorkspaceRegistry.count() == 1
 
     def test_cleanup_stale_keeps_with_sessions(self):
         """cleanup_stale keeps stale workspaces that still have sessions."""
-        state = WorkspaceRegistry.get_or_create(
-            "file:///ws-sessions", ensure_session=False
-        )
+        state = WorkspaceRegistry.get_or_create("file:///ws-sessions", ensure_session=False)
         state.last_activity = datetime.now() - timedelta(hours=48)
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     state.create_session(name="still-active")
 
-        with patch("server.workspace_state.get_cursor_chat_ids", return_value=set()):
+        with patch("server.cursor_chat_db.get_cursor_chat_ids", return_value=set()):
             with patch.object(state, "cleanup_stale_sessions", return_value=0):
                 removed = WorkspaceRegistry.cleanup_stale(max_age_hours=24)
 
@@ -1556,9 +1528,7 @@ class TestWorkspaceRegistryAdvanced:
         # Set access count just below threshold
         WorkspaceRegistry._access_count = WorkspaceRegistry._CLEANUP_INTERVAL - 1
 
-        with patch.object(
-            WorkspaceRegistry, "cleanup_stale", return_value=0
-        ) as mock_cleanup:
+        with patch.object(WorkspaceRegistry, "cleanup_stale", return_value=0) as mock_cleanup:
             result = await WorkspaceRegistry.get_for_ctx(mock_ctx)
             mock_cleanup.assert_called_once_with(max_age_hours=SESSION_STALE_HOURS)
             assert result is not None
@@ -1566,13 +1536,15 @@ class TestWorkspaceRegistryAdvanced:
     def test_sync_all_with_cursor(self):
         """sync_all_with_cursor syncs all workspaces."""
         state = WorkspaceRegistry.get_or_create("file:///ws1", ensure_session=False)
-        with patch.object(
-            state,
-            "sync_with_cursor_db",
-            return_value={"added": 1, "removed": 0, "renamed": 2, "updated": 0},
+        with (
+            patch.object(
+                state,
+                "sync_with_cursor_db",
+                return_value={"added": 1, "removed": 0, "renamed": 2, "updated": 0},
+            ),
+            patch.object(WorkspaceRegistry, "save_to_disk"),
         ):
-            with patch.object(WorkspaceRegistry, "save_to_disk"):
-                totals = WorkspaceRegistry.sync_all_with_cursor()
+            totals = WorkspaceRegistry.sync_all_with_cursor()
 
         assert totals["added"] == 1
         assert totals["renamed"] == 2
@@ -1616,29 +1588,27 @@ class TestWorkspaceRegistryAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s = state.create_session()
 
-        with patch.object(
-            state,
-            "sync_with_cursor_db",
-            return_value={"added": 0, "removed": 0, "renamed": 1, "updated": 0},
+        with (
+            patch.object(
+                state,
+                "sync_with_cursor_db",
+                return_value={"added": 0, "removed": 0, "renamed": 1, "updated": 0},
+            ),
+            patch.object(WorkspaceRegistry, "save_to_disk"),
         ):
-            with patch.object(WorkspaceRegistry, "save_to_disk"):
-                totals = WorkspaceRegistry.sync_sessions_with_cursor(
-                    session_ids=[s.session_id]
-                )
+            totals = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=[s.session_id])
 
         assert totals["renamed"] == 1
 
     def test_sync_sessions_with_cursor_no_match(self):
         """sync_sessions_with_cursor with no matching IDs does nothing."""
         WorkspaceRegistry.get_or_create("file:///ws1", ensure_session=False)
-        totals = WorkspaceRegistry.sync_sessions_with_cursor(
-            session_ids=["nonexistent"]
-        )
+        totals = WorkspaceRegistry.sync_sessions_with_cursor(session_ids=["nonexistent"])
         assert totals == {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
     def test_get_all_sessions_fills_project(self):
@@ -1648,7 +1618,7 @@ class TestWorkspaceRegistryAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     s = state.create_session()
@@ -1785,9 +1755,7 @@ class TestFormatSessionContextForJira:
                 {
                     "type": "assistant",
                     "text": "Done",
-                    "tool_results": [
-                        "Successfully deployed to stage environment with pod replicas=3"
-                    ],
+                    "tool_results": ["Successfully deployed to stage environment with pod replicas=3"],
                 },
             ],
         }
@@ -1843,9 +1811,7 @@ class TestFormatSessionContextForJira:
             },
             "messages": messages,
         }
-        result = format_session_context_for_jira(
-            chat_content, include_transcript=True, max_transcript_chars=500
-        )
+        result = format_session_context_for_jira(chat_content, include_transcript=True, max_transcript_chars=500)
         assert "... (truncated)" in result
 
     def test_session_duration_calculation(self):
@@ -1905,14 +1871,16 @@ class TestCursorChatFunctions:
 
     def test_get_cursor_chat_projects_no_db(self):
         """get_cursor_chat_projects returns empty when db doesn't exist."""
-        with patch(
-            "server.utils.load_config",
-            return_value={"repositories": {"proj": {"path": "/p"}}},
+        with (
+            patch(
+                "server.utils.load_config",
+                return_value={"repositories": {"proj": {"path": "/p"}}},
+            ),
+            patch("pathlib.Path.home", return_value=Path("/fake/home")),
         ):
-            with patch("pathlib.Path.home", return_value=Path("/fake/home")):
-                with patch("pathlib.Path.exists", return_value=False):
-                    result = get_cursor_chat_projects(["chat1"])
-                    assert result == {}
+            with patch("pathlib.Path.exists", return_value=False):
+                result = get_cursor_chat_projects(["chat1"])
+                assert result == {}
 
     def test_get_cursor_chat_projects_empty_valid_projects(self):
         """get_cursor_chat_projects returns empty when no valid projects."""
@@ -1926,9 +1894,7 @@ class TestCursorChatFunctions:
             {"composerId": "id1", "name": "Chat 1"},
             {"composerId": "id2", "name": "Chat 2"},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats", return_value=(mock_chats, "id1")
-        ):
+        with patch("server.cursor_chat_db.list_cursor_chats", return_value=(mock_chats, "id1")):
             result = get_cursor_chat_ids("file:///test")
             assert result == {"id1", "id2"}
 
@@ -1938,9 +1904,7 @@ class TestCursorChatFunctions:
             {"composerId": "id1", "name": "Chat 1"},
             {"composerId": "id2", "name": "Chat 2"},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats", return_value=(mock_chats, "id1")
-        ):
+        with patch("server.cursor_chat_db.list_cursor_chats", return_value=(mock_chats, "id1")):
             result = get_cursor_chat_names("file:///test")
             assert result == {"id1": "Chat 1", "id2": "Chat 2"}
 
@@ -1987,14 +1951,16 @@ class TestCursorChatFunctions:
 
     def test_get_meeting_transcript_issue_keys_no_db(self):
         """get_meeting_transcript_issue_keys returns empty when db missing."""
-        with patch(
-            "server.workspace_state.MEETINGS_DB_FILE",
-            Path("/fake/nonexistent.db"),
-            create=True,
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                Path("/fake/nonexistent.db"),
+                create=True,
+            ),
+            patch("pathlib.Path.exists", return_value=False),
         ):
-            with patch("pathlib.Path.exists", return_value=False):
-                result = get_meeting_transcript_issue_keys()
-                assert result == {}
+            result = get_meeting_transcript_issue_keys()
+            assert result == {}
 
     def test_inject_context_no_workspace_storage(self):
         """inject_context_to_cursor_chat returns False when no workspace storage."""
@@ -2046,9 +2012,7 @@ class TestTryRestoreWorkspaceFromDisk:
             json.dumps(
                 {
                     "version": 2,
-                    "workspaces": {
-                        "file:///other": {"sessions": {}, "project": "other"}
-                    },
+                    "workspaces": {"file:///other": {"sessions": {}, "project": "other"}},
                 }
             )
         )
@@ -2089,9 +2053,7 @@ class TestTryRestoreWorkspaceFromDisk:
                                     "last_tool": "k8s_pods",
                                     "last_tool_time": "2025-01-15T10:45:00",
                                     "tool_call_count": 12,
-                                    "meeting_references": [
-                                        {"meeting_id": 1, "title": "Sprint"}
-                                    ],
+                                    "meeting_references": [{"meeting_id": 1, "title": "Sprint"}],
                                 }
                             },
                         }
@@ -2277,13 +2239,11 @@ class TestLoadFromDiskAdvanced:
                 )
             )
 
-            with patch(
-                "server.workspace_state.list_cursor_chats", return_value=([], None)
+            with (
+                patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value=None),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value=None
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 1
             ws = WorkspaceRegistry.get("file:///ws1")
@@ -2320,13 +2280,11 @@ class TestLoadFromDiskAdvanced:
                 )
             )
 
-            with patch(
-                "server.workspace_state.list_cursor_chats", return_value=([], None)
+            with (
+                patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value=None),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value=None
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 1
             session = WorkspaceRegistry.get("file:///ws1").get_session("s1")
@@ -2356,13 +2314,11 @@ class TestLoadFromDiskAdvanced:
                 )
             )
 
-            with patch(
-                "server.workspace_state.list_cursor_chats", return_value=([], None)
+            with (
+                patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value="new-name"),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value="new-name"
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 1
             ws = WorkspaceRegistry.get("file:///ws1")
@@ -2396,13 +2352,11 @@ class TestLoadFromDiskAdvanced:
                 )
             )
 
-            with patch(
-                "server.workspace_state.list_cursor_chats", return_value=([], None)
+            with (
+                patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value=None),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value=None
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 0
             # Stale empty workspace should not be added
@@ -2419,7 +2373,7 @@ class TestLoadFromDiskAdvanced:
             patch.object(ws_module, "PERSIST_DIR", tmp_path),
             patch.object(ws_module, "PERSIST_FILE", persist_file),
         ):
-            with patch("builtins.open", side_effect=IOError("disk error")):
+            with patch("builtins.open", side_effect=OSError("disk error")):
                 restored = WorkspaceRegistry.load_from_disk()
                 assert restored == 0
 
@@ -2453,14 +2407,14 @@ class TestLoadFromDiskAdvanced:
             )
 
             cursor_chats = [{"composerId": "s1", "name": "New Name"}]
-            with patch(
-                "server.workspace_state.list_cursor_chats",
-                return_value=(cursor_chats, "s1"),
+            with (
+                patch(
+                    "server.cursor_chat_db.list_cursor_chats",
+                    return_value=(cursor_chats, "s1"),
+                ),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value=None),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value=None
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 1
             ws = WorkspaceRegistry.get("file:///ws1")
@@ -2503,9 +2457,7 @@ class TestLoadFromDiskAdvanced:
                                         "last_tool": "git_status",
                                         "last_tool_time": "2025-01-15T10:50:00",
                                         "tool_call_count": 15,
-                                        "meeting_references": [
-                                            {"meeting_id": 2, "title": "Retro"}
-                                        ],
+                                        "meeting_references": [{"meeting_id": 2, "title": "Retro"}],
                                     }
                                 },
                             }
@@ -2514,13 +2466,11 @@ class TestLoadFromDiskAdvanced:
                 )
             )
 
-            with patch(
-                "server.workspace_state.list_cursor_chats", return_value=([], None)
+            with (
+                patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)),
+                patch.object(WorkspaceRegistry, "_detect_project", return_value=None),
             ):
-                with patch.object(
-                    WorkspaceRegistry, "_detect_project", return_value=None
-                ):
-                    restored = WorkspaceRegistry.load_from_disk()
+                restored = WorkspaceRegistry.load_from_disk()
 
             assert restored == 1
             ws = WorkspaceRegistry.get("file:///ws1")
@@ -2565,30 +2515,24 @@ class TestSyncWithCursorDb:
                 "createdAt": 1700000000000,
             },
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, "chat1"),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, "chat1"),
+            ),
+            patch("server.cursor_chat_scan.get_cursor_chat_issue_keys", return_value={}),
+            patch("server.cursor_chat_scan.get_cursor_chat_personas", return_value={}),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys", return_value={}
-            ):
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas", return_value={}
-                ):
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={},
-                    ):
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch.object(
-                                state, "_get_loaded_tools", return_value=set()
-                            ):
-                                result = state.sync_with_cursor_db(
-                                    skip_content_scan=True
-                                )
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert result["added"] == 1
         assert state.get_session("chat1") is not None
@@ -2603,7 +2547,7 @@ class TestSyncWithCursorDb:
         state.active_session_id = "old-session"
 
         # Cursor has no chats
-        with patch("server.workspace_state.list_cursor_chats", return_value=([], None)):
+        with patch("server.cursor_chat_db.list_cursor_chats", return_value=([], None)):
             with patch.object(state, "_get_loaded_tools", return_value=set()):
                 result = state.sync_with_cursor_db(skip_content_scan=True)
 
@@ -2614,21 +2558,21 @@ class TestSyncWithCursorDb:
     def test_sync_renames_sessions(self):
         """sync_with_cursor_db updates names when Cursor's name changes."""
         state = WorkspaceState(workspace_uri="file:///test")
-        session = ChatSession(
-            session_id="s1", workspace_uri="file:///test", name="Old Name"
-        )
+        session = ChatSession(session_id="s1", workspace_uri="file:///test", name="Old Name")
         state.sessions["s1"] = session
         state.active_session_id = "s1"
 
         cursor_chats = [
             {"composerId": "s1", "name": "New Name", "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch.object(state, "_get_loaded_tools", return_value=set()):
-                result = state.sync_with_cursor_db(skip_content_scan=True)
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert result["renamed"] == 1
         assert session.name == "New Name"
@@ -2636,20 +2580,20 @@ class TestSyncWithCursorDb:
     def test_sync_clears_unnamed_placeholder(self):
         """sync_with_cursor_db clears 'unnamed' placeholder name."""
         state = WorkspaceState(workspace_uri="file:///test")
-        session = ChatSession(
-            session_id="s1", workspace_uri="file:///test", name="unnamed"
-        )
+        session = ChatSession(session_id="s1", workspace_uri="file:///test", name="unnamed")
         state.sessions["s1"] = session
 
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch.object(state, "_get_loaded_tools", return_value=set()):
-                result = state.sync_with_cursor_db(skip_content_scan=True)
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert result["renamed"] == 1
         assert session.name is None
@@ -2667,12 +2611,14 @@ class TestSyncWithCursorDb:
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
             {"composerId": "s2", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, "s2"),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, "s2"),
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch.object(state, "_get_loaded_tools", return_value=set()):
-                state.sync_with_cursor_db(skip_content_scan=True)
+            state.sync_with_cursor_db(skip_content_scan=True)
 
         assert state.active_session_id == "s2"
 
@@ -2688,16 +2634,18 @@ class TestSyncWithCursorDb:
                 "createdAt": 1700000000000,
             },
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value={},
-            ):
-                with patch.object(state, "_get_loaded_tools", return_value=set()):
-                    state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            state.sync_with_cursor_db(skip_content_scan=True)
 
         session = state.get_session("c1")
         assert session.issue_key == "AAP-12345"
@@ -2711,30 +2659,30 @@ class TestSyncWithCursorDb:
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_issue_keys",
                 return_value={"s1": "AAP-100"},
-            ) as mock_issues:
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas",
-                    return_value={"s1": "developer"},
-                ) as mock_personas:
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={},
-                    ) as mock_projects:
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch.object(
-                                state, "_get_loaded_tools", return_value=set()
-                            ):
-                                state.sync_with_cursor_db(session_ids=["s1"])
+            ) as mock_issues,
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_personas",
+                return_value={"s1": "developer"},
+            ) as mock_personas,
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={},
+            ) as mock_projects,
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            state.sync_with_cursor_db(session_ids=["s1"])
 
         # Content scanning functions should be called
         mock_issues.assert_called_once_with(["s1"])
@@ -2753,19 +2701,19 @@ class TestSyncWithCursorDb:
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value={},
-            ):
-                # Return 30 tools (simulating more tools loaded)
-                with patch.object(
-                    state, "_get_loaded_tools", return_value=set(range(30))
-                ):
-                    state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+        ):
+            # Return 30 tools (simulating more tools loaded)
+            with patch.object(state, "_get_loaded_tools", return_value=set(range(30))):
+                state.sync_with_cursor_db(skip_content_scan=True)
 
         assert session.static_tool_count == 30
 
@@ -2773,41 +2721,37 @@ class TestSyncWithCursorDb:
         """sync_with_cursor_db updates persona from chat content."""
         state = WorkspaceState(workspace_uri="file:///test")
         default_persona = get_default_persona()
-        session = ChatSession(
-            session_id="s1", workspace_uri="file:///test", persona=default_persona
-        )
+        session = ChatSession(session_id="s1", workspace_uri="file:///test", persona=default_persona)
         state.sessions["s1"] = session
 
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch("server.cursor_chat_scan.get_cursor_chat_issue_keys", return_value={}),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_personas",
+                return_value={"s1": "developer"},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch(
+                "server.workspace_defaults.get_persona_tool_count",
+                return_value=25,
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys", return_value={}
-            ):
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas",
-                    return_value={"s1": "developer"},
-                ):
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={},
-                    ):
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch(
-                                "server.workspace_state.get_persona_tool_count",
-                                return_value=25,
-                            ):
-                                with patch.object(
-                                    state, "_get_loaded_tools", return_value=set()
-                                ):
-                                    state.sync_with_cursor_db(session_ids=["s1"])
+            state.sync_with_cursor_db(session_ids=["s1"])
 
         assert session.persona == "developer"
 
@@ -2825,28 +2769,24 @@ class TestSyncWithCursorDb:
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch("server.cursor_chat_scan.get_cursor_chat_issue_keys", return_value={}),
+            patch("server.cursor_chat_scan.get_cursor_chat_personas", return_value={}),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={"s1": "specific-proj"},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys", return_value={}
-            ):
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas", return_value={}
-                ):
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={"s1": "specific-proj"},
-                    ):
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch.object(
-                                state, "_get_loaded_tools", return_value=set()
-                            ):
-                                state.sync_with_cursor_db(session_ids=["s1"])
+            state.sync_with_cursor_db(session_ids=["s1"])
 
         assert session.project == "specific-proj"
         assert session.is_project_auto_detected is False
@@ -2871,16 +2811,18 @@ class TestSyncWithCursorDb:
                 },
             ]
         }
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value=meeting_refs,
-            ):
-                with patch.object(state, "_get_loaded_tools", return_value=set()):
-                    state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            state.sync_with_cursor_db(skip_content_scan=True)
 
         assert len(session.meeting_references) == 1
         assert session.meeting_references[0]["meeting_id"] == 1
@@ -2901,7 +2843,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=("cursor-uuid-123", "My Chat"),
                 ):
                     session = state.create_session()
@@ -2915,7 +2857,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=("id1", "Cursor Name"),
                 ):
                     session = state.create_session()
@@ -2928,7 +2870,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=("id1", "Cursor Name"),
                 ):
                     session = state.create_session(name="My Explicit Name")
@@ -2941,7 +2883,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -2966,7 +2908,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -2981,12 +2923,10 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
-                    session = state.create_session(
-                        project="explicit-project", is_project_auto_detected=False
-                    )
+                    session = state.create_session(project="explicit-project", is_project_auto_detected=False)
 
         assert session.project == "explicit-project"
         assert session.is_project_auto_detected is False
@@ -2997,7 +2937,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -3013,7 +2953,7 @@ class TestCreateSessionAdvanced:
         with patch.object(state, "_get_loaded_tools", return_value=set()):
             with patch.object(WorkspaceRegistry, "save_to_disk"):
                 with patch(
-                    "server.workspace_state.get_cursor_chat_info_from_db",
+                    "server.cursor_chat_db.get_cursor_chat_info_from_db",
                     return_value=(None, None),
                 ):
                     session = state.create_session()
@@ -3202,7 +3142,7 @@ class TestGetCursorChatIdFromDb:
         from server.workspace_state import get_cursor_chat_id_from_db
 
         with patch(
-            "server.workspace_state.get_cursor_chat_info_from_db",
+            "server.cursor_chat_db.get_cursor_chat_info_from_db",
             return_value=("id123", "Name"),
         ):
             result = get_cursor_chat_id_from_db("file:///test")
@@ -3213,7 +3153,7 @@ class TestGetCursorChatIdFromDb:
         from server.workspace_state import get_cursor_chat_id_from_db
 
         with patch(
-            "server.workspace_state.get_cursor_chat_info_from_db",
+            "server.cursor_chat_db.get_cursor_chat_info_from_db",
             return_value=(None, None),
         ):
             result = get_cursor_chat_id_from_db("file:///test")
@@ -3289,7 +3229,7 @@ class TestListCursorChats:
         workspace_json.write_text(json.dumps({"folder": "file:///other-project"}))
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            chats, active_id = list_cursor_chats("file:///my-project")
+            chats, _active_id = list_cursor_chats("file:///my-project")
             assert chats == []
 
     def test_handles_db_query_failure(self, tmp_path):
@@ -3308,7 +3248,7 @@ class TestListCursorChats:
 
         with patch("pathlib.Path.home", return_value=tmp_path):
             with patch("subprocess.run", return_value=mock_result):
-                chats, active_id = list_cursor_chats("file:///my-project")
+                chats, _active_id = list_cursor_chats("file:///my-project")
                 assert chats == []
 
     def test_handles_invalid_json_in_workspace(self, tmp_path):
@@ -3320,7 +3260,7 @@ class TestListCursorChats:
         workspace_json.write_text("not json{{{")
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            chats, active_id = list_cursor_chats("file:///my-project")
+            chats, _active_id = list_cursor_chats("file:///my-project")
             assert chats == []
 
     def test_no_db_file(self, tmp_path):
@@ -3333,7 +3273,7 @@ class TestListCursorChats:
         # No state.vscdb
 
         with patch("pathlib.Path.home", return_value=tmp_path):
-            chats, active_id = list_cursor_chats("file:///my-project")
+            chats, _active_id = list_cursor_chats("file:///my-project")
             assert chats == []
 
     def test_deduplicates_across_dirs(self, tmp_path):
@@ -3343,9 +3283,7 @@ class TestListCursorChats:
         for i, _ts in enumerate([1000, 2000]):
             ws_dir = ws_storage / f"dir{i}"
             ws_dir.mkdir(parents=True)
-            (ws_dir / "workspace.json").write_text(
-                json.dumps({"folder": "file:///project"})
-            )
+            (ws_dir / "workspace.json").write_text(json.dumps({"folder": "file:///project"}))
             (ws_dir / "state.vscdb").write_text("")
 
         mock_results = [
@@ -3385,7 +3323,7 @@ class TestListCursorChats:
 
         with patch("pathlib.Path.home", return_value=tmp_path):
             with patch("subprocess.run", side_effect=mock_results):
-                chats, active_id = list_cursor_chats("file:///project")
+                chats, _active_id = list_cursor_chats("file:///project")
 
         assert len(chats) == 1
         assert chats[0]["name"] == "New"  # Should keep the newer one
@@ -3409,9 +3347,8 @@ class TestGetCursorChatIssueKeysDetailed:
             ("bubbleId:chat1:2", json.dumps({"text": "Also see aap-12347"})),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_issue_keys(["chat1"])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_issue_keys(["chat1"])
 
         assert "chat1" in result
         assert "AAP-12345" in result["chat1"]
@@ -3438,10 +3375,9 @@ class TestGetCursorChatIssueKeysDetailed:
             ("bubbleId:chat1:1", "not valid json"),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_issue_keys(["chat1"])
-                assert result == {}
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_issue_keys(["chat1"])
+            assert result == {}
 
     def test_sorts_issue_keys_numerically(self):
         """Issue keys are sorted by numeric part."""
@@ -3457,10 +3393,9 @@ class TestGetCursorChatIssueKeysDetailed:
             ),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_issue_keys(["chat1"])
-                assert result["chat1"] == "AAP-10000, AAP-50000, AAP-99999"
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_issue_keys(["chat1"])
+            assert result["chat1"] == "AAP-10000, AAP-50000, AAP-99999"
 
     def test_handles_per_chat_sqlite_error(self):
         """Handles sqlite3 error for individual chat query."""
@@ -3473,10 +3408,9 @@ class TestGetCursorChatIssueKeysDetailed:
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.execute.side_effect = sqlite3.Error("query failed")
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_issue_keys(["chat1"])
-                assert result == {}
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_issue_keys(["chat1"])
+            assert result == {}
 
 
 class TestGetCursorChatContentDetailed:
@@ -3494,26 +3428,22 @@ class TestGetCursorChatContentDetailed:
         mock_result.returncode = 1
         mock_result.stderr = "error"
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
-                assert result["message_count"] == 0
+        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+            result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
+            assert result["message_count"] == 0
 
     def test_parses_messages(self):
         """Parses user and assistant messages from DB output."""
         bid = "bubbleId:12345678-1234-5678-1234-567812345678"
         msg1 = json.dumps({"type": 1, "text": "Hello", "createdAt": 1700000000000})
-        msg2 = json.dumps(
-            {"type": 2, "text": "Hi there! AAP-12345", "createdAt": 1700000001000}
-        )
+        msg2 = json.dumps({"type": 2, "text": "Hi there! AAP-12345", "createdAt": 1700000001000})
         lines = [f"{bid}:1|{msg1}", f"{bid}:2|{msg2}"]
         mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "\n".join(lines)
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
+        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+            result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
 
         assert result["message_count"] == 2
         assert result["summary"]["user_messages"] == 1
@@ -3534,9 +3464,8 @@ class TestGetCursorChatContentDetailed:
         mock_result.returncode = 0
         mock_result.stdout = line
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
+        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+            result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
 
         assert result["summary"]["tool_calls"] == 1
         assert result["summary"]["code_changes"] == 1
@@ -3556,31 +3485,25 @@ class TestGetCursorChatContentDetailed:
         mock_result.returncode = 0
         mock_result.stdout = "no pipe here\n\nsome-key-only"
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
-                assert result["message_count"] == 0
+        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+            result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678")
+            assert result["message_count"] == 0
 
     def test_max_messages_limit(self):
         """Respects max_messages limit."""
         lines = []
         for i in range(10):
-            msg = json.dumps(
-                {"type": 1, "text": f"msg {i}", "createdAt": 1700000000000 + i * 1000}
-            )
+            msg = json.dumps({"type": 1, "text": f"msg {i}", "createdAt": 1700000000000 + i * 1000})
             lines.append(f"bubbleId:12345678-1234-5678-1234-567812345678:{i}|{msg}")
 
         mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = "\n".join(lines)
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_cursor_chat_content(
-                    "12345678-1234-5678-1234-567812345678", max_messages=3
-                )
-                assert len(result["messages"]) == 3
-                assert result["message_count"] == 10
+        with patch("pathlib.Path.exists", return_value=True), patch("subprocess.run", return_value=mock_result):
+            result = get_cursor_chat_content("12345678-1234-5678-1234-567812345678", max_messages=3)
+            assert len(result["messages"]) == 3
+            assert result["message_count"] == 10
 
     def test_handles_general_exception(self):
         """Handles general exception."""
@@ -3604,9 +3527,8 @@ class TestGetCursorChatPersonasDetailed:
             ("bubbleId:chat1:5", json.dumps({"text": 'persona_load("developer")'})),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
 
         assert result.get("chat1") == "developer"
 
@@ -3621,9 +3543,8 @@ class TestGetCursorChatPersonasDetailed:
             ("bubbleId:chat1:3", json.dumps({"text": 'session_start(agent="devops")'})),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
 
         assert result.get("chat1") == "devops"
 
@@ -3639,9 +3560,8 @@ class TestGetCursorChatPersonasDetailed:
             ("bubbleId:chat1:5", json.dumps({"text": 'persona_load("devops")'})),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
 
         assert result.get("chat1") == "devops"
 
@@ -3659,9 +3579,8 @@ class TestGetCursorChatPersonasDetailed:
             ),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
 
         assert "chat1" not in result
 
@@ -3685,10 +3604,9 @@ class TestGetCursorChatPersonasDetailed:
             ("bubbleId:chat1:1", json.dumps({"text": ""})),
         ]
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
-                assert "chat1" not in result
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
+            assert "chat1" not in result
 
     def test_handles_per_chat_sqlite_error(self):
         """Handles sqlite3 error for individual chat query."""
@@ -3701,10 +3619,9 @@ class TestGetCursorChatPersonasDetailed:
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.execute.side_effect = sqlite3.Error("query failed")
 
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("sqlite3.connect", return_value=mock_conn):
-                result = get_cursor_chat_personas(["chat1"])
-                assert result == {}
+        with patch("pathlib.Path.exists", return_value=True), patch("sqlite3.connect", return_value=mock_conn):
+            result = get_cursor_chat_personas(["chat1"])
+            assert result == {}
 
 
 class TestGetCursorChatProjectsDetailed:
@@ -3797,7 +3714,7 @@ class TestGetMeetingTranscriptIssueKeys:
     def test_db_not_found(self):
         """Returns empty when meet bot DB doesn't exist."""
         with patch(
-            "server.workspace_state.MEETINGS_DB_FILE",
+            "server.paths.MEETINGS_DB_FILE",
             new=Path("/nonexistent/db.sqlite"),
             create=True,
         ):
@@ -3808,16 +3725,16 @@ class TestGetMeetingTranscriptIssueKeys:
         """Finds AAP-XXXXX pattern in transcripts."""
         mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
-        mock_result.stdout = (
-            "1|||Discussing AAP-12345 today|||Sprint Planning|||2025-01-20T10:00:00"
-        )
+        mock_result.stdout = "1|||Discussing AAP-12345 today|||Sprint Planning|||2025-01-20T10:00:00"
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys()
+            result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
         assert result["AAP-12345"][0]["meeting_id"] == 1
@@ -3832,12 +3749,14 @@ class TestGetMeetingTranscriptIssueKeys:
             "2|||ticket 67890 is blocked|||Standup|||2025-01-21"
         )
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys()
+            result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
         assert "AAP-67890" in result
@@ -3848,12 +3767,14 @@ class TestGetMeetingTranscriptIssueKeys:
         mock_result.returncode = 0
         mock_result.stdout = "1|||AAP-12345 and AAP-99999|||Meeting|||2025-01-20"
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys(issue_keys=["AAP-12345"])
+            result = get_meeting_transcript_issue_keys(issue_keys=["AAP-12345"])
 
         assert "AAP-12345" in result
         assert "AAP-99999" not in result
@@ -3864,25 +3785,29 @@ class TestGetMeetingTranscriptIssueKeys:
         mock_result.returncode = 1
         mock_result.stderr = "error"
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys()
-                assert result == {}
+            result = get_meeting_transcript_issue_keys()
+            assert result == {}
 
     def test_handles_timeout(self):
         """Handles subprocess timeout."""
         import subprocess as sp
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", side_effect=sp.TimeoutExpired("sqlite3", 30)),
         ):
-            with patch("subprocess.run", side_effect=sp.TimeoutExpired("sqlite3", 30)):
-                result = get_meeting_transcript_issue_keys()
-                assert result == {}
+            result = get_meeting_transcript_issue_keys()
+            assert result == {}
 
     def test_handles_malformed_lines(self):
         """Handles lines with insufficient parts."""
@@ -3890,29 +3815,32 @@ class TestGetMeetingTranscriptIssueKeys:
         mock_result.returncode = 0
         mock_result.stdout = "1|||only two parts\n\ninvalid"
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys()
-                assert result == {}
+            result = get_meeting_transcript_issue_keys()
+            assert result == {}
 
     def test_aggregates_matches_across_entries(self):
         """Aggregates match counts across transcript entries."""
         mock_result = MagicMock(spec=subprocess.CompletedProcess)
         mock_result.returncode = 0
         mock_result.stdout = (
-            "1|||AAP-12345 mentioned here|||Sprint|||2025-01-20\n"
-            "1|||AAP-12345 mentioned again|||Sprint|||2025-01-20"
+            "1|||AAP-12345 mentioned here|||Sprint|||2025-01-20\n" "1|||AAP-12345 mentioned again|||Sprint|||2025-01-20"
         )
 
-        with patch(
-            "server.paths.MEETINGS_DB_FILE",
-            new=MagicMock(exists=MagicMock(return_value=True)),
+        with (
+            patch(
+                "server.paths.MEETINGS_DB_FILE",
+                new=MagicMock(exists=MagicMock(return_value=True)),
+            ),
+            patch("subprocess.run", return_value=mock_result),
         ):
-            with patch("subprocess.run", return_value=mock_result):
-                result = get_meeting_transcript_issue_keys()
+            result = get_meeting_transcript_issue_keys()
 
         assert "AAP-12345" in result
         assert result["AAP-12345"][0]["matches"] == 2
@@ -4087,16 +4015,18 @@ class TestSyncWithCursorDbAdvanced:
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": 1700000000000},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value={},
-            ):
-                with patch.object(state, "_get_loaded_tools", return_value=set()):
-                    result = state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert result["updated"] == 1
         assert session.last_activity > datetime(2020, 1, 1)
@@ -4104,9 +4034,7 @@ class TestSyncWithCursorDbAdvanced:
     def test_sync_updates_zero_tool_count_from_cache(self):
         """sync_with_cursor_db updates tool count from persona cache when zero."""
         state = WorkspaceState(workspace_uri="file:///test")
-        session = ChatSession(
-            session_id="s1", workspace_uri="file:///test", persona="devops"
-        )
+        session = ChatSession(session_id="s1", workspace_uri="file:///test", persona="devops")
         session.static_tool_count = 0
         state.sessions["s1"] = session
         # Not active session
@@ -4115,19 +4043,19 @@ class TestSyncWithCursorDbAdvanced:
         cursor_chats = [
             {"composerId": "s1", "name": None, "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value={},
-            ):
-                with patch(
-                    "server.workspace_state.get_persona_tool_count", return_value=15
-                ):
-                    with patch.object(state, "_get_loaded_tools", return_value=set()):
-                        result = state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch("server.workspace_defaults.get_persona_tool_count", return_value=15),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert session.static_tool_count == 15
         assert result["updated"] == 1
@@ -4141,23 +4069,21 @@ class TestSyncWithCursorDbAdvanced:
 
         cursor_chats = [{"composerId": "s1", "name": None, "lastUpdatedAt": None}]
         meeting_refs = {
-            "AAP-100": [
-                {"meeting_id": 1, "title": "Sprint", "date": "2025-01-20", "matches": 2}
-            ],
-            "AAP-200": [
-                {"meeting_id": 1, "title": "Sprint", "date": "2025-01-20", "matches": 3}
-            ],
+            "AAP-100": [{"meeting_id": 1, "title": "Sprint", "date": "2025-01-20", "matches": 2}],
+            "AAP-200": [{"meeting_id": 1, "title": "Sprint", "date": "2025-01-20", "matches": 3}],
         }
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value=meeting_refs,
-            ):
-                with patch.object(state, "_get_loaded_tools", return_value=set()):
-                    state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            state.sync_with_cursor_db(skip_content_scan=True)
 
         assert len(session.meeting_references) == 1
         assert session.meeting_references[0]["matches"] == 5  # 2 + 3
@@ -4174,33 +4100,31 @@ class TestSyncWithCursorDbAdvanced:
                 "createdAt": 1700000000000,
             },
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch("server.cursor_chat_scan.get_cursor_chat_issue_keys", return_value={}),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_personas",
+                return_value={"c1": "developer"},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={"c1": "my-proj"},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch(
+                "server.workspace_defaults.get_persona_tool_count",
+                return_value=30,
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
         ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys", return_value={}
-            ):
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas",
-                    return_value={"c1": "developer"},
-                ):
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={"c1": "my-proj"},
-                    ):
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch(
-                                "server.workspace_state.get_persona_tool_count",
-                                return_value=30,
-                            ):
-                                with patch.object(
-                                    state, "_get_loaded_tools", return_value=set()
-                                ):
-                                    state.sync_with_cursor_db(session_ids=["c1"])
+            state.sync_with_cursor_db(session_ids=["c1"])
 
         session = state.get_session("c1")
         assert session.persona == "developer"
@@ -4210,25 +4134,25 @@ class TestSyncWithCursorDbAdvanced:
     def test_sync_no_changes(self):
         """sync_with_cursor_db returns zeros when nothing changed."""
         state = WorkspaceState(workspace_uri="file:///test")
-        session = ChatSession(
-            session_id="s1", workspace_uri="file:///test", name="Same Name"
-        )
+        session = ChatSession(session_id="s1", workspace_uri="file:///test", name="Same Name")
         state.sessions["s1"] = session
         state.active_session_id = "s1"
 
         cursor_chats = [
             {"composerId": "s1", "name": "Same Name", "lastUpdatedAt": None},
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, "s1"),
-        ):
-            with patch(
-                "server.workspace_state.get_meeting_transcript_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, "s1"),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
                 return_value={},
-            ):
-                with patch.object(state, "_get_loaded_tools", return_value=set()):
-                    result = state.sync_with_cursor_db(skip_content_scan=True)
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            result = state.sync_with_cursor_db(skip_content_scan=True)
 
         assert result == {"added": 0, "removed": 0, "renamed": 0, "updated": 0}
 
@@ -4244,29 +4168,27 @@ class TestSyncWithCursorDbAdvanced:
                 "createdAt": 1700000000000,
             },
         ]
-        with patch(
-            "server.workspace_state.list_cursor_chats",
-            return_value=(cursor_chats, None),
-        ):
-            with patch(
-                "server.workspace_state.get_cursor_chat_issue_keys",
+        with (
+            patch(
+                "server.cursor_chat_db.list_cursor_chats",
+                return_value=(cursor_chats, None),
+            ),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_issue_keys",
                 return_value={"c1": "AAP-22222"},
-            ):
-                with patch(
-                    "server.workspace_state.get_cursor_chat_personas", return_value={}
-                ):
-                    with patch(
-                        "server.workspace_state.get_cursor_chat_projects",
-                        return_value={},
-                    ):
-                        with patch(
-                            "server.workspace_state.get_meeting_transcript_issue_keys",
-                            return_value={},
-                        ):
-                            with patch.object(
-                                state, "_get_loaded_tools", return_value=set()
-                            ):
-                                state.sync_with_cursor_db(session_ids=["c1"])
+            ),
+            patch("server.cursor_chat_scan.get_cursor_chat_personas", return_value={}),
+            patch(
+                "server.cursor_chat_scan.get_cursor_chat_projects",
+                return_value={},
+            ),
+            patch(
+                "server.cursor_chat_scan.get_meeting_transcript_issue_keys",
+                return_value={},
+            ),
+            patch.object(state, "_get_loaded_tools", return_value=set()),
+        ):
+            state.sync_with_cursor_db(session_ids=["c1"])
 
         session = state.get_session("c1")
         assert "AAP-11111" in session.issue_key
