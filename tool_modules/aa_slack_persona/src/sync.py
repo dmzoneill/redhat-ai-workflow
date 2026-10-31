@@ -12,11 +12,24 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_json(path: Path | str) -> Any:
+    """Read and parse a JSON file without blocking the event loop."""
+    return json.loads(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_json(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as JSON and write it without blocking the event loop."""
+    text = json.dumps(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
 
 # Default paths
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "aa-workflow"
@@ -225,7 +238,8 @@ class SlackPersonaSync:
         """Load sync metadata."""
         if self.metadata_file.exists():
             with open(self.metadata_file, encoding="utf-8") as f:
-                return json.load(f)
+                data: dict[str, Any] = json.load(f)
+            return data
         return {}
 
     def _save_metadata(self, metadata: dict[str, Any]) -> None:
@@ -241,7 +255,8 @@ class SlackPersonaSync:
         """Load per-channel sync state."""
         if self.channel_state_file.exists():
             with open(self.channel_state_file, encoding="utf-8") as f:
-                return json.load(f)
+                data: dict[str, Any] = json.load(f)
+            return data
         return {}
 
     def _save_channel_state(self, state: dict[str, Any]) -> None:
@@ -249,17 +264,13 @@ class SlackPersonaSync:
         with open(self.channel_state_file, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
 
-    def _is_day_synced(
-        self, channel_state: dict, channel_id: str, date_str: str
-    ) -> bool:
+    def _is_day_synced(self, channel_state: dict, channel_id: str, date_str: str) -> bool:
         """Check if a day has been synced for a channel."""
         channel_data = channel_state.get(channel_id, {})
         synced_days = channel_data.get("synced_days", [])
         return date_str in synced_days
 
-    def _mark_day_synced(
-        self, channel_state: dict, channel_id: str, date_str: str
-    ) -> None:
+    def _mark_day_synced(self, channel_state: dict, channel_id: str, date_str: str) -> None:
         """Mark a day as synced for a channel."""
         if channel_id not in channel_state:
             channel_state[channel_id] = {"synced_days": [], "last_sync": None}
@@ -267,7 +278,7 @@ class SlackPersonaSync:
         if date_str not in channel_state[channel_id]["synced_days"]:
             channel_state[channel_id]["synced_days"].append(date_str)
 
-        channel_state[channel_id]["last_sync"] = datetime.now().isoformat()
+        channel_state[channel_id]["last_sync"] = datetime.now().astimezone().isoformat()
 
     # -------------------------------------------------------------------------
     # Conversation discovery
@@ -323,7 +334,7 @@ class SlackPersonaSync:
     # -------------------------------------------------------------------------
 
     # pylint: disable-next=line-too-long
-    # pylint: disable-next=too-many-arguments,too-many-positional-arguments,too-many-locals,too-many-branches,too-many-statements  # noqa: E501
+    # pylint: disable-next=R0913,R0917,R0914,R0912,R0915
     async def _fetch_channel_day(
         self,
         channel_id: str,
@@ -432,11 +443,12 @@ class SlackPersonaSync:
                     user_id = msg.get("user", "")
 
                     try:
-                        dt = datetime.fromtimestamp(float(ts))
+                        dt = datetime.fromtimestamp(float(ts), tz=timezone.utc).astimezone()
                         datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
                     # Best-effort: failure is contained, not raised.
                     # pylint: disable-next=broad-exception-caught
                     except Exception:
+                        logger.debug("Suppressed error", exc_info=True)
                         datetime_str = ""
 
                     messages.append(
@@ -461,9 +473,7 @@ class SlackPersonaSync:
                         try:
                             thread_count += 1
                             await asyncio.sleep(request_delay)
-                            replies = await session.get_thread_replies(
-                                channel_id, thread_ts
-                            )
+                            replies = await session.get_thread_replies(channel_id, thread_ts)
 
                             for reply in replies:
                                 reply_ts = reply.get("ts", "")
@@ -480,13 +490,12 @@ class SlackPersonaSync:
                                     continue
 
                                 try:
-                                    reply_dt = datetime.fromtimestamp(float(reply_ts))
-                                    reply_datetime_str = reply_dt.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    )
+                                    reply_dt = datetime.fromtimestamp(float(reply_ts), tz=timezone.utc).astimezone()
+                                    reply_datetime_str = reply_dt.strftime("%Y-%m-%d %H:%M:%S")
                                 # Best-effort: failure is contained, not raised.
                                 # pylint: disable-next=broad-exception-caught
                                 except Exception:
+                                    logger.debug("Suppressed error", exc_info=True)
                                     reply_datetime_str = ""
 
                                 messages.append(
@@ -507,7 +516,7 @@ class SlackPersonaSync:
                         # Best-effort: failure is contained, not raised.
                         # pylint: disable-next=broad-exception-caught
                         except Exception as e:
-                            logger.debug("Error fetching thread %s: %s", thread_ts, e)
+                            logger.debug("Error fetching thread %s: %s", thread_ts, e, exc_info=True)
 
                 # Check for more pages
                 has_more = result.get("has_more", False)
@@ -521,6 +530,7 @@ class SlackPersonaSync:
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
+            logger.debug("Suppressed error", exc_info=True)
             await progress.update_worker(
                 worker_id=worker_id,
                 channel=display_name,
@@ -567,11 +577,11 @@ class SlackPersonaSync:
         days_skipped = 0
 
         # Generate day list based on direction
-        today = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+        today = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0)
 
         if direction == "backwards":
             # Today -> past
-            day_offsets = range(0, days)
+            day_offsets = range(days)
         else:
             # Past -> today (forwards)
             day_offsets = range(days - 1, -1, -1)
@@ -649,7 +659,7 @@ class SlackPersonaSync:
         Returns:
             Sync statistics
         """
-        start_time = datetime.now()
+        start_time = datetime.now().astimezone()
 
         # Load or reset channel state
         if reset_tracking:
@@ -740,7 +750,7 @@ class SlackPersonaSync:
 
         # Save metadata
         metadata = {
-            "last_full_sync": datetime.now().isoformat(),
+            "last_full_sync": datetime.now().astimezone().isoformat(),
             "days": days,
             "direction": direction,
             "workers": workers,
@@ -752,7 +762,7 @@ class SlackPersonaSync:
 
         # Write stats file for UI
         stats_file = self.vector_dir / "stats.json"
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = datetime.now().astimezone() - timedelta(days=days)
         stats_data = {
             "total_messages": vs_stats.get("total_messages", 0),
             "channels": channel_count,
@@ -760,13 +770,12 @@ class SlackPersonaSync:
             "group_dms": group_dm_count,
             "db_size_mb": vs_stats.get("db_size_mb", 0),
             "oldest_date": cutoff.strftime("%Y-%m-%d"),
-            "newest_date": datetime.now().strftime("%Y-%m-%d"),
-            "last_updated": datetime.now().isoformat(),
+            "newest_date": datetime.now().astimezone().strftime("%Y-%m-%d"),
+            "last_updated": datetime.now().astimezone().isoformat(),
         }
-        with open(stats_file, "w", encoding="utf-8") as f:
-            json.dump(stats_data, f, indent=2)
+        await _dump_json(stats_file, stats_data, indent=2)
 
-        elapsed = (datetime.now() - start_time).total_seconds()
+        elapsed = (datetime.now().astimezone() - start_time).total_seconds()
 
         return {
             "status": "success",
@@ -808,14 +817,14 @@ class SlackPersonaSync:
         include_threads: bool = True,
     ) -> dict[str, Any]:
         """Perform incremental sync of recent messages."""
-        start_time = datetime.now()
+        start_time = datetime.now().astimezone()
 
         # Load metadata to get window size
         metadata = self._load_metadata()
         total_days = metadata.get("days", 90)
 
         # Calculate prune cutoff
-        prune_cutoff = datetime.now() - timedelta(days=total_days)
+        prune_cutoff = datetime.now().astimezone() - timedelta(days=total_days)
         prune_ts = str(prune_cutoff.timestamp())
 
         logger.info("Starting incremental sync for %s day(s)", days)
@@ -836,11 +845,11 @@ class SlackPersonaSync:
         )
 
         # Update metadata
-        metadata["last_incremental_sync"] = datetime.now().isoformat()
+        metadata["last_incremental_sync"] = datetime.now().astimezone().isoformat()
         metadata["last_incremental_messages"] = result["messages_synced"]
         self._save_metadata(metadata)
 
-        elapsed = (datetime.now() - start_time).total_seconds()
+        elapsed = (datetime.now().astimezone() - start_time).total_seconds()
 
         return {
             "status": "success",
@@ -861,12 +870,13 @@ class SlackPersonaSync:
         """Search for similar messages."""
         vector_store = self._get_vector_store()
         user_id = self._my_user_id if my_messages_only else None
-        return vector_store.search(
+        results: list[dict[str, Any]] = vector_store.search(
             query=query,
             limit=limit,
             channel_type=channel_type,
             user_id=user_id,
         )
+        return results
 
     def get_status(self) -> dict[str, Any]:
         """Get sync status including per-channel state."""
