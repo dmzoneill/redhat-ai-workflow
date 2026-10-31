@@ -40,11 +40,8 @@ def get_initials(name: str) -> str:
 
 
 def _name_digest(name: str) -> str:
-    """Return a stable hex digest of a name for colours and cache keys.
-
-    MD5 is used only as a fast, stable fingerprint, never for security.
-    """
-    return hashlib.md5(name.lower().encode(), usedforsecurity=False).hexdigest()
+    """Return a stable hex digest of a name for colours and cache keys."""
+    return hashlib.sha256(name.lower().encode()).hexdigest()
 
 
 def _circle_mask(size: int, margin: int) -> np.ndarray:

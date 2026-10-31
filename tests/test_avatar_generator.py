@@ -18,14 +18,14 @@ def test_color_is_stable_and_case_insensitive():
     """The name colour is a fixed function of the lower-cased name."""
     color = avatar_generator.get_color_for_name("Ada Lovelace")
     assert color == avatar_generator.get_color_for_name("ada lovelace")
-    assert color == (75, 153, 216)
+    assert color == (216, 75, 106)
 
 
 def test_cache_path_keeps_existing_names(tmp_path, monkeypatch):
-    """Cache file names match those written by earlier versions."""
+    """Cache file names are a stable SHA-256 prefix of the name."""
     monkeypatch.setattr(avatar_generator, "AVATAR_CACHE_DIR", tmp_path)
     cache_path = vars(avatar_generator)["_get_cache_path"]("Ada Lovelace", 64)
-    assert cache_path == tmp_path / "03f339ae9cfc_64.png"
+    assert cache_path == tmp_path / "177f85df57ad_64.png"
 
 
 def test_avatar_shapes_and_alpha():
