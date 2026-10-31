@@ -19,6 +19,7 @@ Usage:
     # IntentClassification(intent="code_lookup", confidence=0.85, sources_suggested=["code"])
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 
 # Path for learned classifier models
 CLASSIFIER_DIR = Path.home() / ".cache" / "aa-workflow" / "classifiers"
+
+
+def _append_line(path: Path, line: str) -> None:
+    """Append one line of text to a file (run via asyncio.to_thread)."""
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 
 @dataclass
@@ -218,9 +225,7 @@ class IntentClassifier:
             # Best-effort: log and continue.
             # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning(
-                    "NPU classification failed, falling back to keywords: %s", e
-                )
+                logger.warning("NPU classification failed, falling back to keywords: %s", e, exc_info=True)
 
         # Fall back to keyword-based classification
         return self._keyword_classify(query)
@@ -293,7 +298,7 @@ class IntentClassifier:
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.debug("NPU not available: %s", e)
+            logger.debug("NPU not available: %s", e, exc_info=True)
             self._npu_available = False
 
         return self._npu_available
@@ -341,7 +346,7 @@ Available sources: code, slack, yaml, inscope, jira"""
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
-            logger.warning("NPU classification error: %s", e)
+            logger.warning("NPU classification error: %s", e, exc_info=True)
             return None
 
     async def learn(
@@ -373,18 +378,15 @@ Available sources: code, slack, yaml, inscope, jira"""
                 "query_hash": hashlib.md5(query.encode()).hexdigest()[:8],
             }
 
-            with open(training_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
+            await asyncio.to_thread(_append_line, training_file, json.dumps(entry))
 
-            logger.info(
-                "Recorded intent learning: %s for '%s...'", correct_intent, query[:50]
-            )
+            logger.info("Recorded intent learning: %s for '%s...'", correct_intent, query[:50])
             return True
 
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to record learning: %s", e)
+        except Exception:
+            logger.exception("Failed to record learning")
             return False
 
     def _get_default_sources(self) -> list[str]:
@@ -431,7 +433,7 @@ Available sources: code, slack, yaml, inscope, jira"""
                     intents[intent] = intents.get(intent, 0) + 1
         # Best-effort: log and continue.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Error reading training data: %s", e)
+        except Exception:
+            logger.exception("Error reading training data")
 
         return {"count": count, "intents": intents}
