@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Slides Tab - Google Slides presentation management UI
  *
@@ -36,14 +35,25 @@ const logger = createLogger("SlidesTab");
 type SlidesItemType =
   "category" | "presentation" | "slide" | "action" | "template" | "detail";
 
+interface SlideInfo {
+  title?: string;
+  layout?: string;
+}
+
+/** Payload attached to a tree item: a presentation (with optional slides), slide, template, etc. */
+interface SlidesItemData {
+  slides?: SlideInfo[];
+  [key: string]: unknown;
+}
+
 export class SlidesTreeItem extends vscode.TreeItem {
-  public data?: any;
+  public data?: SlidesItemData;
 
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly itemType: SlidesItemType,
-    data?: any,
+    data?: SlidesItemData,
   ) {
     super(label, collapsibleState);
     this.contextValue = itemType;
@@ -236,7 +246,7 @@ export class SlidesTreeProvider implements vscode.TreeDataProvider<SlidesTreeIte
         deck.name,
         vscode.TreeItemCollapsibleState.Collapsed,
         "presentation",
-        deck,
+        { ...deck },
       );
       presItem.iconPath = new vscode.ThemeIcon(
         "file-media",
@@ -390,7 +400,7 @@ export class SlidesTreeProvider implements vscode.TreeDataProvider<SlidesTreeIte
         template.name,
         vscode.TreeItemCollapsibleState.None,
         "template",
-        template,
+        { ...template },
       );
       templateItem.iconPath = new vscode.ThemeIcon(
         "file-code",
@@ -416,7 +426,7 @@ export class SlidesTreeProvider implements vscode.TreeDataProvider<SlidesTreeIte
     return items;
   }
 
-  private getSlideItems(slides: any[]): SlidesTreeItem[] {
+  private getSlideItems(slides: SlideInfo[]): SlidesTreeItem[] {
     const items: SlidesTreeItem[] = [];
 
     for (let i = 0; i < slides.length; i++) {
@@ -425,7 +435,7 @@ export class SlidesTreeProvider implements vscode.TreeDataProvider<SlidesTreeIte
         `Slide ${i + 1}: ${slide.title || "Untitled"}`,
         vscode.TreeItemCollapsibleState.None,
         "slide",
-        slide,
+        { ...slide },
       );
       slideItem.iconPath = new vscode.ThemeIcon("file");
       slideItem.description = slide.layout || "";
