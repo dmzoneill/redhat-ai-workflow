@@ -5,18 +5,18 @@ Provides 5 tools for Alertmanager silences and status.
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from mcp.types import TextContent
-
 from server.auto_heal_decorator import auto_heal_stage
+from server.config_manager import config as config_manager
 from server.timeouts import parse_duration_to_minutes
 from server.tool_registry import ToolRegistry
 
@@ -28,104 +28,105 @@ logger = logging.getLogger(__name__)
 # ==================== TOOLS ====================
 
 
+_SEVERITY_ICONS = {"critical": "🔴", "warning": "🟡", "info": "🔵"}
+
+
+def _alerts_endpoint(silenced: bool, inhibited: bool) -> str:
+    """The /alerts query for active alerts, with silenced/inhibited filters."""
+    params = [
+        f"silenced={'true' if silenced else 'false'}",
+        f"inhibited={'true' if inhibited else 'false'}",
+        "active=true",
+    ]
+    return "/alerts?" + "&".join(params)
+
+
+def _alert_matches(alert: dict, filter_lower: str) -> bool:
+    """Whether the alert's name, namespace, service, summary or description contains the filter."""
+    labels = alert.get("labels", {})
+    annotations = alert.get("annotations", {})
+    searchable = " ".join(
+        [
+            str(labels.get("alertname", "")),
+            str(labels.get("namespace", "")),
+            str(labels.get("service", "")),
+            str(annotations.get("summary", "")),
+            str(annotations.get("description", "")),
+        ]
+    ).lower()
+    return filter_lower in searchable
+
+
+def _alert_lines(alert: dict) -> list[str]:
+    """Markdown lines describing one alert."""
+    labels = alert.get("labels", {})
+    annotations = alert.get("annotations", {})
+    severity = labels.get("severity", "unknown")
+    namespace = labels.get("namespace", "")
+    summary = annotations.get("summary", "")[:80]
+    runbook = annotations.get("runbook_url", "")
+
+    lines = [f"{_SEVERITY_ICONS.get(severity, '⚪')} **{labels.get('alertname', 'Unknown')}** ({severity})"]
+    if namespace:
+        lines.append(f"   Namespace: `{namespace}`")
+    if summary:
+        lines.append(f"   {summary}")
+    lines.append(f"   Started: {alert.get('startsAt', '')[:19]}")
+    if runbook:
+        lines.append(f"   [Runbook]({runbook})")
+    lines.append("")
+    return lines
+
+
 async def _alertmanager_alerts_impl(
     environment: str, filter_name: str, silenced: bool, inhibited: bool
 ) -> list[TextContent]:
     """Implementation of alertmanager_alerts tool."""
     url, token = await get_alertmanager_config(environment)
 
-    # Build query params
-    params = []
-    if silenced:
-        params.append("silenced=true")
-    else:
-        params.append("silenced=false")
-    if inhibited:
-        params.append("inhibited=true")
-    else:
-        params.append("inhibited=false")
-    params.append("active=true")
-
-    endpoint = "/alerts?" + "&".join(params)
-    success, result = await alertmanager_request(url, endpoint, token=token)
+    success, result = await alertmanager_request(url, _alerts_endpoint(silenced, inhibited), token=token)
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to get alerts: {result}")]
 
     if not isinstance(result, list):
-        return [
-            TextContent(
-                type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}"
-            )
-        ]
+        return [TextContent(type="text", text=f"⚠️ Unexpected response: {str(result)[:500]}")]
 
     alerts = result
-
-    # Filter by name if specified
     if filter_name:
         filter_lower = filter_name.lower()
-        filtered = []
-        for a in alerts:
-            labels = a.get("labels", {})
-            annotations = a.get("annotations", {})
-
-            # Check alertname, namespace, and common labels/annotations
-            searchable = " ".join(
-                [
-                    str(labels.get("alertname", "")),
-                    str(labels.get("namespace", "")),
-                    str(labels.get("service", "")),
-                    str(annotations.get("summary", "")),
-                    str(annotations.get("description", "")),
-                ]
-            ).lower()
-
-            if filter_lower in searchable:
-                filtered.append(a)
-        alerts = filtered
+        alerts = [a for a in alerts if _alert_matches(a, filter_lower)]
 
     if not alerts:
         return [
             TextContent(
                 type="text",
-                text=f"✅ No active alerts in {environment}"
-                + (f" matching '{filter_name}'" if filter_name else ""),
+                text=f"✅ No active alerts in {environment}" + (f" matching '{filter_name}'" if filter_name else ""),
             )
         ]
 
     lines = [f"## 🚨 Active Alerts in {environment}", f"**Count:** {len(alerts)}", ""]
-
     for a in alerts[:20]:
-        labels = a.get("labels", {})
-        annotations = a.get("annotations", {})
-
-        alertname = labels.get("alertname", "Unknown")
-        severity = labels.get("severity", "unknown")
-        namespace = labels.get("namespace", "")
-
-        severity_icon = {"critical": "🔴", "warning": "🟡", "info": "🔵"}.get(
-            severity, "⚪"
-        )
-
-        summary = annotations.get("summary", "")[:80]
-
-        starts_at = a.get("startsAt", "")[:19]
-
-        lines.append(f"{severity_icon} **{alertname}** ({severity})")
-        if namespace:
-            lines.append(f"   Namespace: `{namespace}`")
-        if summary:
-            lines.append(f"   {summary}")
-        lines.append(f"   Started: {starts_at}")
-
-        # Add runbook link if available
-        runbook = annotations.get("runbook_url", "")
-        if runbook:
-            lines.append(f"   [Runbook]({runbook})")
-
-        lines.append("")
+        lines.extend(_alert_lines(a))
 
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+def _utc_iso(moment: datetime) -> str:
+    """Alertmanager timestamp: UTC ISO 8601 with a Z suffix."""
+    return moment.astimezone(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+
+
+def _parse_matchers(matchers: str) -> list[dict]:
+    """Parse "name=value,name=~regex" into Alertmanager matcher dicts."""
+    parsed = []
+    for m in matchers.split(","):
+        is_regex = "=~" in m
+        if not is_regex and "=" not in m:
+            continue
+        name, value = m.split("=~" if is_regex else "=", 1)
+        parsed.append({"name": name.strip(), "value": value.strip(), "isRegex": is_regex, "isEqual": True})
+    return parsed
 
 
 async def _alertmanager_create_silence_impl(
@@ -137,32 +138,10 @@ async def _alertmanager_create_silence_impl(
     # Parse duration using shared utility
     minutes = parse_duration_to_minutes(duration)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     ends = now + timedelta(minutes=minutes)
 
-    # Parse matchers
-    parsed_matchers = []
-    for m in matchers.split(","):
-        if "=~" in m:
-            name, value = m.split("=~", 1)
-            parsed_matchers.append(
-                {
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "isRegex": True,
-                    "isEqual": True,
-                }
-            )
-        elif "=" in m:
-            name, value = m.split("=", 1)
-            parsed_matchers.append(
-                {
-                    "name": name.strip(),
-                    "value": value.strip(),
-                    "isRegex": False,
-                    "isEqual": True,
-                }
-            )
+    parsed_matchers = _parse_matchers(matchers)
 
     if not parsed_matchers:
         return [
@@ -174,28 +153,24 @@ async def _alertmanager_create_silence_impl(
 
     data = {
         "matchers": parsed_matchers,
-        "startsAt": now.isoformat() + "Z",
-        "endsAt": ends.isoformat() + "Z",
+        "startsAt": _utc_iso(now),
+        "endsAt": _utc_iso(ends),
         "createdBy": "mcp-workflow",
         "comment": comment,
     }
 
-    success, result = await alertmanager_request(
-        url, "/silences", method="POST", data=data, token=token
-    )
+    success, result = await alertmanager_request(url, "/silences", method="POST", data=data, token=token)
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to create silence: {result}")]
 
-    silence_id = (
-        result.get("silenceID", "unknown") if isinstance(result, dict) else str(result)
-    )
+    silence_id = result.get("silenceID", "unknown") if isinstance(result, dict) else str(result)
 
     lines = [
         "## ✅ Silence Created",
         f"**ID:** `{silence_id}`",
         f"**Environment:** {environment}",
-        f"**Duration:** {duration} (until {ends.isoformat()}Z)",
+        f"**Duration:** {duration} (until {_utc_iso(ends)})",
         f"**Matchers:** {matchers}",
         f"**Comment:** {comment}",
     ]
@@ -203,15 +178,11 @@ async def _alertmanager_create_silence_impl(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _alertmanager_delete_silence_impl(
-    silence_id: str, environment: str
-) -> list[TextContent]:
+async def _alertmanager_delete_silence_impl(silence_id: str, environment: str) -> list[TextContent]:
     """Implementation of alertmanager_delete_silence tool."""
     url, token = await get_alertmanager_config(environment)
 
-    success, result = await alertmanager_request(
-        url, f"/silence/{silence_id}", method="DELETE", token=token
-    )
+    success, result = await alertmanager_request(url, f"/silence/{silence_id}", method="DELETE", token=token)
 
     if not success:
         return [TextContent(type="text", text=f"❌ Failed to delete silence: {result}")]
@@ -219,32 +190,19 @@ async def _alertmanager_delete_silence_impl(
     return [TextContent(type="text", text=f"✅ Silence `{silence_id}` deleted")]
 
 
-async def _prometheus_grafana_link_impl(
-    dashboard: str, namespace: str, environment: str
-) -> list[TextContent]:
+async def _prometheus_grafana_link_impl(dashboard: str, namespace: str, environment: str) -> list[TextContent]:
     """Implementation of prometheus_grafana_link tool."""
     # Get Prometheus URL from config.json or env
     prom_url = ""
     try:
-        from server.config_manager import config as config_manager
-
         env_key = "production" if environment.lower() == "prod" else environment.lower()
-        prom_url = (
-            (config_manager.get("prometheus") or {})
-            .get("environments", {})
-            .get(env_key, {})
-            .get("url", "")
-        )
-    except Exception as exc:
+        prom_url = (config_manager.get("prometheus") or {}).get("environments", {}).get(env_key, {}).get("url", "")
+    except (AttributeError, TypeError, ValueError, OSError) as exc:
         logger.debug("Suppressed error: %s", exc)
     if not prom_url:
         prom_url = os.getenv(f"PROMETHEUS_{environment.upper()}_URL", "")
     if not prom_url:
-        return [
-            TextContent(
-                type="text", text=f"❌ Prometheus URL not configured for {environment}"
-            )
-        ]
+        return [TextContent(type="text", text=f"❌ Prometheus URL not configured for {environment}")]
     grafana_url = prom_url.replace("prometheus", "grafana")
 
     params = []
@@ -288,9 +246,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             List of active alerts with their details.
         """
-        return await _alertmanager_alerts_impl(
-            environment, filter_name, silenced, inhibited
-        )
+        return await _alertmanager_alerts_impl(environment, filter_name, silenced, inhibited)
 
     @auto_heal_stage()
     @registry.tool()
@@ -312,9 +268,7 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             Created silence ID.
         """
-        return await _alertmanager_create_silence_impl(
-            matchers, duration, comment, environment
-        )
+        return await _alertmanager_create_silence_impl(matchers, duration, comment, environment)
 
     @auto_heal_stage()
     @registry.tool()
