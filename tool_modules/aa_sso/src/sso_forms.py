@@ -50,8 +50,16 @@ def get_sso_credentials(headless: bool = True) -> tuple[str, str]:
         headers={"Authorization": f"Bearer {token}"},
     )
 
+    # Local redhatter service over plain HTTP only: no file:, ftp: or data: handlers.
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with opener.open(request, timeout=15) as response:
             payload = response.read().decode("utf-8")
     except urllib.error.URLError as e:
         raise RuntimeError(f"Failed to get credentials: {e}") from e
@@ -67,7 +75,7 @@ def get_sso_credentials(headless: bool = True) -> tuple[str, str]:
     if not username or not password:
         raise RuntimeError("Credentials missing username or password")
 
-    logger.info("Retrieved credentials for user: %s", username)
+    logger.info("Fetched login details from redhatter")
     return username, password
 
 
@@ -115,7 +123,7 @@ async def fill_sso_form(
         for alt in alternatives:
             try:
                 await page.wait_for_selector(alt, timeout=2000)
-                logger.info("Using alternative selector: %s", alt)
+                logger.info("Using an alternative login form selector")
                 return alt
             # Intentional: skip this candidate when the optional step fails.
             except _AUTOMATION_ERRORS as exc:
@@ -128,17 +136,17 @@ async def fill_sso_form(
     submit_sel = await find_element(selectors.submit, selectors.submit_alt)
 
     # Fill username
-    logger.info("Filling username with selector: %s", username_sel)
+    logger.info("Filling login form: user ID")
     await page.fill(username_sel, username)
     await asyncio.sleep(0.3)
 
     # Fill password
-    logger.info("Filling password with selector: %s", password_sel)
+    logger.info("Filling login form: PIN + OTP")
     await page.fill(password_sel, password)
     await asyncio.sleep(0.3)
 
     # Click submit
-    logger.info("Clicking submit with selector: %s", submit_sel)
+    logger.info("Submitting login form")
     await page.click(submit_sel)
 
     logger.info("SSO form submitted")
@@ -185,7 +193,7 @@ def fill_sso_form_sync(
         for alt in alternatives:
             try:
                 page.wait_for_selector(alt, timeout=2000)
-                logger.info("Using alternative selector: %s", alt)
+                logger.info("Using an alternative login form selector")
                 return alt
             # Intentional: skip this candidate when the optional step fails.
             except _AUTOMATION_ERRORS as exc:
@@ -198,17 +206,17 @@ def fill_sso_form_sync(
     submit_sel = find_element(selectors.submit, selectors.submit_alt)
 
     # Fill username
-    logger.info("Filling username with selector: %s", username_sel)
+    logger.info("Filling login form: user ID")
     page.fill(username_sel, username)
     time.sleep(0.3)
 
     # Fill password
-    logger.info("Filling password with selector: %s", password_sel)
+    logger.info("Filling login form: PIN + OTP")
     page.fill(password_sel, password)
     time.sleep(0.3)
 
     # Click submit
-    logger.info("Clicking submit with selector: %s", submit_sel)
+    logger.info("Submitting login form")
     page.click(submit_sel)
 
     logger.info("SSO form submitted")

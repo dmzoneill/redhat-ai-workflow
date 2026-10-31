@@ -10,7 +10,7 @@ from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
-from tool_modules.aa_sso.src.sso_forms import get_sso_credentials
+from tool_modules.aa_sso.src.sso_forms import fill_sso_form, get_sso_credentials
 from tool_modules.aa_sso.src.sso_models import (
     _AUTOMATION_ERRORS,
     _JWT_ERRORS,
@@ -335,80 +335,11 @@ class SSOAuthenticator:
         password: str,
         page: Page | None = None,
     ) -> None:
-        """Fill SSO login form.
-
-        Uses Playwright's fill() which properly triggers input events.
-        """
+        """Fill and submit the SSO login form on ``page`` (default: the main page)."""
         page = page or self._page
         if page is None:
             raise RuntimeError("Browser page is not initialized")
-
-        logger.info("Filling SSO form...")
-
-        # Try primary selector, then alternatives
-        username_selector = await self._find_element(
-            page,
-            selectors.username,
-            selectors.username_alt,
-        )
-        password_selector = await self._find_element(
-            page,
-            selectors.password,
-            selectors.password_alt,
-        )
-        submit_selector = await self._find_element(
-            page,
-            selectors.submit,
-            selectors.submit_alt,
-        )
-
-        # Fill username
-        logger.info("Filling username with selector: %s", username_selector)
-        await page.fill(username_selector, username)
-        await asyncio.sleep(0.3)
-
-        # Fill password
-        logger.info("Filling password with selector: %s", password_selector)
-        await page.fill(password_selector, password)
-        await asyncio.sleep(0.3)
-
-        # Click submit
-        logger.info("Clicking submit with selector: %s", submit_selector)
-        await page.click(submit_selector)
-
-        logger.info("SSO form submitted")
-
-    async def _find_element(
-        self,
-        page: Page,
-        primary: str,
-        alternatives: Sequence[str],
-    ) -> str:
-        """Find element using primary selector or alternatives.
-
-        Returns the first selector that finds an element.
-        """
-        # Try primary
-        try:
-            await page.wait_for_selector(primary, timeout=5000)
-            return primary
-        # Intentional: log the failure and continue at this boundary.
-        except _AUTOMATION_ERRORS as exc:
-            logger.debug("Suppressed error: %s", exc)
-
-        # Try alternatives
-        for alt in alternatives:
-            try:
-                await page.wait_for_selector(alt, timeout=2000)
-                logger.info("Using alternative selector: %s", alt)
-                return alt
-            # Intentional: skip this candidate when the optional step fails.
-            except _AUTOMATION_ERRORS as exc:
-                logger.debug("Candidate failed: %s", exc)
-                continue
-
-        # Return primary and let it fail with proper error
-        return primary
+        await fill_sso_form(page, username, password, selectors)
 
     async def _wait_for_redirect(self, strategy: SSOStrategy) -> None:
         """Wait for redirect to target URL after SSO submit."""
@@ -490,7 +421,7 @@ class SSOAuthenticator:
             expires_at = None
             try:
                 expires_at = decode_jwt_expiry(token)
-                logger.info("Token expires at: %s", expires_at)
+                logger.info("Session expiry decoded: %s", expires_at)
             # Intentional: log the failure and continue at this boundary.
             except _JWT_ERRORS as e:
                 logger.warning("Could not decode JWT: %s", e)
@@ -507,7 +438,7 @@ class SSOAuthenticator:
                     "saved_at": int(time.time()),
                 }
                 cache_path.write_text(json.dumps(token_data, indent=2), encoding="utf-8")
-                logger.info("Saved token to: %s", cache_path)
+                logger.info("Wrote session cache: %s", cache_path)
         else:
             logger.warning("Could not extract JWT token")
 
@@ -541,7 +472,7 @@ class SSOAuthenticator:
                     logger.debug("Candidate failed: %s", exc)
                     continue
                 if value:
-                    logger.info("Found token in %s['%s']", storage_type, key)
+                    logger.info("Session value found in %s['%s']", storage_type, key)
                     return value
         return None
 

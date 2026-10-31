@@ -186,6 +186,8 @@ class SSOResult(NamedTuple):
 
 
 # Strategy definitions for known sites
+_CONCUR_LOGIN_FORM = "form#login-form"  # Concur's IdP page has more than one form
+
 KNOWN_STRATEGIES: dict[str, SSOStrategy] = {
     "reward_zone": SSOStrategy(
         name="reward_zone",
@@ -215,9 +217,9 @@ KNOWN_STRATEGIES: dict[str, SSOStrategy] = {
         callback_url_patterns=["setsession", "signin"],
         final_redirect_url="https://us2.concursolutions.com/home",
         selectors=SSOSelectors(
-            username="form#login-form input#username",
-            password="form#login-form input#password",
-            submit="form#login-form input#submit",
+            username=f"{_CONCUR_LOGIN_FORM} input#username",
+            password=f"{_CONCUR_LOGIN_FORM} input#password",
+            submit=f"{_CONCUR_LOGIN_FORM} input#submit",
         ),
     ),
 }

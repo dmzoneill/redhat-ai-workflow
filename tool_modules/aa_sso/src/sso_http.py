@@ -304,7 +304,7 @@ async def _saml_phase_acs(client: httpx.AsyncClient, config: HTTPSAMLConfig, par
         raise _SAMLStepError("No Location header from ACS redirect")
 
     session_token = sso_redirect.rstrip("/").split("/")[-1]
-    logger.info("Extracted session token: %s...", session_token[:20])
+    logger.info("Extracted session identifier from ACS redirect")
 
     # Follow the redirect to set cookies
     await client.get(sso_redirect, follow_redirects=True)
