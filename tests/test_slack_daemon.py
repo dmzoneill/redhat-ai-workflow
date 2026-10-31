@@ -9,7 +9,7 @@ from unittest import mock
 import pytest
 
 from scripts.common.command_registry import CommandType
-from services.slack import command_handler, daemon_messages, daemon_startup, errors, slack_config
+from services.slack import command_handler, daemon_messages, daemon_startup, errors, response_builder, slack_config
 from services.slack.daemon import SlackDaemon
 
 
@@ -406,3 +406,38 @@ def test_constructor_options_and_status(daemon, capsys):
     assert "DRY RUN MODE" in out
     with pytest.raises(TypeError):
         SlackDaemon(bogus=True)
+
+
+# ---------------------------------------------------------------- response builder
+
+
+def test_modulate_response_truncates_long_replies():
+    """Replies over the classification limit are cut with a truncation note."""
+    limited = SimpleNamespace(max_response_length=100)
+    assert response_builder.ResponseGenerator.modulate_response("x" * 150, limited) == "x" * 50 + "\n\n_...truncated_"
+    assert response_builder.ResponseGenerator.modulate_response("short", limited) == "short"
+    assert response_builder.ResponseGenerator.modulate_response(None, limited) is None
+
+
+async def test_generate_is_silent_on_claude_errors():
+    """A failing Claude call yields no reply instead of an error message."""
+    generator = object.__new__(response_builder.ResponseGenerator)
+    generator.notifier = response_builder.DesktopNotifier(enabled=False)
+    generator.claude_agent = mock.MagicMock(process_message=mock.AsyncMock(side_effect=RuntimeError("down")))
+    classification = mock.MagicMock(max_response_length=0, auto_respond=True, require_review=False)
+    assert await generator.generate(_msg(), classification) == (None, False)
+
+    generator.claude_agent.process_message = mock.AsyncMock(return_value="hi")
+    assert await generator.generate(_msg(thread_ts="9.9"), classification) == ("hi", True)
+    assert generator.claude_agent.process_message.call_args.kwargs["conversation_id"] == "C1:9.9"
+
+
+def test_notifier_rate_limit_and_send(monkeypatch):
+    """Notifications go through libnotify until the per-window limit is reached."""
+    notify = mock.MagicMock()
+    monkeypatch.setattr(response_builder, "_NOTIFY", notify)
+    notifier = response_builder.DesktopNotifier(enabled=False)
+    notifier.enabled = True
+    for _ in range(notifier.RATE_LIMIT_MAX + 2):
+        notifier.error("boom")
+    assert notify.Notification.new.call_count == notifier.RATE_LIMIT_MAX
