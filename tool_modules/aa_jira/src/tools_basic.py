@@ -209,7 +209,7 @@ def _parse_create_issue_result(success: bool, output: str) -> str:
         return f"❌ Failed to create issue: {output}"
 
     # Extract issue key from output
-    issue_key_match = re.search(r"([A-Z]+-\d+)", output)
+    issue_key_match = re.search(r"(?<![A-Z])([A-Z]+-\d+)", output)
     if issue_key_match:
         issue_key = issue_key_match.group(1)
         url = f"{_get_jira_url()}/browse/{issue_key}"
@@ -580,7 +580,7 @@ async def _jira_create_issue_impl(
 
         if mapped_priority:
             # Extract issue key from output
-            issue_key_match = re.search(r"([A-Z]+-\d+)", output)
+            issue_key_match = re.search(r"(?<![A-Z])([A-Z]+-\d+)", output)
             if issue_key_match:
                 issue_key = issue_key_match.group(1)
                 priority_success, priority_output = await run_rh_issue(
@@ -854,7 +854,7 @@ async def _jira_view_issue_json_impl(issue_key: str) -> str:
     # Parse key-value lines from the output
     # Format: "key             : value"
     for line in output.split("\n"):
-        match = re.match(r"^([a-z][a-z_ /]+?)\s*:\s*(.*)$", line.strip(), re.IGNORECASE)
+        match = re.match(r"^([a-z][a-z_ /]+):(.*)$", line.strip(), re.IGNORECASE)
         if match:
             key = match.group(1).strip().lower().replace(" ", "_").replace("/", "_")
             value = match.group(2).strip()
