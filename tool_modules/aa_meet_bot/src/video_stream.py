@@ -5,7 +5,7 @@ import fcntl
 import gc
 import logging
 import os
-import random
+import secrets
 import struct
 import time
 from pathlib import Path
@@ -27,6 +27,9 @@ from tool_modules.aa_meet_bot.src.video_theme import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 
 class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-methods
@@ -566,9 +569,9 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         attendee_data = self._precompute_attendee_data(attendee)
 
         # Preselect random data for this attendee
-        tools = random.sample(RESEARCH_TOOLS, config.num_tools)
-        findings = random.sample(FAKE_FINDINGS, config.num_findings)
-        assessment = random.choice(THREAT_ASSESSMENTS)
+        tools = _RNG.sample(RESEARCH_TOOLS, config.num_tools)
+        findings = _RNG.sample(FAKE_FINDINGS, config.num_findings)
+        assessment = _RNG.choice(THREAT_ASSESSMENTS)
 
         start_time = asyncio.get_event_loop().time()
         last_npu_update = -1
