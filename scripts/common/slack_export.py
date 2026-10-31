@@ -22,15 +22,19 @@ Usage:
     await export_messages_to_jsonl(session, conversations, output_file)
 """
 
+import asyncio
+import importlib
 import json
 import logging
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    pass  # SlackSession imported dynamically
+import httpx
+
+from server import utils as server_utils
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,31 @@ _slack_path = PROJECT_ROOT / "tool_modules" / "aa_slack" / "src"
 if str(_slack_path) not in sys.path:
     sys.path.insert(0, str(_slack_path))
 
+# Errors the Slack session raises for API/transport failures
+_SLACK_ERRORS = (ValueError, KeyError, httpx.HTTPError)
+
+# Keys in a client.counts response and the flag each conversation type gets
+_COUNTS_KINDS = (("ims", "is_im"), ("mpims", "is_mpim"), ("channels", "is_channel"))
+
+
+@dataclass
+class _ExportStats:
+    """Running totals for an export."""
+
+    message_count: int = 0
+    conversation_count: int = 0
+    skipped_conversations: int = 0
+    errors: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the stats in the historical dict shape."""
+        return {
+            "message_count": self.message_count,
+            "conversation_count": self.conversation_count,
+            "skipped_conversations": self.skipped_conversations,
+            "errors": self.errors,
+        }
+
 
 def get_slack_config() -> dict[str, Any]:
     """Get Slack configuration from config.json.
@@ -52,13 +81,11 @@ def get_slack_config() -> dict[str, Any]:
         Slack config dict with auth credentials, or empty dict if not found
     """
     try:
-        from server.utils import load_config
-
-        config = load_config()
-        return config.get("slack", {})
-    except Exception as e:
-        logger.error(f"Failed to load Slack config: {e}")
+        slack: dict[str, Any] = server_utils.load_config().get("slack", {})
+    except (OSError, ValueError):
+        logger.exception("Failed to load Slack config")
         return {}
+    return slack
 
 
 async def create_slack_session(validate: bool = True) -> Any | None:
@@ -70,7 +97,7 @@ async def create_slack_session(validate: bool = True) -> Any | None:
     Returns:
         SlackSession instance if successful, None if credentials missing or validation fails
     """
-    from slack_client import SlackSession
+    slack_session_cls = importlib.import_module("slack_client").SlackSession
 
     slack_config = get_slack_config()
     auth = slack_config.get("auth", {})
@@ -79,7 +106,7 @@ async def create_slack_session(validate: bool = True) -> Any | None:
         logger.error("No Slack credentials found in config.json")
         return None
 
-    session = SlackSession(
+    session = slack_session_cls(
         xoxc_token=auth.get("xoxc_token", ""),
         d_cookie=auth.get("d_cookie", ""),
         workspace_id=auth.get("workspace_id", ""),
@@ -89,12 +116,22 @@ async def create_slack_session(validate: bool = True) -> Any | None:
     if validate:
         try:
             await session.validate_session()
-            logger.info(f"Slack session validated, user_id: {session.user_id}")
-        except Exception as e:
-            logger.error(f"Slack session validation failed: {e}")
+            logger.info("Slack session validated, user_id: %s", session.user_id)
+        except _SLACK_ERRORS:
+            logger.exception("Slack session validation failed")
             return None
 
     return session
+
+
+def _conversations_from_counts(counts: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build a conversation list from a client.counts API response."""
+    conversations: list[dict[str, Any]] = []
+    for key, flag in _COUNTS_KINDS:
+        for entry in counts.get(key, []):
+            conv_id = entry.get("id") if isinstance(entry, dict) else entry
+            conversations.append({"id": conv_id, flag: True})
+    return conversations
 
 
 async def get_conversations_with_fallback(
@@ -115,16 +152,14 @@ async def get_conversations_with_fallback(
     Returns:
         List of conversation dicts with at least 'id' key
     """
-    conversations: list[dict[str, Any]] = []
-
     # Try users.conversations first
     try:
-        conversations = await session.get_user_conversations(types=types, limit=limit)
-        logger.info(f"Found {len(conversations)} conversations via users.conversations")
+        conversations: list[dict[str, Any]] = await session.get_user_conversations(types=types, limit=limit)
+        logger.info("Found %d conversations via users.conversations", len(conversations))
         return conversations
-    except Exception as e:
+    except _SLACK_ERRORS as e:
         if "enterprise_is_restricted" not in str(e):
-            logger.warning(f"users.conversations failed: {e}")
+            logger.warning("users.conversations failed: %s", e)
             # Don't fall back for non-enterprise errors
             raise
 
@@ -132,33 +167,22 @@ async def get_conversations_with_fallback(
     logger.info("Enterprise restricted, trying client.counts API...")
     try:
         counts = await session.get_client_counts()
+    except _SLACK_ERRORS:
+        logger.exception("client.counts API also failed")
+        return []
 
-        if counts.get("ok"):
-            # Build conversation list from counts
-            for im in counts.get("ims", []):
-                if isinstance(im, dict):
-                    conversations.append({"id": im.get("id"), "is_im": True})
-                else:
-                    conversations.append({"id": im, "is_im": True})
-
-            for mpim in counts.get("mpims", []):
-                if isinstance(mpim, dict):
-                    conversations.append({"id": mpim.get("id"), "is_mpim": True})
-                else:
-                    conversations.append({"id": mpim, "is_mpim": True})
-
-            for channel in counts.get("channels", []):
-                if isinstance(channel, dict):
-                    conversations.append({"id": channel.get("id"), "is_channel": True})
-                else:
-                    conversations.append({"id": channel, "is_channel": True})
-
-            logger.info(f"Found {len(conversations)} conversations via client.counts")
-
-    except Exception as e:
-        logger.error(f"client.counts API also failed: {e}")
-
+    if not counts.get("ok"):
+        return []
+    conversations = _conversations_from_counts(counts)
+    logger.info("Found %d conversations via client.counts", len(conversations))
     return conversations
+
+
+def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    """Write records to a JSON-lines file (run via asyncio.to_thread)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(json.dumps(record) + "\n" for record in records)
 
 
 async def export_messages_to_jsonl(
@@ -184,52 +208,40 @@ async def export_messages_to_jsonl(
         user_id = session.user_id
 
     # Calculate time range
-    now = datetime.now()
-    oldest_date = now - timedelta(days=months * 30)
-    oldest_ts = str(oldest_date.timestamp())
+    oldest_ts = str((datetime.now().astimezone() - timedelta(days=months * 30)).timestamp())
 
-    stats = {
-        "message_count": 0,
-        "conversation_count": 0,
-        "skipped_conversations": 0,
-        "errors": [],
-    }
+    stats = _ExportStats()
+    exported: list[dict[str, Any]] = []
 
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+    for conv in conversations:
+        conv_id = conv.get("id")
+        if not conv_id:
+            continue
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        for conv in conversations:
-            conv_id = conv.get("id")
-            if not conv_id:
-                continue
+        try:
+            messages = await session.get_conversation_history(channel=conv_id, oldest=oldest_ts, limit=1000)
+        except _SLACK_ERRORS as e:
+            logger.debug("Error fetching %s", conv_id, exc_info=True)
+            stats.errors.append(f"Error fetching {conv_id}: {e}")
+            stats.skipped_conversations += 1
+            continue
 
-            try:
-                messages = await session.get_conversation_history(
-                    channel=conv_id,
-                    oldest=oldest_ts,
-                    limit=1000,
-                )
+        # Filter to user's messages
+        user_messages = [m for m in messages if m.get("user") == user_id]
+        if user_messages:
+            stats.conversation_count += 1
+            stats.message_count += len(user_messages)
+            exported.extend(user_messages)
+        else:
+            stats.skipped_conversations += 1
 
-                # Filter to user's messages
-                user_messages = [m for m in messages if m.get("user") == user_id]
-
-                if user_messages:
-                    stats["conversation_count"] += 1
-                    for msg in user_messages:
-                        f.write(json.dumps(msg) + "\n")
-                        stats["message_count"] += 1
-                else:
-                    stats["skipped_conversations"] += 1
-
-            except Exception as e:
-                error_msg = f"Error fetching {conv_id}: {e}"
-                logger.debug(error_msg)
-                stats["errors"].append(error_msg)
-                stats["skipped_conversations"] += 1
+    await asyncio.to_thread(_write_jsonl, output_file, exported)
 
     logger.info(
-        f"Exported {stats['message_count']} messages from "
-        f"{stats['conversation_count']} conversations to {output_file}"
+        "Exported %d messages from %d conversations to %s",
+        stats.message_count,
+        stats.conversation_count,
+        output_file,
     )
 
-    return stats
+    return stats.as_dict()
