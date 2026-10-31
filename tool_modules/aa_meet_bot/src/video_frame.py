@@ -424,7 +424,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
             "has_slack_data": attendee.slack_id is not None,
             "tools": [
                 (f"slack://user/{slack_id}" if attendee.slack_id else f"slack://search?user={first_name}.{last_name}"),
-                f"ldap://query?uid={username}",
+                f"ldaps://query?uid={username}",
                 f"jira://search?assignee={username}",
                 f"gitlab://commits?author={email}",
                 f"confluence://pages?author={attendee.name.replace(' ', '+')}",
@@ -728,7 +728,7 @@ class RealtimeFrameMixin(DynamicFields):  # pylint: disable=too-few-public-metho
         username = f"{first_name[0]}{last_name}" if len(name_parts) > 1 else first_name
         email_domain = "redhat.com"
         return [
-            f"ldap://query?uid={username}",
+            f"ldaps://query?uid={username}",
             f"jira://search?assignee={username}",
             f"gitlab://commits?author={username}@{email_domain}",
             f"slack://history?user={first_name}.{last_name}",
