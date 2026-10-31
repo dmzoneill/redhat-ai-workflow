@@ -7,6 +7,7 @@ import yaml
 
 # Sprint daemon owns its own state file - no shared file with other services
 from services.sprint.bot.execution_tracer import (
+    ExecutionTracer,
     StepStatus,
     WorkflowState,
 )
@@ -22,6 +23,23 @@ from services.sprint.daemon_common import (
 from services.sprint.daemon_work import SprintWorkMixin
 
 logger = logging.getLogger(__name__)
+
+
+def find_issue(state: dict, issue_key: str) -> dict | None:
+    """The issue with ``issue_key`` in the sprint state, if present."""
+    return next((issue for issue in state.get("issues", []) if issue.get("key") == issue_key), None)
+
+
+async def launch_continuation_chat(issue_key: str, work_log: dict) -> str | None:
+    """Ask the VS Code extension over D-Bus for a chat continuing ``issue_key``; return its chat ID."""
+    bus, chat_interface = await connect_chat_interface()
+    # Don't return to the previous chat: the user wants to work on this one
+    result = await chat_interface.call_launch_issue_chat(issue_key, f"Continue: {work_log.get('summary', '')}", False)
+    bus.disconnect()
+    if not result:
+        return None
+    result_dict = json.loads(str(result))
+    return result_dict.get("chatId") if result_dict.get("success") else None
 
 
 class SprintDBusHandlersMixin(SprintWorkMixin):
@@ -434,7 +452,6 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             logger.exception("Failed to save sprint state via D-Bus")
             return {"success": False, "error": str(e)}
 
-    # pylint: disable-next=too-many-statements
     async def _handle_start_issue(self, params: dict) -> dict:
         """Start processing an issue immediately, bypassing all checks.
 
@@ -458,19 +475,11 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         if background_mode is None:
             background_mode = state.get("backgroundTasks", True)
 
-        # Find the issue
-        target_issue = None
-        for issue in state.get("issues", []):
-            if issue.get("key") == issue_key:
-                target_issue = issue
-                break
-
+        target_issue = find_issue(state, issue_key)
         if not target_issue:
             return {"success": False, "error": f"Issue {issue_key} not found in sprint"}
 
         logger.info("Starting issue immediately: %s (background=%s)", _log_safe(issue_key), _log_safe(background_mode))
-
-        # Mark as in_progress and set as processing
         target_issue["approvalStatus"] = "in_progress"
         state["processingIssue"] = issue_key
         _add_timeline_event(
@@ -483,7 +492,6 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         )
         self._save_state(state)
 
-        # Initialize execution tracer
         tracer = self._get_tracer(issue_key, target_issue)
         self._trace_transition(tracer, WorkflowState.LOADING, trigger="force_start")
         self._trace_step(
@@ -494,31 +502,41 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             reason="User requested immediate start via UI, bypassing all checks",
         )
 
-        # FOREGROUND MODE: Open Cursor chat
         if not background_mode:
-            cursor_available = await self._is_cursor_available()
-            if not cursor_available:
-                # Can't do foreground without Cursor - inform user
-                target_issue["approvalStatus"] = "blocked"
-                target_issue["waitingReason"] = "Cursor not available for foreground mode"
-                state["processingIssue"] = None
-                self._save_state(state)
-                return {
-                    "success": False,
-                    "error": "Cursor is not available. Please open VS Code/Cursor first, or use background mode.",
-                }
-
-            # Process in Cursor (foreground)
-            result = await self._process_in_cursor_traced(target_issue, state, tracer)
-            return result
+            return await self._force_start_in_cursor(target_issue, state, tracer)
 
         # BACKGROUND MODE: Run via Claude CLI
-        # Transition Jira to In Progress
         await self._start_jira_work(tracer, issue_key, "force_start_background")
+        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="jira_transitioned")
+        result = await self._run_background_and_record(target_issue, state, tracer)
+        if result.get("success"):
+            return {"success": True, "message": f"Completed {issue_key}", "mode": "background"}
+        return {"success": False, "error": result.get("error", "Background processing failed"), "mode": "background"}
 
-        target_issue["jiraStatus"] = self.jira_status_in_progress
+    async def _force_start_in_cursor(self, issue: dict, state: dict, tracer: ExecutionTracer) -> dict:
+        """Foreground force-start: open a Cursor chat, or block the issue when Cursor is not running."""
+        if await self._is_cursor_available():
+            return await self._process_in_cursor_traced(issue, state, tracer)
+        issue["approvalStatus"] = "blocked"
+        issue["waitingReason"] = "Cursor not available for foreground mode"
+        state["processingIssue"] = None
+        self._save_state(state)
+        return {
+            "success": False,
+            "error": "Cursor is not available. Please open VS Code/Cursor first, or use background mode.",
+        }
+
+    async def _run_background_and_record(self, issue: dict, state: dict, tracer: ExecutionTracer) -> dict:
+        """Mark the issue started, run it via Claude CLI and record completion (to Review) or the block reason.
+
+        Returns the background run's result.
+        """
+        issue_key = issue["key"]
+        issue["approvalStatus"] = "in_progress"
+        issue["jiraStatus"] = self.jira_status_in_progress
+        state["processingIssue"] = issue_key
         _add_timeline_event(
-            target_issue,
+            issue,
             {
                 "timestamp": _local_now().isoformat(),
                 "action": "started",
@@ -526,70 +544,66 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
                 "jiraTransition": self.jira_status_in_progress,
             },
         )
-        target_issue["hasTrace"] = True
-        target_issue["tracePath"] = str(tracer.trace_path)
+        issue["hasTrace"] = True
+        issue["tracePath"] = str(tracer.trace_path)
         self._save_state(state)
 
-        # Build prompt and run
-        self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="jira_transitioned")
         self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background")
+        result = await self._run_issue_in_background_traced(issue, tracer)
 
-        result = await self._run_issue_in_background_traced(target_issue, tracer)
-
-        # Reload state and update
+        # Reload state in case it changed during the run
         state = self._load_state()
-        target_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), target_issue)
-
+        issue = find_issue(state, issue_key) or issue
+        work_log_path = str(self._history.get_work_log_path(issue_key))
         if result.get("success"):
-            self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
-            await self._transition_jira_issue(issue_key, self.jira_status_in_review)
-            self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
-            tracer.mark_completed(summary=f"MR created for {issue_key}")
-
+            await self._move_to_review(issue, tracer, work_log_path)
+            self._issues_processed += 1
+        else:
+            # Blocked: Jira stays "In Progress"; the issue waits for a human with the reason
+            error_reason = result.get("error", "Background processing failed")
+            tracer.mark_blocked(error_reason)
             _add_timeline_event(
-                target_issue,
+                issue,
                 {
                     "timestamp": _local_now().isoformat(),
-                    "action": "background_completed",
-                    "description": "Background processing completed - moved to review",
-                    "workLogPath": str(self._history.get_work_log_path(issue_key)),
-                    "jiraTransition": self.jira_status_in_review,
+                    "action": "background_blocked",
+                    "description": f"Bot blocked: {error_reason}",
                 },
             )
-            target_issue["approvalStatus"] = "completed"
-            target_issue["jiraStatus"] = self.jira_status_in_review
-            target_issue["hasWorkLog"] = True
-            target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
-            state["processingIssue"] = None
-            self._save_state(state)
-            self._issues_processed += 1
-
-            return {
-                "success": True,
-                "message": f"Completed {issue_key}",
-                "mode": "background",
-            }
-        error_reason = result.get("error", "Background processing failed")
-        tracer.mark_blocked(error_reason)
-
-        _add_timeline_event(
-            target_issue,
-            {
-                "timestamp": _local_now().isoformat(),
-                "action": "background_blocked",
-                "description": f"Bot blocked: {error_reason}",
-            },
-        )
-        target_issue["approvalStatus"] = "blocked"
-        target_issue["waitingReason"] = error_reason
-        target_issue["hasWorkLog"] = True
-        target_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
+            issue["approvalStatus"] = "blocked"
+            issue["waitingReason"] = error_reason
+        issue.update(hasWorkLog=True, workLogPath=work_log_path, hasTrace=True, tracePath=str(tracer.trace_path))
         state["processingIssue"] = None
         self._save_state(state)
+        return result
 
-        return {"success": False, "error": error_reason, "mode": "background"}
+    async def _move_to_review(self, issue: dict, tracer: ExecutionTracer, work_log_path: str) -> None:
+        """Transition a completed issue to In Review in Jira, the trace and the issue's timeline."""
+        issue_key = issue["key"]
+        self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
+        await self._transition_jira_issue(issue_key, self.jira_status_in_review)
+        self._trace_step(
+            tracer,
+            "transition_jira_review",
+            inputs={"issue_key": issue_key, "target_status": self.jira_status_in_review},
+            outputs={"success": True},
+            tool_name="jira_transition",
+        )
+        self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
+        tracer.mark_completed(summary=f"MR created for {issue_key}")
+        _add_timeline_event(
+            issue,
+            {
+                "timestamp": _local_now().isoformat(),
+                "action": "background_completed",
+                "description": "Background processing completed - moved to review",
+                "workLogPath": work_log_path,
+                "jiraTransition": self.jira_status_in_review,
+            },
+        )
+        issue["approvalStatus"] = "completed"
+        issue["jiraStatus"] = self.jira_status_in_review
 
-    # pylint: disable-next=too-many-locals
     async def _handle_open_in_cursor(self, params: dict) -> dict:
         """Open an issue's work log in Cursor for interactive continuation.
 
@@ -600,72 +614,44 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         if not issue_key:
             return {"success": False, "error": "issue_key required"}
 
-        # Load work log
         work_log = self._history.load_work_log(issue_key)
         if not work_log:
             return {"success": False, "error": f"No work log found for {issue_key}"}
 
-        # Check if Cursor is available
-        cursor_available = await self._is_cursor_available()
-        if not cursor_available:
-            return {
-                "success": False,
-                "error": "Cursor is not available. Please open VS Code/Cursor first.",
-            }
+        if not await self._is_cursor_available():
+            return {"success": False, "error": "Cursor is not available. Please open VS Code/Cursor first."}
 
-        # Build the context prompt from the work log
         prompt = self._history.build_cursor_context_prompt(issue_key, work_log)
-
-        # Create a Cursor chat with this context
         try:
-            bus, chat_interface = await connect_chat_interface()
-
-            # Launch the chat with context
-            result = await chat_interface.call_launch_issue_chat(
-                issue_key,
-                f"Continue: {work_log.get('summary', '')}",
-                False,  # Don't return to previous - user wants to work on this
-            )
-
-            bus.disconnect()
-
-            if result:
-                result_dict = json.loads(str(result))
-                if result_dict.get("success"):
-                    chat_id = result_dict.get("chatId")
-
-                    # Update the issue with the new chat ID
-                    state = self._load_state()
-                    for issue in state.get("issues", []):
-                        if issue.get("key") == issue_key:
-                            issue["chatId"] = chat_id
-                            _add_timeline_event(
-                                issue,
-                                {
-                                    "timestamp": _local_now().isoformat(),
-                                    "action": "opened_in_cursor",
-                                    "description": "Opened background work in Cursor for interactive continuation",
-                                    "chatLink": chat_id,
-                                },
-                            )
-                            break
-                    self._save_state(state)
-
-                    logger.info("Opened %s in Cursor: %s", issue_key, chat_id)
-                    return {
-                        "success": True,
-                        "message": f"Opened {issue_key} in Cursor",
-                        "chat_id": chat_id,
-                        "context_prompt": prompt,
-                    }
-
-            return {"success": False, "error": "Failed to create Cursor chat"}
-
+            chat_id = await launch_continuation_chat(issue_key, work_log)
         except RECOVERABLE_ERRORS as e:
             logger.exception("Failed to open %s in Cursor", issue_key)
             return {"success": False, "error": str(e)}
+        if not chat_id:
+            return {"success": False, "error": "Failed to create Cursor chat"}
 
-    # pylint: disable-next=too-many-statements
+        state = self._load_state()
+        issue = find_issue(state, issue_key)
+        if issue:
+            issue["chatId"] = chat_id
+            _add_timeline_event(
+                issue,
+                {
+                    "timestamp": _local_now().isoformat(),
+                    "action": "opened_in_cursor",
+                    "description": "Opened background work in Cursor for interactive continuation",
+                    "chatLink": chat_id,
+                },
+            )
+        self._save_state(state)
+        logger.info("Opened %s in Cursor: %s", issue_key, chat_id)
+        return {
+            "success": True,
+            "message": f"Opened {issue_key} in Cursor",
+            "chat_id": chat_id,
+            "context_prompt": prompt,
+        }
+
     async def _process_next_issue(self) -> dict:
         """Process the next approved issue that is actionable.
 
@@ -676,96 +662,23 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
         Now includes execution tracing for full observability.
         """
         state = self._load_state()
-
-        # Find next approved issue that is also actionable
-        next_issue = None
-        for issue in state.get("issues", []):
-            if issue.get("approvalStatus") == "approved" and self._is_actionable(issue):
-                next_issue = issue
-                break
-
+        next_issue = next(
+            (i for i in state.get("issues", []) if i.get("approvalStatus") == "approved" and self._is_actionable(i)),
+            None,
+        )
         if not next_issue:
-            return {
-                "success": True,
-                "message": "No approved actionable issues to process",
-            }
+            return {"success": True, "message": "No approved actionable issues to process"}
 
         issue_key = next_issue["key"]
         background_mode = state.get("backgroundTasks", True)
-
         logger.info("Processing issue: %s (background=%s)", _log_safe(issue_key), _log_safe(background_mode))
 
-        # Initialize execution tracer
         tracer = self._get_tracer(issue_key, next_issue)
-        self._trace_transition(tracer, WorkflowState.LOADING, trigger="start_processing")
-
-        # Log issue loading step
-        self._trace_step(
-            tracer,
-            "load_issue",
-            inputs={
-                "issue_key": issue_key,
-                "approval_status": next_issue.get("approvalStatus"),
-            },
-            outputs={
-                "summary": next_issue.get("summary", "")[:100],
-                "jira_status": next_issue.get("jiraStatus"),
-            },
-        )
-        self._trace_transition(tracer, WorkflowState.ANALYZING, trigger="issue_loaded")
-
-        # Classify the issue
-        workflow_type = self.workflow_config.classify_issue(next_issue)
-        tracer.set_workflow_type(
-            workflow_type,
-            reason=f"Issue type: {next_issue.get('issueType', 'Story')}, keywords matched: {workflow_type}",
-        )
-        self._trace_transition(tracer, WorkflowState.CLASSIFYING, trigger="analysis_complete")
-
-        # Check actionability
-        is_actionable = self._is_actionable(next_issue)
-        self._trace_step(
-            tracer,
-            "check_actionable",
-            inputs={"jira_status": next_issue.get("jiraStatus")},
-            outputs={"is_actionable": is_actionable},
-            decision="actionable" if is_actionable else "not_actionable",
-            reason=(
-                f"Status '{next_issue.get('jiraStatus')}' is "
-                f"{'actionable' if is_actionable else 'not actionable'} per workflow config"
-            ),
-        )
-        self._trace_transition(tracer, WorkflowState.CHECKING_ACTIONABLE, trigger="classified")
-
-        # Check Cursor availability
+        workflow_type = self._trace_issue_analysis(tracer, next_issue)
         cursor_available = await self._is_cursor_available()
 
-        # FOREGROUND MODE: Requires Cursor - wait if not available
         if not background_mode:
-            if not cursor_available:
-                logger.info("Foreground mode: Cursor not available, waiting...")
-                self._trace_step(
-                    tracer,
-                    "check_cursor",
-                    inputs={"mode": "foreground"},
-                    outputs={"cursor_available": False},
-                    status=StepStatus.SKIPPED,
-                    reason="Cursor not available, waiting...",
-                )
-                return {
-                    "success": False,
-                    "waiting": True,
-                    "message": "Waiting for Cursor to be available",
-                }
-
-            # Cursor is available - launch chat
-            self._trace_step(
-                tracer,
-                "check_cursor",
-                inputs={"mode": "foreground"},
-                outputs={"cursor_available": True},
-            )
-            return await self._process_in_cursor_traced(next_issue, state, tracer)
+            return await self._process_in_foreground(next_issue, state, tracer, cursor_available)
 
         # BACKGROUND MODE: Run via Claude CLI (no Cursor dependency)
         logger.info("Background mode: Running %s via Claude CLI", _log_safe(issue_key))
@@ -776,34 +689,11 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             decision="background",
             reason="Background mode enabled, running via Claude CLI",
         )
-
-        # Transition Jira issue to "In Progress"
         await self._start_jira_work(tracer, issue_key, "is_actionable")
-
         if workflow_type == "spike":
             self._trace_transition(tracer, WorkflowState.RESEARCHING, trigger="transitioned_spike")
         else:
             self._trace_transition(tracer, WorkflowState.STARTING_WORK, trigger="transitioned_code_change")
-
-        # Update local status
-        next_issue["approvalStatus"] = "in_progress"
-        next_issue["jiraStatus"] = self.jira_status_in_progress
-        state["processingIssue"] = issue_key
-        _add_timeline_event(
-            next_issue,
-            {
-                "timestamp": _local_now().isoformat(),
-                "action": "started",
-                "description": "Sprint bot started background processing",
-                "jiraTransition": self.jira_status_in_progress,
-            },
-        )
-        # Add trace reference to issue
-        next_issue["hasTrace"] = True
-        next_issue["tracePath"] = str(tracer.trace_path)
-        self._save_state(state)
-
-        # Build prompt
         self._trace_transition(tracer, WorkflowState.BUILDING_PROMPT, trigger="branch_created")
         self._trace_step(
             tracer,
@@ -811,75 +701,53 @@ class SprintDBusHandlersMixin(SprintWorkMixin):
             inputs={"workflow_type": workflow_type},
             outputs={"prompt_length": len(self._build_work_prompt(next_issue))},
         )
+        return await self._run_background_and_record(next_issue, state, tracer)
 
-        # Run in background
-        self._trace_transition(tracer, WorkflowState.IMPLEMENTING, trigger="prompt_ready_background")
-        result = await self._run_issue_in_background_traced(next_issue, tracer)
+    def _trace_issue_analysis(self, tracer: ExecutionTracer, issue: dict) -> str:
+        """Trace loading, classifying and the actionability check of an issue; return its workflow type."""
+        self._trace_transition(tracer, WorkflowState.LOADING, trigger="start_processing")
+        self._trace_step(
+            tracer,
+            "load_issue",
+            inputs={"issue_key": issue["key"], "approval_status": issue.get("approvalStatus")},
+            outputs={"summary": issue.get("summary", "")[:100], "jira_status": issue.get("jiraStatus")},
+        )
+        self._trace_transition(tracer, WorkflowState.ANALYZING, trigger="issue_loaded")
 
-        # Reload state in case it changed
-        state = self._load_state()
-        next_issue = next((i for i in state.get("issues", []) if i["key"] == issue_key), next_issue)
+        workflow_type = self.workflow_config.classify_issue(issue)
+        tracer.set_workflow_type(
+            workflow_type,
+            reason=f"Issue type: {issue.get('issueType', 'Story')}, keywords matched: {workflow_type}",
+        )
+        self._trace_transition(tracer, WorkflowState.CLASSIFYING, trigger="analysis_complete")
 
-        if result.get("success"):
-            # Transition Jira issue to "In Review" (work completed, MR created)
-            self._trace_transition(tracer, WorkflowState.CREATING_MR, trigger="implementation_complete")
+        is_actionable = self._is_actionable(issue)
+        verdict = "actionable" if is_actionable else "not actionable"
+        self._trace_step(
+            tracer,
+            "check_actionable",
+            inputs={"jira_status": issue.get("jiraStatus")},
+            outputs={"is_actionable": is_actionable},
+            decision=verdict.replace(" ", "_"),
+            reason=f"Status '{issue.get('jiraStatus')}' is {verdict} per workflow config",
+        )
+        self._trace_transition(tracer, WorkflowState.CHECKING_ACTIONABLE, trigger="classified")
+        return workflow_type
 
-            await self._transition_jira_issue(issue_key, self.jira_status_in_review)
+    async def _process_in_foreground(
+        self, issue: dict, state: dict, tracer: ExecutionTracer, cursor_available: bool
+    ) -> dict:
+        """Foreground mode needs Cursor: launch the chat, or wait until Cursor is running."""
+        if not cursor_available:
+            logger.info("Foreground mode: Cursor not available, waiting...")
             self._trace_step(
                 tracer,
-                "transition_jira_review",
-                inputs={
-                    "issue_key": issue_key,
-                    "target_status": self.jira_status_in_review,
-                },
-                outputs={"success": True},
-                tool_name="jira_transition",
+                "check_cursor",
+                inputs={"mode": "foreground"},
+                outputs={"cursor_available": False},
+                status=StepStatus.SKIPPED,
+                reason="Cursor not available, waiting...",
             )
-
-            self._trace_transition(tracer, WorkflowState.AWAITING_REVIEW, trigger="mr_created")
-            tracer.mark_completed(summary=f"MR created for {issue_key}")
-
-            _add_timeline_event(
-                next_issue,
-                {
-                    "timestamp": _local_now().isoformat(),
-                    "action": "background_completed",
-                    "description": "Background processing completed - moved to review",
-                    "workLogPath": str(self._history.get_work_log_path(issue_key)),
-                    "jiraTransition": self.jira_status_in_review,
-                },
-            )
-            next_issue["approvalStatus"] = "completed"
-            next_issue["jiraStatus"] = self.jira_status_in_review
-            next_issue["hasWorkLog"] = True
-            next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
-            next_issue["hasTrace"] = True
-            next_issue["tracePath"] = str(tracer.trace_path)
-            state["processingIssue"] = None
-            self._save_state(state)
-            self._issues_processed += 1
-            return result
-        # Bot is blocked - keep in "In Progress" but mark as blocked with reason
-        # Do NOT transition Jira status - it stays "In Progress"
-        error_reason = result.get("error", "Background processing failed")
-
-        tracer.mark_blocked(error_reason)
-
-        _add_timeline_event(
-            next_issue,
-            {
-                "timestamp": _local_now().isoformat(),
-                "action": "background_blocked",
-                "description": f"Bot blocked: {error_reason}",
-            },
-        )
-        next_issue["approvalStatus"] = "blocked"
-        next_issue["waitingReason"] = error_reason
-        # jiraStatus stays as "In Progress" - issue is not done, just blocked
-        next_issue["hasWorkLog"] = True
-        next_issue["hasTrace"] = True
-        next_issue["tracePath"] = str(tracer.trace_path)
-        next_issue["workLogPath"] = str(self._history.get_work_log_path(issue_key))
-        state["processingIssue"] = None
-        self._save_state(state)
-        return result
+            return {"success": False, "waiting": True, "message": "Waiting for Cursor to be available"}
+        self._trace_step(tracer, "check_cursor", inputs={"mode": "foreground"}, outputs={"cursor_available": True})
+        return await self._process_in_cursor_traced(issue, state, tracer)
