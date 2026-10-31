@@ -5,11 +5,15 @@ Primary: Text-based detection from captions (zero processing cost)
 Fallback: Audio-based detection using openWakeWord or Porcupine
 """
 
+import importlib
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import ClassVar
+
+import numpy as np
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -34,7 +38,17 @@ class WakeWordEvent:
         return f"[{self.timestamp.strftime('%H:%M:%S')}] Wake word from {self.speaker}: {self.command_text}"
 
 
-# pylint: disable-next=too-many-instance-attributes
+@dataclass
+class _CommandState:
+    """State of the command currently being collected after a wake word."""
+
+    listening: bool = False
+    start_time: datetime | None = None
+    speaker: str | None = None
+    buffer: list[str] = field(default_factory=list)
+    last_processed_text: str = ""
+
+
 class TextWakeWordDetector:
     """
     Detects wake word "David" from caption text.
@@ -51,29 +65,77 @@ class TextWakeWordDetector:
         # Context buffer for recent captions
         # (speaker, text, time)
         self.context_buffer: list[tuple[str, str, datetime]] = []
-        self.max_context_entries = 10
 
-        # State tracking
-        self.listening_for_command = False
-        self.command_start_time: datetime | None = None
-        self.command_speaker: str | None = None
-        self.command_buffer: list[str] = []
-
-        # Timing
-        self.pause_threshold = timedelta(seconds=1.0)  # Reduced from 2s for faster response
-        self.command_timeout = timedelta(seconds=8)  # Max time to wait for command
-
-        # Track last processed text to avoid re-triggering on updates
-        self._last_processed_text: str = ""
+        # Command collection state
+        self._command = _CommandState()
 
         # Callback
         self._callback: Callable[[WakeWordEvent], None] | None = None
+
+    max_context_entries: ClassVar[int] = 10
+    pause_threshold: ClassVar[timedelta] = timedelta(seconds=1.0)  # Reduced from 2s for faster response
+    command_timeout: ClassVar[timedelta] = timedelta(seconds=8)  # Max time to wait for command
+
+    @property
+    def listening_for_command(self) -> bool:
+        """True while collecting command text after a wake word."""
+        return self._command.listening
+
+    @listening_for_command.setter
+    def listening_for_command(self, value: bool) -> None:
+        self._command.listening = value
+
+    @property
+    def command_start_time(self) -> datetime | None:
+        """When the current command started."""
+        return self._command.start_time
+
+    @command_start_time.setter
+    def command_start_time(self, value: datetime | None) -> None:
+        self._command.start_time = value
+
+    @property
+    def command_speaker(self) -> str | None:
+        """Speaker of the current command."""
+        return self._command.speaker
+
+    @command_speaker.setter
+    def command_speaker(self, value: str | None) -> None:
+        self._command.speaker = value
+
+    @property
+    def command_buffer(self) -> list[str]:
+        """Text collected for the current command."""
+        return self._command.buffer
+
+    @command_buffer.setter
+    def command_buffer(self, value: list[str]) -> None:
+        self._command.buffer = value
 
     def set_callback(self, callback: Callable[[WakeWordEvent], None]) -> None:
         """Set callback for wake word events."""
         self._callback = callback
 
-    # pylint: disable-next=too-many-branches
+    def _update_command_buffer(self, text: str) -> None:
+        """Update the command buffer from a (possibly revised) caption while listening."""
+        last = self._command.last_processed_text
+        if text == last:
+            return
+        if text.startswith(last):
+            # Extract any NEW text beyond what we've seen
+            new_text = text[len(last) :].strip()
+            if new_text:
+                self.command_buffer.append(new_text)
+                logger.debug("Added to command buffer: %s...", new_text[:30])
+        else:
+            # Text changed significantly - might be a correction; take text after the wake word
+            match = self.pattern.search(text)
+            if match:
+                command_text = text[match.end() :].strip()
+                self._command.buffer = [command_text] if command_text else []
+                logger.debug("Command buffer updated: %s...", command_text[:30] if command_text else "empty")
+        self._command.last_processed_text = text
+
     def process_caption(self, speaker: str, text: str) -> WakeWordEvent | None:
         """
         Process a caption entry and check for wake word.
@@ -95,27 +157,7 @@ class TextWakeWordDetector:
         # If we're already listening for a command, just update the buffer with new text
         # Don't re-trigger wake word detection on caption updates
         if self.listening_for_command:
-            # Check if this is new text (not just a repeat)
-            if text != self._last_processed_text:
-                # Extract any NEW text beyond what we've seen
-                if text.startswith(self._last_processed_text):
-                    new_text = text[len(self._last_processed_text) :].strip()
-                    if new_text:
-                        self.command_buffer.append(new_text)
-                        logger.debug("Added to command buffer: %s...", new_text[:30])
-                else:
-                    # Text changed significantly - might be a correction, update buffer
-                    # Find text after the wake word
-                    match = self.pattern.search(text)
-                    if match:
-                        command_text = text[match.end() :].strip()
-                        self.command_buffer = [command_text] if command_text else []
-                        logger.debug(
-                            "Command buffer updated: %s...",
-                            command_text[:30] if command_text else "empty",
-                        )
-
-                self._last_processed_text = text
+            self._update_command_buffer(text)
             return None  # Don't re-trigger, just update buffer
 
         # Check for wake word (only when NOT already listening)
@@ -154,40 +196,22 @@ class TextWakeWordDetector:
             # This handles cases like "David, how are you?" in a single transcription
             if command_start and command_start.rstrip()[-1:] in ".?!":
                 logger.info("🎯 Complete command detected immediately: %s", command_start)
-                self.command_buffer = [command_start]
-                self.command_speaker = speaker
-                self.command_start_time = now
+                self._command.buffer = [command_start]
+                self._command.speaker = speaker
+                self._command.start_time = now
                 return self._create_event(speaker)
 
             # Otherwise wait for a pause to get the complete command.
-            self.listening_for_command = True
-            self.command_start_time = now
-            self.command_speaker = speaker
-            self.command_buffer = [command_start] if command_start else []
-            self._last_processed_text = text  # Track what we've seen
+            self._command.listening = True
+            self._command.start_time = now
+            self._command.speaker = speaker
+            self._command.buffer = [command_start] if command_start else []
+            self._command.last_processed_text = text  # Track what we've seen
 
             logger.info(
                 "🎯 Now listening for command after wake word (buffer: %s...)",
                 command_start[:50] if command_start else "empty",
             )
-
-        elif self.listening_for_command:
-            # We're collecting command text after wake word
-
-            # Check for timeout
-            if now - self.command_start_time > self.command_timeout:
-                logger.info("Command timeout - resetting")
-                self._reset_command_state()
-                return None
-
-            # Check if same speaker is continuing
-            if speaker == self.command_speaker:
-                self.command_buffer.append(text)
-            else:
-                # Different speaker - might be end of command
-                # Check if there's a pause (this caption is from someone else)
-                if self.command_buffer:
-                    return self._create_event(self.command_speaker or "Unknown")
 
         return None
 
@@ -233,11 +257,7 @@ class TextWakeWordDetector:
 
     def _reset_command_state(self) -> None:
         """Reset command collection state."""
-        self.listening_for_command = False
-        self.command_start_time = None
-        self.command_speaker = None
-        self.command_buffer = []
-        self._last_processed_text = ""
+        self._command = _CommandState()
 
     def reset(self) -> None:
         """Full reset - clear all state including context buffer.
@@ -268,12 +288,11 @@ class AudioWakeWordDetector:
         """Initialize the wake word model."""
         try:
             # Try to import openwakeword
-            # pylint: disable-next=import-outside-toplevel
-            from openwakeword.model import Model
+            model_cls = importlib.import_module("openwakeword.model").Model
 
             # Load model - using a pre-trained model that can detect "hey" patterns
             # For custom "David" wake word, we'd need to train a custom model
-            self.model = Model(
+            self.model = model_cls(
                 wakeword_models=["hey_jarvis"],  # Closest pre-trained model
                 inference_framework="onnx",  # Can be optimized for OpenVINO
             )
@@ -284,9 +303,7 @@ class AudioWakeWordDetector:
         except ImportError:
             logger.warning("openwakeword not installed - audio wake word detection disabled")
             return False
-        # Best-effort: failure is contained, not raised.
-        # pylint: disable-next=broad-exception-caught
-        except Exception as e:  # noqa: BLE001 - best-effort, failure is logged
+        except (OSError, RuntimeError, ValueError) as e:
             logger.error("Failed to initialize audio wake word detector: %s", e)
             return False
 
@@ -308,9 +325,6 @@ class AudioWakeWordDetector:
             return None
 
         try:
-            # pylint: disable-next=import-outside-toplevel
-            import numpy as np
-
             # Convert bytes to numpy array
             audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
 
@@ -335,9 +349,7 @@ class AudioWakeWordDetector:
 
                     return event
 
-        # Best-effort: failure is contained, not raised.
-        # pylint: disable-next=broad-exception-caught
-        except Exception as e:  # noqa: BLE001 - best-effort, failure is logged
+        except (RuntimeError, ValueError) as e:
             logger.debug("Audio processing error: %s", e)
 
         return None
@@ -356,7 +368,7 @@ class WakeWordManager:
     with audio-based detection as fallback.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         config = get_config()
         self.text_detector = TextWakeWordDetector(wake_word=config.wake_word)
         self.audio_detector = AudioWakeWordDetector(wake_word=config.wake_word)
