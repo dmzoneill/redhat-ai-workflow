@@ -32,11 +32,14 @@ def _optional_playwright_errors() -> tuple[type[Exception], ...]:
 def _optional_google_errors() -> tuple[type[Exception], ...]:
     """Return the Google API client and auth base errors when those libraries are installed."""
     errors: list[type[Exception]] = []
-    for module, name in (("googleapiclient.errors", "Error"), ("google.auth.exceptions", "GoogleAuthError")):
-        try:
-            errors.append(getattr(importlib.import_module(module), name))
-        except ImportError:
-            logger.debug("%s not installed; no %s to catch", module, name)
+    try:
+        errors.append(importlib.import_module("googleapiclient.errors").Error)
+    except ImportError:
+        logger.debug("google-api-python-client not installed; no API errors to catch")
+    try:
+        errors.append(importlib.import_module("google.auth.exceptions").GoogleAuthError)
+    except ImportError:
+        logger.debug("google-auth not installed; no auth errors to catch")
     return tuple(errors)
 
 

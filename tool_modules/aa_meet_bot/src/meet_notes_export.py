@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -419,8 +418,9 @@ async def _run_startup_cleanup() -> None:
         logger.error("🔊 MeetBot startup cleanup failed: %s", e)
 
 
-# One bad cleanup iteration (device, subprocess or API failure) must not end the loop.
-_CLEANUP_ERRORS: tuple[type[Exception], ...] = (*MEET_ERRORS, subprocess.SubprocessError)
+# One bad cleanup iteration (device, process or Google API/auth failure) must not end the loop;
+# asyncio subprocess failures surface as OSError, which MEET_ERRORS already covers.
+_CLEANUP_ERRORS: tuple[type[Exception], ...] = MEET_ERRORS
 
 
 async def periodic_cleanup_task() -> None:

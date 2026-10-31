@@ -2,7 +2,6 @@
 
 import asyncio
 import importlib
-import subprocess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -52,10 +51,9 @@ def test_upcoming_meetings_skips_failing_calendar(error):
     [
         google_auth_exceptions.RefreshError("token expired"),
         http_error(503),
-        subprocess.SubprocessError("pactl failed"),
         OSError("pipewire gone"),
     ],
-    ids=["refresh-error", "http-error", "subprocess-error", "os-error"],
+    ids=["refresh-error", "http-error", "os-error"],
 )
 async def test_periodic_cleanup_survives_iteration_error(error):
     """An error in one cleanup iteration is logged and the loop carries on to the next one."""
