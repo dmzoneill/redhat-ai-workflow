@@ -9,9 +9,9 @@ can be performed to make the bot appear more human:
 
 import asyncio
 import logging
-import random
+import secrets
 from datetime import datetime, time, timedelta
-from typing import Any
+from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class WorkingHoursEnforcer:
     """
 
     # Default configuration
-    DEFAULT_CONFIG = {
+    DEFAULT_CONFIG: ClassVar[dict[str, Any]] = {
         "enabled": True,
         "start_hour": 9,
         "end_hour": 17,
@@ -45,7 +45,7 @@ class WorkingHoursEnforcer:
     }
 
     # Day name to weekday number mapping
-    DAY_NUMBERS = {
+    DAY_NUMBERS: ClassVar[dict[str, int]] = {
         "monday": 0,
         "tuesday": 1,
         "wednesday": 2,
@@ -64,15 +64,13 @@ class WorkingHoursEnforcer:
         self.config = {**self.DEFAULT_CONFIG, **(config or {})}
         self._tz = ZoneInfo(self.config["timezone"])
         self._working_days = {
-            self.DAY_NUMBERS[day.lower()]
-            for day in self.config["days"]
-            if day.lower() in self.DAY_NUMBERS
+            self.DAY_NUMBERS[day.lower()] for day in self.config["days"] if day.lower() in self.DAY_NUMBERS
         }
 
     @property
     def enabled(self) -> bool:
         """Check if working hours enforcement is enabled."""
-        return self.config.get("enabled", True)
+        return bool(self.config.get("enabled", True))
 
     def _now(self) -> datetime:
         """Get current time in configured timezone."""
@@ -91,7 +89,7 @@ class WorkingHoursEnforcer:
 
         # Check day of week
         if now.weekday() not in self._working_days:
-            logger.debug(f"Not a working day: {now.strftime('%A')}")
+            logger.debug("Not a working day: %s", now.strftime("%A"))
             return False
 
         # Check time of day
@@ -99,10 +97,8 @@ class WorkingHoursEnforcer:
         end = time(self.config["end_hour"], 0)
 
         current_time = now.time()
-        if not (start <= current_time < end):
-            logger.debug(
-                f"Outside working hours: {current_time} (working: {start}-{end})"
-            )
+        if not start <= current_time < end:
+            logger.debug("Outside working hours: %s (working: %s-%s)", current_time, start, end)
             return False
 
         return True
@@ -139,11 +135,9 @@ class WorkingHoursEnforcer:
             return 0
 
         max_minutes = self.config.get("randomize_minutes", 15)
-        delay_seconds = random.randint(0, max_minutes * 60)
+        delay_seconds = secrets.randbelow(max_minutes * 60 + 1)
 
-        logger.debug(
-            f"Adding human delay: {delay_seconds}s ({delay_seconds // 60}m {delay_seconds % 60}s)"
-        )
+        logger.debug("Adding human delay: %ss (%sm %ss)", delay_seconds, delay_seconds // 60, delay_seconds % 60)
         return delay_seconds
 
     async def wait_for_delay(self) -> int:
@@ -154,7 +148,7 @@ class WorkingHoursEnforcer:
         """
         delay = self.add_human_delay()
         if delay > 0:
-            logger.info(f"Waiting {delay}s for human-like timing...")
+            logger.info("Waiting %ss for human-like timing...", delay)
             await asyncio.sleep(delay)
         return delay
 
@@ -173,8 +167,9 @@ class WorkingHoursEnforcer:
 
             if wait_seconds > 0:
                 logger.info(
-                    f"Outside working hours. Waiting until {next_start.strftime('%Y-%m-%d %H:%M %Z')} "
-                    f"({wait_seconds / 3600:.1f} hours)"
+                    "Outside working hours. Waiting until %s (%.1f hours)",
+                    next_start.strftime("%Y-%m-%d %H:%M %Z"),
+                    wait_seconds / 3600,
                 )
                 # Sleep in chunks to allow for cancellation
                 while wait_seconds > 0:
@@ -234,17 +229,16 @@ class WorkingHoursEnforcer:
                 f"  Hours: {status['working_hours']}\n"
                 f"  Days: {', '.join(status['working_days'])}"
             )
-        else:
-            return (
-                "Working hours: OUTSIDE\n"
-                f"  Current: {self._now().strftime('%Y-%m-%d %H:%M %Z')}\n"
-                f"  Next window: {status.get('next_working_time', 'N/A')}\n"
-                f"  Wait: {status.get('wait_hours', 0)} hours"
-            )
+        return (
+            "Working hours: OUTSIDE\n"
+            f"  Current: {self._now().strftime('%Y-%m-%d %H:%M %Z')}\n"
+            f"  Next window: {status.get('next_working_time', 'N/A')}\n"
+            f"  Wait: {status.get('wait_hours', 0)} hours"
+        )
 
 
-# Singleton instance for easy import
-_enforcer: WorkingHoursEnforcer | None = None
+# Singleton holder for easy import
+_ENFORCER: dict[str, WorkingHoursEnforcer] = {}
 
 
 def get_working_hours_enforcer(
@@ -258,13 +252,11 @@ def get_working_hours_enforcer(
     Returns:
         WorkingHoursEnforcer instance
     """
-    global _enforcer
-    if _enforcer is None:
-        _enforcer = WorkingHoursEnforcer(config)
-    return _enforcer
+    if "instance" not in _ENFORCER:
+        _ENFORCER["instance"] = WorkingHoursEnforcer(config)
+    return _ENFORCER["instance"]
 
 
 def reset_enforcer() -> None:
     """Reset the singleton (useful for testing)."""
-    global _enforcer
-    _enforcer = None
+    _ENFORCER.clear()
