@@ -32,7 +32,7 @@ from server.state_manager import state as state_manager
 
 logger = logging.getLogger(__name__)
 
-# Canonical status lists used by daemon.py
+# Canonical status lists used by both daemon.py and sprint_planner.py
 COMPLETED_STATUSES = ["done", "closed", "resolved"]
 REVIEW_STATUSES = ["in review", "review", "code review", "peer review"]
 
