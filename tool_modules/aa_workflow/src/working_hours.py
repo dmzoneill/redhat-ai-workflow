@@ -237,8 +237,8 @@ class WorkingHoursEnforcer:
         )
 
 
-# Singleton instance for easy import (module-level state by design)
-_enforcer: WorkingHoursEnforcer | None = None  # pylint: disable=invalid-name
+# Singleton holder for easy import
+_ENFORCER: dict[str, WorkingHoursEnforcer] = {}
 
 
 def get_working_hours_enforcer(
@@ -252,13 +252,11 @@ def get_working_hours_enforcer(
     Returns:
         WorkingHoursEnforcer instance
     """
-    global _enforcer  # pylint: disable=global-statement  # lazy singleton
-    if _enforcer is None:
-        _enforcer = WorkingHoursEnforcer(config)
-    return _enforcer
+    if "instance" not in _ENFORCER:
+        _ENFORCER["instance"] = WorkingHoursEnforcer(config)
+    return _ENFORCER["instance"]
 
 
 def reset_enforcer() -> None:
     """Reset the singleton (useful for testing)."""
-    global _enforcer  # pylint: disable=global-statement  # test reset hook
-    _enforcer = None
+    _ENFORCER.clear()
