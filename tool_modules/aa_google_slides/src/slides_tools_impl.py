@@ -48,7 +48,7 @@ def _try_load_oauth_token(credentials_cls, scopes):
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Auth libraries raise provider-specific errors; fall through.
-            logger.debug("Suppressed error in _try_load_oauth_token: %s", exc, exc_info=True)
+            logger.debug("Could not load saved Google login: %s", exc, exc_info=True)
     return None
 
 
@@ -62,7 +62,7 @@ def _try_refresh_credentials(creds, request_cls):
             return creds
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Token refresh raises provider-specific errors; fall through.
-            logger.debug("Suppressed error in _try_refresh_credentials: %s", exc, exc_info=True)
+            logger.debug("Could not refresh Google login: %s", exc, exc_info=True)
     return None
 
 
