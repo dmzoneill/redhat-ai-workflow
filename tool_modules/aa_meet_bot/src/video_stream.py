@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+
 from tool_modules.aa_meet_bot.src.audio_capture import PulseAudioCapture
 from tool_modules.aa_meet_bot.src.dynamic_fields import DynamicFields
 from tool_modules.aa_meet_bot.src.stt_engine import NPUWhisperSTT
@@ -74,12 +75,10 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             return False
 
         except ImportError:
-            logger.warning(
-                "audio_capture module not available, using simulated waveform"
-            )
+            logger.warning("audio_capture module not available, using simulated waveform")
             return False
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("Audio capture error: %s, using simulated waveform", e)
+            logger.warning("Audio capture error: %s, using simulated waveform", e, exc_info=True)
             return False
 
     async def _audio_processing_loop(self):
@@ -113,9 +112,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
 
                 # Shift buffer and add new samples (in-place to avoid allocation)
                 chunk_len = len(chunk.data)
-                audio_buffer[:-chunk_len] = audio_buffer[
-                    chunk_len:
-                ]  # Shift left in-place
+                audio_buffer[:-chunk_len] = audio_buffer[chunk_len:]  # Shift left in-place
                 audio_buffer[-chunk_len:] = chunk.data  # Add new samples
 
                 # Feed STT buffer (zero-copy write into pre-allocated array)
@@ -154,7 +151,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     last_log_time = now
 
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("Audio processing error: %s", e)
+                logger.debug("Audio processing error: %s", e, exc_info=True)
                 await asyncio.sleep(0.01)
 
     async def _init_stt_engine(self):
@@ -171,16 +168,14 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 # Start STT processing loop
                 asyncio.create_task(self._stt_processing_loop())
             else:
-                logger.warning(
-                    "STT engine failed to initialize, transcription disabled"
-                )
+                logger.warning("STT engine failed to initialize, transcription disabled")
                 self.__dict__["_stt_enabled"] = False
 
         except ImportError as e:
             logger.warning("STT engine not available: %s", e)
             self.__dict__["_stt_enabled"] = False
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("STT initialization error: %s", e)
+            logger.warning("STT initialization error: %s", e, exc_info=True)
             self.__dict__["_stt_enabled"] = False
 
     async def _stt_processing_loop(self):
@@ -205,9 +200,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
 
                 # Check for silence at the end (last 1600 samples = 100ms) - NO COPY, just a view
                 check_start = max(0, self._stt_write_pos - 1600)
-                rms = np.sqrt(
-                    np.mean(self._stt_buffer[check_start : self._stt_write_pos] ** 2)
-                )
+                rms = np.sqrt(np.mean(self._stt_buffer[check_start : self._stt_write_pos] ** 2))
                 is_silence = rms < 0.01
 
                 # Decide when to transcribe:
@@ -216,16 +209,14 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 # 3. HARD CAP at 10s
                 should_transcribe = False
 
-                if buffer_duration >= 1.0 and is_silence:
-                    should_transcribe = True
-                elif buffer_duration >= 5.0:
-                    should_transcribe = True
-                elif buffer_duration >= 10.0:
+                if buffer_duration >= 10.0:
                     should_transcribe = True
                     logger.warning(
                         "STT buffer hit 10s cap (%s samples), forcing transcribe",
                         self._stt_write_pos,
                     )
+                elif buffer_duration >= 5.0 or (buffer_duration >= 1.0 and is_silence):
+                    should_transcribe = True
 
                 if should_transcribe and self._stt_write_pos > 0:
                     # Pass a VIEW to transcribe - NO COPY
@@ -271,9 +262,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                                 self._stt_history.insert(0, text)
                                 # Trim history to max size
                                 if len(self._stt_history) > self._stt_history_max:
-                                    self.__dict__["_stt_history"] = self._stt_history[
-                                        : self._stt_history_max
-                                    ]
+                                    self.__dict__["_stt_history"] = self._stt_history[: self._stt_history_max]
                             logger.info("STT [%ss]: %s", format(proc_time, ".2f"), text)
                             last_transcription = time.time()
 
@@ -285,7 +274,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 await asyncio.sleep(0.2)  # Check every 200ms (reduced from 100ms)
 
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("STT processing error: %s", e)
+                logger.debug("STT processing error: %s", e, exc_info=True)
                 await asyncio.sleep(0.2)
 
     async def _npu_stats_loop(self):
@@ -305,23 +294,13 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
 
                 # Read all stats in one batch (minimize syscalls)
                 try:
-                    freq = int(
-                        (npu_path / "npu_current_frequency_mhz").read_text().strip()
-                    )
-                    max_freq = int(
-                        (npu_path / "npu_max_frequency_mhz").read_text().strip()
-                    )
+                    freq = int((npu_path / "npu_current_frequency_mhz").read_text().strip())
+                    max_freq = int((npu_path / "npu_max_frequency_mhz").read_text().strip())
                     busy_us = int((npu_path / "npu_busy_time_us").read_text().strip())
-                    mem_bytes = int(
-                        (npu_path / "npu_memory_utilization").read_text().strip()
-                    )
+                    mem_bytes = int((npu_path / "npu_memory_utilization").read_text().strip())
                     power_state = (npu_path / "power_state").read_text().strip()
-                    runtime_status = (
-                        (npu_path / "power" / "runtime_status").read_text().strip()
-                    )
-                    active_ms = int(
-                        (npu_path / "power" / "runtime_active_time").read_text().strip()
-                    )
+                    runtime_status = (npu_path / "power" / "runtime_status").read_text().strip()
+                    active_ms = int((npu_path / "power" / "runtime_active_time").read_text().strip())
 
                     # Calculate busy delta for utilization
                     busy_delta = busy_us - self._npu_stats_prev_busy
@@ -346,12 +325,12 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     # NPU sysfs not available, use defaults
                     pass
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.debug("NPU stats read error: %s", e)
+                    logger.debug("NPU stats read error: %s", e, exc_info=True)
 
                 await asyncio.sleep(0.5)  # Update every 500ms
 
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("NPU stats loop error: %s", e)
+                logger.debug("NPU stats loop error: %s", e, exc_info=True)
                 await asyncio.sleep(1.0)
 
     # Live flow kept together after the duplicate copy was removed.
@@ -373,17 +352,13 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         config = self.config
         self.__dict__["_running"] = True
 
-        logger.info(
-            "Starting real-time stream to %s at %sfps", video_device, config.fps
-        )
+        logger.info("Starting real-time stream to %s at %sfps", video_device, config.fps)
 
         # Start audio capture if configured
         if self._audio_source:
             audio_started = await self._start_audio_capture()
             if audio_started:
-                logger.info(
-                    "Audio-reactive waveform enabled from %s", self._audio_source
-                )
+                logger.info("Audio-reactive waveform enabled from %s", self._audio_source)
                 # Wait for audio buffer to be populated (up to 2s)
                 # This ensures waveform is ready on first frame
                 for i in range(200):  # 200 x 10ms = 2000ms max
@@ -406,7 +381,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         # Killing processes here was causing the daemon to kill itself!
 
         # Open v4l2 device
-        v4l2_fd = os.open(video_device, os.O_RDWR)
+        v4l2_fd = await asyncio.to_thread(os.open, video_device, os.O_RDWR)
 
         # Set the video format using v4l2 ioctl
         # This is CRITICAL - v4l2loopback uses the format from the first VIDIOC_S_FMT
@@ -476,13 +451,11 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     v4l2_device=None,  # We push frames via appsrc, not v4l2
                     input_format="yuyv",  # Direct YUYV input - VA-API converts in hardware
                 )
-                self.__dict__["_webrtc_pipeline"] = IntelStreamingPipeline(
-                    stream_config
-                )
+                self.__dict__["_webrtc_pipeline"] = IntelStreamingPipeline(stream_config)
                 self._webrtc_pipeline.start(mode="webrtc")
                 logger.info("WebRTC streaming initialized")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("Failed to start WebRTC streaming: %s", e)
+                logger.warning("Failed to start WebRTC streaming: %s", e, exc_info=True)
                 self.__dict__["_webrtc_pipeline"] = None
 
         # Pre-create black frame for "black" mode (YUYV format)
@@ -493,9 +466,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
 
         try:
             # Use dynamic attendees if available, otherwise use provided list
-            current_attendees = (
-                self._dynamic_attendees if self._dynamic_attendees else attendees
-            )
+            current_attendees = self._dynamic_attendees if self._dynamic_attendees else attendees
 
             while self._running:
                 # Check video mode - can switch without restarting loop
@@ -511,9 +482,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 if self._attendees_updated and self._dynamic_attendees:
                     current_attendees = self._dynamic_attendees
                     self.__dict__["_attendees_updated"] = False
-                    logger.info(
-                        "Attendee list updated: %s participants", len(current_attendees)
-                    )
+                    logger.info("Attendee list updated: %s participants", len(current_attendees))
 
                 for attendee_idx, attendee in enumerate(current_attendees):
                     if not self._running:
@@ -584,18 +553,14 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         # Initialize GPU renderer if needed
         if not hasattr(self, "_ulc_renderer") or self._ulc_renderer is None:
             try:
-                self.__dict__["_ulc_renderer"] = UltraLowCPURenderer(
-                    config, use_intel=config.prefer_intel_gpu
-                )
+                self.__dict__["_ulc_renderer"] = UltraLowCPURenderer(config, use_intel=config.prefer_intel_gpu)
                 logger.info(
                     "UltraLowCPU renderer initialized: %s",
                     self._ulc_renderer.device_name,
                 )
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error("Failed to initialize GPU renderer: %s", e)
-                raise RuntimeError(
-                    f"GPU renderer required but failed to initialize: {e}"
-                ) from e
+                raise RuntimeError(f"GPU renderer required but failed to initialize: {e}") from e
 
         # Pre-compute attendee-specific data
         attendee_data = self._precompute_attendee_data(attendee)
@@ -679,14 +644,10 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 )
                 # Warn if memory is growing dangerously
                 if mem_mb > MEMORY_WARNING_MB:
-                    logger.warning(
-                        "HIGH MEMORY: %sMB - running GC...", format(mem_mb, ".0f")
-                    )
+                    logger.warning("HIGH MEMORY: %sMB - running GC...", format(mem_mb, ".0f"))
                     gc.collect()
                 if mem_mb > MEMORY_CRITICAL_MB:
-                    logger.error(
-                        "CRITICAL MEMORY: %sMB - forcing cleanup", format(mem_mb, ".0f")
-                    )
+                    logger.error("CRITICAL MEMORY: %sMB - forcing cleanup", format(mem_mb, ".0f"))
                     self.__dict__["_stt_write_pos"] = 0  # Reset STT buffer
                     # Force full GC with all generations
                     gc.collect(0)
@@ -724,7 +685,7 @@ class RealtimeStreamMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     self._webrtc_pipeline.push_frame_yuyv(yuyv)
                 except Exception as e:  # pylint: disable=broad-exception-caught
                     if frame_num % 60 == 0:  # Log every ~5 seconds at 12fps
-                        logger.warning("WebRTC push error: %s", e)
+                        logger.warning("WebRTC push error: %s", e, exc_info=True)
 
             # Pace output to real-time
             elapsed = asyncio.get_event_loop().time() - start_time
