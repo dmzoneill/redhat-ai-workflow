@@ -1,10 +1,24 @@
 # pylint: disable=duplicate-code,cyclic-import
 """Split from skill_engine.py so the public module stays importable."""
 
+import asyncio
 import logging
+import re
+from collections.abc import Coroutine
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 class SkillStepMixin:  # pylint: disable=too-few-public-methods
@@ -59,30 +73,18 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
             heal_type, cluster = self._detect_auto_heal_type(error_msg)
 
             if heal_type:
-                output_lines.append(
-                    f"   🩹 Detected {heal_type} error, attempting auto-heal..."
-                )
+                output_lines.append(f"   🩹 Detected {heal_type} error, attempting auto-heal...")
 
                 # Emit auto-heal triggered event (WebSocket)
                 if self.ws_server and self.ws_server.is_running:
-                    import asyncio  # pylint: disable=import-outside-toplevel
-
                     # Get current step index from event_emitter or calculate it
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
-                    asyncio.create_task(
+                    step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                    _spawn_background(
                         self.ws_server.auto_heal_triggered(
                             skill_id=self.skill_id,
                             step_index=step_idx,
                             error_type=heal_type,
-                            fix_action=(
-                                f"kube_login({cluster})"
-                                if heal_type == "auth"
-                                else "vpn_connect()"
-                            ),
+                            fix_action=(f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"),
                             error_snippet=error_msg[:200],
                         )
                     )
@@ -94,43 +96,27 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                         notify_auto_heal_triggered,
                     )
 
-                    fix_action = (
-                        f"kube_login({cluster})"
-                        if heal_type == "auth"
-                        else "vpn_connect()"
-                    )
+                    fix_action = f"kube_login({cluster})" if heal_type == "auth" else "vpn_connect()"
                     notify_auto_heal_triggered(step_name, heal_type, fix_action)
                 except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.debug("Suppressed error: %s", exc)
+                    logger.debug("Suppressed error: %s", exc, exc_info=True)
 
-                retry_result = await self._attempt_auto_heal(
-                    heal_type, cluster, tool, step, output_lines
-                )
+                retry_result = await self._attempt_auto_heal(heal_type, cluster, tool, step, output_lines)
 
                 if retry_result and retry_result.get("success"):
                     # Auto-heal worked! Store result and continue
                     output_lines.append("   ✅ Auto-heal successful!")
                     output_name = step.get("output", step_name)
                     self.context[output_name] = retry_result["result"]
-                    self._parse_and_store_tool_result(
-                        retry_result["result"], output_name
-                    )
+                    self._parse_and_store_tool_result(retry_result["result"], output_name)
 
                     # Log success to memory
-                    await self._log_auto_heal_to_memory(
-                        tool, heal_type, error_msg[:100], success=True
-                    )
+                    await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=True)
 
                     # Emit auto-heal completed event (WebSocket)
                     if self.ws_server and self.ws_server.is_running:
-                        import asyncio  # pylint: disable=import-outside-toplevel
-
-                        step_idx = (
-                            self.event_emitter.current_step_index
-                            if self.event_emitter
-                            else 0
-                        )
-                        asyncio.create_task(
+                        step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                        _spawn_background(
                             self.ws_server.auto_heal_completed(
                                 skill_id=self.skill_id,
                                 step_index=step_idx,
@@ -148,7 +134,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                         notify_auto_heal_succeeded(step_name, heal_type)
                     except Exception as exc:  # pylint: disable=broad-exception-caught
-                        logger.debug("Suppressed error: %s", exc)
+                        logger.debug("Suppressed error: %s", exc, exc_info=True)
 
                     self.step_results.append(
                         {
@@ -162,20 +148,12 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                     return True
                 # Auto-heal failed, log and continue
                 output_lines.append("   ⚠️ Auto-heal failed, continuing anyway...")
-                await self._log_auto_heal_to_memory(
-                    tool, heal_type, error_msg[:100], success=False
-                )
+                await self._log_auto_heal_to_memory(tool, heal_type, error_msg[:100], success=False)
 
                 # Emit auto-heal completed (failed) event (WebSocket)
                 if self.ws_server and self.ws_server.is_running:
-                    import asyncio  # pylint: disable=import-outside-toplevel
-
-                    step_idx = (
-                        self.event_emitter.current_step_index
-                        if self.event_emitter
-                        else 0
-                    )
-                    asyncio.create_task(
+                    step_idx = self.event_emitter.current_step_index if self.event_emitter else 0
+                    _spawn_background(
                         self.ws_server.auto_heal_completed(
                             skill_id=self.skill_id,
                             step_index=step_idx,
@@ -193,7 +171,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                     notify_auto_heal_failed(step_name, error_msg[:100])
                 except Exception as exc:  # pylint: disable=broad-exception-caught
-                    logger.debug("Suppressed error: %s", exc)
+                    logger.debug("Suppressed error: %s", exc, exc_info=True)
             else:
                 output_lines.append("   ℹ️ Error not auto-healable, continuing...")
 
@@ -211,13 +189,9 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
             if "args" in step:
                 args_data = step["args"]
                 if isinstance(args_data, dict):
-                    tool_params = {
-                        k: self._template(str(v)) for k, v in args_data.items()
-                    }
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
 
-            await self._learn_from_error(
-                tool_name=tool, params=tool_params, error_msg=error_msg
-            )
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
 
             self.step_results.append(
                 {
@@ -243,15 +217,12 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                 )
 
                 if issue_result["success"]:
-                    output_lines.append(
-                        f"\n   🐛 **Issue created:** {issue_result['issue_url']}"
-                    )
+                    output_lines.append(f"\n   🐛 **Issue created:** {issue_result['issue_url']}")
                 elif issue_result["issue_url"]:
                     output_lines.append("\n   💡 **Report this error:**")
-                    output_lines.append(
-                        f"   📝 [Create GitHub Issue]({issue_result['issue_url']})"
-                    )
+                    output_lines.append(f"   📝 [Create GitHub Issue]({issue_result['issue_url']})")
             except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.debug("Failed to create issue", exc_info=True)
                 self._debug(f"Failed to create issue: {e}")
 
         if on_error == "continue":
@@ -278,13 +249,9 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
             if "args" in step:
                 args_data = step["args"]
                 if isinstance(args_data, dict):
-                    tool_params = {
-                        k: self._template(str(v)) for k, v in args_data.items()
-                    }
+                    tool_params = {k: self._template(str(v)) for k, v in args_data.items()}
 
-            await self._learn_from_error(
-                tool_name=tool, params=tool_params, error_msg=error_msg
-            )
+            await self._learn_from_error(tool_name=tool, params=tool_params, error_msg=error_msg)
 
             # Emit toast notification for continue-mode failures (helps visibility)
             try:
@@ -295,7 +262,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
                 notify_step_failed(skill_name, step_name, error_msg[:150])
             except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
+                logger.debug("Suppressed error: %s", exc, exc_info=True)
 
             self.step_results.append(
                 {
@@ -320,7 +287,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                 if parsed:
                     self.context[f"{output_name}_parsed"] = parsed
         except Exception as exc:  # pylint: disable=broad-exception-caught
-            logger.debug("Suppressed error: %s", exc)
+            logger.debug("Suppressed error: %s", exc, exc_info=True)
 
     def _detect_soft_failure(self, result_text: str) -> tuple[bool, str | None]:
         """Detect if a successful tool result actually contains an error (soft failure).
@@ -397,9 +364,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                 rendered_value = args.get(key, "")
                 if rendered_value == "" or rendered_value is None:
                     # Extract variable name from template for better error message
-                    import re  # pylint: disable=import-outside-toplevel
-
-                    var_match = re.search(r"\{\{\s*([^}]+)\s*\}\}", raw_value)
+                    var_match = re.search(r"\{\{\s*([^\s}][^}]*)\}\}", raw_value)
                     var_name = var_match.group(1).strip() if var_match else raw_value
                     return (
                         f"Required argument '{key}' is empty. "
@@ -459,9 +424,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
 
             if is_soft_failure and step.get("on_error") == "auto_heal":
                 # Treat as error and trigger auto-heal
-                output_lines.append(
-                    f"   ⚠️ Soft failure detected: {(soft_error or '')[:100]}"
-                )
+                output_lines.append(f"   ⚠️ Soft failure detected: {(soft_error or '')[:100]}")
                 self._debug(f"Soft failure in {tool}: {soft_error}")
 
                 # Store result anyway (some steps may need it even if failed)
@@ -492,16 +455,12 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                 result_preview += "..."
             output_lines.append(f"   ```\n   {result_preview}\n   ```\n")
 
-            self.step_results.append(
-                {"step": step_name, "tool": tool, "success": True, "duration": duration}
-            )
+            self.step_results.append({"step": step_name, "tool": tool, "success": True, "duration": duration})
             return True
 
         # Handle error - error message can be in 'error' key or 'result' key
         error_msg = result.get("error") or result.get("result", "Unknown error")
-        should_continue = await self._handle_tool_error(
-            tool, step, step_name, error_msg, output_lines
-        )
+        should_continue = await self._handle_tool_error(tool, step, step_name, error_msg, output_lines)
         if not should_continue:
             output_lines.append(f"\n⛔ **Skill failed at step {step_num}**")
         return should_continue
@@ -523,9 +482,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
                     output_value = (
                         self._template_dict(val)
                         if isinstance(val, dict)
-                        else [
-                            self._template(i) if isinstance(i, str) else i for i in val
-                        ]
+                        else [self._template(i) if isinstance(i, str) else i for i in val]
                     )
                 else:
                     output_value = val
@@ -548,11 +505,7 @@ class SkillStepMixin:  # pylint: disable=too-few-public-methods
         for then_item in step["then"]:
             if "return" in then_item:
                 ret = then_item["return"]
-                templated = (
-                    self._template_dict(ret)
-                    if isinstance(ret, dict)
-                    else self._template(str(ret))
-                )
+                templated = self._template_dict(ret) if isinstance(ret, dict) else self._template(str(ret))
                 self._debug(f"Early return: {templated}")
 
                 total_time = time.time() - (self.start_time or 0.0)
