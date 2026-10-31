@@ -29,7 +29,6 @@ from services.stats.issue_hierarchy import IssueHierarchyMixin
 
 logger = logging.getLogger(__name__)
 
-_GMAIL_MODULE = "tool_modules.aa_gmail.src.tools_basic"
 _GMAIL_UNAVAILABLE = "Gmail module not available"
 _BODY_LIMIT = 10000
 
@@ -37,7 +36,7 @@ _BODY_LIMIT = 10000
 def gmail_service() -> tuple[Any, str | None]:
     """Return ``(service, error)``; the Gmail tool module is optional."""
     try:
-        module = importlib.import_module(_GMAIL_MODULE)
+        module = importlib.import_module("tool_modules.aa_gmail.src.tools_basic")
     except ImportError:
         return None, _GMAIL_UNAVAILABLE
     service, error = module.get_gmail_service()
@@ -48,13 +47,14 @@ def gmail_service() -> tuple[Any, str | None]:
 def gmail_errors() -> tuple[type[Exception], ...]:
     """Exceptions a Gmail API call can raise (network, auth, API and data errors)."""
     errors: list[type[Exception]] = [OSError, ValueError, KeyError, TypeError]
-    for module_name, attr in (
-        ("googleapiclient.errors", "Error"),
-        ("google.auth.exceptions", "GoogleAuthError"),
-        ("httplib2", "HttpLib2Error"),
-    ):
+    loaders = (
+        lambda: importlib.import_module("googleapiclient.errors").Error,
+        lambda: importlib.import_module("google.auth.exceptions").GoogleAuthError,
+        lambda: importlib.import_module("httplib2").HttpLib2Error,
+    )
+    for load in loaders:
         try:
-            errors.append(getattr(importlib.import_module(module_name), attr))
+            errors.append(load())
         except (ImportError, AttributeError):
             continue
     return tuple(errors)
