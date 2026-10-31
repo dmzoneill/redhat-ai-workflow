@@ -4,22 +4,19 @@
 import asyncio
 import json
 import logging
-import random
+import secrets
 import time
 import uuid
 from typing import Any
 
 import httpx
-from tool_modules.aa_slack.src.slack_message_builder import (
-    extract_avatar_hash as avatar_hash_from_profile,
-)
-from tool_modules.aa_slack.src.slack_message_builder import (
-    get_avatar_url as avatar_url_for,
-)
-from tool_modules.aa_slack.src.slack_message_builder import (
-    parse_inline_elements,
-    text_to_rich_blocks,
-)
+
+from tool_modules.aa_slack.src.slack_message_builder import extract_avatar_hash as avatar_hash_from_profile
+from tool_modules.aa_slack.src.slack_message_builder import get_avatar_url as avatar_url_for
+from tool_modules.aa_slack.src.slack_message_builder import parse_inline_elements, text_to_rich_blocks
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 logger = logging.getLogger("tool_modules.aa_slack.src.slack_session")
 
@@ -57,7 +54,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         """
         if typing_delay:
             # Natural typing delay to avoid bot-like behavior
-            delay = random.uniform(0.5, 2.5)
+            delay = _RNG.uniform(0.5, 2.5)
             logger.debug("Adding natural typing delay: %ss", format(delay, ".2f"))
             await asyncio.sleep(delay)
 
@@ -65,7 +62,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         if thread_ts:
             data["thread_ts"] = thread_ts
 
-        result = await self._request("chat.postMessage", data)
+        result: dict[str, Any] = await self._request("chat.postMessage", data)
         return result
 
     async def send_message_rich(  # pylint: disable=too-many-locals
@@ -97,7 +94,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
             Message response with ts, channel, message details, etc.
         """
         if typing_delay:
-            delay = random.uniform(0.5, 2.5)
+            delay = _RNG.uniform(0.5, 2.5)
             logger.debug("Adding natural typing delay: %ss", format(delay, ".2f"))
             await asyncio.sleep(delay)
 
@@ -105,7 +102,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{_RNG.randint(100, 999)}"
 
         url = (
             f"https://{self.SLACK_HOST}/api/chat.postMessage"
@@ -122,7 +119,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         # Generate unique IDs
         client_msg_id = str(uuid.uuid4())
         draft_id = str(uuid.uuid4())
-        msg_ts = f"{int(time.time())}.{random.randint(100000, 999999)}"
+        msg_ts = f"{int(time.time())}.{_RNG.randint(100000, 999999)}"
 
         # Build rich text blocks from plain text
         blocks = self._text_to_rich_blocks(text)
@@ -190,7 +187,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
             }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Send message request failed: %s", e)
+            logger.exception("Send message request failed")
             return {"ok": False, "error": str(e)}
 
     def _text_to_rich_blocks(self, text):
@@ -208,10 +205,11 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         emoji: str,
     ) -> dict[str, Any]:
         """Add a reaction to a message."""
-        return await self._request(
+        result: dict[str, Any] = await self._request(
             "reactions.add",
             {"channel": channel_id, "timestamp": timestamp, "name": emoji},
         )
+        return result
 
     # ==================== DM Methods ====================
 
@@ -227,7 +225,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
         """
         result = await self._request("conversations.open", {"users": user_id})
         channel = result.get("channel", {})
-        return channel.get("id", "")
+        return str(channel.get("id", ""))
 
     async def send_dm(
         self,
@@ -263,12 +261,14 @@ class SlackSessionMessaging:  # pylint: disable=no-member
     async def get_user_info(self, user_id: str) -> dict[str, Any]:
         """Get information about a user."""
         result = await self._request("users.info", {"user": user_id})
-        return result.get("user", {})
+        user: dict[str, Any] = result.get("user", {})
+        return user
 
     async def get_users_list(self, limit: int = 200) -> list[dict[str, Any]]:
         """Get list of all users in workspace."""
         result = await self._request("users.list", {"limit": limit})
-        return result.get("members", [])
+        members: list[dict[str, Any]] = result.get("members", [])
+        return members
 
     # ==================== Search Methods ====================
 
@@ -284,7 +284,8 @@ class SlackSessionMessaging:  # pylint: disable=no-member
             "search.messages",
             {"query": query, "count": count, "sort": sort, "sort_dir": sort_dir},
         )
-        return result.get("messages", {}).get("matches", [])
+        matches: list[dict[str, Any]] = result.get("messages", {}).get("matches", [])
+        return matches
 
     async def search_channels(
         self,
@@ -377,6 +378,7 @@ class SlackSessionMessaging:  # pylint: disable=no-member
                 "channels": results,
             }
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Channel search failed", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
