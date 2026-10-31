@@ -8,18 +8,21 @@ Provides tools for analyzing writing style and generating personalized personas:
 - persona_refine_style: Refine a persona based on feedback
 """
 
+import asyncio
 import json
 import logging
 import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastmcp import FastMCP
 
 from server.auto_heal_decorator import auto_heal
 from server.tool_registry import ToolRegistry
+from tool_modules.aa_style.src.analyzer import StyleAnalyzer
 
 # Setup project path for server imports
 from tool_modules.common import PROJECT_ROOT
@@ -27,6 +30,24 @@ from tool_modules.common import PROJECT_ROOT
 __project_root__ = PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
+
+async def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Read a JSON-lines file without blocking the event loop."""
+    text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    return [json.loads(line) for line in text.splitlines() if line.strip()]
+
 
 # Add current directory to sys.path
 _TOOLS_DIR = Path(__file__).parent.absolute()
@@ -38,7 +59,236 @@ STYLE_DIR = MEMORY_DIR / "style"
 PERSONAS_DIR = PROJECT_ROOT / "personas"
 
 
-def register_tools(server: FastMCP) -> int:  # noqa: C901
+async def _style_analyze_impl(
+    corpus_path: str = "",
+    min_message_length: int = 5,
+    save_profile: bool = True,
+    profile_name: str = "dave",
+) -> str:
+    """Implementation of style_analyze."""
+    if not corpus_path:
+        corpus_path = str(STYLE_DIR / "slack_corpus.jsonl")
+
+    corpus_file = Path(corpus_path)
+    if not corpus_file.exists():
+        return (
+            f"❌ Corpus file not found: {corpus_path}\n\n"
+            "Run `slack_export_my_messages` first to export your Slack messages."
+        )
+
+    # Load messages
+    try:
+        messages = [m for m in await _read_jsonl(corpus_file) if len(m.get("text", "")) >= min_message_length]
+    except (OSError, ValueError) as e:
+        return f"❌ Failed to load corpus: {e}"
+
+    if not messages:
+        return f"❌ No messages found in corpus (min length: {min_message_length})"
+
+    # Analyze the messages
+    analyzer = StyleAnalyzer()
+    profile = analyzer.analyze(messages)
+
+    # Add metadata
+    profile["meta"] = {
+        "source": "slack",
+        "corpus_file": str(corpus_file),
+        "messages_analyzed": len(messages),
+        "analysis_date": datetime.now().astimezone().isoformat(),
+        "profile_name": profile_name,
+    }
+
+    # Save profile
+    if save_profile:
+        STYLE_DIR.mkdir(parents=True, exist_ok=True)
+        profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
+        await _dump_yaml(profile_file, profile, default_flow_style=False, allow_unicode=True)
+
+    summary = _format_style_summary(profile, len(messages))
+
+    if save_profile:
+        summary += f"\n**Profile saved to:** `{profile_file}`"
+
+    return summary
+
+
+async def _style_profile_view_impl(profile_name: str = "dave") -> str:
+    """Implementation of style_profile_view."""
+    profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
+
+    if not profile_file.exists():
+        return f"❌ Style profile not found: {profile_name}\n\nRun `style_analyze` first to create a profile."
+
+    profile = await _load_yaml(profile_file)
+
+    return f"**Style Profile: {profile_name}**\n\n```yaml\n{yaml.dump(profile, default_flow_style=False)}\n```"
+
+
+async def _persona_generate_from_style_impl(
+    profile_name: str = "dave",
+    persona_name: str = "dave",
+    example_count: int = 20,
+    include_tools: str = "workflow,slack",
+) -> str:
+    """Implementation of persona_generate_from_style."""
+    profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
+    if not profile_file.exists():
+        return f"❌ Style profile not found: {profile_name}\n\nRun `style_analyze` first to create a profile."
+
+    profile = await _load_yaml(profile_file)
+
+    # Load corpus for examples
+    corpus_file = STYLE_DIR / "slack_corpus.jsonl"
+    examples = []
+    if corpus_file.exists():
+        all_messages = await _read_jsonl(corpus_file)
+
+        # Select diverse examples
+        examples = _select_diverse_examples(all_messages, example_count)
+
+    # Generate persona YAML
+    tools_list = [t.strip() for t in include_tools.split(",") if t.strip()]
+
+    persona_yaml = _generate_persona_yaml(persona_name, tools_list)
+    persona_md = _generate_persona_markdown(persona_name, profile, examples)
+
+    # Save files
+    PERSONAS_DIR.mkdir(parents=True, exist_ok=True)
+
+    yaml_file = PERSONAS_DIR / f"{persona_name}.yaml"
+    md_file = PERSONAS_DIR / f"{persona_name}.md"
+
+    await _dump_yaml(yaml_file, persona_yaml, default_flow_style=False, allow_unicode=True)
+
+    await asyncio.to_thread(Path(md_file).write_text, persona_md, encoding="utf-8")
+
+    return (
+        f"✅ Persona generated: {persona_name}\n\n"
+        "**Files created:**\n"
+        f"- `{yaml_file}` - Persona configuration\n"
+        f"- `{md_file}` - Style guide with {len(examples)} examples\n\n"
+        "**To use:**\n"
+        f'```\npersona_load("{persona_name}")\n```\n\n'
+        "**To test:**\n"
+        f'```\npersona_test_style("{persona_name}")\n```'
+    )
+
+
+async def _persona_test_style_impl(
+    persona_name: str = "dave",
+    test_prompts: str = "",
+) -> str:
+    """Implementation of persona_test_style."""
+    persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
+    profile_file = STYLE_DIR / f"{persona_name}_style_profile.yaml"
+
+    if not persona_file.exists():
+        return f"❌ Persona not found: {persona_name}"
+
+    if not profile_file.exists():
+        return f"❌ Style profile not found: {persona_name}"
+
+    profile = await _load_yaml(profile_file)
+
+    # Default test prompts
+    if not test_prompts:
+        default_prompts = [
+            "Thanks for the update",
+            "I'll take a look at this",
+            "Can you clarify what you mean?",
+            "Sounds good to me",
+            "Let me check on that",
+        ]
+    else:
+        default_prompts = [p.strip() for p in test_prompts.split(",")]
+
+    # Load some real examples for comparison
+    corpus_file = STYLE_DIR / "slack_corpus.jsonl"
+    real_examples = []
+    if corpus_file.exists():
+        short_texts = (m.get("text", "") for m in await _read_jsonl(corpus_file))
+        real_examples = [t for t in short_texts if 10 <= len(t) <= 100][:20]
+
+    return _format_style_test_report(persona_name, profile, default_prompts, real_examples)
+
+
+async def _persona_refine_style_impl(
+    persona_name: str = "dave",
+    feedback: str = "",
+    adjustment: str = "",
+) -> str:
+    """Implementation of persona_refine_style."""
+    persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
+
+    if not persona_file.exists():
+        return f"❌ Persona not found: {persona_name}"
+
+    await _load_yaml(persona_file)
+
+    changes = []
+
+    # Apply specific adjustments
+    if adjustment:
+        adj_lower = adjustment.lower()
+
+        if "casual" in adj_lower or "informal" in adj_lower:
+            changes.append("Adjusted tone to be more casual")
+            # This would modify the persona field
+
+        if "formal" in adj_lower:
+            changes.append("Adjusted tone to be more formal")
+
+        if "less_emoji" in adj_lower or "fewer_emoji" in adj_lower:
+            changes.append("Reduced emoji usage guidance")
+
+        if "more_emoji" in adj_lower:
+            changes.append("Increased emoji usage guidance")
+
+        if "shorter" in adj_lower:
+            changes.append("Adjusted for shorter responses")
+
+        if "longer" in adj_lower:
+            changes.append("Adjusted for more detailed responses")
+
+    # Log feedback for future reference
+    if feedback:
+        refinement_log = STYLE_DIR / f"{persona_name}_refinements.yaml"
+        refinements: list[dict[str, Any]] = []
+        if refinement_log.exists():
+            refinements = await _load_yaml(refinement_log) or []
+
+        refinements.append(
+            {
+                "date": datetime.now().astimezone().isoformat(),
+                "feedback": feedback,
+                "adjustment": adjustment,
+                "changes": changes,
+            }
+        )
+
+        await _dump_yaml(refinement_log, refinements, default_flow_style=False)
+
+        changes.append("Logged feedback to refinement history")
+
+    if not changes:
+        return (
+            "No specific adjustments made.\n\n"
+            "**Available adjustments:**\n"
+            "- `more_casual` / `more_formal` - Adjust formality\n"
+            "- `less_emoji` / `more_emoji` - Adjust emoji usage\n"
+            "- `shorter` / `longer` - Adjust response length\n\n"
+            "**Or provide feedback** to log for future improvements."
+        )
+
+    return (
+        f"✅ Persona refined: {persona_name}\n\n"
+        "**Changes:**\n"
+        + "\n".join(f"- {c}" for c in changes)
+        + f'\n\n**To re-test:** `persona_test_style("{persona_name}")`'
+    )
+
+
+def register_tools(server: FastMCP) -> int:
     """
     Register style analysis and persona generation tools.
 
@@ -79,90 +329,12 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             Summary of the style analysis with key patterns
         """
         # Default corpus path
-        if not corpus_path:
-            corpus_path = str(STYLE_DIR / "slack_corpus.jsonl")
-
-        corpus_file = Path(corpus_path)
-        if not corpus_file.exists():
-            return (
-                f"❌ Corpus file not found: {corpus_path}\n\n"
-                "Run `slack_export_my_messages` first to export your Slack messages."
-            )
-
-        # Load messages
-        messages = []
-        try:
-            with open(corpus_file, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        msg = json.loads(line)
-                        text = msg.get("text", "")
-                        if len(text) >= min_message_length:
-                            messages.append(msg)
-        except Exception as e:
-            return f"❌ Failed to load corpus: {e}"
-
-        if not messages:
-            return f"❌ No messages found in corpus (min length: {min_message_length})"
-
-        # Analyze the messages
-        from .analyzer import StyleAnalyzer
-
-        analyzer = StyleAnalyzer()
-        profile = analyzer.analyze(messages)
-
-        # Add metadata
-        profile["meta"] = {
-            "source": "slack",
-            "corpus_file": str(corpus_file),
-            "messages_analyzed": len(messages),
-            "analysis_date": datetime.now().isoformat(),
-            "profile_name": profile_name,
-        }
-
-        # Save profile
-        if save_profile:
-            STYLE_DIR.mkdir(parents=True, exist_ok=True)
-            profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
-            with open(profile_file, "w", encoding="utf-8") as f:
-                yaml.dump(profile, f, default_flow_style=False, allow_unicode=True)
-
-        # Generate summary
-        vocab = profile.get("vocabulary", {})
-        sentence = profile.get("sentence_patterns", {})
-        tone = profile.get("tone", {})
-        emoji_data = profile.get("emoji", {})
-        greetings = profile.get("greetings", {})
-        signoffs = profile.get("signoffs", {})
-
-        summary = (
-            "✅ Style analysis complete\n\n"
-            f"**Messages analyzed:** {len(messages):,}\n\n"
-            "## Vocabulary\n"
-            f"- Top words: {', '.join(vocab.get('top_words', [])[:10])}\n"
-            f"- Unique phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n"
-            f"- Filler words: {', '.join(vocab.get('filler_words', [])[:5])}\n\n"
-            "## Sentence Patterns\n"
-            f"- Average length: {sentence.get('avg_length', 0):.1f} words\n"
-            f"- Exclamation rate: {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%}\n"
-            f"- Question rate: {sentence.get('punctuation', {}).get('question_rate', 0):.0%}\n"
-            f"- Capitalization: {sentence.get('capitalization', 'unknown')}\n\n"
-            "## Tone\n"
-            f"- Formality: {tone.get('formality', 0):.0%}\n"
-            f"- Directness: {tone.get('directness', 0):.0%}\n\n"
-            "## Emoji\n"
-            f"- Usage rate: {emoji_data.get('frequency', 0):.0%}\n"
-            f"- Favorites: {', '.join(emoji_data.get('favorites', [])[:5])}\n\n"
-            "## Greetings & Signoffs\n"
-            f"- Common greetings: {', '.join(greetings.get('common', [])[:5])}\n"
-            f"- Common signoffs: {', '.join(signoffs.get('common', [])[:5])}\n"
+        return await _style_analyze_impl(
+            corpus_path=corpus_path,
+            min_message_length=min_message_length,
+            save_profile=save_profile,
+            profile_name=profile_name,
         )
-
-        if save_profile:
-            summary += f"\n**Profile saved to:** `{profile_file}`"
-
-        return summary
 
     @registry.tool()
     @auto_heal()
@@ -176,18 +348,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             The style profile contents
         """
-        profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
-
-        if not profile_file.exists():
-            return (
-                f"❌ Style profile not found: {profile_name}\n\n"
-                "Run `style_analyze` first to create a profile."
-            )
-
-        with open(profile_file, encoding="utf-8") as f:
-            profile = yaml.safe_load(f)
-
-        return f"**Style Profile: {profile_name}**\n\n```yaml\n{yaml.dump(profile, default_flow_style=False)}\n```"
+        return await _style_profile_view_impl(profile_name=profile_name)
 
     @registry.tool()
     @auto_heal()
@@ -214,53 +375,11 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             Summary of generated persona files
         """
         # Load style profile
-        profile_file = STYLE_DIR / f"{profile_name}_style_profile.yaml"
-        if not profile_file.exists():
-            return (
-                f"❌ Style profile not found: {profile_name}\n\n"
-                "Run `style_analyze` first to create a profile."
-            )
-
-        with open(profile_file, encoding="utf-8") as f:
-            profile = yaml.safe_load(f)
-
-        # Load corpus for examples
-        corpus_file = STYLE_DIR / "slack_corpus.jsonl"
-        examples = []
-        if corpus_file.exists():
-            with open(corpus_file, encoding="utf-8") as f:
-                all_messages = [json.loads(line) for line in f if line.strip()]
-
-            # Select diverse examples
-            examples = _select_diverse_examples(all_messages, example_count)
-
-        # Generate persona YAML
-        tools_list = [t.strip() for t in include_tools.split(",") if t.strip()]
-
-        persona_yaml = _generate_persona_yaml(persona_name, profile, tools_list)
-        persona_md = _generate_persona_markdown(persona_name, profile, examples)
-
-        # Save files
-        PERSONAS_DIR.mkdir(parents=True, exist_ok=True)
-
-        yaml_file = PERSONAS_DIR / f"{persona_name}.yaml"
-        md_file = PERSONAS_DIR / f"{persona_name}.md"
-
-        with open(yaml_file, "w", encoding="utf-8") as f:
-            yaml.dump(persona_yaml, f, default_flow_style=False, allow_unicode=True)
-
-        with open(md_file, "w", encoding="utf-8") as f:
-            f.write(persona_md)
-
-        return (
-            f"✅ Persona generated: {persona_name}\n\n"
-            "**Files created:**\n"
-            f"- `{yaml_file}` - Persona configuration\n"
-            f"- `{md_file}` - Style guide with {len(examples)} examples\n\n"
-            "**To use:**\n"
-            f'```\npersona_load("{persona_name}")\n```\n\n'
-            "**To test:**\n"
-            f'```\npersona_test_style("{persona_name}")\n```'
+        return await _persona_generate_from_style_impl(
+            profile_name=profile_name,
+            persona_name=persona_name,
+            example_count=example_count,
+            include_tools=include_tools,
         )
 
     @registry.tool()
@@ -283,85 +402,7 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
             Test results with similarity scores
         """
         # Load persona and profile
-        persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
-        profile_file = STYLE_DIR / f"{persona_name}_style_profile.yaml"
-
-        if not persona_file.exists():
-            return f"❌ Persona not found: {persona_name}"
-
-        if not profile_file.exists():
-            return f"❌ Style profile not found: {persona_name}"
-
-        with open(profile_file, encoding="utf-8") as f:
-            profile = yaml.safe_load(f)
-
-        # Default test prompts
-        if not test_prompts:
-            default_prompts = [
-                "Thanks for the update",
-                "I'll take a look at this",
-                "Can you clarify what you mean?",
-                "Sounds good to me",
-                "Let me check on that",
-            ]
-        else:
-            default_prompts = [p.strip() for p in test_prompts.split(",")]
-
-        # Load some real examples for comparison
-        corpus_file = STYLE_DIR / "slack_corpus.jsonl"
-        real_examples = []
-        if corpus_file.exists():
-            with open(corpus_file, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        msg = json.loads(line)
-                        if 10 <= len(msg.get("text", "")) <= 100:
-                            real_examples.append(msg.get("text", ""))
-                            if len(real_examples) >= 20:
-                                break
-
-        # Analyze style characteristics
-        vocab = profile.get("vocabulary", {})
-        tone = profile.get("tone", {})
-        emoji_data = profile.get("emoji", {})
-
-        results = []
-        results.append(f"## Persona Test: {persona_name}\n")
-        results.append(f"**Test prompts:** {len(default_prompts)}\n")
-        results.append(f"**Real examples for comparison:** {len(real_examples)}\n\n")
-
-        # Style characteristics summary
-        results.append("### Style Profile Summary\n")
-        results.append(f"- Formality: {tone.get('formality', 0):.0%}\n")
-        results.append(f"- Directness: {tone.get('directness', 0):.0%}\n")
-        results.append(f"- Emoji usage: {emoji_data.get('frequency', 0):.0%}\n")
-        results.append(
-            f"- Top phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n\n"
-        )
-
-        # Show real examples
-        results.append("### Real Message Examples\n")
-        for i, ex in enumerate(real_examples[:5], 1):
-            results.append(f'{i}. "{ex}"\n')
-
-        results.append("\n### Test Prompts\n")
-        results.append("Use these prompts to test the persona manually:\n")
-        for prompt in default_prompts:
-            results.append(f'- "{prompt}"\n')
-
-        results.append("\n### Evaluation Criteria\n")
-        results.append("When testing, check if responses match:\n")
-        results.append("- [ ] Uses similar vocabulary/phrases\n")
-        results.append(
-            f"- [ ] Matches formality level ({tone.get('formality', 0):.0%})\n"
-        )
-        results.append(
-            f"- [ ] Emoji usage matches ({emoji_data.get('frequency', 0):.0%})\n"
-        )
-        results.append("- [ ] Sentence length is similar\n")
-        results.append("- [ ] Greetings/signoffs match style\n")
-
-        return "".join(results)
+        return await _persona_test_style_impl(persona_name=persona_name, test_prompts=test_prompts)
 
     @registry.tool()
     @auto_heal()
@@ -381,79 +422,84 @@ def register_tools(server: FastMCP) -> int:  # noqa: C901
         Returns:
             Summary of refinements made
         """
-        persona_file = PERSONAS_DIR / f"{persona_name}.yaml"
-
-        if not persona_file.exists():
-            return f"❌ Persona not found: {persona_name}"
-
-        with open(persona_file, encoding="utf-8") as f:
-            yaml.safe_load(f)  # Validate persona exists and is valid
-
-        changes = []
-
-        # Apply specific adjustments
-        if adjustment:
-            adj_lower = adjustment.lower()
-
-            if "casual" in adj_lower or "informal" in adj_lower:
-                changes.append("Adjusted tone to be more casual")
-                # This would modify the persona field
-
-            if "formal" in adj_lower:
-                changes.append("Adjusted tone to be more formal")
-
-            if "less_emoji" in adj_lower or "fewer_emoji" in adj_lower:
-                changes.append("Reduced emoji usage guidance")
-
-            if "more_emoji" in adj_lower:
-                changes.append("Increased emoji usage guidance")
-
-            if "shorter" in adj_lower:
-                changes.append("Adjusted for shorter responses")
-
-            if "longer" in adj_lower:
-                changes.append("Adjusted for more detailed responses")
-
-        # Log feedback for future reference
-        if feedback:
-            refinement_log = STYLE_DIR / f"{persona_name}_refinements.yaml"
-            refinements = []
-            if refinement_log.exists():
-                with open(refinement_log, encoding="utf-8") as f:
-                    refinements = yaml.safe_load(f) or []
-
-            refinements.append(
-                {
-                    "date": datetime.now().isoformat(),
-                    "feedback": feedback,
-                    "adjustment": adjustment,
-                    "changes": changes,
-                }
-            )
-
-            with open(refinement_log, "w", encoding="utf-8") as f:
-                yaml.dump(refinements, f, default_flow_style=False)
-
-            changes.append("Logged feedback to refinement history")
-
-        if not changes:
-            return (
-                "No specific adjustments made.\n\n"
-                "**Available adjustments:**\n"
-                "- `more_casual` / `more_formal` - Adjust formality\n"
-                "- `less_emoji` / `more_emoji` - Adjust emoji usage\n"
-                "- `shorter` / `longer` - Adjust response length\n\n"
-                "**Or provide feedback** to log for future improvements."
-            )
-
-        return (
-            f"✅ Persona refined: {persona_name}\n\n"
-            "**Changes:**\n"
-            + "\n".join(f"- {c}" for c in changes)
-            + f'\n\n**To re-test:** `persona_test_style("{persona_name}")`'
-        )
+        return await _persona_refine_style_impl(persona_name=persona_name, feedback=feedback, adjustment=adjustment)
 
     return registry.count
+
+
+def _format_style_summary(profile: dict, message_count: int) -> str:
+    """Build the human-readable summary of a style analysis."""
+    vocab = profile.get("vocabulary", {})
+    sentence = profile.get("sentence_patterns", {})
+    tone = profile.get("tone", {})
+    emoji_data = profile.get("emoji", {})
+    greetings = profile.get("greetings", {})
+    signoffs = profile.get("signoffs", {})
+
+    return (
+        "✅ Style analysis complete\n\n"
+        f"**Messages analyzed:** {message_count:,}\n\n"
+        "## Vocabulary\n"
+        f"- Top words: {', '.join(vocab.get('top_words', [])[:10])}\n"
+        f"- Unique phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n"
+        f"- Filler words: {', '.join(vocab.get('filler_words', [])[:5])}\n\n"
+        "## Sentence Patterns\n"
+        f"- Average length: {sentence.get('avg_length', 0):.1f} words\n"
+        f"- Exclamation rate: {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%}\n"
+        f"- Question rate: {sentence.get('punctuation', {}).get('question_rate', 0):.0%}\n"
+        f"- Capitalization: {sentence.get('capitalization', 'unknown')}\n\n"
+        "## Tone\n"
+        f"- Formality: {tone.get('formality', 0):.0%}\n"
+        f"- Directness: {tone.get('directness', 0):.0%}\n\n"
+        "## Emoji\n"
+        f"- Usage rate: {emoji_data.get('frequency', 0):.0%}\n"
+        f"- Favorites: {', '.join(emoji_data.get('favorites', [])[:5])}\n\n"
+        "## Greetings & Signoffs\n"
+        f"- Common greetings: {', '.join(greetings.get('common', [])[:5])}\n"
+        f"- Common signoffs: {', '.join(signoffs.get('common', [])[:5])}\n"
+    )
+
+
+def _format_style_test_report(
+    persona_name: str, profile: dict, default_prompts: list[str], real_examples: list[str]
+) -> str:
+    """Build the persona style test report."""
+    # Analyze style characteristics
+    vocab = profile.get("vocabulary", {})
+    tone = profile.get("tone", {})
+    emoji_data = profile.get("emoji", {})
+
+    results = []
+    results.append(f"## Persona Test: {persona_name}\n")
+    results.append(f"**Test prompts:** {len(default_prompts)}\n")
+    results.append(f"**Real examples for comparison:** {len(real_examples)}\n\n")
+
+    # Style characteristics summary
+    results.append("### Style Profile Summary\n")
+    results.append(f"- Formality: {tone.get('formality', 0):.0%}\n")
+    results.append(f"- Directness: {tone.get('directness', 0):.0%}\n")
+    results.append(f"- Emoji usage: {emoji_data.get('frequency', 0):.0%}\n")
+    results.append(f"- Top phrases: {', '.join(vocab.get('unique_phrases', [])[:5])}\n\n")
+
+    # Show real examples
+    results.append("### Real Message Examples\n")
+    for i, ex in enumerate(real_examples[:5], 1):
+        results.append(f'{i}. "{ex}"\n')
+
+    results.append("\n### Test Prompts\n")
+    results.append("Use these prompts to test the persona manually:\n")
+    for prompt in default_prompts:
+        results.append(f'- "{prompt}"\n')
+
+    results.append("\n### Evaluation Criteria\n")
+    results.append("When testing, check if responses match:\n")
+    results.append("- [ ] Uses similar vocabulary/phrases\n")
+    results.append(f"- [ ] Matches formality level ({tone.get('formality', 0):.0%})\n")
+    results.append(f"- [ ] Emoji usage matches ({emoji_data.get('frequency', 0):.0%})\n")
+    results.append("- [ ] Sentence length is similar\n")
+    results.append("- [ ] Greetings/signoffs match style\n")
+
+    return "".join(results)
 
 
 def _select_diverse_examples(messages: list[dict], count: int) -> list[dict]:
@@ -513,7 +559,7 @@ def _has_emoji(text: str) -> bool:
     return bool(emoji_pattern.search(text))
 
 
-def _generate_persona_yaml(name: str, profile: dict, tools: list[str]) -> dict:
+def _generate_persona_yaml(name: str, tools: list[str]) -> dict:
     """Generate persona YAML configuration."""
     # The persona field references the markdown file which contains
     # the full style guide and examples
@@ -550,51 +596,51 @@ This persona mimics {name}'s natural communication patterns based on analysis of
 
 | Attribute | Value |
 |-----------|-------|
-| Formality | {tone.get('formality', 0.5):.0%} |
-| Directness | {tone.get('directness', 0.5):.0%} |
-| Avg sentence length | {sentence.get('avg_length', 12):.0f} words |
-| Emoji usage | {emoji_data.get('frequency', 0):.0%} |
-| Exclamation rate | {sentence.get('punctuation', {}).get('exclamation_rate', 0):.0%} |
-| Question rate | {sentence.get('punctuation', {}).get('question_rate', 0):.0%} |
+| Formality | {tone.get("formality", 0.5):.0%} |
+| Directness | {tone.get("directness", 0.5):.0%} |
+| Avg sentence length | {sentence.get("avg_length", 12):.0f} words |
+| Emoji usage | {emoji_data.get("frequency", 0):.0%} |
+| Exclamation rate | {sentence.get("punctuation", {}).get("exclamation_rate", 0):.0%} |
+| Question rate | {sentence.get("punctuation", {}).get("question_rate", 0):.0%} |
 
 ## Vocabulary Patterns
 
 ### Common Phrases
-{_format_list(vocab.get('unique_phrases', [])[:15])}
+{_format_list(vocab.get("unique_phrases", [])[:15])}
 
 ### Filler Words
-{_format_list(vocab.get('filler_words', [])[:10])}
+{_format_list(vocab.get("filler_words", [])[:10])}
 
 ### Technical Terms
-{_format_list(vocab.get('technical_terms', [])[:10])}
+{_format_list(vocab.get("technical_terms", [])[:10])}
 
 ## Response Patterns
 
 ### Acknowledgments
-{_format_list(response_patterns.get('acknowledgment', [])[:5])}
+{_format_list(response_patterns.get("acknowledgment", [])[:5])}
 
 ### Agreement
-{_format_list(response_patterns.get('agreement', [])[:5])}
+{_format_list(response_patterns.get("agreement", [])[:5])}
 
 ### Disagreement
-{_format_list(response_patterns.get('disagreement', [])[:5])}
+{_format_list(response_patterns.get("disagreement", [])[:5])}
 
 ## Greetings & Signoffs
 
 ### Greetings
-{_format_list(greetings.get('common', [])[:5])}
+{_format_list(greetings.get("common", [])[:5])}
 
 ### Signoffs
-{_format_list(signoffs.get('common', [])[:5])}
+{_format_list(signoffs.get("common", [])[:5])}
 
 ## Emoji Usage
 
-Favorite emojis: {' '.join(emoji_data.get('favorites', [])[:10])}
+Favorite emojis: {" ".join(emoji_data.get("favorites", [])[:10])}
 
 ### Contextual Patterns
-- Agreement: {' '.join(emoji_data.get('contextual_patterns', {}).get('agreement', [])[:3])}
-- Thinking: {' '.join(emoji_data.get('contextual_patterns', {}).get('thinking', [])[:3])}
-- Positive: {' '.join(emoji_data.get('contextual_patterns', {}).get('positive', [])[:3])}
+- Agreement: {" ".join(emoji_data.get("contextual_patterns", {}).get("agreement", [])[:3])}
+- Thinking: {" ".join(emoji_data.get("contextual_patterns", {}).get("thinking", [])[:3])}
+- Positive: {" ".join(emoji_data.get("contextual_patterns", {}).get("positive", [])[:3])}
 
 ## Example Messages
 
@@ -602,26 +648,7 @@ These are real examples of {name}'s messages to use as few-shot examples:
 
 """
 
-    # Add examples
-    for i, ex in enumerate(examples, 1):
-        text = ex.get("text", "")
-        channel_type = ex.get("channel_type", "unknown")
-        is_reply = ex.get("is_thread_reply", False)
-        reply_context = ""
-
-        if is_reply and ex.get("reply_to"):
-            reply_to = ex.get("reply_to", {})
-            reply_context = (
-                f"\n   > Replying to: \"{reply_to.get('text', '')[:100]}...\""
-            )
-
-        md += f"""
-### Example {i} ({channel_type}{', thread reply' if is_reply else ''})
-{reply_context}
-```
-{text}
-```
-"""
+    md += _format_examples_section(examples)
 
     md += """
 ## Usage Guidelines
@@ -634,6 +661,29 @@ These are real examples of {name}'s messages to use as few-shot examples:
 """
 
     return md
+
+
+def _format_examples_section(examples: list[dict]) -> str:
+    """Render few-shot example messages as markdown."""
+    sections = []
+    for i, ex in enumerate(examples, 1):
+        text = ex.get("text", "")
+        channel_type = ex.get("channel_type", "unknown")
+        is_reply = ex.get("is_thread_reply", False)
+        reply_context = ""
+
+        if is_reply and ex.get("reply_to"):
+            reply_to = ex.get("reply_to", {})
+            reply_context = f'\n   > Replying to: "{reply_to.get("text", "")[:100]}..."'
+
+        sections.append(f"""
+### Example {i} ({channel_type}{", thread reply" if is_reply else ""})
+{reply_context}
+```
+{text}
+```
+""")
+    return "".join(sections)
 
 
 def _tone_description(tone: dict) -> str:
