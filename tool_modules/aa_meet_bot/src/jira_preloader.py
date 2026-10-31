@@ -8,13 +8,19 @@ Uses the MCP Jira tools for reliable access.
 """
 
 import asyncio
+import functools
 import json
 import logging
+import os
 import re
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import NamedTuple
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -25,59 +31,91 @@ from tool_modules.aa_meet_bot.src.llm_responder import get_llm_responder
 
 logger = logging.getLogger(__name__)
 
+# Failures expected while talking to Jira or the LLM responder: network/file
+# errors, bad JSON and unexpected response shapes.
+_JIRA_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    urllib.error.URLError,
+    ValueError,
+    KeyError,
+    TypeError,
+    AttributeError,
+)
 
-def _parse_jira_table(output: str) -> List[dict]:
+
+def _jira_credentials() -> tuple[str, str]:
+    """Return ``(jira_url, token)`` from the environment or ~/.config/jira/config.json."""
+    jira_url = os.environ.get("JIRA_URL", "https://issues.redhat.com")
+    # Try JIRA_JPAT first (used by rh-issue), then JIRA_TOKEN
+    jira_token = os.environ.get("JIRA_JPAT", "") or os.environ.get("JIRA_TOKEN", "")
+    if not jira_token:
+        config_path = Path.home() / ".config" / "jira" / "config.json"
+        if config_path.exists():
+            with open(config_path, encoding="utf-8") as f:
+                config = json.load(f)
+                jira_token = config.get("token", "")
+                jira_url = config.get("url", jira_url)
+    return jira_url, jira_token
+
+
+def _http_opener() -> urllib.request.OpenerDirector:
+    """Build an opener that only speaks HTTP(S) - no file:, ftp: or data: handlers."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPRedirectHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener
+
+
+def _fetch_json(req: urllib.request.Request) -> dict:
+    """Perform the (blocking) request and decode the JSON body."""
+    if urllib.parse.urlparse(req.full_url).scheme not in ("https", "http"):
+        raise ValueError(f"Refusing non-HTTP Jira URL: {req.full_url}")
+    with _http_opener().open(req, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _split_cells(line: str) -> list[str]:
+    """Split a table line on ``|`` or on runs of two or more spaces."""
+    if "|" in line:
+        return [v.strip() for v in line.split("|") if v.strip() or v == ""]
+    return [v.strip() for v in re.split(r"\s{2,}", line)]
+
+
+def _find_header(lines: list[str]) -> tuple[list[str], int]:
+    """Return the normalised header names and the index of the first data line."""
+    for i, line in enumerate(lines):
+        if "Key" in line and ("Status" in line or "Summary" in line):
+            headers = [h.lower().replace(" ", "_") for h in _split_cells(line) if h]
+            data_start = i + 1
+            if data_start < len(lines) and "---" in lines[data_start]:
+                data_start += 1
+            return headers, data_start
+    return [], 0
+
+
+def _parse_jira_table(output: str) -> list[dict]:
     """Parse the table output from Jira MCP tools into a list of dicts."""
     lines = output.strip().split("\n")
     if len(lines) < 2:
         return []
 
-    # Find header line (contains Key, Status, etc.)
-    header_line = None
-    data_start = 0
-    for i, line in enumerate(lines):
-        if "Key" in line and ("Status" in line or "Summary" in line):
-            header_line = line
-            data_start = i + 1
-            break
-
-    if not header_line:
+    headers, data_start = _find_header(lines)
+    if not headers:
         return []
 
-    # Parse header - split by | or multiple spaces
-    if "|" in header_line:
-        headers = [
-            h.strip().lower().replace(" ", "_")
-            for h in header_line.split("|")
-            if h.strip()
-        ]
-    else:
-        headers = [
-            h.strip().lower().replace(" ", "_")
-            for h in re.split(r"\s{2,}", header_line)
-            if h.strip()
-        ]
-
-    # Skip separator line (----)
-    if data_start < len(lines) and "---" in lines[data_start]:
-        data_start += 1
-
-    # Parse data rows
     results = []
     for line in lines[data_start:]:
-        if not line.strip() or line.startswith("📊") or line.startswith("Found"):
+        if not line.strip() or line.startswith(("📊", "Found")):
             continue
-
-        if "|" in line:
-            values = [v.strip() for v in line.split("|") if v.strip() or v == ""]
-        else:
-            values = [v.strip() for v in re.split(r"\s{2,}", line)]
-
+        values = _split_cells(line)
         if len(values) >= len(headers):
-            row = {}
-            for i, header in enumerate(headers):
-                if i < len(values):
-                    row[header] = values[i]
+            row = dict(zip(headers, values))
             if row.get("key"):
                 results.append(row)
 
@@ -91,14 +129,13 @@ class SprintInfo:
     id: int
     name: str
     state: str  # "active", "closed", "future"
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
     goal: str = ""
 
 
-@dataclass
-class JiraIssue:
-    """Simplified Jira issue for context."""
+class JiraIssue(NamedTuple):
+    """Simplified (immutable) Jira issue for context."""
 
     key: str
     summary: str
@@ -106,10 +143,11 @@ class JiraIssue:
     assignee: str
     issue_type: str
     priority: str
-    story_points: Optional[int] = None
-    labels: List[str] = field(default_factory=list)
+    story_points: int | None = None
+    labels: Sequence[str] = ()
 
     def to_dict(self) -> dict:
+        """Serialise for the LLM responder context."""
         return {
             "key": self.key,
             "summary": self.summary,
@@ -118,7 +156,7 @@ class JiraIssue:
             "type": self.issue_type,
             "priority": self.priority,
             "story_points": self.story_points,
-            "labels": self.labels,
+            "labels": list(self.labels),
         }
 
 
@@ -132,10 +170,10 @@ class JiraPreloader:
     def __init__(self):
         self.config = get_config()
         self.project = "AAP"  # Default project
-        self.current_sprint: Optional[SprintInfo] = None
-        self.issues: List[JiraIssue] = []
-        self.my_issues: List[JiraIssue] = []
-        self.last_refresh: Optional[datetime] = None
+        self.current_sprint: SprintInfo | None = None
+        self.issues: list[JiraIssue] = []
+        self.my_issues: list[JiraIssue] = []
+        self.last_refresh: datetime | None = None
         self.refresh_interval = timedelta(minutes=15)
 
     async def preload(self, project: str = "AAP") -> bool:
@@ -149,7 +187,7 @@ class JiraPreloader:
             True if successful
         """
         self.project = project
-        logger.info(f"Preloading Jira context for {project}...")
+        logger.info("Preloading Jira context for %s...", project)
 
         try:
             # Fetch my issues
@@ -172,66 +210,44 @@ class JiraPreloader:
 
             self.issues = sprint_issues
             self.my_issues = my_issues
-            self.last_refresh = datetime.now()
+            self.last_refresh = datetime.now(UTC)
 
-            logger.info(
-                f"Loaded {len(my_issues)} personal issues, {len(sprint_issues)} sprint issues"
-            )
+            logger.info("Loaded %s personal issues, %s sprint issues", len(my_issues), len(sprint_issues))
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to preload Jira context: {e}")
+        except _JIRA_ERRORS as e:
+            logger.error("Failed to preload Jira context: %s", e)
             return False
 
-    async def _fetch_my_issues(self) -> List[JiraIssue]:
+    async def _fetch_my_issues(self) -> list[JiraIssue]:
         """Fetch issues assigned to me using MCP tools."""
         try:
             # Use the MCP jira_search tool via subprocess
             jql = f"project = {self.project} AND assignee = currentUser() AND status != Done ORDER BY updated DESC"
             return await self._jql_search(jql)
-        except Exception as e:
-            logger.error(f"Failed to fetch my issues: {e}")
+        except _JIRA_ERRORS as e:
+            logger.error("Failed to fetch my issues: %s", e)
             return []
 
-    async def _fetch_sprint_issues(self) -> List[JiraIssue]:
+    async def _fetch_sprint_issues(self) -> list[JiraIssue]:
         """Fetch issues in the current sprint."""
         try:
             # Try to get active sprint issues
             return await self._jql_search(
                 f"project = {self.project} AND Sprint in openSprints() ORDER BY status ASC, priority DESC"
             )
-        except Exception as e:
-            logger.error(f"Failed to fetch sprint issues: {e}")
+        except _JIRA_ERRORS as e:
+            logger.error("Failed to fetch sprint issues: %s", e)
             return []
 
-    async def _jql_search(self, jql: str, max_results: int = 50) -> List[JiraIssue]:
+    async def _jql_search(self, jql: str, max_results: int = 50) -> list[JiraIssue]:
         """Execute a JQL search using the Jira REST API directly."""
         try:
-            import os
-            import urllib.parse
-            import urllib.request
-
-            # Get Jira credentials from environment
-            jira_url = os.environ.get("JIRA_URL", "https://issues.redhat.com")
-            # Try JIRA_JPAT first (used by rh-issue), then JIRA_TOKEN
-            jira_token = os.environ.get("JIRA_JPAT", "") or os.environ.get(
-                "JIRA_TOKEN", ""
-            )
-
-            if not jira_token:
-                # Try to read from config file
-                config_path = Path.home() / ".config" / "jira" / "config.json"
-                if config_path.exists():
-                    with open(config_path, encoding="utf-8") as f:
-                        config = json.load(f)
-                        jira_token = config.get("token", "")
-                        jira_url = config.get("url", jira_url)
-
+            jira_url, jira_token = _jira_credentials()
             if not jira_token:
                 logger.warning("No Jira token found")
                 return []
 
-            # Build search URL
             params = urllib.parse.urlencode(
                 {
                     "jql": jql,
@@ -239,29 +255,15 @@ class JiraPreloader:
                     "fields": "key,summary,status,assignee,issuetype,priority,customfield_10016,labels",
                 }
             )
-            url = f"{jira_url}/rest/api/2/search?{params}"
-
-            # Make request
-            req = urllib.request.Request(url)
+            req = urllib.request.Request(f"{jira_url}/rest/api/2/search?{params}")
             req.add_header("Authorization", f"Bearer {jira_token}")
             req.add_header("Content-Type", "application/json")
 
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, lambda: urllib.request.urlopen(req, timeout=30)
-            )
+            data = await asyncio.get_running_loop().run_in_executor(None, _fetch_json, req)
+            return [self._parse_issue(issue_data) for issue_data in data.get("issues", [])]
 
-            data = json.loads(response.read().decode("utf-8"))
-
-            issues = []
-            for issue_data in data.get("issues", []):
-                issue = self._parse_issue(issue_data)
-                issues.append(issue)
-
-            return issues
-
-        except Exception as e:
-            logger.error(f"JQL search error: {e}")
+        except _JIRA_ERRORS as e:
+            logger.error("JQL search error: %s", e)
             return []
 
     def _parse_issue(self, data: dict) -> JiraIssue:
@@ -300,13 +302,13 @@ class JiraPreloader:
         if self.last_refresh is None:
             return await self.preload(self.project)
 
-        if datetime.now() - self.last_refresh > self.refresh_interval:
+        if datetime.now(UTC) - self.last_refresh > self.refresh_interval:
             logger.info("Jira context is stale, refreshing...")
             return await self.preload(self.project)
 
         return True
 
-    def get_issue_summary(self, issue_key: str) -> Optional[str]:
+    def get_issue_summary(self, issue_key: str) -> str | None:
         """Get a quick summary of an issue."""
         for issue in self.issues + self.my_issues:
             if issue.key.upper() == issue_key.upper():
@@ -319,7 +321,7 @@ class JiraPreloader:
             return "No sprint data loaded."
 
         # Count by status
-        status_counts = {}
+        status_counts: dict[str, int] = {}
         for issue in self.issues:
             status = issue.status
             status_counts[status] = status_counts.get(status, 0) + 1
@@ -334,16 +336,10 @@ class JiraPreloader:
         return f"Sprint has {len(self.issues)} items: {', '.join(parts)}. I have {my_count} assigned."
 
 
-# Global instance
-_jira_preloader: Optional[JiraPreloader] = None
-
-
+@functools.cache
 def get_jira_preloader() -> JiraPreloader:
     """Get or create the global Jira preloader instance."""
-    global _jira_preloader
-    if _jira_preloader is None:
-        _jira_preloader = JiraPreloader()
-    return _jira_preloader
+    return JiraPreloader()
 
 
 async def preload_jira_context(project: str = "AAP") -> bool:
