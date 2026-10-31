@@ -31,13 +31,16 @@ Integration with DaemonDBusBase:
 import asyncio
 import importlib
 import logging
-import random
+import secrets
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Scheduling jitter only; SystemRandom keeps a single, OS-seeded source.
+_JITTER_RNG = secrets.SystemRandom()
 
 
 def _optional_dbus_error() -> tuple[type[Exception], ...]:
@@ -511,7 +514,7 @@ class RobustPeriodicTask:
         else:
             wait_time = self._schedule.interval
         if self._schedule.max_jitter > 0:
-            wait_time += random.uniform(0, self._schedule.max_jitter)
+            wait_time += _JITTER_RNG.uniform(0, self._schedule.max_jitter)
         return wait_time
 
     async def _wait(self, wait_time: float) -> None:
