@@ -6,7 +6,7 @@ daemon lifecycle and D-Bus orchestration.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +51,7 @@ class SprintHistoryTracker:
             "issue_type": issue.get("issueType", "Story"),
             "story_points": issue.get("storyPoints"),
             "jira_status": issue.get("jiraStatus", ""),
-            "started": datetime.now().isoformat(),
+            "started": datetime.now(timezone.utc).astimezone().replace(tzinfo=None).isoformat(),
             "status": "in_progress",
             "execution_mode": "background",
             "persona_used": "developer",
@@ -78,7 +78,7 @@ class SprintHistoryTracker:
             return
 
         action: dict[str, Any] = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).astimezone().replace(tzinfo=None).isoformat(),
             "type": action_type,
             "details": details,
         }
