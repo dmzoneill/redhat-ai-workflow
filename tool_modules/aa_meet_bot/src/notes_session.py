@@ -32,7 +32,7 @@ class MeetingSession:
     session_id: str
     meet_url: str
     title: str
-    scheduled_end: Optional[datetime] = None
+    scheduled_end: datetime | None = None
     grace_period_minutes: int = 5  # Stay this long after scheduled end
 
 
@@ -53,9 +53,9 @@ class NotesBotManager:
         """Initialize the bot manager."""
         self._sessions: dict[str, MeetingSession] = {}
         self._bots: dict[str, NotesBot] = {}  # Backward compatibility
-        self._db: Optional[MeetingNotesDB] = None
+        self._db: MeetingNotesDB | None = None
         self._lock = asyncio.Lock()
-        self._monitor_task: Optional[asyncio.Task] = None
+        self._monitor_task: asyncio.Task | None = None
         self._monitor_interval: int = 60  # Check every 60 seconds
         self._initialized: bool = False
 
@@ -101,15 +101,13 @@ class NotesBotManager:
 
         # 3. Run comprehensive orphan cleanup
         try:
-            cleanup_results = await cleanup_orphaned_meetbot_devices(
-                active_instance_ids=active_ids
-            )
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=active_ids)
 
             record_device_cleanup(results, cleanup_results, prefix, "Cleanup")
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             results["errors"].append(f"Orphan cleanup: {e}")
-            logger.warning("%sError during cleanup: %s", prefix, e)
+            logger.warning("%sError during cleanup: %s", prefix, e, exc_info=True)
 
         return results
 
@@ -139,10 +137,8 @@ class NotesBotManager:
         """Stop the background monitor task."""
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
-            try:
-                await self._monitor_task
-            except asyncio.CancelledError:
-                pass
+            # Wait for the cancelled task to finish without re-raising its CancelledError here
+            await asyncio.wait([self._monitor_task])
             self._monitor_task = None
             logger.info("Stopped meeting end-time monitor")
 
@@ -163,9 +159,10 @@ class NotesBotManager:
                     await self._cleanup_orphaned_audio_devices()
 
             except asyncio.CancelledError:
-                break
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.error("Error in meeting monitor: %s", e)
+                logger.debug("Meeting monitor cancelled")
+                raise
+            except Exception:  # pylint: disable=broad-exception-caught
+                logger.exception("Error in meeting monitor")
 
     async def _cleanup_orphaned_audio_devices(self) -> None:
         """Clean up any orphaned MeetBot audio devices."""
@@ -197,19 +194,16 @@ class NotesBotManager:
                         len(results["removed_modules"]),
                     )
                 if results["removed_pipes"]:
-                    logger.info(
-                        "Cleaned up %s orphaned pipes", len(results["removed_pipes"])
-                    )
+                    logger.info("Cleaned up %s orphaned pipes", len(results["removed_pipes"]))
                 if results["errors"]:
                     for err in results["errors"]:
                         logger.warning("Cleanup error: %s", err)
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Error during orphaned device cleanup: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error during orphaned device cleanup")
 
     async def _check_expired_meetings(self) -> None:
         """Check for and leave any meetings past their end time."""
-        now = datetime.now()
         expired_sessions = []
         hung_sessions = []
 
@@ -218,10 +212,9 @@ class NotesBotManager:
                 # Check scheduled end time
                 if session.scheduled_end:
                     # Add grace period
-                    end_with_grace = session.scheduled_end + timedelta(
-                        minutes=session.grace_period_minutes
-                    )
-                    if now > end_with_grace:
+                    end_with_grace = session.scheduled_end + timedelta(minutes=session.grace_period_minutes)
+                    # Compare in the same tz-awareness as scheduled_end (calendar times may be aware or naive)
+                    if datetime.now(end_with_grace.tzinfo) > end_with_grace:
                         expired_sessions.append(session_id)
                         logger.info(
                             "Meeting '%s' (%s) has passed its end time (%s + %smin grace)",
@@ -234,11 +227,8 @@ class NotesBotManager:
                 # Check for hung bots (no activity for 30+ minutes while supposedly capturing)
                 if session.bot.has_controller():
                     last_activity = session.bot.controller_last_activity()
-                    inactive_minutes = (now - last_activity).total_seconds() / 60
-                    if (
-                        inactive_minutes > 30
-                        and session.bot.state.status == "capturing"
-                    ):
+                    inactive_minutes = (datetime.now(last_activity.tzinfo) - last_activity).total_seconds() / 60
+                    if inactive_minutes > 30 and session.bot.state.status == "capturing":
                         hung_sessions.append((session_id, inactive_minutes))
                         logger.warning(
                             "Meeting '%s' (%s) appears hung (no activity for %s min)",
@@ -283,7 +273,7 @@ class NotesBotManager:
             try:
                 await PulseAudioCapture.kill_all_captures()
             except Exception:  # pylint: disable=broad-exception-caught
-                pass
+                logger.debug("Ignored error during best-effort step", exc_info=True)
 
             # Force kill the browser
             await session.bot.force_kill_controller()
@@ -299,7 +289,7 @@ class NotesBotManager:
         try:
             await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("Error during post-force-kill cleanup: %s", e)
+            logger.warning("Error during post-force-kill cleanup: %s", e, exc_info=True)
 
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-locals,too-many-arguments,too-many-positional-arguments
@@ -311,8 +301,8 @@ class NotesBotManager:
         event_id: str = "",
         description: str = "",
         organizer: str = "",
-        attendees: Optional[list[str]] = None,
-        scheduled_end: Optional[datetime] = None,
+        attendees: list[str] | None = None,
+        scheduled_end: datetime | None = None,
         grace_period_minutes: int = 5,
     ) -> tuple[str, bool, list[str]]:
         """
@@ -446,9 +436,7 @@ class NotesBotManager:
             if not has_scheduled and self._monitor_task:
                 await self._stop_monitor()
 
-            logger.info(
-                "Left meeting %s. Active meetings: %s", session_id, len(self._sessions)
-            )
+            logger.info("Left meeting %s. Active meetings: %s", session_id, len(self._sessions))
             return result
 
     async def leave_all(self) -> list[dict]:
@@ -466,7 +454,7 @@ class NotesBotManager:
 
         return results
 
-    async def get_status(self, session_id: Optional[str] = None) -> dict:
+    async def get_status(self, session_id: str | None = None) -> dict:
         """
         Get status of one or all active meetings.
 
@@ -481,9 +469,7 @@ class NotesBotManager:
                 return {"error": f"No active meeting with session ID: {session_id}"}
             session = self._sessions[session_id]
             status = await session.bot.get_status()
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             return status
 
@@ -491,9 +477,7 @@ class NotesBotManager:
         statuses = {}
         for sid, session in self._sessions.items():
             status = await session.bot.get_status()
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             statuses[sid] = status
         return statuses
@@ -504,16 +488,12 @@ class NotesBotManager:
         for session_id, session in self._sessions.items():
             status = await session.bot.get_status()
             status["session_id"] = session_id
-            status["scheduled_end"] = (
-                session.scheduled_end.isoformat() if session.scheduled_end else None
-            )
+            status["scheduled_end"] = session.scheduled_end.isoformat() if session.scheduled_end else None
             status["grace_period_minutes"] = session.grace_period_minutes
             # Calculate time remaining
             if session.scheduled_end:
-                remaining = session.scheduled_end - datetime.now()
-                status["time_remaining_minutes"] = max(
-                    0, remaining.total_seconds() / 60
-                )
+                remaining = session.scheduled_end - datetime.now(session.scheduled_end.tzinfo)
+                status["time_remaining_minutes"] = max(0, remaining.total_seconds() / 60)
             statuses.append(status)
         return statuses
 
@@ -525,18 +505,16 @@ class NotesBotManager:
         """Get list of active session IDs."""
         return list(self._sessions.keys())
 
-    def get_bot(self, session_id: str) -> Optional[NotesBot]:
+    def get_bot(self, session_id: str) -> NotesBot | None:
         """Get a specific bot instance."""
         session = self._sessions.get(session_id)
         return session.bot if session else None
 
-    def get_session(self, session_id: str) -> Optional[MeetingSession]:
+    def get_session(self, session_id: str) -> MeetingSession | None:
         """Get a specific session."""
         return self._sessions.get(session_id)
 
-    async def update_scheduled_end(
-        self, session_id: str, scheduled_end: datetime
-    ) -> bool:
+    async def update_scheduled_end(self, session_id: str, scheduled_end: datetime) -> bool:
         """Update the scheduled end time for a meeting."""
         if session_id not in self._sessions:
             return False
@@ -577,7 +555,7 @@ class NotesBotManager:
             if killed > 0:
                 logger.info("MANAGER CLOSE: Killed %s audio capture processes", killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("MANAGER CLOSE: Error killing audio captures: %s", e)
+            logger.warning("MANAGER CLOSE: Error killing audio captures: %s", e, exc_info=True)
 
         # Final cleanup of any orphaned devices
         logger.info("MANAGER CLOSE: Running final orphan cleanup...")
@@ -588,7 +566,7 @@ class NotesBotManager:
             try:
                 await self._db.close()
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("MANAGER CLOSE: Error closing database: %s", e)
+                logger.warning("MANAGER CLOSE: Error closing database: %s", e, exc_info=True)
             self._db = None
 
         self._initialized = False
@@ -601,7 +579,7 @@ class NotesBotManager:
 class _BotSlots:  # pylint: disable=too-few-public-methods
     """Process-wide notes bot and manager, without a global statement."""
 
-    notes_bot: Optional[NotesBot] = None
+    notes_bot: NotesBot | None = None
     bot_manager: Optional["NotesBotManager"] = None
 
 
