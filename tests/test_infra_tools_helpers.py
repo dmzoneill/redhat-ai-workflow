@@ -56,3 +56,10 @@ def test_safe_state_path_rejects_outside(tmp_path, monkeypatch):
     """Configured state paths elsewhere are rejected."""
     monkeypatch.setenv("HOME", str(tmp_path))
     assert vars(infra_tools)["_safe_state_path"]("/etc/passwd") is None
+
+
+def test_numeric_entries_drops_non_timestamps():
+    """Only numeric timestamps survive a state file round-trip."""
+    entries = vars(infra_tools)["_numeric_entries"]
+    assert entries({"s": 1, "p": 2.5, "x": "bad", "b": True}) == {"s": 1.0, "p": 2.5}
+    assert not entries(["s"])

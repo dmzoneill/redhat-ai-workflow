@@ -272,16 +272,27 @@ def _get_kube_last_login_time(cluster: str) -> float:
     return 0
 
 
+def _numeric_entries(loaded: object) -> dict[str, float]:
+    """Keep only cluster -> timestamp pairs from a parsed state file."""
+    if not isinstance(loaded, dict):
+        return {}
+    return {
+        str(key): float(value)
+        for key, value in loaded.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    }
+
+
 def _set_kube_last_login_time(cluster: str, timestamp: float) -> None:
     """Set the last kube login time for a cluster in shared state file."""
     try:
-        state = {}
+        state: dict[str, float] = {}
         if _KUBE_STATE_FILE.exists():
             try:
-                state = json.loads(_KUBE_STATE_FILE.read_text(encoding="utf-8"))
+                state = _numeric_entries(json.loads(_KUBE_STATE_FILE.read_text(encoding="utf-8")))
             except ValueError as e:
                 logger.debug("Suppressed error in _set_kube_last_login_time (read existing): %s", e)
-        state[cluster] = timestamp
+        state[cluster] = float(timestamp)
         _KUBE_STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
     except OSError as e:
         logger.debug("Suppressed error in _set_kube_last_login_time (write): %s", e)
