@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Meetings Tab for Command Center
  *
@@ -34,18 +33,24 @@ export interface Meeting {
     | "failed"
     | "active";
   approvedAt?: string;
+  calendarName?: string;
+  botMode?: string;
 }
 
 export interface Caption {
   speaker: string;
   text: string;
   timestamp: string;
+  meetingTitle?: string;
 }
 
 export interface ActiveMeeting extends Meeting {
   sessionId: string;
   captionsCount: number;
   durationMinutes: number;
+  timeRemainingMinutes?: number | null;
+  screenshotPath?: string;
+  screenshotUpdated?: number;
 }
 
 export interface TechnicalIntegration {
@@ -107,20 +112,74 @@ export interface MeetingNote {
   date: string;
   duration: number;
   transcriptCount: number;
-  status: string;
+  status?: string;
+  actionItems?: number;
+  linkedIssues?: number;
+}
+
+/** A device status as reported by the daemon: a plain flag or a detailed object. */
+type RawIntegration =
+  | boolean
+  | {
+      name?: string;
+      status?: TechnicalIntegration["status"];
+      ready?: boolean;
+      details?: string;
+      path?: string;
+      error?: string;
+    }
+  | null
+  | undefined;
+
+/** Virtual devices payload (accepts both current and legacy key names). */
+interface RawVirtualDevices {
+  pulseaudio?: RawIntegration;
+  pulseaudioRunning?: RawIntegration;
+  audioSink?: RawIntegration;
+  audioSinkReady?: RawIntegration;
+  audioSource?: RawIntegration;
+  audioSourceReady?: RawIntegration;
+  v4l2loopback?: RawIntegration;
+  v4l2loopbackLoaded?: RawIntegration;
+  virtualCamera?: RawIntegration;
+  virtualCameraReady?: RawIntegration;
+  virtualCameraPath?: string;
+  videoDevicePath?: string;
+  ffmpeg?: RawIntegration;
+  ffmpegAvailable?: RawIntegration;
+  pipewire?: RawIntegration;
+}
+
+/** Meet state payload from D-Bus / unified workspace state. */
+export interface RawMeetData {
+  currentMeeting?: Meeting | null;
+  currentMeetings?: ActiveMeeting[];
+  upcomingMeetings?: Partial<Meeting>[];
+  captions?: Partial<Caption>[];
+  schedulerRunning?: boolean;
+  monitoredCalendars?: (Partial<MonitoredCalendar> & {
+    calendar_id?: string;
+    auto_join?: boolean;
+  })[];
+  recentNotes?: Partial<MeetingNote>[];
+  nextMeeting?: Meeting | null;
+  countdown?: string | null;
+  countdownSeconds?: number | null;
+  lastPoll?: string | null;
+  virtualDevices?: RawVirtualDevices;
 }
 
 /**
  * Parse virtual devices status from unified state data
  */
 function parseVirtualDevicesStatus(
-  data: any,
+  data: RawVirtualDevices | undefined,
 ): VirtualDevicesStatus | undefined {
   if (!data) {
     return undefined;
   }
 
-  const parseStatus = (value: any): TechnicalIntegration => {
+  const parseStatus = (value: RawIntegration): TechnicalIntegration => {
     if (typeof value === "boolean") {
       return {
         name: "",
@@ -162,7 +221,7 @@ function parseVirtualDevicesStatus(
  *
  * @param unifiedMeetData - Meet data from D-Bus (preferred) or workspace_states.json
  */
-export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
+export function loadMeetBotState(unifiedMeetData?: RawMeetData): MeetBotState {
   // If unified data is provided, use it (preferred - always fresh)
   if (unifiedMeetData && Object.keys(unifiedMeetData).length > 0) {
     // Parse virtual devices status if available
@@ -174,20 +233,18 @@ export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
       currentMeeting: unifiedMeetData.currentMeeting || null,
       currentMeetings: unifiedMeetData.currentMeetings || [],
       activeMeetingCount: unifiedMeetData.currentMeetings?.length || 0,
-      upcomingMeetings: (unifiedMeetData.upcomingMeetings || []).map(
-        (m: any) => ({
-          id: m.id || "",
-          title: m.title || "Untitled",
-          url: m.url || "",
-          startTime: m.startTime || "",
-          endTime: m.endTime || "",
-          organizer: m.organizer || "",
-          attendees: m.attendees || [],
-          status: m.status || "pending",
-          calendarName: m.calendarName || "",
-        }),
-      ),
-      captions: (unifiedMeetData.captions || []).map((c: any) => ({
+      upcomingMeetings: (unifiedMeetData.upcomingMeetings || []).map((m) => ({
+        id: m.id || "",
+        title: m.title || "Untitled",
+        url: m.url || "",
+        startTime: m.startTime || "",
+        endTime: m.endTime || "",
+        organizer: m.organizer || "",
+        attendees: m.attendees || [],
+        status: m.status || "pending",
+        calendarName: m.calendarName || "",
+      })),
+      captions: (unifiedMeetData.captions || []).map((c) => ({
         speaker: c.speaker || "Unknown",
         text: c.text || "",
         timestamp: c.timestamp || "",
@@ -204,7 +261,7 @@ export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
       error: null,
       schedulerRunning: unifiedMeetData.schedulerRunning || false,
       monitoredCalendars: (unifiedMeetData.monitoredCalendars || []).map(
-        (c: any) => ({
+        (c) => ({
           id: c.id || c.calendar_id || "",
           calendarId: c.calendarId || c.calendar_id || "",
           name: c.name || "",
@@ -212,7 +269,7 @@ export function loadMeetBotState(unifiedMeetData?: any): MeetBotState {
           enabled: c.enabled || false,
         }),
       ),
-      recentNotes: (unifiedMeetData.recentNotes || []).map((note: any) => ({
+      recentNotes: (unifiedMeetData.recentNotes || []).map((note) => ({
         id: note.id || 0,
         title: note.title || "Untitled",
         date: note.date ? new Date(note.date).toLocaleDateString() : "",
@@ -533,8 +590,7 @@ export function getUpcomingMeetingsHtml(state: MeetBotState): string {
 
   return state.upcomingMeetings
     .map((meeting, index) => {
-      const meetingAny = meeting as any;
-      const calendarName = meetingAny.calendarName || "";
+      const calendarName = meeting.calendarName || "";
       const startTime = new Date(meeting.startTime);
       const endTime = meeting.endTime ? new Date(meeting.endTime) : null;
       // Meeting is active if it has started but not ended
@@ -547,7 +603,7 @@ export function getUpcomingMeetingsHtml(state: MeetBotState): string {
       const titleSafe = escapeHtml(meeting.title)
         .replace(/\\/g, "\\\\")
         .replace(/'/g, "\\'");
-      const meetingMode = meetingAny.botMode || "notes"; // Default to notes
+      const meetingMode = meeting.botMode || "notes"; // Default to notes
       const isApproved = meeting.status === "approved";
       const statusStr = meeting.status as string;
       const isScheduled = statusStr === "scheduled" || statusStr === "pending";
@@ -656,7 +712,7 @@ export function getMeetingsTabContent(
       <!-- Meeting Cards -->
       <div class="active-meetings-grid">
         ${activeMeetings
-          .map((meeting: any) => {
+          .map((meeting) => {
             const timeRemaining = meeting.timeRemainingMinutes;
             const hasScheduledEnd =
               timeRemaining !== null && timeRemaining !== undefined;
@@ -751,7 +807,7 @@ export function getMeetingsTabContent(
             state.captions?.length > 0
               ? state.captions
                   .map(
-                    (caption: any) => `
+                    (caption) => `
             <div class="live-caption-entry">
               <div class="caption-meta">
                 <span class="caption-speaker">${escapeHtml(caption.speaker)}</span>
@@ -925,7 +981,7 @@ export function getMeetingsTabContent(
                   <select id="test-target-meeting" class="meeting-select w-full">
                     ${state.currentMeetings
                       .map(
-                        (m: any) => `
+                        (m) => `
                       <option value="${m.sessionId || m.id || ""}">${escapeHtml(m.title || "Untitled Meeting")}</option>
                     `,
                       )
@@ -996,7 +1052,7 @@ export function getMeetingsTabContent(
             state.recentNotes?.length > 0
               ? state.recentNotes
                   .map(
-                    (note: any) => `
+                    (note) => `
             <div class="history-item" data-note-id="${note.id}">
               <div class="history-item-header">
                 <div class="history-item-title">${escapeHtml(note.title)}</div>
