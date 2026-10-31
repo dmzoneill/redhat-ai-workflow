@@ -134,7 +134,7 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
 
         return True
     # Saving is best-effort; callers still have the in-memory knowledge.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("Failed to save knowledge %s", knowledge_path)
         return False
 
