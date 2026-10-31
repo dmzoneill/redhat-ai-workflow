@@ -95,12 +95,12 @@ async def test_jql_search(monkeypatch):
     monkeypatch.setattr(jira_preloader, "_jira_credentials", lambda: ("https://j", "tok"))
     seen = {}
 
-    def fake_urlopen(req, timeout):
+    def fake_open(req, timeout):
         seen.update(url=req.full_url, auth=req.get_header("Authorization"), timeout=timeout)
         body = {"issues": [{"key": "AAP-9", "fields": {"summary": "s", "status": {"name": "Done"}}}]}
         return io.BytesIO(json.dumps(body).encode())
 
-    monkeypatch.setattr(jira_preloader.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(jira_preloader, "_http_opener", lambda: SimpleNamespace(open=fake_open))
     issues = await vars(JiraPreloader)["_jql_search"](JiraPreloader(), "project = AAP")
     assert [i.key for i in issues] == ["AAP-9"]
     assert seen["url"].startswith("https://j/rest/api/2/search?jql=project+%3D+AAP")
@@ -116,7 +116,7 @@ async def test_jql_search_errors_return_empty(monkeypatch):
     def fail(*_args, **_kwargs):
         raise jira_preloader.urllib.error.URLError("down")
 
-    monkeypatch.setattr(jira_preloader.urllib.request, "urlopen", fail)
+    monkeypatch.setattr(jira_preloader, "_http_opener", lambda: SimpleNamespace(open=fail))
     assert not await vars(JiraPreloader)["_jql_search"](JiraPreloader(), "x")
     monkeypatch.setattr(jira_preloader, "_jira_credentials", lambda: ("https://j", ""))
     assert not await vars(JiraPreloader)["_jql_search"](JiraPreloader(), "x")
@@ -163,3 +163,18 @@ def test_get_jira_preloader_is_singleton(monkeypatch):
         assert get_jira_preloader() is get_jira_preloader()
     finally:
         get_jira_preloader.cache_clear()
+
+
+def test_fetch_json_rejects_non_http_schemes():
+    """file: and other schemes are refused before any request is made."""
+    fetch = vars(jira_preloader)["_fetch_json"]
+    for url in ("file:///etc/passwd", "ftp://x/y"):
+        try:
+            fetch(jira_preloader.urllib.request.Request(url))
+        except ValueError as e:
+            assert "non-HTTP" in str(e)
+        else:
+            raise AssertionError(url)
+    handlers = {type(h).__name__ for h in vars(jira_preloader)["_http_opener"]().handlers}
+    assert "FileHandler" not in handlers
+    assert "HTTPSHandler" in handlers

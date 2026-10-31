@@ -58,9 +58,25 @@ def _jira_credentials() -> tuple[str, str]:
     return jira_url, jira_token
 
 
+def _http_opener() -> urllib.request.OpenerDirector:
+    """Build an opener that only speaks HTTP(S) - no file:, ftp: or data: handlers."""
+    opener = urllib.request.OpenerDirector()
+    for handler in (
+        urllib.request.HTTPSHandler(),
+        urllib.request.HTTPHandler(),
+        urllib.request.HTTPRedirectHandler(),
+        urllib.request.HTTPDefaultErrorHandler(),
+        urllib.request.HTTPErrorProcessor(),
+    ):
+        opener.add_handler(handler)
+    return opener
+
+
 def _fetch_json(req: urllib.request.Request) -> dict:
     """Perform the (blocking) request and decode the JSON body."""
-    with urllib.request.urlopen(req, timeout=30) as response:
+    if urllib.parse.urlparse(req.full_url).scheme not in ("https", "http"):
+        raise ValueError(f"Refusing non-HTTP Jira URL: {req.full_url}")
+    with _http_opener().open(req, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
