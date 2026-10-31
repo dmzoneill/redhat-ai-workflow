@@ -11,9 +11,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import ClassVar
-
-import numpy as np
+from typing import Any, ClassVar
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -280,32 +278,34 @@ class AudioWakeWordDetector:
 
     def __init__(self, wake_word: str = "david"):
         self.wake_word = wake_word
-        self.model = None
+        self.model: Any = None
+        self._np: Any = None
         self.running = False
         self._callback: Callable[[WakeWordEvent], None] | None = None
 
     async def initialize(self) -> bool:
         """Initialize the wake word model."""
         try:
-            # Try to import openwakeword
+            # Optional dependencies, loaded lazily
             model_cls = importlib.import_module("openwakeword.model").Model
+            self._np = importlib.import_module("numpy")
+        except ImportError:
+            logger.warning("openwakeword not installed - audio wake word detection disabled")
+            return False
 
+        try:
             # Load model - using a pre-trained model that can detect "hey" patterns
             # For custom "David" wake word, we'd need to train a custom model
             self.model = model_cls(
                 wakeword_models=["hey_jarvis"],  # Closest pre-trained model
                 inference_framework="onnx",  # Can be optimized for OpenVINO
             )
-
-            logger.info("Audio wake word detector initialized")
-            return True
-
-        except ImportError:
-            logger.warning("openwakeword not installed - audio wake word detection disabled")
-            return False
-        except (OSError, RuntimeError, ValueError) as e:
+        except (OSError, RuntimeError, ValueError, KeyError) as e:
             logger.error("Failed to initialize audio wake word detector: %s", e)
             return False
+
+        logger.info("Audio wake word detector initialized")
+        return True
 
     def set_callback(self, callback: Callable[[WakeWordEvent], None]) -> None:
         """Set callback for wake word events."""
@@ -325,34 +325,28 @@ class AudioWakeWordDetector:
             return None
 
         try:
-            # Convert bytes to numpy array
-            audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
-
-            # Run prediction
+            audio_data = self._np.frombuffer(audio_chunk, dtype=self._np.int16)
             prediction = self.model.predict(audio_data)
-
-            # Check if any wake word detected
-            for wakeword, score in prediction.items():
-                if score > 0.5:  # Confidence threshold
-                    logger.info("Audio wake word detected: %s (score: %s)", wakeword, score)
-
-                    event = WakeWordEvent(
-                        timestamp=datetime.now().astimezone(),
-                        speaker="Unknown",  # Can't determine from audio alone
-                        context_before=[],
-                        command_text="",  # Will be filled by STT
-                        source="audio",
-                    )
-
-                    if self._callback:
-                        self._callback(event)
-
-                    return event
-
-        except (RuntimeError, ValueError) as e:
+        except (RuntimeError, ValueError, TypeError) as e:
             logger.debug("Audio processing error: %s", e)
+            return None
 
-        return None
+        # Check if any wake word detected
+        detected = next(((w, score) for w, score in prediction.items() if score > 0.5), None)  # Confidence threshold
+        if detected is None:
+            return None
+
+        logger.info("Audio wake word detected: %s (score: %s)", *detected)
+        event = WakeWordEvent(
+            timestamp=datetime.now().astimezone(),
+            speaker="Unknown",  # Can't determine from audio alone
+            context_before=[],
+            command_text="",  # Will be filled by STT
+            source="audio",
+        )
+        if self._callback:
+            self._callback(event)
+        return event
 
     async def cleanup(self) -> None:
         """Clean up resources."""
