@@ -5,7 +5,9 @@ import json
 import logging
 import re
 import shutil
-from typing import ClassVar
+from asyncio.subprocess import Process
+from collections.abc import Callable
+from typing import Any, ClassVar, NamedTuple
 
 # Sprint daemon owns its own state file - no shared file with other services
 from services.sprint.bot.execution_tracer import (
@@ -31,10 +33,83 @@ from tool_modules.aa_workflow.src.notification_emitter import (
 logger = logging.getLogger(__name__)
 
 
+def notify_safely(notify: Callable[..., Any], *args: Any) -> None:
+    """Send a desktop notification; a failing notifier never interrupts the work."""
+    try:
+        notify(*args)
+    except RECOVERABLE_ERRORS as exc:
+        logger.debug("Suppressed error: %s", exc, exc_info=True)
+
+
+class BackgroundOutcome(NamedTuple):
+    """How a finished Claude CLI run is recorded and reported."""
+
+    status: str  # work-log status: completed, blocked or failed
+    action: str  # work-log action type
+    detail: str  # work-log action details
+    result: dict  # returned to the caller
+    prompt: str | None  # suggested Cursor prompt; None = continuation prompt from the work log
+    fields: dict  # extra work-log fields
+    trace: dict | None  # parse_result trace step details, if any
+    notify: str | None  # completed or blocked notification, if any
+
+
+def resolve_background_outcome(
+    issue_key: str, bot_status: dict, returncode: int | None, error_output: str
+) -> BackgroundOutcome:
+    """Decide the outcome of a Claude CLI run from its status marker, exit code and stderr."""
+    status = bot_status["status"]
+    if status == "COMPLETED":
+        return BackgroundOutcome(
+            "completed",
+            "completed",
+            "Background processing completed successfully",
+            {"success": True, "message": f"Completed {issue_key} in background"},
+            None,
+            {},
+            {"decision": "completed", "reason": "Bot reported COMPLETED status"},
+            "completed",
+        )
+    if status == "BLOCKED":
+        reason = bot_status.get("reason", "Unknown reason")
+        return BackgroundOutcome(
+            "blocked",
+            "blocked",
+            f"Bot blocked: {reason}",
+            {"success": False, "error": f"Blocked: {reason}", "blocked": True},
+            f"The bot was blocked on {issue_key}: {reason}. "
+            "Please provide the needed information or continue the work.",
+            {"blocked_reason": reason},
+            {"decision": "blocked", "reason": reason, "status": StepStatus.FAILED},
+            "blocked",
+        )
+    if status == "FAILED" or returncode != 0:
+        reason = bot_status.get("error") or error_output[:500]
+        return BackgroundOutcome(
+            "failed",
+            "failed",
+            f"Background processing failed: {reason[:200]}",
+            {"success": False, "error": f"Failed: {reason[:200]}"},
+            f"The background process for {issue_key} failed: {reason[:200]}. Please investigate and continue the work.",
+            {"error": reason},
+            {"decision": "failed", "error": reason[:200], "status": StepStatus.FAILED},
+            None,
+        )
+    return BackgroundOutcome(
+        "completed",
+        "completed",
+        "Background processing completed (no explicit status)",
+        {"success": True, "message": f"Completed {issue_key} in background"},
+        None,
+        {},
+        None,
+        None,
+    )
+
+
 class SprintWorkMixin(SprintStateMixin):
     """Sprint daemon issue execution in Cursor chats or the background Claude CLI."""
 
-    # pylint: disable-next=too-many-statements
     async def _process_in_cursor(self, issue: dict, state: dict) -> dict:
         """Process an issue by opening a Cursor chat (foreground mode).
 
@@ -197,278 +272,139 @@ class SprintWorkMixin(SprintStateMixin):
         tracer = self._get_tracer(issue["key"], issue)
         return await self._run_issue_in_background_traced(issue, tracer)
 
-    # pylint: disable-next=too-many-locals,too-many-return-statements,too-many-statements
     async def _run_issue_in_background_traced(self, issue: dict, tracer: ExecutionTracer) -> dict:
         """Run issue processing via Claude CLI with full execution tracing.
 
         Returns dict with success status and details.
         """
         issue_key = issue["key"]
-
         logger.info("Running %s in background mode (Claude CLI)", _log_safe(issue_key))
 
-        # Initialize work log
         work_log = self._history.init_work_log(issue)
         self._history.save_work_log(issue_key, work_log)
-
         self._history.log_action(issue_key, "started", "Background processing started")
         self._trace_step(
             tracer,
             "init_work_log",
             outputs={"work_log_path": str(self._history.get_work_log_path(issue_key))},
         )
-
-        # Emit toast notification for issue started
-        try:
-            notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except RECOVERABLE_ERRORS as exc:
-            logger.debug("Suppressed error: %s", exc, exc_info=True)
+        notify_safely(notify_sprint_issue_started, issue_key, issue.get("summary", "")[:50])
 
         try:
-            claude_path = shutil.which("claude")
-            if not claude_path:
-                self._history.log_action(issue_key, "error", "Claude CLI not found")
-                self._trace_step(
-                    tracer,
-                    "check_claude_cli",
-                    error="Claude CLI not found",
-                    status=StepStatus.FAILED,
-                )
-                tracer.mark_failed("Claude CLI not found")
-                work_log["status"] = "failed"
-                work_log["error"] = "Claude CLI not found"
-                self._history.save_work_log(issue_key, work_log)
-                return {"success": False, "error": "Claude CLI not found"}
-
-            self._trace_step(tracer, "check_claude_cli", outputs={"claude_path": claude_path})
-
-            # Build the unified work prompt
-            prompt = self._build_work_prompt(issue)
-
-            self._history.log_action(
-                issue_key,
-                "claude_started",
-                "Started Claude CLI execution",
-                {
-                    "prompt_length": len(prompt),
-                },
-            )
-
-            # Start step for Claude execution
-            step_id = tracer.start_step("execute_claude_cli", inputs={"prompt_length": len(prompt)})
-
-            # Run Claude CLI with extended timeout for actual work
-            process = await spawn_claude_cli(claude_path, prompt)
-
-            cli_timeout = self._config.get("claude_cli_timeout_seconds", 1800)
-            try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=cli_timeout,
-                )
-            except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                timeout_mins = cli_timeout // 60
-                self._history.log_action(
-                    issue_key,
-                    "timeout",
-                    f"Claude CLI timed out after {timeout_mins} minutes",
-                )
-                tracer.end_step(
-                    step_id,
-                    status=StepStatus.FAILED,
-                    error=f"Timeout after {timeout_mins} minutes",
-                )
-                tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
-                work_log = self._history.load_work_log(issue_key)
-                work_log["status"] = "timeout"
-                work_log["completed"] = _local_now().isoformat()
-                work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = (
-                    f"Continue working on {issue_key}. The background process timed out. "
-                    "Review the work log and continue from where it left off."
-                )
-                self._history.save_work_log(issue_key, work_log)
-                return {"success": False, "error": "Claude CLI timed out"}
-
-            output = stdout.decode("utf-8", errors="replace") if stdout else ""
-            error_output = stderr.decode("utf-8", errors="replace") if stderr else ""
-
-            # Update work log with results
-            work_log = self._history.load_work_log(issue_key)
-            work_log["completed"] = _local_now().isoformat()
-
-            # Parse output to extract useful information
-            self._parse_background_output(issue_key, output, work_log)
-
-            # Check for explicit status markers in output
-            bot_status = self._parse_bot_status(output)
-
-            # End the Claude execution step
-            tracer.end_step(
-                step_id,
-                status=(
-                    StepStatus.SUCCESS
-                    if bot_status["status"] in ("COMPLETED", "UNKNOWN") and process.returncode == 0
-                    else StepStatus.FAILED
-                ),
-                outputs={
-                    "return_code": process.returncode,
-                    "bot_status": bot_status["status"],
-                    "output_length": len(output),
-                    "commits_found": len(work_log.get("outcome", {}).get("commits", [])),
-                    "mrs_found": len(work_log.get("outcome", {}).get("merge_requests", [])),
-                },
-            )
-
-            if bot_status["status"] == "COMPLETED":
-                work_log["status"] = "completed"
-                self._history.log_action(
-                    issue_key,
-                    "completed",
-                    "Background processing completed successfully",
-                )
-
-                # Emit toast notification for issue completed
-                try:
-                    notify_sprint_issue_completed(issue_key)
-                except RECOVERABLE_ERRORS as exc:
-                    logger.debug("Suppressed error: %s", exc, exc_info=True)
-                self._trace_step(
-                    tracer,
-                    "parse_result",
-                    decision="completed",
-                    reason="Bot reported COMPLETED status",
-                    outputs={"commits": work_log.get("outcome", {}).get("commits", [])},
-                )
-
-                # Create context for continuing in Cursor
-                work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
-                    issue_key, work_log
-                )
-
-                self._history.save_work_log(issue_key, work_log)
-                logger.info("Background processing completed for %s", _log_safe(issue_key))
-                return {
-                    "success": True,
-                    "message": f"Completed {issue_key} in background",
-                }
-
-            if bot_status["status"] == "BLOCKED":
-                # Bot is blocked - needs human intervention
-                blocked_reason = bot_status.get("reason", "Unknown reason")
-                work_log["status"] = "blocked"
-                work_log["blocked_reason"] = blocked_reason
-                self._history.log_action(issue_key, "blocked", f"Bot blocked: {blocked_reason}")
-
-                # Emit toast notification for issue blocked
-                try:
-                    notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except RECOVERABLE_ERRORS as exc:
-                    logger.debug("Suppressed error: %s", exc, exc_info=True)
-                self._trace_step(
-                    tracer,
-                    "parse_result",
-                    decision="blocked",
-                    reason=blocked_reason,
-                    status=StepStatus.FAILED,
-                )
-
-                work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = (
-                    f"The bot was blocked on {issue_key}: {blocked_reason}. "
-                    "Please provide the needed information or continue the work."
-                )
-
-                self._history.save_work_log(issue_key, work_log)
-                logger.warning(
-                    "Background processing blocked for %s: %s", _log_safe(issue_key), _log_safe(blocked_reason)
-                )
-                return {
-                    "success": False,
-                    "error": f"Blocked: {blocked_reason}",
-                    "blocked": True,
-                }
-
-            if bot_status["status"] == "FAILED" or process.returncode != 0:
-                # Bot failed
-                error_reason = bot_status.get("error") or error_output[:500]
-                work_log["status"] = "failed"
-                work_log["error"] = error_reason
-                self._history.log_action(
-                    issue_key,
-                    "failed",
-                    f"Background processing failed: {error_reason[:200]}",
-                )
-                self._trace_step(
-                    tracer,
-                    "parse_result",
-                    decision="failed",
-                    error=error_reason[:200],
-                    status=StepStatus.FAILED,
-                )
-
-                work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = (
-                    f"The background process for {issue_key} failed: {error_reason[:200]}. "
-                    "Please investigate and continue the work."
-                )
-
-                self._history.save_work_log(issue_key, work_log)
-                logger.warning(
-                    "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_reason[:200])
-                )
-                return {"success": False, "error": f"Failed: {error_reason[:200]}"}
-
-            # No explicit status - assume completed if return code is 0
-            if process.returncode == 0:
-                work_log["status"] = "completed"
-                self._history.log_action(
-                    issue_key,
-                    "completed",
-                    "Background processing completed (no explicit status)",
-                )
-                work_log["cursor_context"]["can_continue"] = True
-                work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
-                    issue_key, work_log
-                )
-                self._history.save_work_log(issue_key, work_log)
-                logger.info("Background processing completed for %s", _log_safe(issue_key))
-                return {
-                    "success": True,
-                    "message": f"Completed {issue_key} in background",
-                }
-            work_log["status"] = "failed"
-            work_log["error"] = error_output[:500]
-            self._history.log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
-            work_log["cursor_context"]["can_continue"] = True
-            retry_prompt = f"The background process for {issue_key} failed. Please investigate and continue the work."
-            work_log["cursor_context"]["suggested_prompt"] = retry_prompt
-            self._history.save_work_log(issue_key, work_log)
-            logger.warning(
-                "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
-            )
-            return {
-                "success": False,
-                "error": f"Claude CLI failed: {error_output[:200]}",
-            }
-
+            return await self._execute_in_background(issue, tracer, work_log)
         except RECOVERABLE_ERRORS as e:
             self._history.log_action(issue_key, "error", f"Exception: {e!s}")
             work_log = self._history.load_work_log(issue_key)
-            work_log["status"] = "failed"
-            work_log["error"] = str(e)
             work_log["completed"] = _local_now().isoformat()
-            work_log["cursor_context"]["can_continue"] = True
-            work_log["cursor_context"]["suggested_prompt"] = (
+            prompt = (
                 f"The background process for {issue_key} encountered an error: {e!s}. "
                 "Please investigate and continue the work."
             )
-            self._history.save_work_log(issue_key, work_log)
+            self._close_work_log(issue_key, work_log, "failed", prompt, error=str(e))
             logger.exception("Background processing error for %s", _log_safe(issue_key))
             return {"success": False, "error": str(e)}
+
+    async def _execute_in_background(self, issue: dict, tracer: ExecutionTracer, work_log: dict) -> dict:
+        """Run Claude CLI on the work prompt and record the outcome in the work log and trace."""
+        issue_key = issue["key"]
+        claude_path = shutil.which("claude")
+        if not claude_path:
+            self._history.log_action(issue_key, "error", "Claude CLI not found")
+            self._trace_step(tracer, "check_claude_cli", error="Claude CLI not found", status=StepStatus.FAILED)
+            tracer.mark_failed("Claude CLI not found")
+            work_log["status"] = "failed"
+            work_log["error"] = "Claude CLI not found"
+            self._history.save_work_log(issue_key, work_log)
+            return {"success": False, "error": "Claude CLI not found"}
+        self._trace_step(tracer, "check_claude_cli", outputs={"claude_path": claude_path})
+
+        prompt = self._build_work_prompt(issue)
+        self._history.log_action(
+            issue_key, "claude_started", "Started Claude CLI execution", {"prompt_length": len(prompt)}
+        )
+        step_id = tracer.start_step("execute_claude_cli", inputs={"prompt_length": len(prompt)})
+        process = await spawn_claude_cli(claude_path, prompt)
+        streams = await self._communicate_or_time_out(process, issue_key, tracer, step_id)
+        if streams is None:
+            return {"success": False, "error": "Claude CLI timed out"}
+        output, error_output = streams
+
+        work_log = self._history.load_work_log(issue_key)
+        work_log["completed"] = _local_now().isoformat()
+        self._parse_background_output(issue_key, output, work_log)
+        bot_status = self._parse_bot_status(output)
+        outcome = resolve_background_outcome(issue_key, bot_status, process.returncode, error_output)
+        succeeded = outcome.status == "completed" and process.returncode == 0
+        tracer.end_step(
+            step_id,
+            status=StepStatus.SUCCESS if succeeded else StepStatus.FAILED,
+            outputs={
+                "return_code": process.returncode,
+                "bot_status": bot_status["status"],
+                "output_length": len(output),
+                "commits_found": len(work_log.get("outcome", {}).get("commits", [])),
+                "mrs_found": len(work_log.get("outcome", {}).get("merge_requests", [])),
+            },
+        )
+        return self._apply_background_outcome(issue_key, tracer, work_log, outcome)
+
+    async def _communicate_or_time_out(
+        self, process: Process, issue_key: str, tracer: ExecutionTracer, step_id: str
+    ) -> tuple[str, str] | None:
+        """Wait for Claude CLI; return decoded (stdout, stderr), or record the timeout and return ``None``."""
+        cli_timeout = self._config.get("claude_cli_timeout_seconds", 1800)
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=cli_timeout)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            timeout_mins = cli_timeout // 60
+            self._history.log_action(issue_key, "timeout", f"Claude CLI timed out after {timeout_mins} minutes")
+            tracer.end_step(step_id, status=StepStatus.FAILED, error=f"Timeout after {timeout_mins} minutes")
+            tracer.mark_failed(f"Claude CLI timed out after {timeout_mins} minutes")
+            work_log = self._history.load_work_log(issue_key)
+            work_log["completed"] = _local_now().isoformat()
+            prompt = (
+                f"Continue working on {issue_key}. The background process timed out. "
+                "Review the work log and continue from where it left off."
+            )
+            self._close_work_log(issue_key, work_log, "timeout", prompt)
+            return None
+        return (
+            stdout.decode("utf-8", errors="replace") if stdout else "",
+            stderr.decode("utf-8", errors="replace") if stderr else "",
+        )
+
+    def _apply_background_outcome(
+        self, issue_key: str, tracer: ExecutionTracer, work_log: dict, outcome: BackgroundOutcome
+    ) -> dict:
+        """Log, notify, trace and persist a resolved background outcome; return the caller's result."""
+        self._history.log_action(issue_key, outcome.action, outcome.detail)
+        if outcome.notify == "completed":
+            notify_safely(notify_sprint_issue_completed, issue_key)
+        elif outcome.notify == "blocked":
+            notify_safely(notify_sprint_issue_blocked, issue_key, outcome.fields["blocked_reason"])
+        if outcome.trace is not None:
+            trace = dict(outcome.trace)
+            if outcome.notify == "completed":
+                trace["outputs"] = {"commits": work_log.get("outcome", {}).get("commits", [])}
+            self._trace_step(tracer, "parse_result", **trace)
+        work_log.update(outcome.fields)
+        prompt = outcome.prompt
+        if prompt is None:
+            prompt = self._history.generate_continuation_prompt(issue_key, {**work_log, "status": outcome.status})
+        self._close_work_log(issue_key, work_log, outcome.status, prompt)
+        log = logger.info if outcome.result["success"] else logger.warning
+        log("Background processing %s for %s: %s", outcome.status, _log_safe(issue_key), _log_safe(outcome.detail))
+        return outcome.result
+
+    def _close_work_log(self, issue_key: str, work_log: dict, status: str, prompt: str, **fields: str) -> None:
+        """Set the final status, mark the work continuable in Cursor with ``prompt``, and save."""
+        work_log["status"] = status
+        work_log.update(fields)
+        work_log["cursor_context"]["can_continue"] = True
+        work_log["cursor_context"]["suggested_prompt"] = prompt
+        self._history.save_work_log(issue_key, work_log)
 
     _STATUS_DETAIL_KEYS: ClassVar[dict[str, str]] = {"BLOCKED": "reason", "FAILED": "error"}
 
