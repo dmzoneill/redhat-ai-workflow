@@ -241,6 +241,7 @@ class InstanceDeviceManager:
                         await self._force_restore_default_source(original_source)
         except asyncio.CancelledError:
             logger.info("[%s] Default source monitor stopped", self.instance_id)
+            raise
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception as e:
@@ -925,10 +926,8 @@ class InstanceDeviceManager:
         # Stop the source monitor task first
         if self._source_monitor_task and not self._source_monitor_task.done():
             self._source_monitor_task.cancel()
-            try:
-                await asyncio.wait_for(self._source_monitor_task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
+            # Wait briefly for it to finish without swallowing a cancellation of cleanup() itself
+            await asyncio.wait({self._source_monitor_task}, timeout=2.0)
             self._source_monitor_task = None
 
         # Ensure the default source lock is still in place after cleanup
