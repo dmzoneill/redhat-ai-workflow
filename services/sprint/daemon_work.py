@@ -14,6 +14,7 @@ from services.sprint.bot.execution_tracer import (
     WorkflowState,
 )
 from services.sprint.daemon_common import (
+    RECOVERABLE_ERRORS,
     _add_timeline_event,
     _local_now,
     _log_safe,
@@ -21,6 +22,11 @@ from services.sprint.daemon_common import (
     spawn_claude_cli,
 )
 from services.sprint.daemon_state import SprintStateMixin
+from tool_modules.aa_workflow.src.notification_emitter import (
+    notify_sprint_issue_blocked,
+    notify_sprint_issue_completed,
+    notify_sprint_issue_started,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +89,7 @@ class SprintWorkMixin(SprintStateMixin):
 
         chat_id = await self._launch_cursor_chat(issue)
 
-        if chat_id:  # pylint: disable=no-else-return
+        if chat_id:
             self._trace_step(
                 tracer,
                 "chat_created",
@@ -115,22 +121,21 @@ class SprintWorkMixin(SprintStateMixin):
                 "message": f"Processing {issue_key}",
                 "chat_id": chat_id,
             }
-        else:
-            # Chat creation failed - mark as blocked but keep In Progress in Jira
-            self._trace_step(
-                tracer,
-                "chat_creation_failed",
-                error="Failed to create Cursor chat",
-                status=StepStatus.FAILED,
-            )
-            tracer.mark_blocked("Failed to create Cursor chat")
+        # Chat creation failed - mark as blocked but keep In Progress in Jira
+        self._trace_step(
+            tracer,
+            "chat_creation_failed",
+            error="Failed to create Cursor chat",
+            status=StepStatus.FAILED,
+        )
+        tracer.mark_blocked("Failed to create Cursor chat")
 
-            issue["approvalStatus"] = "blocked"
-            issue["waitingReason"] = "Failed to create Cursor chat"
-            state["processingIssue"] = None
-            self._save_state(state)
-            logger.warning("Could not create chat for %s", _log_safe(issue_key))
-            return {"success": False, "error": f"Failed to create chat for {issue_key}"}
+        issue["approvalStatus"] = "blocked"
+        issue["waitingReason"] = "Failed to create Cursor chat"
+        state["processingIssue"] = None
+        self._save_state(state)
+        logger.warning("Could not create chat for %s", _log_safe(issue_key))
+        return {"success": False, "error": f"Failed to create chat for {issue_key}"}
 
     async def _launch_cursor_chat(self, issue: dict) -> str | None:
         """Launch a Cursor chat for an issue via D-Bus.
@@ -166,14 +171,13 @@ class SprintWorkMixin(SprintStateMixin):
 
             if result:
                 result_dict = json.loads(str(result))
-                if result_dict.get("success"):  # pylint: disable=no-else-return
+                if result_dict.get("success"):
                     return result_dict.get("chatId")
-                else:
-                    logger.warning("LaunchIssueChatWithPrompt returned error: %s", result_dict.get("error"))
+                logger.warning("LaunchIssueChatWithPrompt returned error: %s", result_dict.get("error"))
 
             return None
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.exception("Failed to launch chat via D-Bus")
             logger.debug("Is VS Code running with the AA Workflow extension active?")
             return None
@@ -216,12 +220,8 @@ class SprintWorkMixin(SprintStateMixin):
 
         # Emit toast notification for issue started
         try:
-            from tool_modules.aa_workflow.src.notification_emitter import (  # pylint: disable=import-outside-toplevel
-                notify_sprint_issue_started,
-            )
-
             notify_sprint_issue_started(issue_key, issue.get("summary", "")[:50])
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc, exc_info=True)
 
         try:
@@ -322,7 +322,7 @@ class SprintWorkMixin(SprintStateMixin):
                 },
             )
 
-            if bot_status["status"] == "COMPLETED":  # pylint: disable=no-else-return
+            if bot_status["status"] == "COMPLETED":
                 work_log["status"] = "completed"
                 self._history.log_action(
                     issue_key,
@@ -332,13 +332,8 @@ class SprintWorkMixin(SprintStateMixin):
 
                 # Emit toast notification for issue completed
                 try:
-                    # pylint: disable-next=import-outside-toplevel
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_sprint_issue_completed,
-                    )
-
                     notify_sprint_issue_completed(issue_key)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                except RECOVERABLE_ERRORS as exc:
                     logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
@@ -361,7 +356,7 @@ class SprintWorkMixin(SprintStateMixin):
                     "message": f"Completed {issue_key} in background",
                 }
 
-            elif bot_status["status"] == "BLOCKED":
+            if bot_status["status"] == "BLOCKED":
                 # Bot is blocked - needs human intervention
                 blocked_reason = bot_status.get("reason", "Unknown reason")
                 work_log["status"] = "blocked"
@@ -370,13 +365,8 @@ class SprintWorkMixin(SprintStateMixin):
 
                 # Emit toast notification for issue blocked
                 try:
-                    # pylint: disable-next=import-outside-toplevel
-                    from tool_modules.aa_workflow.src.notification_emitter import (
-                        notify_sprint_issue_blocked,
-                    )
-
                     notify_sprint_issue_blocked(issue_key, blocked_reason)
-                except Exception as exc:  # pylint: disable=broad-exception-caught
+                except RECOVERABLE_ERRORS as exc:
                     logger.debug("Suppressed error: %s", exc, exc_info=True)
                 self._trace_step(
                     tracer,
@@ -402,7 +392,7 @@ class SprintWorkMixin(SprintStateMixin):
                     "blocked": True,
                 }
 
-            elif bot_status["status"] == "FAILED" or process.returncode != 0:
+            if bot_status["status"] == "FAILED" or process.returncode != 0:
                 # Bot failed
                 error_reason = bot_status.get("error") or error_output[:500]
                 work_log["status"] = "failed"
@@ -432,44 +422,40 @@ class SprintWorkMixin(SprintStateMixin):
                 )
                 return {"success": False, "error": f"Failed: {error_reason[:200]}"}
 
-            else:
-                # No explicit status - assume completed if return code is 0
-                if process.returncode == 0:  # pylint: disable=no-else-return
-                    work_log["status"] = "completed"
-                    self._history.log_action(
-                        issue_key,
-                        "completed",
-                        "Background processing completed (no explicit status)",
-                    )
-                    work_log["cursor_context"]["can_continue"] = True
-                    work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
-                        issue_key, work_log
-                    )
-                    self._history.save_work_log(issue_key, work_log)
-                    logger.info("Background processing completed for %s", _log_safe(issue_key))
-                    return {
-                        "success": True,
-                        "message": f"Completed {issue_key} in background",
-                    }
-                else:
-                    work_log["status"] = "failed"
-                    work_log["error"] = error_output[:500]
-                    self._history.log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
-                    work_log["cursor_context"]["can_continue"] = True
-                    retry_prompt = (
-                        f"The background process for {issue_key} failed. Please investigate and continue the work."
-                    )
-                    work_log["cursor_context"]["suggested_prompt"] = retry_prompt
-                    self._history.save_work_log(issue_key, work_log)
-                    logger.warning(
-                        "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
-                    )
-                    return {
-                        "success": False,
-                        "error": f"Claude CLI failed: {error_output[:200]}",
-                    }
+            # No explicit status - assume completed if return code is 0
+            if process.returncode == 0:
+                work_log["status"] = "completed"
+                self._history.log_action(
+                    issue_key,
+                    "completed",
+                    "Background processing completed (no explicit status)",
+                )
+                work_log["cursor_context"]["can_continue"] = True
+                work_log["cursor_context"]["suggested_prompt"] = self._history.generate_continuation_prompt(
+                    issue_key, work_log
+                )
+                self._history.save_work_log(issue_key, work_log)
+                logger.info("Background processing completed for %s", _log_safe(issue_key))
+                return {
+                    "success": True,
+                    "message": f"Completed {issue_key} in background",
+                }
+            work_log["status"] = "failed"
+            work_log["error"] = error_output[:500]
+            self._history.log_action(issue_key, "failed", f"Claude CLI failed: {error_output[:200]}")
+            work_log["cursor_context"]["can_continue"] = True
+            retry_prompt = f"The background process for {issue_key} failed. Please investigate and continue the work."
+            work_log["cursor_context"]["suggested_prompt"] = retry_prompt
+            self._history.save_work_log(issue_key, work_log)
+            logger.warning(
+                "Background processing failed for %s: %s", _log_safe(issue_key), _log_safe(error_output[:200])
+            )
+            return {
+                "success": False,
+                "error": f"Claude CLI failed: {error_output[:200]}",
+            }
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS as e:
             self._history.log_action(issue_key, "error", f"Exception: {e!s}")
             work_log = self._history.load_work_log(issue_key)
             work_log["status"] = "failed"
@@ -559,6 +545,6 @@ class SprintWorkMixin(SprintStateMixin):
 
             return result and "pong" in result
 
-        except Exception:  # pylint: disable=broad-exception-caught
+        except RECOVERABLE_ERRORS:
             logger.debug("Ping failed", exc_info=True)
             return False
