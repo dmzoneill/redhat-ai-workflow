@@ -17,4 +17,3 @@ jobs:
     uses: dmzoneill/dmzoneill/.github/workflows/dispatch.yaml@main
     with:
       basic: "true"
-      VALIDATE_PYTHON_BLACK: "false"
