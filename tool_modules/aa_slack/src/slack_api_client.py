@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import os
-import random
+import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +19,9 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 
 @dataclass
@@ -56,10 +59,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
     _rate_limit: RateLimitState = field(default_factory=RateLimitState)
 
     # High-fidelity spoofing headers
-    USER_AGENT = (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
-    )
+    USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
 
     # Enterprise Slack URLs
     SLACK_HOST = os.getenv("SLACK_HOST", "redhat.enterprise.slack.com")
@@ -127,9 +127,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
         # Check if we're in backoff
         if time.time() < self._rate_limit.backoff_until:
             wait_time = self._rate_limit.backoff_until - time.time()
-            logger.warning(
-                "Rate limited, waiting %ss before retry", format(wait_time, ".1f")
-            )
+            logger.warning("Rate limited, waiting %ss before retry", format(wait_time, ".1f"))
             await asyncio.sleep(wait_time)
 
         url = f"{self.BASE_URL}/{method}"
@@ -150,7 +148,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
                     # Exponential backoff with jitter
                     backoff = min(
                         retry_after,
-                        self.base_backoff * (2**attempt) + random.uniform(0, 1),
+                        self.base_backoff * (2**attempt) + _RNG.uniform(0, 1),
                     )
                     self._rate_limit.backoff_until = time.time() + backoff
 
@@ -165,7 +163,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
                     continue
 
                 response.raise_for_status()
-                result = response.json()
+                result: dict[str, Any] = response.json()
 
                 # Reset rate limit state on success
                 self._rate_limit.retry_count = 0
@@ -180,9 +178,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
                             "Re-obtain from browser dev tools."
                         )
                     if error == "token_revoked":
-                        raise ValueError(
-                            "Token has been revoked. Re-authenticate via browser."
-                        )
+                        raise ValueError("Token has been revoked. Re-authenticate via browser.")
                     if error == "ratelimited":
                         await asyncio.sleep(self.base_backoff * (2**attempt))
                         continue
@@ -220,7 +216,7 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
             Fully-qualified URL string
         """
         eid = self.get_enterprise_id()
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{_RNG.randint(100, 999)}"
 
         return (
             f"https://{self.SLACK_HOST}/api/{api_method}"
@@ -301,7 +297,8 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
         client = await self.get_client()
         response = await client.post(url, content=body, headers=headers)
         response.raise_for_status()
-        return response.json()
+        data: dict[str, Any] = response.json()
+        return data
 
     async def edge_api_request(
         self,
@@ -357,11 +354,8 @@ class SlackApiClient:  # pylint: disable=too-many-instance-attributes
                 headers=headers,
             )
             response.raise_for_status()
-            return response.json()
+            data: dict[str, Any] = response.json()
+            return data
         except httpx.HTTPStatusError as e:
-            logger.error(
-                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
-            )
-            raise ValueError(
-                f"Edge API request to {edge_path} failed: {e.response.status_code}"
-            ) from e
+            logger.error("Edge API error: %s - %s", e.response.status_code, e.response.text[:200])
+            raise ValueError(f"Edge API request to {edge_path} failed: {e.response.status_code}") from e
