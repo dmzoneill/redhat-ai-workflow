@@ -4,16 +4,16 @@ Provides 9 tools for searching and analyzing logs via Kibana.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
-
-from mcp.types import TextContent
 
 from server.auto_heal_decorator import auto_heal_stage
 from server.tool_registry import ToolRegistry
@@ -21,6 +21,39 @@ from server.tool_registry import ToolRegistry
 from .common import build_kibana_url, get_cached_kibana_config, kibana_request
 
 logger = logging.getLogger(__name__)
+
+_RANGE_UNITS = {"m": "minutes", "h": "hours", "d": "days"}
+
+
+def _time_window(time_range: str) -> tuple[datetime, datetime]:
+    """Return (from, now) in UTC for a range like "15m", "1h" or "7d" (unknown units mean 1h)."""
+    now = datetime.now(timezone.utc)
+    unit_name = _RANGE_UNITS.get(time_range[-1])
+    if unit_name is None:
+        return now - timedelta(hours=1), now
+    return now - timedelta(**{unit_name: int(time_range[:-1])}), now
+
+
+def _hit_total(result: dict[str, Any]) -> Any:
+    """Total hit count from an Elasticsearch response (ES 7+ wraps it in {"value": n})."""
+    total = result.get("hits", {}).get("total", {})
+    return total.get("value", 0) if isinstance(total, dict) else total
+
+
+def _log_table(hits: list[dict[str, Any]]) -> list[str]:
+    """Markdown table rows for up to 50 log hits."""
+    if not hits:
+        return ["No matching logs found."]
+    lines = ["| Time | Level | Message |", "|------|-------|---------|"]
+    for hit in hits[:50]:
+        source = hit.get("_source", {})
+        timestamp = source.get("@timestamp", "")[:19]
+        level = source.get("level", source.get("log", {}).get("level", "INFO"))
+        message = source.get("message", source.get("log", ""))[:80]
+        if len(message) == 80:
+            message += "..."
+        lines.append(f"| {timestamp} | {level} | {message} |")
+    return lines
 
 
 # ==================== SEARCH TOOLS ====================
@@ -55,28 +88,15 @@ def register_tools(server: "FastMCP") -> int:
         """
         env_config = get_cached_kibana_config(environment)
         if not env_config:
-            return [
-                TextContent(type="text", text=f"❌ Unknown environment: {environment}")
-            ]
+            return [TextContent(type="text", text=f"❌ Unknown environment: {environment}")]
 
         ns = namespace or env_config.namespace
 
         # Parse time range
-        unit = time_range[-1]
-        value = int(time_range[:-1])
-
-        now = datetime.utcnow()
-        if unit == "m":
-            from_time = now - timedelta(minutes=value)
-        elif unit == "h":
-            from_time = now - timedelta(hours=value)
-        elif unit == "d":
-            from_time = now - timedelta(days=value)
-        else:
-            from_time = now - timedelta(hours=1)
+        from_time, now = _time_window(time_range)
 
         # Build Elasticsearch query via Kibana proxy
-        es_query = {
+        es_query: dict[str, Any] = {
             "query": {
                 "bool": {
                     "must": [
@@ -97,9 +117,7 @@ def register_tools(server: "FastMCP") -> int:
         }
 
         if ns:
-            es_query["query"]["bool"]["must"].append(
-                {"match": {"kubernetes.namespace_name": ns}}
-            )
+            es_query["query"]["bool"]["must"].append({"match": {"kubernetes.namespace_name": ns}})
 
         success, result = await kibana_request(
             environment,
@@ -108,7 +126,7 @@ def register_tools(server: "FastMCP") -> int:
             data=es_query,
         )
 
-        if not success:
+        if not success or not isinstance(result, dict):
             link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
             return [
                 TextContent(
@@ -118,9 +136,6 @@ def register_tools(server: "FastMCP") -> int:
             ]
 
         hits = result.get("hits", {}).get("hits", [])
-        total = result.get("hits", {}).get("total", {})
-        if isinstance(total, dict):
-            total = total.get("value", 0)
 
         lines = [
             f"## Log Search: {environment}",
@@ -128,24 +143,11 @@ def register_tools(server: "FastMCP") -> int:
             f"**Query:** `{query}`",
             f"**Namespace:** `{ns}`",
             f"**Time Range:** Last {time_range}",
-            f"**Results:** {len(hits)} of {total} total",
+            f"**Results:** {len(hits)} of {_hit_total(result)} total",
             "",
         ]
 
-        if not hits:
-            lines.append("No matching logs found.")
-        else:
-            lines.append("| Time | Level | Message |")
-            lines.append("|------|-------|---------|")
-
-            for hit in hits[:50]:
-                source = hit.get("_source", {})
-                timestamp = source.get("@timestamp", "")[:19]
-                level = source.get("level", source.get("log", {}).get("level", "INFO"))
-                message = source.get("message", source.get("log", ""))[:80]
-                if len(message) == 80:
-                    message += "..."
-                lines.append(f"| {timestamp} | {level} | {message} |")
+        lines.extend(_log_table(hits))
 
         link = build_kibana_url(environment, query, ns, f"now-{time_range}", "now")
         lines.extend(["", f"**[Open in Kibana]({link})**"])
