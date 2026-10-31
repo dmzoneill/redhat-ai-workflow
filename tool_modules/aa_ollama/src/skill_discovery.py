@@ -7,7 +7,6 @@ enabling Layer 3 of the tool filtering system.
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 class SkillToolDiscovery:
     """Dynamically discover tools required by a skill from YAML."""
 
-    def __init__(self, skills_dir: Optional[Path] = None):
+    def __init__(self, skills_dir: Path | None = None):
         """Initialize skill discovery.
 
         Args:
@@ -326,36 +325,36 @@ class SkillToolDiscovery:
 # Skill patterns for fast detection (no NPU needed)
 SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
     "test_mr_ephemeral": [
-        re.compile(r"deploy.*mr|test.*mr|spin.*up.*mr", re.I),
-        re.compile(r"ephemeral.*mr\s*\d+", re.I),
-        re.compile(r"deploy.*ephemeral", re.I),
-        re.compile(r"test.*in.*ephemeral", re.I),
+        re.compile(r"deploy.*mr|test.*mr|spin(?>.*?up).*mr", re.IGNORECASE),
+        re.compile(r"ephemeral.*mr\s*\d+", re.IGNORECASE),
+        re.compile(r"deploy.*ephemeral", re.IGNORECASE),
+        re.compile(r"test(?>.*?in).*ephemeral", re.IGNORECASE),
     ],
     "review_pr": [
-        re.compile(r"review.*mr|review.*!\d+", re.I),
-        re.compile(r"check.*mr.*review", re.I),
-        re.compile(r"look.*at.*mr", re.I),
+        re.compile(r"review.*mr|review.*!\d+", re.IGNORECASE),
+        re.compile(r"check(?>.*?mr).*review", re.IGNORECASE),
+        re.compile(r"look(?>.*?at).*mr", re.IGNORECASE),
     ],
     "start_work": [
-        re.compile(r"start.*work.*aap-\d+", re.I),
-        re.compile(r"begin.*aap-\d+", re.I),
-        re.compile(r"pick.*up.*aap-\d+", re.I),
+        re.compile(r"start(?>.*?work).*aap-\d", re.IGNORECASE),
+        re.compile(r"begin.*aap-\d+", re.IGNORECASE),
+        re.compile(r"pick(?>.*?up).*aap-\d", re.IGNORECASE),
     ],
     "investigate_slack_alert": [
-        re.compile(r"investigate.*alert", re.I),
-        re.compile(r"look.*into.*alert", re.I),
-        re.compile(r"whats.*firing", re.I),  # codespell:ignore
-        re.compile(r"what.*alerts", re.I),
+        re.compile(r"investigate.*alert", re.IGNORECASE),
+        re.compile(r"look(?>.*?into).*alert", re.IGNORECASE),
+        re.compile(r"whats.*firing", re.IGNORECASE),  # codespell:ignore
+        re.compile(r"what.*alerts", re.IGNORECASE),
     ],
     "create_mr": [
-        re.compile(r"create.*mr|open.*mr", re.I),
-        re.compile(r"push.*and.*mr", re.I),
-        re.compile(r"submit.*mr", re.I),
+        re.compile(r"create.*mr|open.*mr", re.IGNORECASE),
+        re.compile(r"push(?>.*?and).*mr", re.IGNORECASE),
+        re.compile(r"submit.*mr", re.IGNORECASE),
     ],
     "check_pipeline": [
-        re.compile(r"check.*pipeline|pipeline.*status", re.I),
-        re.compile(r"ci.*status", re.I),
-        re.compile(r"build.*status", re.I),
+        re.compile(r"check.*pipeline|pipeline.*status", re.IGNORECASE),
+        re.compile(r"ci.*status", re.IGNORECASE),
+        re.compile(r"build.*status", re.IGNORECASE),
     ],
 }
 
@@ -374,9 +373,7 @@ def detect_skill(message: str) -> str | None:
     for skill_name, patterns in SKILL_PATTERNS.items():
         for pattern in patterns:
             if pattern.search(message):
-                logger.debug(
-                    "Fast skill detection: %s matched '%s...'", skill_name, message[:50]
-                )
+                logger.debug("Fast skill detection: %s matched '%s...'", skill_name, message[:50])
                 return skill_name
     return None
 
@@ -390,11 +387,11 @@ def add_skill_pattern(skill_name: str, pattern: str) -> None:
     """
     if skill_name not in SKILL_PATTERNS:
         SKILL_PATTERNS[skill_name] = []
-    SKILL_PATTERNS[skill_name].append(re.compile(pattern, re.I))
+    SKILL_PATTERNS[skill_name].append(re.compile(pattern, re.IGNORECASE))
 
 
 # Singleton discovery instance
-_discovery: Optional[SkillToolDiscovery] = None  # pylint: disable=invalid-name
+_discovery: SkillToolDiscovery | None = None  # pylint: disable=invalid-name
 
 
 def get_skill_discovery() -> SkillToolDiscovery:
