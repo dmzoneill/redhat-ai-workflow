@@ -89,7 +89,7 @@ def test_apply_sprint_points_ignores_missing_sprint():
     ],
 )
 def test_parse_mr_status(output, expected):
-    """Status, hold reason and MR ID are parsed; unparseable output gives None."""
+    """Status, hold reason and MR ID are parsed; unparsable output gives None."""
     assert parse_mr_status(output) == expected
 
 
