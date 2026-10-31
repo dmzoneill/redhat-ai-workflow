@@ -28,31 +28,27 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 await self.db.update_meeting(
                     self.state.meeting_id,
                     status="completed",
-                    actual_end=datetime.now(),
+                    actual_end=datetime.now().astimezone(),
                 )
-                logger.info(
-                    "CLEANUP: Meeting %s marked as completed", self.state.meeting_id
-                )
+                logger.info("CLEANUP: Meeting %s marked as completed", self.state.meeting_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLEANUP: Failed to update meeting record: %s", e)
+                logger.warning("CLEANUP: Failed to update meeting record: %s", e, exc_info=True)
 
         # 7. Close the browser controller - this cleans up per-instance audio devices
         # restore_browser_audio=True because the meeting died unexpectedly
         if self._controller:
             logger.info("CLEANUP: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
                 logger.info("CLEANUP: Browser controller closed")
             except asyncio.TimeoutError:
                 logger.warning("CLEANUP: Timeout closing controller, force killing...")
                 try:
                     await self._controller.force_kill()
                 except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+                    logger.debug("Ignored error during best-effort step", exc_info=True)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLEANUP: Error closing controller: %s", e)
+                logger.warning("CLEANUP: Error closing controller: %s", e, exc_info=True)
                 cleanup_errors.append(f"Controller close error: {e}")
             finally:
                 self.__dict__["_controller"] = None
@@ -121,7 +117,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 logger.warning("CLEANUP: Timeout stopping NPU STT pipeline")
                 cleanup_errors.append("NPU STT timeout")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLEANUP: Error stopping NPU STT: %s", e)
+                logger.warning("CLEANUP: Error stopping NPU STT: %s", e, exc_info=True)
                 cleanup_errors.append(f"NPU STT error: {e}")
             finally:
                 self.__dict__["_npu_stt_pipeline"] = None
@@ -130,11 +126,9 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         try:
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
-                logger.info(
-                    "CLEANUP: Force-killed %s orphaned audio capture processes", killed
-                )
+                logger.info("CLEANUP: Force-killed %s orphaned audio capture processes", killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("CLEANUP: Error killing audio captures: %s", e)
+            logger.warning("CLEANUP: Error killing audio captures: %s", e, exc_info=True)
             cleanup_errors.append(f"Audio capture kill error: {e}")
 
         # 3. Cancel all background tasks
@@ -146,7 +140,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 logger.info("CLEANUP: Cancelling %s...", _task_name)
                 task.cancel()
@@ -155,6 +149,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
                 except Exception as e:  # pylint: disable=broad-exception-caught
+                    logger.warning("CLEANUP: %s cancel error: %s", _task_name, e, exc_info=True)
                     cleanup_errors.append(f"{_task_name} cancel error: {e}")
 
         # Clear task references
@@ -176,14 +171,14 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 logger.warning("CLEANUP: Timeout stopping video daemon")
                 cleanup_errors.append("Video daemon timeout")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLEANUP: Error stopping video integration: %s", e)
+                logger.warning("CLEANUP: Error stopping video integration: %s", e, exc_info=True)
                 cleanup_errors.append(f"Video daemon error: {e}")
 
         # 5. Flush any remaining transcript buffer
         try:
             await self._flush_buffer()
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("CLEANUP: Failed to flush buffer: %s", e)
+            logger.warning("CLEANUP: Failed to flush buffer: %s", e, exc_info=True)
 
         await self._finish_stale_cleanup(cleanup_errors)
 
@@ -197,7 +192,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout leaving meeting")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("LEAVE: Error leaving meeting: %s", e)
+                logger.warning("LEAVE: Error leaving meeting: %s", e, exc_info=True)
 
         # 7. Build result before cleanup
         result = {
@@ -208,7 +203,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         }
 
         if self.db and self.state.meeting_id:
-            now = datetime.now()
+            now = datetime.now().astimezone()
 
             # Calculate duration
             if self.state.joined_at:
@@ -223,20 +218,18 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                     actual_end=now,
                 )
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("LEAVE: Failed to update meeting record: %s", e)
+                logger.warning("LEAVE: Failed to update meeting record: %s", e, exc_info=True)
 
         # 8. Close browser controller (this cleans up per-instance devices)
         # restore_browser_audio=False for normal exit (user's Chrome wasn't affected)
         if self._controller:
             logger.info("LEAVE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=False), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=False), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout closing controller")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("LEAVE: Error closing controller: %s", e)
+                logger.warning("LEAVE: Error closing controller: %s", e, exc_info=True)
             finally:
                 self.__dict__["_controller"] = None
 
@@ -248,7 +241,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 result.get("captions_captured", 0),
             )
         except Exception:  # pylint: disable=broad-exception-caught
-            pass
+            logger.debug("Ignored error during best-effort step", exc_info=True)
 
         # 10. FINAL: Clean up any orphaned devices (safety net)
         await self._run_orphan_cleanup("POST-LEAVE")
@@ -257,9 +250,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         self.__dict__["state"] = NotesBotState()
 
         logger.info("=" * 60)
-        logger.info(
-            "LEAVE: Meeting ended. Captured %s captions.", result["captions_captured"]
-        )
+        logger.info("LEAVE: Meeting ended. Captured %s captions.", result["captions_captured"])
         logger.info("=" * 60)
 
         return result
@@ -299,7 +290,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout stopping NPU STT pipeline")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("LEAVE: Error stopping NPU STT: %s", e)
+                logger.warning("LEAVE: Error stopping NPU STT: %s", e, exc_info=True)
             finally:
                 self.__dict__["_npu_stt_pipeline"] = None
 
@@ -309,7 +300,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             if killed > 0:
                 logger.info("LEAVE: Killed %s audio capture processes", killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("LEAVE: Error killing audio captures: %s", e)
+            logger.warning("LEAVE: Error killing audio captures: %s", e, exc_info=True)
 
         # 3. Cancel background tasks
         tasks_to_cancel = [
@@ -319,7 +310,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
                 try:
@@ -341,13 +332,13 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout stopping video daemon")
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("LEAVE: Error stopping video daemon: %s", e)
+                logger.warning("LEAVE: Error stopping video daemon: %s", e, exc_info=True)
 
         # 5. Final buffer flush
         try:
             await self._flush_buffer()
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("LEAVE: Failed to flush buffer: %s", e)
+            logger.warning("LEAVE: Failed to flush buffer: %s", e, exc_info=True)
 
         return await self._finish_leave()
 
@@ -362,24 +353,22 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 logger.warning("CLOSE: Timeout leaving meeting, forcing cleanup...")
                 await self._cleanup_stale_meeting()
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLOSE: Error leaving meeting: %s", e)
+                logger.warning("CLOSE: Error leaving meeting: %s", e, exc_info=True)
                 await self._cleanup_stale_meeting()
 
         # 5. Close browser controller if still open
         if self._controller:
             logger.info("CLOSE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("CLOSE: Timeout closing controller, force killing...")
                 try:
                     await self._controller.force_kill()
                 except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+                    logger.debug("Ignored error during best-effort step", exc_info=True)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("CLOSE: Error closing browser controller: %s", e)
+                logger.warning("CLOSE: Error closing browser controller: %s", e, exc_info=True)
             finally:
                 self.__dict__["_controller"] = None
 
@@ -416,7 +405,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 asyncio.TimeoutError,
                 Exception,
             ) as e:
-                logger.warning("CLOSE: Error stopping NPU STT: %s", e)
+                logger.warning("CLOSE: Error stopping NPU STT: %s", e, exc_info=True)
             finally:
                 self.__dict__["_npu_stt_pipeline"] = None
 
@@ -426,7 +415,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             if killed > 0:
                 logger.info("CLOSE: Killed %s orphaned audio capture processes", killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("CLOSE: Error killing audio captures: %s", e)
+            logger.warning("CLOSE: Error killing audio captures: %s", e, exc_info=True)
 
         # 3. Cancel all background tasks
         tasks_to_cancel = [
@@ -437,7 +426,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
                 try:
