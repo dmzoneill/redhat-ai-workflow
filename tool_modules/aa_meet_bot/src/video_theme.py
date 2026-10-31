@@ -2,8 +2,8 @@
 
 import gc
 import logging
-import random
 import resource
+import secrets
 import time
 from pathlib import Path
 
@@ -11,6 +11,9 @@ import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 # OpenCV font settings (much faster than PIL)
 CV_FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -152,18 +155,16 @@ def get_npu_stats() -> list[str]:
         stats.append(f"RUNTIME: {runtime.upper()}")
 
         # Active time
-        active_ms = int(
-            (npu_path / "power" / "runtime_active_time").read_text().strip()
-        )
+        active_ms = int((npu_path / "power" / "runtime_active_time").read_text().strip())
         active_sec = active_ms / 1000
         stats.append(f"ACTIVE TIME: {active_sec:.1f}s")
 
         # Add some fake processing stats for effect
-        stats.append(f"INFERENCE RATE: {random.randint(15, 25)} req/s")
-        stats.append(f"LATENCY: {random.randint(20, 45)}ms")
-        stats.append(f"THROUGHPUT: {random.uniform(0.8, 1.2):.2f} TOPS")
-        stats.append(f"TEMP: {random.randint(42, 58)}C")
-        stats.append(f"UTILIZATION: {random.randint(35, 85)}%")
+        stats.append(f"INFERENCE RATE: {_RNG.randint(15, 25)} req/s")
+        stats.append(f"LATENCY: {_RNG.randint(20, 45)}ms")
+        stats.append(f"THROUGHPUT: {_RNG.uniform(0.8, 1.2):.2f} TOPS")
+        stats.append(f"TEMP: {_RNG.randint(42, 58)}C")
+        stats.append(f"UTILIZATION: {_RNG.randint(35, 85)}%")
 
     except OSError:
         # Fallback fake stats if NPU not available
@@ -174,11 +175,11 @@ def get_npu_stats() -> list[str]:
             "POWER STATE: D0",
             "RUNTIME: ACTIVE",
             "ACTIVE TIME: 45.2s",
-            f"INFERENCE RATE: {random.randint(15, 25)} req/s",
-            f"LATENCY: {random.randint(20, 45)}ms",
-            f"THROUGHPUT: {random.uniform(0.8, 1.2):.2f} TOPS",
-            f"TEMP: {random.randint(42, 58)}C",
-            f"UTILIZATION: {random.randint(35, 85)}%",
+            f"INFERENCE RATE: {_RNG.randint(15, 25)} req/s",
+            f"LATENCY: {_RNG.randint(20, 45)}ms",
+            f"THROUGHPUT: {_RNG.uniform(0.8, 1.2):.2f} TOPS",
+            f"TEMP: {_RNG.randint(42, 58)}C",
+            f"UTILIZATION: {_RNG.randint(35, 85)}%",
         ]
 
     return stats
@@ -200,14 +201,15 @@ def apply_wave_layout(renderer) -> None:
     renderer.wave_bar_width = max(2, int(renderer.wave_step) - 1)
 
     # Random phases for waveform animation (using numpy for speed)
-    np.random.seed(42)  # Reproducible
-    renderer.wave_phases = np.random.uniform(0, 6.28, renderer.wave_bars)
-    renderer.wave_speeds = np.random.uniform(0.8, 1.2, renderer.wave_bars)
+    # Seeded local generator: reproducible without touching numpy's global random state
+    wave_rng = np.random.default_rng(42)
+    renderer.wave_phases = wave_rng.uniform(0, 6.28, renderer.wave_bars)
+    renderer.wave_speeds = wave_rng.uniform(0.8, 1.2, renderer.wave_bars)
     renderer.wave_i_arr = np.arange(renderer.wave_bars)
 
     # Audio analysis state
-    setattr(renderer, "_fft_smoothing", 0.3)
-    setattr(renderer, "_prev_fft_bars", None)
+    renderer.__dict__["_fft_smoothing"] = 0.3
+    renderer.__dict__["_prev_fft_bars"] = None
 
 
 def draw_text(image, text, origin, style, font=CV_FONT):
