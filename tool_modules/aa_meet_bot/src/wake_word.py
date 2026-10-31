@@ -128,7 +128,6 @@ class TextWakeWordDetector:
         # e.g., speaker "David ONeill" saying "How are you?" should NOT trigger
         # Only trigger if "David" is actually spoken as a command/address
         speaker_lower = speaker.lower()
-        text.lower()
 
         # Check if wake word appears in text
         match = self.pattern.search(text)
