@@ -33,6 +33,7 @@ Usage:
 
 import asyncio
 import atexit
+import importlib
 import json
 import logging
 import re
@@ -44,15 +45,51 @@ from dataclasses import dataclass, field
 from enum import Enum
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import Browser, BrowserContext, Error, Page, async_playwright
+
+from tool_modules.common.redhat_sso import extract_form_action, extract_hidden_fields
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
+
+
+def _optional_jwt_errors() -> tuple[type[Exception], ...]:
+    """Return PyJWT's base error when PyJWT is installed."""
+    try:
+        jwt_module = importlib.import_module("jwt")
+    except ImportError:
+        return ()
+    return (jwt_module.PyJWTError,)
+
+
+# Failures expected from browser automation, HTTP calls and local I/O.
+_AUTOMATION_ERRORS: tuple[type[Exception], ...] = (
+    Error,  # playwright.async_api.Error, base of Playwright's TimeoutError
+    httpx.HTTPError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    KeyError,
+    AttributeError,
+    asyncio.TimeoutError,
+)
+# A response body that is not JSON, or JSON that is not an object.
+_JSON_ERRORS: tuple[type[Exception], ...] = (ValueError, AttributeError, TypeError)
+# Reading and decoding a JWT: cache unreadable, PyJWT missing or token malformed.
+_JWT_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ImportError,
+    ValueError,
+    AttributeError,
+    TypeError,
+    *_optional_jwt_errors(),
+)
 
 
 # ==================== Enums ====================
@@ -165,9 +202,7 @@ class SSOStrategy:
     popup_close_timeout: int = 30000  # Max wait for popup to close
 
     # Callback URL handling (for sites with intermediate redirects)
-    callback_url_patterns: list[str] = field(
-        default_factory=list
-    )  # e.g., ["setsession", "signin"]
+    callback_url_patterns: list[str] = field(default_factory=list)  # e.g., ["setsession", "signin"]
     final_redirect_url: str = ""  # Force navigate here if callback doesn't redirect
 
 
@@ -182,14 +217,14 @@ class SSOResult:
     outcome_type: OutcomeType
 
     # Outcome data
-    jwt_token: Optional[str] = None
-    jwt_expires_at: Optional[int] = None
+    jwt_token: str | None = None
+    jwt_expires_at: int | None = None
     cookies: dict[str, str] = field(default_factory=dict)
     final_url: str = ""
 
     # Error info
-    error: Optional[str] = None
-    screenshot_path: Optional[str] = None
+    error: str | None = None
+    screenshot_path: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -233,10 +268,7 @@ KNOWN_STRATEGIES: dict[str, SSOStrategy] = {
     ),
     "concur": SSOStrategy(
         name="concur",
-        target_url=(
-            "https://auth.redhat.com/auth/realms/EmployeeIDP/"
-            "protocol/saml/clients/concursolutions"
-        ),
+        target_url=("https://auth.redhat.com/auth/realms/EmployeeIDP/protocol/saml/clients/concursolutions"),
         flow_type=FlowType.INLINE_REDIRECT,
         success_url_pattern="concursolutions.com",
         outcome_type=OutcomeType.REDIRECT_ONLY,
@@ -298,10 +330,7 @@ def get_sso_credentials(headless: bool = True) -> tuple[str, str]:
     # Read auth token
     token_path = Path.home() / ".cache" / "redhatter" / "auth_token"
     if not token_path.exists():
-        raise RuntimeError(
-            f"Auth token not found at {token_path}. "
-            "Ensure redhatter service is running."
-        )
+        raise RuntimeError(f"Auth token not found at {token_path}. Ensure redhatter service is running.")
 
     token = token_path.read_text(encoding="utf-8").strip()
     if not token:
@@ -349,7 +378,7 @@ async def fill_sso_form(
     page: Page,
     username: str,
     password: str,
-    selectors: Optional[SSOSelectors] = None,
+    selectors: SSOSelectors | None = None,
 ) -> None:
     """Fill Red Hat SSO login form on an existing Playwright page.
 
@@ -381,7 +410,7 @@ async def fill_sso_form(
             await page.wait_for_selector(primary, timeout=5000)
             return primary
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
         for alt in alternatives:
             try:
@@ -389,7 +418,8 @@ async def fill_sso_form(
                 logger.info("Using alternative selector: %s", alt)
                 return alt
             # Intentional: skip this candidate when the optional step fails.
-            except Exception:  # pylint: disable=broad-exception-caught
+            except _AUTOMATION_ERRORS as exc:
+                logger.debug("Candidate failed: %s", exc)
                 continue
         return primary  # Return primary and let it fail with proper error
 
@@ -418,7 +448,7 @@ def fill_sso_form_sync(
     page,  # playwright.sync_api.Page
     username: str,
     password: str,
-    selectors: Optional[SSOSelectors] = None,
+    selectors: SSOSelectors | None = None,
 ) -> None:
     """Fill Red Hat SSO login form on an existing Playwright page (synchronous version).
 
@@ -450,7 +480,7 @@ def fill_sso_form_sync(
             page.wait_for_selector(primary, timeout=5000)
             return primary
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
         for alt in alternatives:
             try:
@@ -458,7 +488,8 @@ def fill_sso_form_sync(
                 logger.info("Using alternative selector: %s", alt)
                 return alt
             # Intentional: skip this candidate when the optional step fails.
-            except Exception:  # pylint: disable=broad-exception-caught
+            except _AUTOMATION_ERRORS as exc:
+                logger.debug("Candidate failed: %s", exc)
                 continue
         return primary  # Return primary and let it fail with proper error
 
@@ -509,7 +540,7 @@ class SSOAuthenticator:
     def __init__(
         self,
         headless: bool = True,
-        screenshot_dir: Optional[Path] = None,
+        screenshot_dir: Path | None = None,
     ):
         """Initialize authenticator.
 
@@ -518,20 +549,18 @@ class SSOAuthenticator:
             screenshot_dir: Directory for error screenshots
         """
         self.headless = headless
-        self.screenshot_dir = (
-            screenshot_dir or Path.home() / ".cache" / "sso" / "screenshots"
-        )
+        self.screenshot_dir = screenshot_dir or Path.home() / ".cache" / "sso" / "screenshots"
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
 
-        self._browser: Optional[Browser] = None
-        self._context: Optional[BrowserContext] = None
-        self._page: Optional[Page] = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
 
     async def authenticate(
         self,
         strategy: SSOStrategy | str,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
     ) -> SSOResult:
         """Authenticate to a site using the specified strategy.
 
@@ -576,9 +605,7 @@ class SSOAuthenticator:
 
                 # Execute appropriate flow
                 if strategy.flow_type == FlowType.INLINE_REDIRECT:
-                    result = await self._flow_inline_redirect(
-                        strategy, username, password
-                    )
+                    result = await self._flow_inline_redirect(strategy, username, password)
                 elif strategy.flow_type == FlowType.POPUP:
                     result = await self._flow_popup(strategy, username, password)
                 elif strategy.flow_type == FlowType.OAUTH_CHAIN:
@@ -599,8 +626,8 @@ class SSOAuthenticator:
                 return result
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.exception("SSO authentication failed: %s", e)
+        except _AUTOMATION_ERRORS as e:
+            logger.exception("SSO authentication failed")
             screenshot_path = await self._take_screenshot(f"{strategy.name}_error")
             return SSOResult(
                 success=False,
@@ -637,14 +664,12 @@ class SSOAuthenticator:
                 timeout=strategy.navigation_timeout,
             )
         # Intentional: re-raise unexpected errors after handling known cases.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             # Handle ERR_ABORTED (common with SSO redirects)
             if "net::ERR_ABORTED" not in str(e):
                 raise
             logger.warning("Navigation aborted (expected for SSO): %s", e)
-            await page.wait_for_load_state(
-                "domcontentloaded", timeout=strategy.navigation_timeout
-            )
+            await page.wait_for_load_state("domcontentloaded", timeout=strategy.navigation_timeout)
 
         await asyncio.sleep(2)  # Wait for potential redirect
 
@@ -656,10 +681,7 @@ class SSOAuthenticator:
 
         if not on_sso:
             # Check if already authenticated
-            if (
-                strategy.success_url_pattern
-                and strategy.success_url_pattern in current_url
-            ):
+            if strategy.success_url_pattern and strategy.success_url_pattern in current_url:
                 logger.info("Already authenticated - session exists")
                 return SSOResult(
                     success=True,
@@ -678,11 +700,7 @@ class SSOAuthenticator:
             await self._wait_for_redirect(strategy)
 
         final_url = page.url
-        success = (
-            strategy.success_url_pattern in final_url
-            if strategy.success_url_pattern
-            else True
-        )
+        success = strategy.success_url_pattern in final_url if strategy.success_url_pattern else True
 
         return SSOResult(
             success=success,
@@ -724,24 +742,27 @@ class SSOAuthenticator:
 
         # Check if already authenticated
         current_url = page.url
-        if strategy.success_url_pattern and strategy.success_url_pattern in current_url:
-            # Check if sign-in button is missing (already logged in)
-            if strategy.popup_trigger_selector:
-                try:
-                    await page.wait_for_selector(
-                        strategy.popup_trigger_selector,
-                        timeout=3000,
-                    )
-                # Intentional: convert the failure into an error result for the caller.
-                except Exception:  # pylint: disable=broad-exception-caught
-                    logger.info("Sign-in button not found - already authenticated")
-                    return SSOResult(
-                        success=True,
-                        strategy_name=strategy.name,
-                        flow_type=strategy.flow_type,
-                        outcome_type=strategy.outcome_type,
-                        final_url=current_url,
-                    )
+        # Already authenticated if on the success URL and the sign-in button is missing
+        if (
+            strategy.success_url_pattern
+            and strategy.success_url_pattern in current_url
+            and strategy.popup_trigger_selector
+        ):
+            try:
+                await page.wait_for_selector(
+                    strategy.popup_trigger_selector,
+                    timeout=3000,
+                )
+            # Intentional: convert the failure into an error result for the caller.
+            except _AUTOMATION_ERRORS:
+                logger.info("Sign-in button not found - already authenticated")
+                return SSOResult(
+                    success=True,
+                    strategy_name=strategy.name,
+                    flow_type=strategy.flow_type,
+                    outcome_type=strategy.outcome_type,
+                    final_url=current_url,
+                )
 
         # Click popup trigger
         if strategy.popup_trigger_selector:
@@ -760,19 +781,15 @@ class SSOAuthenticator:
             # Check if popup is SSO page
             if any(pattern in popup_url for pattern in strategy.sso_url_patterns):
                 # Fill credentials in popup
-                await self._fill_sso_form(
-                    strategy.selectors, username, password, page=popup
-                )
+                await self._fill_sso_form(strategy.selectors, username, password, page=popup)
 
                 # Wait for popup to close
                 logger.info("Waiting for popup to close...")
                 try:
-                    await popup.wait_for_event(
-                        "close", timeout=strategy.popup_close_timeout
-                    )
+                    await popup.wait_for_event("close", timeout=strategy.popup_close_timeout)
                     logger.info("Popup closed - authentication successful")
                 # Intentional: log the failure and continue at this boundary.
-                except Exception:  # pylint: disable=broad-exception-caught
+                except _AUTOMATION_ERRORS:
                     logger.warning("Popup did not close within timeout")
 
             # Refresh main page to get authenticated state
@@ -781,11 +798,7 @@ class SSOAuthenticator:
             await asyncio.sleep(2)
 
         final_url = page.url
-        success = (
-            strategy.success_url_pattern in final_url
-            if strategy.success_url_pattern
-            else True
-        )
+        success = strategy.success_url_pattern in final_url if strategy.success_url_pattern else True
 
         return SSOResult(
             success=success,
@@ -816,7 +829,7 @@ class SSOAuthenticator:
         selectors: SSOSelectors,
         username: str,
         password: str,
-        page: Optional[Page] = None,
+        page: Page | None = None,
     ) -> None:
         """Fill SSO login form.
 
@@ -876,7 +889,7 @@ class SSOAuthenticator:
             await page.wait_for_selector(primary, timeout=5000)
             return primary
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
 
         # Try alternatives
@@ -886,7 +899,8 @@ class SSOAuthenticator:
                 logger.info("Using alternative selector: %s", alt)
                 return alt
             # Intentional: skip this candidate when the optional step fails.
-            except Exception:  # pylint: disable=broad-exception-caught
+            except _AUTOMATION_ERRORS as exc:
+                logger.debug("Candidate failed: %s", exc)
                 continue
 
         # Return primary and let it fail with proper error
@@ -908,19 +922,15 @@ class SSOAuthenticator:
             current_url = page.url
 
             # Check for callback URLs that need handling
-            if strategy.callback_url_patterns:
-                if any(
-                    pattern in current_url for pattern in strategy.callback_url_patterns
-                ):
-                    logger.info("On callback URL: %s", current_url)
-                    # Wait for redirect away from callback
-                    continue
+            if strategy.callback_url_patterns and any(
+                pattern in current_url for pattern in strategy.callback_url_patterns
+            ):
+                logger.info("On callback URL: %s", current_url)
+                # Wait for redirect away from callback
+                continue
 
             # Check if we've reached target
-            if (
-                strategy.success_url_pattern
-                and strategy.success_url_pattern in current_url
-            ):
+            if strategy.success_url_pattern and strategy.success_url_pattern in current_url:
                 logger.info("Reached target URL: %s", current_url)
                 return
 
@@ -994,7 +1004,8 @@ class SSOAuthenticator:
                         logger.info("Found token in %s['%s']", storage_type, key)
                         break
                 # Intentional: skip this candidate when the optional step fails.
-                except Exception:  # pylint: disable=broad-exception-caught
+                except _AUTOMATION_ERRORS as exc:
+                    logger.debug("Candidate failed: %s", exc)
                     continue
             if token:
                 break
@@ -1010,7 +1021,7 @@ class SSOAuthenticator:
                 result.jwt_expires_at = claims.get("exp")
                 logger.info("Token expires at: %s", result.jwt_expires_at)
             # Intentional: log the failure and continue at this boundary.
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except _JWT_ERRORS as e:
                 logger.warning("Could not decode JWT: %s", e)
 
             # Save to cache if configured
@@ -1023,9 +1034,7 @@ class SSOAuthenticator:
                     "expires_at": result.jwt_expires_at,
                     "saved_at": int(time.time()),
                 }
-                cache_path.write_text(
-                    json.dumps(token_data, indent=2), encoding="utf-8"
-                )
+                cache_path.write_text(json.dumps(token_data, indent=2), encoding="utf-8")
                 logger.info("Saved token to: %s", cache_path)
         else:
             logger.warning("Could not extract JWT token")
@@ -1066,7 +1075,7 @@ class SSOAuthenticator:
 
         return result
 
-    async def _take_screenshot(self, name: str) -> Optional[str]:
+    async def _take_screenshot(self, name: str) -> str | None:
         """Take screenshot for debugging."""
         if not self._page:
             return None
@@ -1078,7 +1087,7 @@ class SSOAuthenticator:
             logger.info("Screenshot saved: %s", path)
             return str(path)
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             logger.warning("Failed to take screenshot: %s", e)
             return None
 
@@ -1092,9 +1101,9 @@ class SSOAuthenticator:
 # Mutable browser session. Names stay lowercase because they are reassigned.
 # pylint: disable=invalid-name
 _browser_playwright = None  # Playwright instance
-_browser_instance: Optional[Browser] = None  # Browser instance
-_browser_context: Optional[BrowserContext] = None  # Browser context
-_browser_page: Optional[Page] = None  # Active page
+_browser_instance: Browser | None = None  # Browser instance
+_browser_context: BrowserContext | None = None  # Browser context
+_browser_page: Page | None = None  # Active page
 # pylint: enable=invalid-name
 
 # Screenshot output directory - use tempfile.gettempdir() for portability
@@ -1126,7 +1135,7 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
             _ = _browser_page.url
             return _browser_page
         # Intentional: log the failure and continue at this boundary.
-        except Exception:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS:
             logger.warning("Browser session expired, creating new one")
             await _close_browser()
 
@@ -1135,8 +1144,7 @@ async def _get_or_create_browser(headless: bool = True) -> Page:
         from playwright.async_api import async_playwright as _async_playwright
     except ImportError as e:
         raise RuntimeError(
-            "Playwright is not installed. "
-            "Install it with: uv add playwright && playwright install chromium"
+            "Playwright is not installed. Install it with: uv add playwright && playwright install chromium"
         ) from e
 
     logger.info("Launching browser (headless=%s)", headless)
@@ -1160,14 +1168,14 @@ async def _close_browser() -> None:
         try:
             await _browser_instance.close()
         # Intentional: log the failure and continue at this boundary.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             logger.warning("Error closing browser: %s", e)
 
     if _browser_playwright is not None:
         try:
             await _browser_playwright.stop()
         # Intentional: log the failure and continue at this boundary.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             logger.warning("Error stopping playwright: %s", e)
 
     _browser_playwright = None
@@ -1187,7 +1195,7 @@ def _cleanup_browser_sync() -> None:
             else:
                 loop.run_until_complete(_close_browser())
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
 
 
@@ -1272,7 +1280,7 @@ async def _close_http_session(name: str) -> None:
         try:
             await _http_sessions[name].aclose()
         # Intentional: log the failure and continue at this boundary.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             logger.warning("Error closing HTTP session '%s': %s", name, e)
         del _http_sessions[name]
         del _session_meta[name]
@@ -1295,7 +1303,7 @@ def _cleanup_http_sessions_sync() -> None:
             else:
                 loop.run_until_complete(_close_all_http_sessions())
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
 
 
@@ -1315,11 +1323,11 @@ class _SAMLResponseParser(HTMLParser):
 
     def __init__(self):
         super().__init__()
-        self.saml_response: Optional[str] = None
-        self.relay_state: Optional[str] = None
-        self.form_action: Optional[str] = None
+        self.saml_response: str | None = None
+        self.relay_state: str | None = None
+        self.form_action: str | None = None
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = dict(attrs)
         method = attr_dict.get("method") or ""
         if tag == "form" and method.lower() == "post":
@@ -1382,7 +1390,7 @@ async def _saml_auth_http(
         else:
             logger.warning("No _csrf in init response, continuing anyway")
     # Intentional: log the failure and continue at this boundary.
-    except Exception:  # pylint: disable=broad-exception-caught
+    except _JSON_ERRORS:
         logger.warning("Init response was not JSON, continuing anyway")
 
     # Phase 2: GET /saml/login -> follow 302 to auth.redhat.com
@@ -1431,9 +1439,7 @@ async def _saml_auth_http(
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                     follow_redirects=True,
                 )
-                logger.info(
-                    "SAML Phase 3: Kerberos fallback POST -> HTTP %s", resp.status_code
-                )
+                logger.info("SAML Phase 3: Kerberos fallback POST -> HTTP %s", resp.status_code)
 
         if resp.status_code != 200:
             return {
@@ -1503,14 +1509,10 @@ async def _saml_auth_http(
                 )
             if finish_match:
                 finish_url = finish_match.group(1).replace("&amp;", "&")
-                logger.info(
-                    "SAML Phase 5: Following finishLoginLink: %s...", finish_url[:80]
-                )
+                logger.info("SAML Phase 5: Following finishLoginLink: %s...", finish_url[:80])
                 resp = await sso_client.get(finish_url, follow_redirects=True)
                 response_html = resp.text
-                logger.info(
-                    "SAML Phase 5: finishLoginLink response: HTTP %s", resp.status_code
-                )
+                logger.info("SAML Phase 5: finishLoginLink response: HTTP %s", resp.status_code)
 
         parser = _SAMLResponseParser()
         parser.feed(response_html)
@@ -1588,7 +1590,7 @@ async def _saml_auth_http(
         if new_csrf:
             meta["csrf"] = new_csrf
     # Intentional: log the failure and continue at this boundary.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _JSON_ERRORS as e:
         logger.warning("Could not parse SSO login response: %s", e)
 
     return {
@@ -1599,55 +1601,19 @@ async def _saml_auth_http(
     }
 
 
-def _extract_form_action(html: str) -> Optional[str]:
-    """Extract the action URL from a login form in HTML."""
-    # Look for form with id="kc-form-login" (Keycloak) or generic login form
-    match = re.search(
-        r'<form[^>]*id=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\']',
-        html,
-    )
-    if match:
-        return match.group(1).replace("&amp;", "&")
+def _extract_form_action(html: str) -> str | None:
+    """Extract the action URL from a login form in HTML.
 
-    # Fallback: any form with action containing "authenticate"
-    match = re.search(
-        r'<form[^>]*action=["\']([^"\']*authenticate[^"\']*)["\']',
-        html,
-    )
-    if match:
-        return match.group(1).replace("&amp;", "&")
-
-    # Fallback: first form with POST method
-    match = re.search(
-        r'<form[^>]*method=["\']post["\'][^>]*action=["\']([^"\']+)["\']',
-        html,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).replace("&amp;", "&")
-
-    return None
+    Prefers the Keycloak ``kc-form-login`` form, then a form posting to an
+    "authenticate" URL, then any POST form. Delegates to the linear
+    attribute parser in ``tool_modules.common.redhat_sso``.
+    """
+    return extract_form_action(html)
 
 
 def _extract_hidden_fields(html: str) -> dict[str, str]:
-    """Extract all hidden input fields from HTML."""
-    fields = {}
-    for match in re.finditer(
-        r'<input[^>]*type=["\']hidden["\'][^>]*name=["\']([^"\']+)["\']'
-        r'[^>]*value=["\']([^"\']*)["\']',
-        html,
-    ):
-        fields[match.group(1)] = match.group(2)
-
-    # Also check reverse attribute order (value before name)
-    for match in re.finditer(
-        r'<input[^>]*type=["\']hidden["\'][^>]*value=["\']([^"\']*)["\']'
-        r'[^>]*name=["\']([^"\']+)["\']',
-        html,
-    ):
-        fields[match.group(2)] = match.group(1)
-
-    return fields
+    """Extract all named hidden input fields from HTML, in any attribute order."""
+    return {name: value for name, value in extract_hidden_fields(html).items() if name}
 
 
 # ==================== MCP Tool Registration ====================
@@ -1664,6 +1630,7 @@ def register_tools(server: "FastMCP") -> int:
         Number of tools registered
     """
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
+
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )
@@ -1716,7 +1683,9 @@ def register_tools(server: "FastMCP") -> int:
                 if result.jwt_expires_at:
                     import datetime  # pylint: disable=import-outside-toplevel
 
-                    exp_time = datetime.datetime.fromtimestamp(result.jwt_expires_at)
+                    exp_time = datetime.datetime.fromtimestamp(
+                        result.jwt_expires_at, tz=datetime.timezone.utc
+                    ).astimezone()
                     output += f"**Expires:** {exp_time}\n"
 
             if result.cookies:
@@ -1773,10 +1742,7 @@ def register_tools(server: "FastMCP") -> int:
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        f"❌ Unknown strategy: {strategy}\n\n"
-                        f"Known: {list(KNOWN_STRATEGIES.keys())}"
-                    ),
+                    text=(f"❌ Unknown strategy: {strategy}\n\nKnown: {list(KNOWN_STRATEGIES.keys())}"),
                 )
             ]
 
@@ -1808,7 +1774,7 @@ def register_tools(server: "FastMCP") -> int:
                         output += "❌ **Token Status:** Expired\n"
                         output += f"**Expired:** {int(-remaining / 60)} minutes ago\n"
                 # Intentional: log the failure and continue at this boundary.
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except _JWT_ERRORS as e:
                     output += "⚠️ **Token Status:** Error reading token\n"
                     output += f"**Error:** {e}\n"
             else:
@@ -1833,10 +1799,60 @@ def register_tools(server: "FastMCP") -> int:
     return registry.count
 
 
+async def _init_csrf_status(client: httpx.AsyncClient, meta: dict, name: str) -> str:
+    """Hit the session's init endpoint (if configured) and store its _csrf token.
+
+    Returns a short status for the tool output.
+    """
+    if name not in HTTP_SAML_CONFIGS:
+        return "not attempted"
+    config = HTTP_SAML_CONFIGS[name]
+    try:
+        resp = await client.get(config.init_url, follow_redirects=True)
+    # Intentional: report the failure in the status and continue.
+    except _AUTOMATION_ERRORS as e:
+        return f"error: {e}"
+    if resp.status_code != 200:
+        return f"HTTP {resp.status_code}"
+    try:
+        csrf = resp.json().get(config.csrf_field)
+    except _JSON_ERRORS:
+        return "response not JSON"
+    if not csrf:
+        return "not in response"
+    meta["csrf"] = csrf
+    return "extracted"
+
+
+def _parse_json_arg(raw: str) -> Any:
+    """Parse an optional JSON tool argument; empty means None."""
+    return json.loads(raw) if raw else None
+
+
+_MAX_BODY_CHARS = 5000
+
+
+def _format_response_body(resp: httpx.Response) -> str:
+    """Pretty-print a JSON response or return its text, truncated."""
+    if "application/json" in resp.headers.get("content-type", ""):
+        try:
+            body_str = json.dumps(resp.json(), indent=2)
+        except _JSON_ERRORS:
+            return resp.text[:_MAX_BODY_CHARS]
+        if len(body_str) > _MAX_BODY_CHARS:
+            body_str = body_str[:_MAX_BODY_CHARS] + "\n... (truncated)"
+        return body_str
+    body_str = resp.text[:_MAX_BODY_CHARS]
+    if len(resp.text) > _MAX_BODY_CHARS:
+        body_str += "\n... (truncated)"
+    return body_str
+
+
 # pylint: disable-next=too-many-statements
-def _register_http_session_tools(registry) -> None:  # noqa: C901
+def _register_http_session_tools(registry) -> None:
     """Register HTTP session management tools."""
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
+
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )
@@ -1862,33 +1878,9 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
         Examples:
             http_session_create("reward_zone", "https://rewardzone.redhat.com")
         """
-        # pylint: disable-next=too-many-nested-blocks
         try:
             client, meta = await _create_http_session(name, base_url)
-
-            # Try to hit init endpoint if we have a config for this session
-            csrf_status = "not attempted"
-            if name in HTTP_SAML_CONFIGS:
-                config = HTTP_SAML_CONFIGS[name]
-                try:
-                    resp = await client.get(config.init_url, follow_redirects=True)
-                    if resp.status_code == 200:
-                        try:
-                            init_data = resp.json()
-                            csrf = init_data.get(config.csrf_field)
-                            if csrf:
-                                meta["csrf"] = csrf
-                                csrf_status = "extracted"
-                            else:
-                                csrf_status = "not in response"
-                        # Intentional: log the failure and continue at this boundary.
-                        except Exception:  # pylint: disable=broad-exception-caught
-                            csrf_status = "response not JSON"
-                    else:
-                        csrf_status = f"HTTP {resp.status_code}"
-                # Intentional: log the failure and continue at this boundary.
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    csrf_status = f"error: {e}"
+            csrf_status = await _init_csrf_status(client, meta, name)
 
             output = "HTTP session created\n\n"
             output += f"**Name:** {name}\n"
@@ -1898,7 +1890,7 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             return [
                 TextContent(
                     type="text",
@@ -1951,8 +1943,7 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
                 TextContent(
                     type="text",
                     text=(
-                        f"Unknown HTTP SAML config: {config_name!r}\n\n"
-                        f"Known configs: {list(HTTP_SAML_CONFIGS.keys())}"
+                        f"Unknown HTTP SAML config: {config_name!r}\n\nKnown configs: {list(HTTP_SAML_CONFIGS.keys())}"
                     ),
                 )
             ]
@@ -1981,15 +1972,12 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.exception("HTTP SAML auth failed: %s", e)
+        except _AUTOMATION_ERRORS as e:
+            logger.exception("HTTP SAML auth failed")
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        "HTTP SAML authentication failed\n\n"
-                        f"**Session:** {session}\n**Error:** {e}"
-                    ),
+                    text=(f"HTTP SAML authentication failed\n\n**Session:** {session}\n**Error:** {e}"),
                 )
             ]
 
@@ -2038,31 +2026,14 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
 
         method = method.upper()
 
-        # Parse params
-        query_params = None
-        if params:
-            try:
-                query_params = json.loads(params)
-            except json.JSONDecodeError as e:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"Invalid params JSON: {e}\n\nReceived: {params}",
-                    )
-                ]
-
-        # Parse body
-        body = None
-        if json_body:
-            try:
-                body = json.loads(json_body)
-            except json.JSONDecodeError as e:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"Invalid json_body JSON: {e}\n\nReceived: {json_body}",
-                    )
-                ]
+        try:
+            query_params = _parse_json_arg(params)
+        except json.JSONDecodeError as e:
+            return [TextContent(type="text", text=f"Invalid params JSON: {e}\n\nReceived: {params}")]
+        try:
+            body = _parse_json_arg(json_body)
+        except json.JSONDecodeError as e:
+            return [TextContent(type="text", text=f"Invalid json_body JSON: {e}\n\nReceived: {json_body}")]
 
         # Auto-inject _csrf for write methods
         if method in ("POST", "PUT", "PATCH") and meta.get("csrf"):
@@ -2085,32 +2056,13 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
 
             resp = await client.request(method, path, **kwargs)
 
-            # Format response
-            status = resp.status_code
-            content_type = resp.headers.get("content-type", "")
-
-            if "application/json" in content_type:
-                try:
-                    resp_body = resp.json()
-                    body_str = json.dumps(resp_body, indent=2)
-                    # Truncate if very large
-                    if len(body_str) > 5000:
-                        body_str = body_str[:5000] + "\n... (truncated)"
-                # Intentional: log the failure and continue at this boundary.
-                except Exception:  # pylint: disable=broad-exception-caught
-                    body_str = resp.text[:5000]
-            else:
-                body_str = resp.text[:5000]
-                if len(resp.text) > 5000:
-                    body_str += "\n... (truncated)"
-
-            output = f"**{method} {path}** -> HTTP {status}\n\n"
-            output += f"```\n{body_str}\n```"
+            output = f"**{method} {path}** -> HTTP {resp.status_code}\n\n"
+            output += f"```\n{_format_response_body(resp)}\n```"
 
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             return [
                 TextContent(
                     type="text",
@@ -2120,9 +2072,10 @@ def _register_http_session_tools(registry) -> None:  # noqa: C901
 
 
 # pylint: disable-next=too-many-statements
-def _register_browser_tools(registry) -> None:  # noqa: C901
+def _register_browser_tools(registry) -> None:
     """Register browser automation tools."""
     from mcp.types import TextContent  # pylint: disable=import-outside-toplevel
+
     from server.auto_heal_decorator import (  # pylint: disable=import-outside-toplevel
         auto_heal,
     )
@@ -2158,10 +2111,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        f"Invalid wait_for value: {wait_for!r}. "
-                        f"Must be one of: {', '.join(valid_wait_conditions)}"
-                    ),
+                    text=(f"Invalid wait_for value: {wait_for!r}. Must be one of: {', '.join(valid_wait_conditions)}"),
                 )
             ]
 
@@ -2183,7 +2133,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             return [
                 TextContent(
                     type="text",
@@ -2254,7 +2204,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             target = f"text={text!r}" if text else f"selector={selector!r}"
             return [
                 TextContent(
@@ -2319,7 +2269,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             return [
                 TextContent(
                     type="text",
@@ -2380,7 +2330,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             return [
                 TextContent(
                     type="text",
@@ -2428,10 +2378,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        f"Invalid state value: {state!r}. "
-                        f"Must be one of: {', '.join(valid_states)}"
-                    ),
+                    text=(f"Invalid state value: {state!r}. Must be one of: {', '.join(valid_states)}"),
                 )
             ]
 
@@ -2462,7 +2409,7 @@ def _register_browser_tools(registry) -> None:  # noqa: C901
             return [TextContent(type="text", text=output)]
 
         # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _AUTOMATION_ERRORS as e:
             target = f"text={text!r}" if text else f"selector={selector!r}"
             return [
                 TextContent(
