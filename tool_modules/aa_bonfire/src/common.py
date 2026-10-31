@@ -74,8 +74,7 @@ def get_app_config(app_name: str = "", billing: bool = False) -> dict:
         "component": component,
         "image_base": app_config.get(
             "image_base",
-            "quay.io/redhat-user-workloads/aap-aa-tenant/"
-            "aap-aa-main/automation-analytics-backend-main",
+            "quay.io/redhat-user-workloads/aap-aa-tenant/aap-aa-main/automation-analytics-backend-main",
         ),
         "ref_env": config.get("ref_env", "insights-production"),
     }
@@ -108,7 +107,7 @@ async def run_bonfire(
 
     cmd = ["bonfire"] + args
 
-    logger.info(f"Running: {' '.join(cmd)}")
+    logger.info("Running: %s", " ".join(cmd))
 
     # Build env with KUBECONFIG
     run_env = {"KUBECONFIG": kubeconfig}
@@ -117,3 +116,52 @@ async def run_bonfire(
 
     # Use unified run_cmd
     return await run_cmd(cmd, env=run_env, timeout=timeout)
+
+
+def aa_deploy_args(app_cfg: dict, namespace: str, timeout: int, image: tuple[str, str] | None = None) -> list[str]:
+    """Build the exact ITS ``bonfire deploy`` command for Automation Analytics.
+
+    Args:
+        app_cfg: App config from :func:`get_app_config`.
+        namespace: Target ephemeral namespace.
+        timeout: Deployment timeout in seconds.
+        image: Optional ``(template_ref, sha256_digest)`` override; ``None`` uses ref-env defaults.
+    """
+    component = app_cfg["component"]
+    args = [
+        "deploy",
+        "--source=appsre",
+        "--ref-env",
+        app_cfg["ref_env"],
+        "--namespace",
+        namespace,
+        "--timeout",
+        str(timeout),
+        "--optional-deps-method",
+        "hybrid",
+        "--frontends",
+        "false",
+        "--component",
+        component,
+        "--no-remove-resources",
+        "all",
+    ]
+    if image:
+        template_ref, digest = image
+        args.extend(
+            [
+                "--set-template-ref",
+                f"{component}={template_ref}",
+                "--set-parameter",
+                f"{component}/IMAGE={app_cfg.get('image_base', '')}@sha256",
+                "--set-parameter",
+                f"{component}/IMAGE_TAG={digest}",
+            ]
+        )
+    args.append(app_cfg["app_name"])
+    return args
+
+
+def deploy_failure_text(heading: str, cmd_preview: str, output: str) -> str:
+    """Format a failed deploy message, including the command for debugging."""
+    return f"{heading}\n\n**Command:**\n```bash\n{cmd_preview}\n```\n\n**Output:**\n```\n{output}\n```"

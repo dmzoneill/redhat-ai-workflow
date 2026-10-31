@@ -1,27 +1,27 @@
-# pylint: disable=duplicate-code
 """Bonfire MCP Server - Ephemeral namespace management and ClowdApp deployment (extra tools).
 
 Provides additional tools for managing ephemeral namespaces and deploying apps.
 """
 
+import json
 import logging
 import re
 from pathlib import Path
+from typing import TypedDict
 
 from fastmcp import FastMCP
+from mcp.types import TextContent
 
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
 __project_root__ = PROJECT_ROOT  # Module initialization
 
-from mcp.types import TextContent  # pylint: disable=wrong-import-order
-
 from server.auto_heal_decorator import auto_heal_ephemeral
 from server.tool_registry import ToolRegistry
 from server.utils import truncate_output
 
-from .common import get_app_config, get_ephemeral_kubeconfig, run_bonfire
+from .common import aa_deploy_args, deploy_failure_text, get_app_config, get_ephemeral_kubeconfig, run_bonfire
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,26 @@ logger = logging.getLogger(__name__)
 
 
 # ==================== TOOL IMPLEMENTATIONS ====================
+
+
+class IqeCjiOptions(TypedDict):
+    """Optional settings for ``bonfire deploy-iqe-cji``."""
+
+    cji_name: str
+    marker: str
+    filter_expr: str
+    env: str
+
+
+class ProcessOptions(TypedDict):
+    """Options for ``bonfire process``."""
+
+    namespace: str
+    source: str
+    target_env: str
+    set_image_tag: str
+    component: str
+    no_get_dependencies: bool
 
 
 @auto_heal_ephemeral()
@@ -53,8 +73,43 @@ async def _bonfire_apps_list_impl(
     return [TextContent(type="text", text=f"## Deployable Apps\n\n```\n{output}\n```")]
 
 
+def _parse_snapshot(snapshot_json: str) -> tuple[str, str]:
+    """Extract (template_ref, image_digest) from a Konflux snapshot JSON string or file path.
+
+    Raises:
+        ValueError: with a user-facing message when the refs are missing or malformed.
+    """
+    if snapshot_json.strip().startswith("{"):
+        snapshot = json.loads(snapshot_json)
+    else:
+        # Assume file path
+        snapshot = json.loads(Path(snapshot_json).read_text(encoding="utf-8"))
+
+    template_ref = ""
+    image_digest = ""
+    for comp in snapshot.get("spec", {}).get("components", []):
+        container_image = comp.get("containerImage", "")
+        if "automation-analytics" in container_image or "your-app-backend" in container_image:
+            if "@sha256:" in container_image:
+                # Extract the 64-char sha256 digest
+                image_digest = container_image.split("@sha256:")[-1]
+            template_ref = comp.get("source", {}).get("git", {}).get("revision", "")
+            break
+
+    if not template_ref or not image_digest:
+        raise ValueError("❌ Could not extract template_ref and sha256 digest from snapshot")
+    if len(template_ref) != 40:
+        raise ValueError(
+            f"❌ Invalid template_ref from snapshot: `{template_ref}` ({len(template_ref)} chars, need 40)"
+        )
+    if len(image_digest) != 64:
+        raise ValueError(
+            f"❌ Invalid image digest from snapshot: `{image_digest}` ({len(image_digest)} chars, need 64)"
+        )
+    return template_ref, image_digest
+
+
 @auto_heal_ephemeral()
-# pylint: disable-next=too-many-branches,too-many-locals,too-many-return-statements
 async def _bonfire_deploy_aa_from_snapshot_impl(
     namespace: str,
     snapshot_json: str,
@@ -76,106 +131,28 @@ async def _bonfire_deploy_aa_from_snapshot_impl(
     Returns:
         Deployment status.
     """
-    import json as json_module  # pylint: disable=import-outside-toplevel
-
     lines = [f"## Deploy from Snapshot to `{namespace}`", ""]
 
     try:
-        # Parse JSON
-        if snapshot_json.strip().startswith("{"):
-            snapshot = json_module.loads(snapshot_json)
-        else:
-            # Assume file path
-            snapshot = json_module.loads(Path(snapshot_json).read_text(encoding="utf-8"))
-
-        # Extract components
-        components = snapshot.get("spec", {}).get("components", [])
-
-        template_ref = None
-        image_digest = None
-
-        for comp in components:
-            container_image = comp.get("containerImage", "")
-            if "automation-analytics" in container_image or "your-app-backend" in container_image:
-                if "@sha256:" in container_image:
-                    # Extract the 64-char sha256 digest
-                    image_digest = container_image.split("@sha256:")[-1]
-                template_ref = comp.get("source", {}).get("git", {}).get("revision", "")
-                break
-
-        if not template_ref or not image_digest:
-            return [
-                TextContent(
-                    type="text",
-                    text="❌ Could not extract template_ref and sha256 digest from snapshot",
-                )
-            ]
-
-        # Validate lengths
-        if len(template_ref) != 40:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Invalid template_ref from snapshot: `{template_ref}` ({len(template_ref)} chars, need 40)"
-                    ),
-                )
-            ]
-
-        if len(image_digest) != 64:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Invalid image digest from snapshot: `{image_digest}` ({len(image_digest)} chars, need 64)"
-                    ),
-                )
-            ]
-
-        lines.append(f"**Template Ref:** `{template_ref}`")
-        lines.append(f"**Image Digest:** `{image_digest[:16]}...`")
-        lines.append("")
-
-    except json_module.JSONDecodeError as e:
+        template_ref, image_digest = _parse_snapshot(snapshot_json)
+    except json.JSONDecodeError as e:
         return [TextContent(type="text", text=f"❌ Invalid JSON in snapshot: {e}")]
     except OSError as e:
         return [TextContent(type="text", text=f"❌ Failed to read snapshot file: {e}")]
     except (KeyError, TypeError) as e:
         return [TextContent(type="text", text=f"❌ Failed to parse snapshot structure: {e}")]
+    except ValueError as e:
+        return [TextContent(type="text", text=str(e))]
+
+    lines.append(f"**Template Ref:** `{template_ref}`")
+    lines.append(f"**Image Digest:** `{image_digest[:16]}...`")
+    lines.append("")
 
     # Deploy using exact ITS pattern
     app_cfg = get_app_config(billing=billing)
     component = app_cfg["component"]
-    app_name = app_cfg["app_name"]
-    ref_env = app_cfg["ref_env"]
-    image_base = app_cfg.get("image_base", "")
 
-    # Exact ITS command pattern
-    deploy_args = [
-        "deploy",
-        "--source=appsre",
-        "--ref-env",
-        ref_env,
-        "--namespace",
-        namespace,
-        "--timeout",
-        str(timeout),
-        "--optional-deps-method",
-        "hybrid",
-        "--frontends",
-        "false",
-        "--component",
-        component,
-        "--no-remove-resources",
-        "all",
-        "--set-template-ref",
-        f"{component}={template_ref}",
-        "--set-parameter",
-        f"{component}/IMAGE={image_base}@sha256",
-        "--set-parameter",
-        f"{component}/IMAGE_TAG={image_digest}",
-        app_name,
-    ]
+    deploy_args = aa_deploy_args(app_cfg, namespace, timeout, (template_ref, image_digest))
 
     kubeconfig = get_ephemeral_kubeconfig()
     cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(deploy_args)}"
@@ -219,28 +196,9 @@ async def _bonfire_deploy_aa_local_impl(
     app_cfg = get_app_config(billing=billing)
     component = app_cfg["component"]
     app_name = app_cfg["app_name"]
-    ref_env = app_cfg["ref_env"]
 
     # Local deploy without image overrides - uses defaults from ref-env
-    args = [
-        "deploy",
-        "--source=appsre",
-        "--ref-env",
-        ref_env,
-        "--namespace",
-        namespace,
-        "--timeout",
-        str(timeout),
-        "--optional-deps-method",
-        "hybrid",
-        "--frontends",
-        "false",
-        "--component",
-        component,
-        "--no-remove-resources",
-        "all",
-        app_name,
-    ]
+    args = aa_deploy_args(app_cfg, namespace, timeout)
 
     kubeconfig = get_ephemeral_kubeconfig()
     cmd_preview = f"KUBECONFIG={kubeconfig} bonfire {' '.join(args)}"
@@ -250,22 +208,7 @@ async def _bonfire_deploy_aa_local_impl(
     success, output = await run_bonfire(args, timeout=timeout + 120)
 
     if not success:
-        return [
-            TextContent(
-                type="text",
-                text=f"""❌ Local deploy failed
-
-**Command:**
-```bash
-{cmd_preview}
-```
-
-**Output:**
-```
-{output}
-```""",
-            )
-        ]
+        return [TextContent(type="text", text=deploy_failure_text("❌ Local deploy failed", cmd_preview, output))]
 
     display_output = truncate_output(output, 5000, mode="tail")
 
@@ -321,15 +264,7 @@ async def _bonfire_deploy_env_impl(
 
 
 @auto_heal_ephemeral()
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-async def _bonfire_deploy_iqe_cji_impl(
-    namespace: str,
-    cji_name: str = "",
-    marker: str = "",
-    filter_expr: str = "",
-    env: str = "",
-    timeout: int = 600,
-) -> list[TextContent]:
+async def _bonfire_deploy_iqe_cji_impl(namespace: str, opts: IqeCjiOptions, timeout: int = 600) -> list[TextContent]:
     """
     Deploy IQE ClowdJobInvocation for integration tests.
 
@@ -344,6 +279,7 @@ async def _bonfire_deploy_iqe_cji_impl(
     Returns:
         CJI deployment status.
     """
+    cji_name, marker, filter_expr, env = opts["cji_name"], opts["marker"], opts["filter_expr"], opts["env"]
     args = ["deploy-iqe-cji", "--namespace", namespace, "--timeout", str(timeout)]
 
     if cji_name:
@@ -424,7 +360,6 @@ async def _bonfire_deploy_with_reserve_impl(
 
 
 @auto_heal_ephemeral()
-# pylint: disable-next=too-many-locals,too-many-statements
 async def _bonfire_full_test_workflow_impl(
     duration: str = "2h",
     billing: bool = False,
@@ -445,7 +380,24 @@ async def _bonfire_full_test_workflow_impl(
     """
     lines = ["## 🚀 Full Test Workflow", ""]
 
-    # Step 1: Reserve namespace
+    namespace = await _workflow_reserve(duration, lines)
+    if not namespace:
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    deployed = await _workflow_deploy(namespace, billing, lines)
+    if not deployed:
+        return [TextContent(type="text", text="\n".join(lines))]
+
+    # Step 3: Run IQE (optional)
+    if run_iqe:
+        await _workflow_run_iqe(namespace, iqe_marker, lines)
+
+    lines.extend(_workflow_summary(namespace, duration))
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _workflow_reserve(duration: str, lines: list[str]) -> str | None:
+    """Step 1 of the full test workflow: reserve a namespace and return its name."""
     lines.append("### Step 1: Reserving namespace...")
     reserve_args = [
         "namespace",
@@ -463,7 +415,7 @@ async def _bonfire_full_test_workflow_impl(
 
     if not success:
         lines.append(f"❌ Failed to reserve namespace:\n```\n{output}\n```")
-        return [TextContent(type="text", text="\n".join(lines))]
+        return None
 
     # Try to extract namespace from output
     namespace = None
@@ -476,38 +428,22 @@ async def _bonfire_full_test_workflow_impl(
 
     if not namespace:
         lines.append(f"⚠️ Namespace reserved but couldn't parse name:\n```\n{output}\n```")
-        return [TextContent(type="text", text="\n".join(lines))]
+        return None
 
     lines.append(f"✅ Reserved: `{namespace}`")
     lines.append("")
+    return namespace
 
-    # Step 2: Deploy the app
+
+async def _workflow_deploy(namespace: str, billing: bool, lines: list[str]) -> bool:
+    """Step 2 of the full test workflow: deploy the app; returns True on success."""
     app_cfg = get_app_config(billing=billing)
     component = app_cfg["component"]
     app_name = app_cfg["app_name"]
-    ref_env = app_cfg["ref_env"]
 
     lines.append(f"### Step 2: Deploying {app_name} ({component})...")
 
-    deploy_args = [
-        "deploy",
-        "--source=appsre",
-        "--ref-env",
-        ref_env,
-        "--namespace",
-        namespace,
-        "--timeout",
-        "900",
-        "--optional-deps-method",
-        "hybrid",
-        "--frontends",
-        "false",
-        "--component",
-        component,
-        "--no-remove-resources",
-        "all",
-        app_name,
-    ]
+    deploy_args = aa_deploy_args(app_cfg, namespace, 900)
 
     success, output = await run_bonfire(deploy_args, timeout=960)
 
@@ -517,33 +453,39 @@ async def _bonfire_full_test_workflow_impl(
             f"\n⚠️ Namespace `{namespace}` still reserved. "
             f"Release with: `bonfire_namespace_release(namespace='{namespace}')`"
         )
-        return [TextContent(type="text", text="\n".join(lines))]
+        return False
 
     lines.append(f"✅ Deployed `{component}`")
     lines.append("")
+    return True
 
-    # Step 3: Run IQE (optional)
-    if run_iqe:
-        lines.append(f"### Step 3: Running IQE tests (marker: {iqe_marker})...")
 
-        iqe_args = [
-            "deploy-iqe-cji",
-            "--namespace",
-            namespace,
-            "--timeout",
-            "600",
-        ]
-        if iqe_marker:
-            iqe_args.extend(["--marker", iqe_marker])
+async def _workflow_run_iqe(namespace: str, iqe_marker: str, lines: list[str]) -> None:
+    """Step 3 of the full test workflow: deploy the IQE CJI."""
+    lines.append(f"### Step 3: Running IQE tests (marker: {iqe_marker})...")
 
-        success, output = await run_bonfire(iqe_args, timeout=660)
+    iqe_args = [
+        "deploy-iqe-cji",
+        "--namespace",
+        namespace,
+        "--timeout",
+        "600",
+    ]
+    if iqe_marker:
+        iqe_args.extend(["--marker", iqe_marker])
 
-        if not success:
-            truncated = truncate_output(output, 1000, mode="tail")
-            lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
-        else:
-            lines.append("✅ IQE CJI deployed")
+    success, output = await run_bonfire(iqe_args, timeout=660)
 
+    if not success:
+        truncated = truncate_output(output, 1000, mode="tail")
+        lines.append(f"⚠️ IQE deployment failed (app is still running):\n```\n{truncated}\n```")
+    else:
+        lines.append("✅ IQE CJI deployed")
+
+
+def _workflow_summary(namespace: str, duration: str) -> list[str]:
+    """Closing summary lines for the full test workflow."""
+    lines: list[str] = []
     lines.append("")
     lines.append("---")
     lines.append("")
@@ -555,21 +497,11 @@ async def _bonfire_full_test_workflow_impl(
     lines.append(f"- Get logs: `kubectl_logs(pod_name='...', namespace='{namespace}', environment='ephemeral')`")
     lines.append(f"- Extend time: `bonfire_namespace_extend(namespace='{namespace}', duration='1h')`")
     lines.append(f"- Release: `bonfire_namespace_release(namespace='{namespace}')`")
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    return lines
 
 
 @auto_heal_ephemeral()
-# pylint: disable-next=too-many-arguments,too-many-positional-arguments
-async def _bonfire_process_impl(
-    app: str,
-    namespace: str = "",
-    source: str = "appsre",
-    target_env: str = "insights-ephemeral",
-    set_image_tag: str = "",
-    component: str = "",
-    no_get_dependencies: bool = False,
-) -> list[TextContent]:
+async def _bonfire_process_impl(app: str, opts: ProcessOptions) -> list[TextContent]:
     """
     Process and show the rendered ClowdApp template (dry-run, no deploy).
 
@@ -588,16 +520,17 @@ async def _bonfire_process_impl(
     apps = app.split() if " " in app else [app]
     args = ["process"] + apps
 
-    args.extend(["--source", source])
-    args.extend(["--target-env", target_env])
+    args.extend(["--source", opts["source"]])
+    args.extend(["--target-env", opts["target_env"]])
 
-    if namespace:
-        args.extend(["--namespace", namespace])
-    if set_image_tag:
-        args.extend(["--set-image-tag", set_image_tag])
-    if component:
-        args.extend(["--component", component])
-    if no_get_dependencies:
+    for flag, value in (
+        ("--namespace", opts["namespace"]),
+        ("--set-image-tag", opts["set_image_tag"]),
+        ("--component", opts["component"]),
+    ):
+        if value:
+            args.extend([flag, value])
+    if opts["no_get_dependencies"]:
         args.append("--no-get-dependencies")
 
     success, output = await run_bonfire(args)
@@ -758,6 +691,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # MCP tool schema is generated from this signature; parameters are the public tool API.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_deploy_iqe_cji(
         namespace: str,
@@ -781,7 +715,11 @@ def register_tools(server: "FastMCP") -> int:
         Returns:
             CJI deployment status.
         """
-        return await _bonfire_deploy_iqe_cji_impl(namespace, cji_name, marker, filter_expr, env, timeout)
+        return await _bonfire_deploy_iqe_cji_impl(
+            namespace,
+            IqeCjiOptions(cji_name=cji_name, marker=marker, filter_expr=filter_expr, env=env),
+            timeout,
+        )
 
     @auto_heal_ephemeral()
     @registry.tool()
@@ -831,6 +769,7 @@ def register_tools(server: "FastMCP") -> int:
 
     @auto_heal_ephemeral()
     @registry.tool()
+    # MCP tool schema is generated from this signature; parameters are the public tool API.
     # pylint: disable-next=too-many-arguments,too-many-positional-arguments
     async def bonfire_process(
         app: str,
@@ -858,12 +797,14 @@ def register_tools(server: "FastMCP") -> int:
         """
         return await _bonfire_process_impl(
             app,
-            namespace,
-            source,
-            target_env,
-            set_image_tag,
-            component,
-            no_get_dependencies,
+            ProcessOptions(
+                namespace=namespace,
+                source=source,
+                target_env=target_env,
+                set_image_tag=set_image_tag,
+                component=component,
+                no_get_dependencies=no_get_dependencies,
+            ),
         )
 
     @auto_heal_ephemeral()
