@@ -264,3 +264,23 @@ async def test_health_check(daemon):
     result = await daemon.health_check()
     assert result["healthy"] is True
     assert result["checks"]["recent_sync"] is False
+
+
+async def test_periodic_loop_survives_job_errors(daemon, monkeypatch):
+    """A failing sync (here an IndexError, a LookupError) is logged and the loop keeps running."""
+    calls: list[int] = []
+
+    async def job():
+        calls.append(len(calls))
+        if len(calls) == 1:
+            raise IndexError("no such session")
+        if len(calls) == 2:
+            raise sqlite3.OperationalError("database is locked")
+        _private(daemon, "_shutdown_event").set()
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    await _private(daemon, "_periodic_loop")("recent", 0, job, 0)
+    assert calls == [0, 1, 2]

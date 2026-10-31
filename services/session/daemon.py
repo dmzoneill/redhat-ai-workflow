@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 SYNC_ERRORS: tuple[type[Exception], ...] = (
     OSError,
     ValueError,
-    KeyError,
+    LookupError,
     TypeError,
     AttributeError,
     RuntimeError,
