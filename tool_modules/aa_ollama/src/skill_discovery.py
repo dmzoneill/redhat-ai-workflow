@@ -325,30 +325,30 @@ class SkillToolDiscovery:
 # Skill patterns for fast detection (no NPU needed)
 SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
     "test_mr_ephemeral": [
-        re.compile(r"deploy.*mr|test.*mr|spin(?>.*?up).*mr", re.IGNORECASE),
+        re.compile(r"deploy.*mr|test.*mr|(?m:^)(?>.*?spin)(?>.*?up).*mr", re.IGNORECASE),
         re.compile(r"ephemeral.*mr\s*\d+", re.IGNORECASE),
         re.compile(r"deploy.*ephemeral", re.IGNORECASE),
-        re.compile(r"test(?>.*?in).*ephemeral", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?test)(?>.*?in).*ephemeral", re.IGNORECASE),
     ],
     "review_pr": [
         re.compile(r"review.*mr|review.*!\d+", re.IGNORECASE),
-        re.compile(r"check(?>.*?mr).*review", re.IGNORECASE),
-        re.compile(r"look(?>.*?at).*mr", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?check)(?>.*?mr).*review", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?look)(?>.*?at).*mr", re.IGNORECASE),
     ],
     "start_work": [
-        re.compile(r"start(?>.*?work).*aap-\d", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?start)(?>.*?work).*aap-\d", re.IGNORECASE),
         re.compile(r"begin.*aap-\d+", re.IGNORECASE),
-        re.compile(r"pick(?>.*?up).*aap-\d", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?pick)(?>.*?up).*aap-\d", re.IGNORECASE),
     ],
     "investigate_slack_alert": [
         re.compile(r"investigate.*alert", re.IGNORECASE),
-        re.compile(r"look(?>.*?into).*alert", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?look)(?>.*?into).*alert", re.IGNORECASE),
         re.compile(r"whats.*firing", re.IGNORECASE),  # codespell:ignore
         re.compile(r"what.*alerts", re.IGNORECASE),
     ],
     "create_mr": [
         re.compile(r"create.*mr|open.*mr", re.IGNORECASE),
-        re.compile(r"push(?>.*?and).*mr", re.IGNORECASE),
+        re.compile(r"(?m)^(?>.*?push)(?>.*?and).*mr", re.IGNORECASE),
         re.compile(r"submit.*mr", re.IGNORECASE),
     ],
     "check_pipeline": [
