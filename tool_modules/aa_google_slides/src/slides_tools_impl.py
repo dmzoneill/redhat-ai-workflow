@@ -17,25 +17,21 @@ Setup:
 3. Run google_slides_status() to verify authentication
 """
 
+import asyncio
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-logger = logging.getLogger(__name__)
-
+from typing import Any
 
 # Setup project path for server imports (must be before server imports)
-from tool_modules.common import (  # noqa: E402  # pylint: disable=wrong-import-position
+from tool_modules.common import (
     PROJECT_ROOT,
     get_google_config_dir,
     get_google_oauth_scopes,
 )
 
+logger = logging.getLogger(__name__)
+
 __project_root__ = PROJECT_ROOT  # Module initialization
-
-
-if TYPE_CHECKING:
-    pass
 
 # Shared Google config (single source of truth in tool_modules.common)
 CONFIG_DIR = get_google_config_dir()
@@ -52,7 +48,7 @@ def _try_load_oauth_token(credentials_cls, scopes):
             return credentials_cls.from_authorized_user_file(str(TOKEN_FILE), scopes)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Auth libraries raise provider-specific errors; fall through.
-            logger.debug("Suppressed error in _try_load_oauth_token: %s", exc)
+            logger.debug("Could not load saved Google login: %s", exc, exc_info=True)
     return None
 
 
@@ -66,7 +62,7 @@ def _try_refresh_credentials(creds, request_cls):
             return creds
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Token refresh raises provider-specific errors; fall through.
-            logger.debug("Suppressed error in _try_refresh_credentials: %s", exc)
+            logger.debug("Could not refresh Google login: %s", exc, exc_info=True)
     return None
 
 
@@ -74,12 +70,10 @@ def _try_service_account(service_account, scopes):
     """Try to load service account credentials."""
     if SERVICE_ACCOUNT_FILE.exists():
         try:
-            return service_account.Credentials.from_service_account_file(
-                str(SERVICE_ACCOUNT_FILE), scopes=scopes
-            )
+            return service_account.Credentials.from_service_account_file(str(SERVICE_ACCOUNT_FILE), scopes=scopes)
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # Service-account load raises provider-specific errors; fall through.
-            logger.debug("Suppressed error in _try_service_account: %s", exc)
+            logger.debug("Suppressed error in _try_service_account: %s", exc, exc_info=True)
     return None
 
 
@@ -92,9 +86,7 @@ def _shared__try_oauth_flow(scopes):
                 InstalledAppFlow,
             )
 
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_FILE), scopes
-            )
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
             creds = flow.run_local_server(port=0)
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             with open(TOKEN_FILE, "w", encoding="utf-8") as f:
@@ -102,6 +94,7 @@ def _shared__try_oauth_flow(scopes):
             return creds, None
         except Exception as exc:  # pylint: disable=broad-exception-caught
             # OAuth libraries raise provider-specific errors; return them as text.
+            logger.exception("OAuth flow failed")
             return None, f"OAuth flow failed: {exc}"
     return None, f"No credentials found. Add credentials.json to {CONFIG_DIR}"
 
@@ -132,8 +125,10 @@ def _build_google_service(api: str, version: str, label: str):
     except ImportError:
         return (
             None,
-            "Google API libraries not installed. Run: "
-            "uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib",
+            (
+                "Google API libraries not installed. Run: "
+                "uv add google-api-python-client google-auth-httplib2 google-auth-oauthlib"
+            ),
         )
 
     creds = _try_load_oauth_token(Credentials, SCOPES)
@@ -153,6 +148,7 @@ def _build_google_service(api: str, version: str, label: str):
         return service, None
     except Exception as exc:  # pylint: disable=broad-exception-caught
         # API boundary: surface client/auth failures as a message.
+        logger.exception("Failed to build %s service", label)
         return None, f"Failed to build {label} service: {exc}"
 
 
@@ -298,6 +294,7 @@ async def _google_slides_list_impl(
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to list presentations")
         return f"❌ Failed to list presentations: {e}"
 
 
@@ -314,9 +311,7 @@ async def _google_slides_get_impl(  # pylint: disable=too-many-locals
         return "❌ Google Slides service not available"
 
     try:  # pylint: disable=too-many-nested-blocks
-        presentation = (
-            service.presentations().get(presentationId=presentation_id).execute()
-        )
+        presentation = service.presentations().get(presentationId=presentation_id).execute()
 
         title = presentation.get("title", "Untitled")
         slides = presentation.get("slides", [])
@@ -351,9 +346,7 @@ async def _google_slides_get_impl(  # pylint: disable=too-many-locals
                         text_content = shape["text"].get("textElements", [])
                         for text_elem in text_content:
                             if "textRun" in text_elem:
-                                content = (
-                                    text_elem["textRun"].get("content", "").strip()
-                                )
+                                content = text_elem["textRun"].get("content", "").strip()
                                 if content and len(content) < 100:
                                     slide_title = content[:50]
                                     break
@@ -367,6 +360,7 @@ async def _google_slides_get_impl(  # pylint: disable=too-many-locals
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to get presentation")
         error_str = str(e)
         if "404" in error_str or "notFound" in error_str:
             return f"❌ Presentation not found: `{presentation_id}`"
@@ -393,11 +387,7 @@ async def _google_slides_create_impl(
             if drive_error:
                 return f"❌ {drive_error}"
 
-            copied = (
-                drive_service.files()
-                .copy(fileId=template_id, body={"name": title})
-                .execute()
-            )
+            copied = drive_service.files().copy(fileId=template_id, body={"name": title}).execute()
             presentation_id = copied.get("id")
         else:
             # Create blank presentation
@@ -430,6 +420,7 @@ async def _google_slides_create_impl(
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to create presentation")
         return f"❌ Failed to create presentation: {e}"
 
 
@@ -487,16 +478,12 @@ async def _google_slides_add_slide_impl(  # pylint: disable=too-many-branches,to
             requests[0]["createSlide"]["insertionIndex"] = insert_at
 
         # Execute slide creation
-        service.presentations().batchUpdate(
-            presentationId=presentation_id, body={"requests": requests}
-        ).execute()
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         # If title or body provided, add text
         if title or body:
             # Get the slide to find placeholder IDs
-            presentation = (
-                service.presentations().get(presentationId=presentation_id).execute()
-            )
+            presentation = service.presentations().get(presentationId=presentation_id).execute()
 
             text_requests = []
             for slide in presentation.get("slides", []):
@@ -545,13 +532,12 @@ async def _google_slides_add_slide_impl(  # pylint: disable=too-many-branches,to
             lines.append(f"**Body:** {body[:50]}...")
 
         lines.append("")
-        lines.append(
-            f"**Edit:** https://docs.google.com/presentation/d/{presentation_id}/edit"
-        )
+        lines.append(f"**Edit:** https://docs.google.com/presentation/d/{presentation_id}/edit")
 
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to add slide")
         return f"❌ Failed to add slide: {e}"
 
 
@@ -595,9 +581,7 @@ async def _google_slides_update_text_impl(
             }
         )
 
-        service.presentations().batchUpdate(
-            presentationId=presentation_id, body={"requests": requests}
-        ).execute()
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         lines = [
             "✅ **Text Updated**",
@@ -611,6 +595,7 @@ async def _google_slides_update_text_impl(
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to update text")
         return f"❌ Failed to update text: {e}"
 
 
@@ -630,9 +615,7 @@ async def _google_slides_delete_slide_impl(
     try:
         requests = [{"deleteObject": {"objectId": slide_id}}]
 
-        service.presentations().batchUpdate(
-            presentationId=presentation_id, body={"requests": requests}
-        ).execute()
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         lines = [
             "✅ **Slide Deleted**",
@@ -645,6 +628,7 @@ async def _google_slides_delete_slide_impl(
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to delete slide")
         return f"❌ Failed to delete slide: {e}"
 
 
@@ -704,9 +688,7 @@ async def _google_slides_add_text_box_impl(  # pylint: disable=too-many-argument
             },
         ]
 
-        service.presentations().batchUpdate(
-            presentationId=presentation_id, body={"requests": requests}
-        ).execute()
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         lines = [
             "✅ **Text Box Added**",
@@ -722,6 +704,7 @@ async def _google_slides_add_text_box_impl(  # pylint: disable=too-many-argument
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to add text box")
         return f"❌ Failed to add text box: {e}"
 
 
@@ -742,11 +725,7 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
         # Get presentation title for filename
         slides_service, _ = get_slides_service()
         if slides_service:
-            presentation = (
-                slides_service.presentations()
-                .get(presentationId=presentation_id)
-                .execute()
-            )
+            presentation = slides_service.presentations().get(presentationId=presentation_id).execute()
             title = presentation.get("title", "presentation")
         else:
             title = "presentation"
@@ -758,9 +737,7 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
             output_path = f"{safe_title}.pdf"
 
         # Export as PDF
-        request = drive_service.files().export_media(
-            fileId=presentation_id, mimeType="application/pdf"
-        )
+        request = drive_service.files().export_media(fileId=presentation_id, mimeType="application/pdf")
 
         # Download the file
         from io import BytesIO  # pylint: disable=import-outside-toplevel
@@ -780,8 +757,7 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
         pdf_path = Path(output_path).expanduser()
         pdf_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(pdf_path, "wb") as f:
-            f.write(fh.getvalue())
+        await asyncio.to_thread(pdf_path.write_bytes, fh.getvalue())
 
         lines = [
             "✅ **PDF Exported**",
@@ -794,6 +770,7 @@ async def _google_slides_export_pdf_impl(  # pylint: disable=too-many-locals
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to export PDF")
         return f"❌ Failed to export PDF: {e}"
 
 
@@ -862,9 +839,7 @@ async def _google_slides_build_from_outline_impl(
                     {
                         "createSlide": {
                             "objectId": slide_id,
-                            "slideLayoutReference": {
-                                "predefinedLayout": "SECTION_HEADER"
-                            },
+                            "slideLayoutReference": {"predefinedLayout": "SECTION_HEADER"},
                         }
                     }
                 )
@@ -875,7 +850,7 @@ async def _google_slides_build_from_outline_impl(
                 flush_slide()
                 current_title = line[3:].strip()
 
-            elif line.startswith("- ") or line.startswith("  - "):
+            elif line.startswith(("- ", "  - ")):
                 # Bullet point
                 current_bullets.append(line)
 
@@ -886,9 +861,7 @@ async def _google_slides_build_from_outline_impl(
             return "❌ No valid slides found in outline. Use # for sections, ## for slide titles."
 
         # Execute all requests
-        service.presentations().batchUpdate(
-            presentationId=presentation_id, body={"requests": requests}
-        ).execute()
+        service.presentations().batchUpdate(presentationId=presentation_id, body={"requests": requests}).execute()
 
         lines = [
             "✅ **Slides Built from Outline**",
@@ -902,4 +875,5 @@ async def _google_slides_build_from_outline_impl(
         return "\n".join(lines)
 
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to build slides")
         return f"❌ Failed to build slides: {e}"

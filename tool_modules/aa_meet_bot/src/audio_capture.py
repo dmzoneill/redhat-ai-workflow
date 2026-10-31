@@ -10,10 +10,12 @@ import logging
 import os
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, ClassVar
 
 import numpy as np
+
 from tool_modules.aa_meet_bot.src.pulse_defaults import read_pactl_sources_short
 
 logger = logging.getLogger(__name__)
@@ -83,9 +85,7 @@ class RingBuffer:
             else:
                 # Split read
                 first_part = self.max_samples - self.read_pos
-                data = np.concatenate(
-                    [self.buffer[self.read_pos :], self.buffer[: n - first_part]]
-                )
+                data = np.concatenate([self.buffer[self.read_pos :], self.buffer[: n - first_part]])
 
             self.read_pos = end_pos % self.max_samples
             return data
@@ -104,9 +104,7 @@ class RingBuffer:
                 return self.buffer[self.read_pos : end_pos].copy()
             else:
                 first_part = self.max_samples - self.read_pos
-                return np.concatenate(
-                    [self.buffer[self.read_pos :], self.buffer[: n - first_part]]
-                )
+                return np.concatenate([self.buffer[self.read_pos :], self.buffer[: n - first_part]])
 
     def available(self) -> int:
         """Return number of samples available to read."""
@@ -135,14 +133,14 @@ class PulseAudioCapture:
     """
 
     # Class-level tracking of all active capture processes for cleanup
-    _active_captures: dict[int, "PulseAudioCapture"] = {}
+    _active_captures: ClassVar[dict[int, "PulseAudioCapture"]] = {}
 
     def __init__(
         self,
         source_name: str,
         sample_rate: int = 16000,
         chunk_ms: int = 100,  # 100ms chunks for low latency
-        sink_input_index: Optional[int] = None,  # For monitor-stream method
+        sink_input_index: int | None = None,  # For monitor-stream method
     ):
         """
         Initialize audio capture.
@@ -162,11 +160,11 @@ class PulseAudioCapture:
         self.sink_input_index = sink_input_index
 
         # pylint: disable-next=no-member
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._process_pid: Optional[int] = None  # Track PID for cleanup
+        self._process: asyncio.subprocess.Process | None = None
+        self._process_pid: int | None = None  # Track PID for cleanup
         self._running = False
         self._buffer = RingBuffer(max_seconds=30.0, sample_rate=sample_rate)
-        self._read_task: Optional[asyncio.Task] = None  # Track the read loop task
+        self._read_task: asyncio.Task | None = None  # Track the read loop task
 
     async def start(self) -> bool:
         """Start audio capture."""
@@ -225,9 +223,7 @@ class PulseAudioCapture:
             self._process_pid = self._process.pid
             if self._process_pid:
                 PulseAudioCapture._active_captures[self._process_pid] = self
-                logger.info(
-                    "Audio capture process started with PID %s", self._process_pid
-                )
+                logger.info("Audio capture process started with PID %s", self._process_pid)
 
             self._running = True
 
@@ -239,8 +235,8 @@ class PulseAudioCapture:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to start audio capture: %s", e)
+        except Exception:
+            logger.exception("Failed to start audio capture")
             return False
 
     async def _check_command(self, cmd: str) -> bool:
@@ -257,6 +253,7 @@ class PulseAudioCapture:
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
         except Exception:
+            logger.debug("Suppressed error", exc_info=True)
             return False
 
     async def _read_loop(self):
@@ -278,8 +275,8 @@ class PulseAudioCapture:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Audio read error: %s", e)
+        except Exception:
+            logger.exception("Audio read error")
         finally:
             self._running = False
 
@@ -291,10 +288,8 @@ class PulseAudioCapture:
         # Cancel the read task first
         if self._read_task and not self._read_task.done():
             self._read_task.cancel()
-            try:
-                await asyncio.wait_for(self._read_task, timeout=1.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
+            # Wait briefly for the cancelled task without swallowing our own cancellation
+            await asyncio.wait({self._read_task}, timeout=1.0)
             self._read_task = None
 
         # Terminate the process
@@ -308,9 +303,7 @@ class PulseAudioCapture:
                     logger.info("Audio capture process %s terminated gracefully", pid)
                 except asyncio.TimeoutError:
                     # Force kill if terminate didn't work
-                    logger.warning(
-                        "Audio capture process %s didn't terminate, killing...", pid
-                    )
+                    logger.warning("Audio capture process %s didn't terminate, killing...", pid)
                     self._process.kill()
                     try:
                         await asyncio.wait_for(self._process.wait(), timeout=1.0)
@@ -328,15 +321,12 @@ class PulseAudioCapture:
             # Best-effort: failure is contained, not raised.
             # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning("Error stopping audio capture process: %s", e)
+                logger.warning("Error stopping audio capture process: %s", e, exc_info=True)
             finally:
                 self._process = None
 
         # Remove from active captures tracking
-        if (
-            self._process_pid
-            and self._process_pid in PulseAudioCapture._active_captures
-        ):
+        if self._process_pid and self._process_pid in PulseAudioCapture._active_captures:
             del PulseAudioCapture._active_captures[self._process_pid]
             logger.info("Removed PID %s from active captures", self._process_pid)
 
@@ -369,7 +359,7 @@ class PulseAudioCapture:
         """Get list of active capture process PIDs."""
         return list(cls._active_captures.keys())
 
-    async def read_chunk(self) -> Optional[AudioChunk]:
+    async def read_chunk(self) -> AudioChunk | None:
         """Read a chunk of audio."""
         if not self._running:
             return None
@@ -393,7 +383,7 @@ class PulseAudioCapture:
             sample_rate=self.sample_rate,
         )
 
-    async def read_seconds(self, seconds: float) -> Optional[np.ndarray]:
+    async def read_seconds(self, seconds: float) -> np.ndarray | None:
         """Read a specific duration of audio."""
         n_samples = int(seconds * self.sample_rate)
 
@@ -440,7 +430,7 @@ class RealtimeSTTPipeline:
         self,
         source_name: str,
         on_transcription: Callable[[str, bool], None],
-        on_partial: Optional[Callable[[str], None]] = None,
+        on_partial: Callable[[str], None] | None = None,
         sample_rate: int = 16000,
         vad_threshold: float = 0.01,
         silence_duration: float = 0.8,
@@ -469,14 +459,14 @@ class RealtimeSTTPipeline:
         self.min_speech_duration = min_speech_duration
         self.max_speech_duration = max_speech_duration
 
-        self._capture: Optional[PulseAudioCapture] = None
+        self._capture: PulseAudioCapture | None = None
         self._stt: Any = None  # Lazy load
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
 
         # Speech detection state
         self._speech_buffer: deque = deque()
-        self._speech_start_time: Optional[float] = None
+        self._speech_start_time: float | None = None
         self._last_speech_time: float = 0
         self._in_speech = False
 
@@ -495,9 +485,7 @@ class RealtimeSTTPipeline:
                 logger.error("Failed to initialize NPU STT")
                 return False
 
-            logger.info(
-                "STT initialized on %s", self._stt.get_device_info()["actual_device"]
-            )
+            logger.info("STT initialized on %s", self._stt.get_device_info()["actual_device"])
 
             # Start audio capture
             self._capture = PulseAudioCapture(
@@ -518,8 +506,8 @@ class RealtimeSTTPipeline:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("Failed to start STT pipeline: %s", e)
+        except Exception:
+            logger.exception("Failed to start STT pipeline")
             return False
 
     async def stop(self):
@@ -548,17 +536,15 @@ class RealtimeSTTPipeline:
             # Best-effort: failure is contained, not raised.
             # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                logger.warning("Error stopping audio capture: %s", e)
+                logger.warning("Error stopping audio capture: %s", e, exc_info=True)
             finally:
                 self._capture = None
 
         # Now cancel the processing task
         if self._task:
             self._task.cancel()
-            try:
-                await asyncio.wait_for(self._task, timeout=2.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
+            # Wait briefly for the cancelled task without swallowing our own cancellation
+            await asyncio.wait({self._task}, timeout=2.0)
             self._task = None
 
         logger.info("STT pipeline stopped")
@@ -566,7 +552,7 @@ class RealtimeSTTPipeline:
     def _is_speech(self, audio: np.ndarray) -> bool:
         """Simple VAD based on RMS energy."""
         rms = np.sqrt(np.mean(audio**2))
-        return rms > self.vad_threshold
+        return bool(rms > self.vad_threshold)
 
     # pylint: disable-next=too-many-branches,too-many-statements
     async def _process_loop(self):
@@ -590,9 +576,7 @@ class RealtimeSTTPipeline:
                 if chunk is None:
                     consecutive_none_chunks += 1
                     if consecutive_none_chunks >= max_none_chunks:
-                        logger.warning(
-                            "🎧 NPU STT: Audio source appears to be gone (too many empty chunks)"
-                        )
+                        logger.warning("🎧 NPU STT: Audio source appears to be gone (too many empty chunks)")
                         self._running = False
                         break
                     await asyncio.sleep(0.1)  # Brief wait before retry
@@ -607,8 +591,7 @@ class RealtimeSTTPipeline:
                 # Log audio levels periodically (every 5 seconds)
                 if now - last_log_time >= 5.0:
                     logger.info(
-                        "🎧 NPU STT: Audio stats - chunks: %s, speech chunks: %s, "
-                        "current RMS: %.4f, threshold: %s",
+                        "🎧 NPU STT: Audio stats - chunks: %s, speech chunks: %s, current RMS: %.4f, threshold: %s",
                         chunk_count,
                         speech_chunk_count,
                         rms,
@@ -643,16 +626,12 @@ class RealtimeSTTPipeline:
                 else:
                     # Silence
                     if self._in_speech:
-                        self._speech_buffer.append(
-                            chunk.data
-                        )  # Include trailing silence
+                        self._speech_buffer.append(chunk.data)  # Include trailing silence
 
                         silence_time = now - self._last_speech_time
                         if silence_time >= self.silence_duration:
                             # End of speech segment
-                            speech_duration = (
-                                self._last_speech_time - self._speech_start_time
-                            )
+                            speech_duration = self._last_speech_time - self._speech_start_time
 
                             logger.info(
                                 "🎧 NPU STT: 🔇 Speech ENDED after %.1fs (silence: %.1fs)",
@@ -673,11 +652,12 @@ class RealtimeSTTPipeline:
                             self._speech_buffer.clear()
 
         except asyncio.CancelledError:
-            pass
+            logger.debug("Audio processing loop cancelled")
+            raise
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
-            logger.error("🎧 NPU STT: Processing error: %s", e)
+        except Exception:
+            logger.exception("🎧 NPU STT: Processing error")
             # pylint: disable-next=import-outside-toplevel
             import traceback
 
@@ -706,9 +686,7 @@ class RealtimeSTTPipeline:
         if result.text:
             rtf = elapsed / duration if duration > 0 else 0
             # Log the full transcription prominently
-            logger.info(
-                '🎧 NPU STT: ✅ [%.2fs, RTF:%.2f] "%s"', elapsed, rtf, result.text
-            )
+            logger.info('🎧 NPU STT: ✅ [%.2fs, RTF:%.2f] "%s"', elapsed, rtf, result.text)
 
             # Call callback with the transcription
             self.on_transcription(result.text, is_final)
@@ -722,7 +700,7 @@ class RealtimeSTTPipeline:
 async def create_meeting_stt_pipeline(
     instance_id: str,
     on_transcription: Callable[[str, bool], None],
-) -> Optional[RealtimeSTTPipeline]:
+) -> RealtimeSTTPipeline | None:
     """
     Create an STT pipeline for a meeting instance.
 

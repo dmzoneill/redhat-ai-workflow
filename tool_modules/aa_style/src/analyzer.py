@@ -11,14 +11,14 @@ Analyzes messages to extract:
 
 import re
 from collections import Counter
-from typing import Any
+from typing import Any, ClassVar
 
 
 class StyleAnalyzer:
     """Analyzes writing style from a corpus of messages."""
 
     # Common English stop words to filter from vocabulary
-    STOP_WORDS = {
+    STOP_WORDS: ClassVar[set[str]] = {
         "a",
         "an",
         "the",
@@ -137,7 +137,7 @@ class StyleAnalyzer:
     }
 
     # Common filler words/phrases
-    FILLER_PATTERNS = [
+    FILLER_PATTERNS: ClassVar[list[str]] = [
         r"\blike\b",
         r"\bum\b",
         r"\buh\b",
@@ -161,7 +161,7 @@ class StyleAnalyzer:
     ]
 
     # Technical term patterns
-    TECH_PATTERNS = [
+    TECH_PATTERNS: ClassVar[list[str]] = [
         r"\b[A-Z]{2,}[-_]?\d+\b",  # Issue keys like AAP-12345
         r"\b(?:api|sdk|cli|ui|ux|db|sql|json|yaml|xml|html|css|js)\b",
         r"\b(?:kubernetes|k8s|docker|pod|container|namespace)\b",
@@ -172,7 +172,7 @@ class StyleAnalyzer:
     ]
 
     # Greeting patterns
-    GREETING_PATTERNS = [
+    GREETING_PATTERNS: ClassVar[list[tuple[str, str]]] = [
         (r"^hey\b", "hey"),
         (r"^hi\b", "hi"),
         (r"^hello\b", "hello"),
@@ -191,7 +191,7 @@ class StyleAnalyzer:
     ]
 
     # Signoff patterns
-    SIGNOFF_PATTERNS = [
+    SIGNOFF_PATTERNS: ClassVar[list[tuple[str, str]]] = [
         (r"\bthanks\b[!.]?$", "thanks"),
         (r"\bthank you\b[!.]?$", "thank you"),
         (r"\bcheers\b[!.]?$", "cheers"),
@@ -210,7 +210,7 @@ class StyleAnalyzer:
     ]
 
     # Response pattern categories
-    ACKNOWLEDGMENT_PATTERNS = [
+    ACKNOWLEDGMENT_PATTERNS: ClassVar[list[str]] = [
         "got it",
         "gotcha",
         "understood",
@@ -229,7 +229,7 @@ class StyleAnalyzer:
         "kk",
     ]
 
-    AGREEMENT_PATTERNS = [
+    AGREEMENT_PATTERNS: ClassVar[list[str]] = [
         "sounds good",
         "works for me",
         "lgtm",
@@ -252,7 +252,7 @@ class StyleAnalyzer:
         "cool",
     ]
 
-    DISAGREEMENT_PATTERNS = [
+    DISAGREEMENT_PATTERNS: ClassVar[list[str]] = [
         "hmm",
         "not sure",
         "i don't think",
@@ -296,8 +296,18 @@ class StyleAnalyzer:
         Returns:
             Style profile dictionary
         """
-        texts = [msg.get("text", "") for msg in messages if msg.get("text")]
+        return self.analyze_texts([msg.get("text", "") for msg in messages if msg.get("text")])
 
+    def analyze_texts(self, texts: list[str]) -> dict[str, Any]:
+        """
+        Analyze a list of raw message texts and extract style patterns.
+
+        Args:
+            texts: Message bodies to analyze
+
+        Returns:
+            Style profile dictionary (empty when there are no texts)
+        """
         if not texts:
             return {}
 
@@ -314,9 +324,9 @@ class StyleAnalyzer:
     def _analyze_vocabulary(self, texts: list[str]) -> dict:
         """Analyze vocabulary patterns."""
         all_words = []
-        unique_phrases = Counter()
-        technical_terms = Counter()
-        filler_words = Counter()
+        unique_phrases: Counter[str] = Counter()
+        technical_terms: Counter[str] = Counter()
+        filler_words: Counter[str] = Counter()
 
         for text in texts:
             # Clean and tokenize
@@ -324,23 +334,15 @@ class StyleAnalyzer:
             words = clean_text.lower().split()
 
             # Filter stop words for top words
-            filtered_words = [
-                w for w in words if w not in self.STOP_WORDS and len(w) > 2
-            ]
+            filtered_words = [w for w in words if w not in self.STOP_WORDS and len(w) > 2]
             all_words.extend(filtered_words)
 
             # Extract phrases (2-4 word combinations)
-            for n in range(2, 5):
-                for i in range(len(words) - n + 1):
-                    phrase = " ".join(words[i : i + n])
-                    if self._is_meaningful_phrase(phrase):
-                        unique_phrases[phrase] += 1
+            unique_phrases.update(self._meaningful_phrases(words))
 
             # Extract technical terms
             for pattern in self.TECH_PATTERNS:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    technical_terms[match.lower()] += 1
+                technical_terms.update(match.lower() for match in re.findall(pattern, text, re.IGNORECASE))
 
             # Count filler words
             for pattern in self.FILLER_PATTERNS:
@@ -390,7 +392,7 @@ class StyleAnalyzer:
         total = len(texts) or 1
 
         # Determine dominant capitalization style
-        cap_style = max(caps_styles, key=caps_styles.get)
+        cap_style = max(caps_styles, key=lambda style: caps_styles[style])
 
         return {
             "avg_length": sum(lengths) / len(lengths) if lengths else 0,
@@ -406,8 +408,6 @@ class StyleAnalyzer:
 
     def _analyze_tone(self, texts: list[str]) -> dict:
         """Analyze tone markers."""
-        formality_score = 0
-        directness_score = 0
 
         # Formal indicators
         formal_patterns = [
@@ -457,44 +457,15 @@ class StyleAnalyzer:
             r"\bmight\b",
         ]
 
-        formal_count = 0
-        informal_count = 0
-        direct_count = 0
-        indirect_count = 0
-
-        for text in texts:
-            text_lower = text.lower()
-
-            for pattern in formal_patterns:
-                if re.search(pattern, text_lower):
-                    formal_count += 1
-                    break
-
-            for pattern in informal_patterns:
-                if re.search(pattern, text_lower):
-                    informal_count += 1
-                    break
-
-            for pattern in direct_patterns:
-                if re.search(pattern, text_lower):
-                    direct_count += 1
-                    break
-
-            for pattern in indirect_patterns:
-                if re.search(pattern, text_lower):
-                    indirect_count += 1
-                    break
+        lowered = [text.lower() for text in texts]
+        formal_count = _count_matching(lowered, formal_patterns)
+        informal_count = _count_matching(lowered, informal_patterns)
+        direct_count = _count_matching(lowered, direct_patterns)
+        indirect_count = _count_matching(lowered, indirect_patterns)
 
         # Calculate scores (0 = casual/indirect, 1 = formal/direct)
-        if formal_count + informal_count > 0:
-            formality_score = formal_count / (formal_count + informal_count)
-        else:
-            formality_score = 0.5
-
-        if direct_count + indirect_count > 0:
-            directness_score = direct_count / (direct_count + indirect_count)
-        else:
-            directness_score = 0.5
+        formality_score = _ratio(formal_count, informal_count)
+        directness_score = _ratio(direct_count, indirect_count)
 
         return {
             "formality": formality_score,
@@ -505,13 +476,13 @@ class StyleAnalyzer:
 
     def _analyze_emoji(self, texts: list[str]) -> dict:
         """Analyze emoji usage patterns."""
-        emoji_counter = Counter()
+        emoji_counter: Counter[str] = Counter()
         messages_with_emoji = 0
 
         # Contextual emoji tracking
-        agreement_emojis = Counter()
-        thinking_emojis = Counter()
-        positive_emojis = Counter()
+        agreement_emojis: Counter[str] = Counter()
+        thinking_emojis: Counter[str] = Counter()
+        positive_emojis: Counter[str] = Counter()
 
         for text in texts:
             emojis = self.EMOJI_PATTERN.findall(text)
@@ -522,18 +493,11 @@ class StyleAnalyzer:
                 # Categorize by context
                 text_lower = text.lower()
                 for emoji in emojis:
-                    if any(
-                        p in text_lower for p in ["yes", "agree", "good", "ok", "sure"]
-                    ):
+                    if any(p in text_lower for p in ["yes", "agree", "good", "ok", "sure"]):
                         agreement_emojis[emoji] += 1
-                    if any(
-                        p in text_lower for p in ["think", "hmm", "wonder", "maybe"]
-                    ):
+                    if any(p in text_lower for p in ["think", "hmm", "wonder", "maybe"]):
                         thinking_emojis[emoji] += 1
-                    if any(
-                        p in text_lower
-                        for p in ["great", "awesome", "nice", "love", "thanks"]
-                    ):
+                    if any(p in text_lower for p in ["great", "awesome", "nice", "love", "thanks"]):
                         positive_emojis[emoji] += 1
 
         total = len(texts) or 1
@@ -552,7 +516,7 @@ class StyleAnalyzer:
 
     def _analyze_greetings(self, texts: list[str]) -> dict:
         """Analyze greeting patterns."""
-        greeting_counter = Counter()
+        greeting_counter: Counter[str] = Counter()
 
         for text in texts:
             text_lower = text.lower().strip()
@@ -568,7 +532,7 @@ class StyleAnalyzer:
 
     def _analyze_signoffs(self, texts: list[str]) -> dict:
         """Analyze signoff patterns."""
-        signoff_counter = Counter()
+        signoff_counter: Counter[str] = Counter()
 
         for text in texts:
             text_lower = text.lower().strip()
@@ -584,9 +548,9 @@ class StyleAnalyzer:
 
     def _analyze_response_patterns(self, texts: list[str]) -> dict:
         """Analyze response patterns (acknowledgment, agreement, disagreement)."""
-        ack_counter = Counter()
-        agree_counter = Counter()
-        disagree_counter = Counter()
+        ack_counter: Counter[str] = Counter()
+        agree_counter: Counter[str] = Counter()
+        disagree_counter: Counter[str] = Counter()
 
         for text in texts:
             text_lower = text.lower().strip()
@@ -612,6 +576,11 @@ class StyleAnalyzer:
             "disagreement": [d for d, _ in disagree_counter.most_common(10)],
         }
 
+    def _meaningful_phrases(self, words: list[str]) -> list[str]:
+        """Return the meaningful 2-4 word phrases in a tokenised message."""
+        phrases = (" ".join(words[i : i + n]) for n in range(2, 5) for i in range(len(words) - n + 1))
+        return [phrase for phrase in phrases if self._is_meaningful_phrase(phrase)]
+
     def _clean_text(self, text: str) -> str:
         """Clean text for analysis."""
         # Remove URLs
@@ -634,3 +603,14 @@ class StyleAnalyzer:
         # At least one non-stop word
         non_stop = [w for w in words if w not in self.STOP_WORDS]
         return len(non_stop) >= 1 and len(phrase) >= 5
+
+
+def _count_matching(texts: list[str], patterns: list[str]) -> int:
+    """Count texts that match at least one of the regex patterns."""
+    return sum(1 for text in texts if any(re.search(pattern, text) for pattern in patterns))
+
+
+def _ratio(positive: int, negative: int) -> float:
+    """Return positive / (positive + negative), or 0.5 when both are zero."""
+    total = positive + negative
+    return positive / total if total else 0.5

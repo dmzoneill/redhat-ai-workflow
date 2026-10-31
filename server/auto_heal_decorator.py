@@ -18,12 +18,29 @@ Usage:
 import asyncio
 import logging
 import os
+from collections.abc import Callable
+from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, Literal
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
 
 from server.error_patterns import AUTH_PATTERNS, NETWORK_PATTERNS
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
 
 ClusterType = Literal["stage", "prod", "ephemeral", "konflux", "auto"]
 
@@ -134,9 +151,7 @@ async def _run_kube_login(cluster: str) -> bool:
             )
             output = stdout + stderr
             if success or "logged in" in output.lower():
-                logger.info(
-                    "Auto-heal: kube_login(%s) via oc login successful", cluster
-                )
+                logger.info("Auto-heal: kube_login(%s) via oc login successful", cluster)
                 return True
 
         logger.warning("Auto-heal: kube_login(%s) failed: %s", cluster, output[:200])
@@ -164,9 +179,7 @@ async def _run_vpn_connect() -> bool:
         vpn_script = paths.get("vpn_connect_script")
 
         if not vpn_script:
-            vpn_script = os.path.expanduser(
-                "~/src/redhatter/src/redhatter_vpn/vpn-connect"
-            )
+            vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
         else:
             vpn_script = os.path.expanduser(vpn_script)
 
@@ -201,9 +214,7 @@ async def _run_vpn_connect() -> bool:
                 timeout=30,
             )
             if success:
-                logger.info(
-                    "Auto-heal: vpn_connect successful via nmcli (%s)", vpn_name
-                )
+                logger.info("Auto-heal: vpn_connect successful via nmcli (%s)", vpn_name)
                 return True
 
         logger.warning("Auto-heal: All VPN connection attempts failed")
@@ -223,9 +234,7 @@ def _update_rolling_stats(data: dict, today: str, this_week: str) -> None:
         data["stats"] = {}
 
     # Total counters (only for recent window)
-    data["stats"]["total_failures"] = min(
-        data["stats"].get("total_failures", 0) + 1, 1000
-    )
+    data["stats"]["total_failures"] = min(data["stats"].get("total_failures", 0) + 1, 1000)
     data["stats"]["auto_fixed"] = min(data["stats"].get("auto_fixed", 0) + 1, 1000)
 
     # Daily stats
@@ -273,15 +282,6 @@ async def _log_auto_heal_to_memory(
 ) -> None:
     """Log a successful auto-heal to memory for learning."""
     try:
-        # pylint: disable-next=import-outside-toplevel
-        from datetime import datetime
-
-        # pylint: disable-next=import-outside-toplevel
-        from pathlib import Path
-
-        # pylint: disable-next=import-outside-toplevel
-        import yaml
-
         # Find memory directory
         project_root = Path(__file__).parent.parent
         memory_dir = project_root / "memory" / "learned"
@@ -291,8 +291,7 @@ async def _log_auto_heal_to_memory(
 
         # Load or create
         if failures_file.exists():
-            with open(failures_file, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+            data = await _load_yaml(failures_file) or {}
         else:
             data = {
                 "failures": [],
@@ -311,12 +310,12 @@ async def _log_auto_heal_to_memory(
             "error_snippet": error_snippet[:100],
             "fix_applied": fix_applied,
             "success": True,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().astimezone().isoformat(),
         }
         data["failures"].append(entry)
 
         # Update rolling stats
-        now = datetime.now()
+        now = datetime.now().astimezone()
         today = now.strftime("%Y-%m-%d")
         this_week = now.strftime("%Y-W%U")
 
@@ -324,8 +323,7 @@ async def _log_auto_heal_to_memory(
         _cleanup_old_stats(data)
 
         # Write back
-        with open(failures_file, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False)
+        await _dump_yaml(failures_file, data, default_flow_style=False)
 
         logger.debug("Logged auto-heal for %s to memory", tool_name)
 
@@ -333,7 +331,7 @@ async def _log_auto_heal_to_memory(
     # pylint: disable-next=broad-exception-caught
     except Exception as e:
         # Memory logging is best-effort, don't fail the tool
-        logger.debug("Failed to log auto-heal to memory: %s", e)
+        logger.debug("Failed to log auto-heal to memory: %s", e, exc_info=True)
 
 
 def _convert_result_to_string(result: Any) -> str:
@@ -347,14 +345,10 @@ def _convert_result_to_string(result: Any) -> str:
     return str(result)
 
 
-async def _apply_auto_heal_fix(
-    failure_type: str, cluster: ClusterType, tool_name: str, result_str: str
-) -> bool:
+async def _apply_auto_heal_fix(failure_type: str, cluster: ClusterType, tool_name: str, result_str: str) -> bool:
     """Apply auto-heal fix based on failure type."""
     if failure_type == "auth":
-        target_cluster = (
-            cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
-        )
+        target_cluster = cluster if cluster != "auto" else _guess_cluster(tool_name, result_str)
         logger.info(
             "Auto-heal: %s auth failure, running kube_login(%s)",
             tool_name,
@@ -375,9 +369,7 @@ async def _handle_retry_with_heal(
     result_str: str,
 ) -> bool:
     """Handle retry with auto-heal fix application and logging."""
-    fix_applied = await _apply_auto_heal_fix(
-        failure_type, cluster, tool_name, result_str
-    )
+    fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, result_str)
 
     if not fix_applied:
         logger.warning("Auto-heal: fix for %s failed, giving up", tool_name)
@@ -505,9 +497,7 @@ def auto_heal(
                     failure_type, _ = _detect_failure_type(error_str)
 
                     if failure_type in retry_on and attempt < max_retries:
-                        fix_applied = await _apply_auto_heal_fix(
-                            failure_type, cluster, tool_name, error_str
-                        )
+                        fix_applied = await _apply_auto_heal_fix(failure_type, cluster, tool_name, error_str)
                         if fix_applied:
                             await asyncio.sleep(1)
                             continue

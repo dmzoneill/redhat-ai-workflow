@@ -4,6 +4,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -11,6 +12,17 @@ import yaml
 from .skill_paths import skills_dir
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
 
 
 class SkillHealMixin:
@@ -47,11 +59,10 @@ class SkillHealMixin:
                     pattern_text = pattern.get("pattern", "").lower()
                     if pattern_text and pattern_text in error_lower:
                         # Track that pattern was matched
-                        self._update_pattern_usage_stats(
-                            cat, pattern_text, matched=True
-                        )
+                        self._update_pattern_usage_stats(cat, pattern_text, matched=True)
                         return pattern, cat
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Pattern lookup failed", exc_info=True)
             self._debug(f"Pattern lookup failed: {e}")
 
         return None, None
@@ -70,11 +81,7 @@ class SkillHealMixin:
             for cmd in commands:
                 if "vpn" in cmd.lower() or "connect" in cmd.lower():
                     return "network"
-                if (
-                    "login" in cmd.lower()
-                    or "auth" in cmd.lower()
-                    or "kube" in cmd.lower()
-                ):
+                if "login" in cmd.lower() or "auth" in cmd.lower() or "kube" in cmd.lower():
                     return "auth"
 
         # Priority 2: Hardcoded patterns
@@ -112,9 +119,7 @@ class SkillHealMixin:
             vpn_script = paths.get("vpn_connect_script")
 
             if not vpn_script:
-                vpn_script = os.path.expanduser(
-                    "~/src/redhatter/src/redhatter_vpn/vpn-connect"
-                )
+                vpn_script = os.path.expanduser("~/src/redhatter/src/redhatter_vpn/vpn-connect")
             else:
                 vpn_script = os.path.expanduser(vpn_script)
 
@@ -156,6 +161,7 @@ class SkillHealMixin:
             return False
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Auto-fix failed", exc_info=True)
             self._debug(f"  → Auto-fix failed: {e}")
             return False
 
@@ -196,6 +202,7 @@ class SkillHealMixin:
             await asyncio.sleep(1)
             return proc.returncode == 0
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Auto-fix failed", exc_info=True)
             self._debug(f"  → Auto-fix failed: {e}")
             return False
 
@@ -228,9 +235,7 @@ class SkillHealMixin:
         # Track fix success for matched pattern
         if fix_success and matched_pattern and pattern_category:
             pattern_text = matched_pattern.get("pattern", "")
-            self._update_pattern_usage_stats(
-                pattern_category, pattern_text, matched=False, fixed=True
-            )
+            self._update_pattern_usage_stats(pattern_category, pattern_text, matched=False, fixed=True)
 
         return fix_success
 
@@ -282,19 +287,15 @@ class SkillHealMixin:
 
                             # Update counters
                             if matched:
-                                stats["times_matched"] = (
-                                    stats.get("times_matched", 0) + 1
-                                )
-                                stats["last_matched"] = datetime.now().isoformat()
+                                stats["times_matched"] = stats.get("times_matched", 0) + 1
+                                stats["last_matched"] = datetime.now().astimezone().isoformat()
 
                             if fixed:
                                 stats["times_fixed"] = stats.get("times_fixed", 0) + 1
 
                             # Recalculate success rate
                             if stats["times_matched"] > 0:
-                                stats["success_rate"] = round(
-                                    stats["times_fixed"] / stats["times_matched"], 2
-                                )
+                                stats["success_rate"] = round(stats["times_fixed"] / stats["times_matched"], 2)
 
                             # Write back
                             f.seek(0)
@@ -311,6 +312,7 @@ class SkillHealMixin:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to update pattern stats", exc_info=True)
             self._debug(f"Failed to update pattern stats: {e}")
 
     def _check_error_patterns(self, error: str) -> str | None:
@@ -330,9 +332,7 @@ class SkillHealMixin:
                 pattern_text = pattern.get("pattern", "").lower()
                 if pattern_text and pattern_text in error_lower:
                     # Track pattern match
-                    self._update_pattern_usage_stats(
-                        "error_patterns", pattern_text, matched=True
-                    )
+                    self._update_pattern_usage_stats("error_patterns", pattern_text, matched=True)
 
                     fix = pattern.get("fix", "")
                     meaning = pattern.get("meaning", "")
@@ -350,6 +350,7 @@ class SkillHealMixin:
 
             return None
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Pattern lookup failed", exc_info=True)
             self._debug(f"Pattern lookup failed: {e}")
             return None
 
@@ -419,9 +420,7 @@ class SkillHealMixin:
         """
         try:
             if heal_type == "auth":
-                output_lines.append(
-                    f"   🔧 Auto-healing: running kube_login({cluster})..."
-                )
+                output_lines.append(f"   🔧 Auto-healing: running kube_login({cluster})...")
                 self._debug(f"Auto-heal: kube_login({cluster})")
 
                 # Emit remediation step event
@@ -437,9 +436,7 @@ class SkillHealMixin:
                 if not heal_result.get("success"):
                     # pylint: disable-next=line-too-long
                     # Get error from either 'error' key or 'result' key (for tools that return error text)
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -464,9 +461,7 @@ class SkillHealMixin:
                 if not heal_result.get("success"):
                     # pylint: disable-next=line-too-long
                     # Get error from either 'error' key or 'result' key (for tools that return error text)
-                    error_msg = heal_result.get("error") or heal_result.get(
-                        "result", "unknown"
-                    )
+                    error_msg = heal_result.get("error") or heal_result.get("result", "unknown")
                     # Truncate long error messages
                     if len(error_msg) > 200:
                         error_msg = error_msg[:200] + "..."
@@ -486,11 +481,12 @@ class SkillHealMixin:
             output_lines.append(f"   🔄 Retrying {tool}...")
             raw_args = step.get("args", {})
             args = self._template_dict(raw_args)
-            retry_result = await self._exec_tool(tool, args)
+            retry_result: dict | None = await self._exec_tool(tool, args)
 
             return retry_result
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Auto-heal failed", exc_info=True)
             self._debug(f"Auto-heal failed: {e}")
             output_lines.append(f"   ⚠️ Auto-heal exception: {e}")
             return None
@@ -508,8 +504,6 @@ class SkillHealMixin:
                 datetime,
             )
 
-            import yaml  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
-
             # Find memory directory
             memory_dir = skills_dir().parent / "memory" / "learned"
             memory_dir.mkdir(parents=True, exist_ok=True)
@@ -518,8 +512,7 @@ class SkillHealMixin:
 
             # Load or create
             if failures_file.exists():
-                with open(failures_file, encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
+                data = await _load_yaml(failures_file) or {}
             else:
                 data = {
                     "failures": [],
@@ -547,7 +540,7 @@ class SkillHealMixin:
                 "fix_applied": "kube_login" if heal_type == "auth" else "vpn_connect",
                 "success": success,
                 "source": "skill_engine",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now().astimezone().isoformat(),
             }
             data["failures"].append(entry)
 
@@ -556,21 +549,19 @@ class SkillHealMixin:
             if success:
                 data["stats"]["auto_fixed"] = data["stats"].get("auto_fixed", 0) + 1
             else:
-                data["stats"]["manual_required"] = (
-                    data["stats"].get("manual_required", 0) + 1
-                )
+                data["stats"]["manual_required"] = data["stats"].get("manual_required", 0) + 1
 
             # Keep only last 100 entries
             if len(data["failures"]) > 100:
                 data["failures"] = data["failures"][-100:]
 
             # Write back
-            with open(failures_file, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False)
+            await _dump_yaml(failures_file, data, default_flow_style=False)
 
             self._debug(f"Logged auto-heal for {tool} to memory (success={success})")
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Failed to log auto-heal to memory", exc_info=True)
             self._debug(f"Failed to log auto-heal to memory: {e}")
 
     def find_matched_pattern(self, *args, **kwargs):
