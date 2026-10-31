@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Memory Tab - Comprehensive view of the AI Workflow memory system
  *
@@ -54,15 +53,88 @@ const logger = createLogger("MemoryTab");
 type MemoryItemType =
   "category" | "subcategory" | "item" | "detail" | "action" | "file";
 
+/** A memory record (issue, MR, follow-up, discovered work, pattern) as stored in YAML/D-Bus. */
+interface MemoryEntry {
+  key?: string;
+  id?: string | number;
+  title?: string;
+  summary?: string;
+  status?: string;
+  branch?: string;
+  repo?: string;
+  project?: string;
+  task?: string;
+  priority?: string;
+  issue_key?: string;
+  mr_id?: string | number;
+  work_type?: string;
+  source_skill?: string;
+  jira_synced?: boolean;
+  jira_key?: string;
+  name?: string;
+  commit?: string;
+  expires?: string;
+  pattern?: string;
+  meaning?: string;
+  fix?: string;
+  commands?: string[];
+  tool?: string;
+  error_type?: string;
+  fix_applied?: string;
+  success?: boolean;
+  timestamp?: string;
+  error_snippet?: string;
+  error_pattern?: string;
+  root_cause?: string;
+  verified?: boolean;
+  path?: string;
+  [field: string]: unknown;
+}
+
+/** Payload attached to a memory tree item. */
+interface MemoryItemData {
+  items?: MemoryEntry[];
+  type?: string;
+  children?: MemoryTreeItem[];
+  [field: string]: unknown;
+}
+
+interface CurrentWorkData {
+  active_issues?: MemoryEntry[];
+  open_mrs?: MemoryEntry[];
+  follow_ups?: MemoryEntry[];
+  discovered_work?: MemoryEntry[];
+  last_updated?: string;
+}
+
+interface EnvironmentsData {
+  environments?: { ephemeral?: { active_namespaces?: MemoryEntry[] } };
+}
+
+interface ToolFailuresData {
+  failures?: MemoryEntry[];
+  learned_fixes?: MemoryEntry[];
+  stats?: { auto_fixed?: number };
+}
+
+interface EnvironmentEntry {
+  name?: string;
+  status?: string;
+}
+
+interface PatternEntry {
+  type?: string;
+}
+
 export class MemoryTreeItem extends vscode.TreeItem {
-  public data?: any;
+  public data?: MemoryItemData;
   public filePath?: string;
 
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly itemType: MemoryItemType,
-    data?: any,
+    data?: MemoryItemData,
     filePath?: string,
   ) {
     super(label, collapsibleState);
@@ -188,7 +260,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     } else if (element.data?.children) {
       return element.data.children;
     } else if (element.data?.items) {
-      return this.getItemDetails(element.data.items, element.data.type);
+      return this.getItemDetails(element.data.items, element.data.type ?? "");
     }
 
     return [];
@@ -216,13 +288,22 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
 
       // Process health
       if (healthResult.success && healthResult.data) {
-        const health = (healthResult.data as any).health;
+        const health = (healthResult.data as { health?: { patterns?: number } })
+          .health;
         stats.statistics.vectorReindexes = health?.patterns || 0;
       }
 
       // Process current work
       if (workResult.success && workResult.data) {
-        const work = (workResult.data as any).work;
+        const work = (
+          workResult.data as {
+            work?: {
+              activeIssues?: unknown[];
+              openMRs?: unknown[];
+              followUps?: unknown[];
+            };
+          }
+        ).work;
         stats.state.activeIssues = work?.activeIssues?.length || 0;
         stats.state.openMrs = work?.openMRs?.length || 0;
         stats.state.followUps = work?.followUps?.length || 0;
@@ -230,7 +311,9 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
 
       // Process environments
       if (envResult.success && envResult.data) {
-        const envs = (envResult.data as any).environments || [];
+        const envs =
+          (envResult.data as { environments?: EnvironmentEntry[] })
+            .environments || [];
         for (const env of envs) {
           if (env.name === "stage") {
             stats.environments.stage.status = env.status || "unknown";
@@ -242,7 +325,8 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
 
       // Process patterns
       if (patternsResult.success && patternsResult.data) {
-        const patterns = (patternsResult.data as any).patterns || [];
+        const patterns =
+          (patternsResult.data as { patterns?: PatternEntry[] }).patterns || [];
         for (const p of patterns) {
           if (p.type === "error_patterns") stats.learned.errorPatterns++;
           else if (p.type === "auth_patterns") stats.learned.authPatterns++;
@@ -569,7 +653,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     // Use cached data from D-Bus (already loaded in loadStatsAsync)
     // The stats object contains the counts, but we need the actual items
     // These are available from the last D-Bus call to memory_getCurrentWork
-    const currentWork: any = {
+    const currentWork: CurrentWorkData = {
       active_issues: [],
       open_mrs: [],
       follow_ups: [],
@@ -661,7 +745,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open current_work.yaml",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       currentWorkPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -680,7 +764,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     const items: MemoryTreeItem[] = [];
     // Environment data comes from D-Bus via loadStatsAsync
     const envPath = path.join(this.memoryDir, "state", "environments.yaml");
-    const envData: any = {}; // TODO: Load from D-Bus when available
+    const envData: EnvironmentsData = {}; // TODO: Load from D-Bus when available
 
     // Stage
     const stageItem = new MemoryTreeItem(
@@ -766,7 +850,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open environments.yaml",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       envPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -803,7 +887,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
         this.truncate(displayName, 40),
         vscode.TreeItemCollapsibleState.None,
         "item",
-        session,
+        { ...session },
       );
 
       // Icon based on active status
@@ -886,7 +970,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open workspace_states.json",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       workspaceStatesPath,
     );
     openFileItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -904,8 +988,8 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     const stats = this.loadStats();
     const items: MemoryTreeItem[] = [];
     // Pattern data comes from D-Bus via loadStatsAsync
-    const patterns: any = {};
-    const failures: any = {};
+    const patterns: Record<string, MemoryEntry[] | undefined> = {};
+    const failures: ToolFailuresData = {};
     const patternsPath = path.join(this.memoryDir, "learned", "patterns.yaml");
     const failuresPath = path.join(
       this.memoryDir,
@@ -996,7 +1080,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open patterns.yaml",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       patternsPath,
     );
     openPatternsItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -1011,7 +1095,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open tool_failures.yaml",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       failuresPath,
     );
     openFailuresItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -1061,7 +1145,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open knowledge.yaml",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       knowledgePath,
     );
     openKnowledgeItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -1230,7 +1314,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open Database Directory",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       slackDbPath,
     );
     openDbItem.iconPath = new vscode.ThemeIcon(
@@ -1250,7 +1334,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
       "Open Sync Metadata",
       vscode.TreeItemCollapsibleState.None,
       "action",
-      null,
+      undefined,
       syncMetaPath,
     );
     openMetaItem.iconPath = new vscode.ThemeIcon("go-to-file");
@@ -1486,7 +1570,7 @@ export class MemoryTreeProvider implements vscode.TreeDataProvider<MemoryTreeIte
     return items;
   }
 
-  private getItemDetails(items: any[], type: string): MemoryTreeItem[] {
+  private getItemDetails(items: MemoryEntry[], type: string): MemoryTreeItem[] {
     const result: MemoryTreeItem[] = [];
 
     for (const item of items.slice(0, 20)) {
@@ -2023,7 +2107,7 @@ export function registerMemoryTab(
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "aa-workflow.showItemDetails",
-      async (item: any) => {
+      async (item: unknown) => {
         const output = vscode.window.createOutputChannel("Memory Item Details");
         output.clear();
         output.appendLine("=== Memory Item Details ===");
