@@ -29,6 +29,17 @@ def _optional_playwright_errors() -> tuple[type[Exception], ...]:
     return tuple(errors)
 
 
+def _optional_google_errors() -> tuple[type[Exception], ...]:
+    """Return the Google API client and auth base errors when those libraries are installed."""
+    errors: list[type[Exception]] = []
+    for module, name in (("googleapiclient.errors", "Error"), ("google.auth.exceptions", "GoogleAuthError")):
+        try:
+            errors.append(getattr(importlib.import_module(module), name))
+        except ImportError:
+            logger.debug("%s not installed; no %s to catch", module, name)
+    return tuple(errors)
+
+
 # Failures expected at the tool boundary: browser automation, audio/video
 # devices, subprocesses, network calls and malformed data.
 MEET_ERRORS: tuple[type[Exception], ...] = (
@@ -41,6 +52,8 @@ MEET_ERRORS: tuple[type[Exception], ...] = (
     ImportError,
     asyncio.TimeoutError,
     *_optional_playwright_errors(),
+    # Google Calendar API errors (HttpError) and auth errors (e.g. RefreshError).
+    *_optional_google_errors(),
 )
 
 

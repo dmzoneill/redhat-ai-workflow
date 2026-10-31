@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -77,7 +78,7 @@ def _calendar_meetings(service, cal, time_min: str, time_max: str) -> list[dict]
     return meetings
 
 
-def _upcoming_meetings(calendars) -> list[dict]:
+def fetch_upcoming_meetings(calendars) -> list[dict]:
     """Fetch upcoming Meet events for each enabled calendar, sorted by start time."""
     upcoming: list[dict] = []
     try:
@@ -174,7 +175,7 @@ async def _meet_notes_export_state_impl() -> str:
     meetings = await db.list_meetings(since=since, limit=10)
 
     # Fetch upcoming meetings from Google Calendar for each monitored calendar
-    upcoming_meetings = _upcoming_meetings(calendars)
+    upcoming_meetings = fetch_upcoming_meetings(calendars)
 
     # Get scheduler status
     scheduler_running = NOTES.scheduler is not None and NOTES.scheduler.state.running
@@ -418,7 +419,11 @@ async def _run_startup_cleanup() -> None:
         logger.error("🔊 MeetBot startup cleanup failed: %s", e)
 
 
-async def _periodic_cleanup_task() -> None:
+# One bad cleanup iteration (device, subprocess or API failure) must not end the loop.
+_CLEANUP_ERRORS: tuple[type[Exception], ...] = (*MEET_ERRORS, subprocess.SubprocessError)
+
+
+async def periodic_cleanup_task() -> None:
     """
     Background task that periodically cleans up orphaned devices.
 
@@ -455,12 +460,12 @@ async def _periodic_cleanup_task() -> None:
         except asyncio.CancelledError:
             logger.info("🔊 Periodic cleanup task cancelled")
             raise
-        except MEET_ERRORS as e:
+        except _CLEANUP_ERRORS as e:
             logger.error("🔊 Periodic cleanup error: %s", e)
 
 
 def _start_periodic_cleanup() -> None:
     """Start the periodic cleanup background task."""
     if CLEANUP.task is None or CLEANUP.task.done():
-        CLEANUP.task = asyncio.create_task(_periodic_cleanup_task())
+        CLEANUP.task = asyncio.create_task(periodic_cleanup_task())
         logger.info("🔊 Started periodic device cleanup task")
