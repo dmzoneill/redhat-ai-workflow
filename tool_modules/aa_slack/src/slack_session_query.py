@@ -6,22 +6,22 @@ Split out so the session module stays within the module line limit.
 
 import json
 import logging
-import random
+import secrets
 import time
 import uuid
 from typing import Any
 
 import httpx
+
 from tool_modules.aa_slack.src.slack_message_builder import (
     _shared_get_app_commands_summary,
     extract_from_block_element,
 )
-from tool_modules.aa_slack.src.slack_message_builder import (
-    get_channel_sections_summary as channel_sections_summary,
-)
-from tool_modules.aa_slack.src.slack_message_builder import (
-    simplify_channel_history as simplified_channel_history,
-)
+from tool_modules.aa_slack.src.slack_message_builder import get_channel_sections_summary as channel_sections_summary
+from tool_modules.aa_slack.src.slack_message_builder import simplify_channel_history as simplified_channel_history
+
+# Non-cryptographic jitter/variety; SystemRandom avoids the predictable Mersenne Twister flagged by scanners
+_RNG = secrets.SystemRandom()
 
 logger = logging.getLogger("tool_modules.aa_slack.src.slack_session")
 
@@ -111,7 +111,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             response.raise_for_status()
             result = response.json()
 
-            users = result.get("results", [])
+            users: list[dict[str, Any]] = result.get("results", [])
             return users
 
         except httpx.HTTPStatusError as e:
@@ -151,12 +151,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         if not eid:
-            raise ValueError(
-                "Enterprise ID not available. Set enterprise_id in config.json slack.auth section."
-            )
-
-        # Edge API URL for users list
-        edge_url = f"https://edgeapi.slack.com/cache/{eid}/users/list"
+            raise ValueError("Enterprise ID not available. Set enterprise_id in config.json slack.auth section.")
 
         # Build filter
         if include_bots:
@@ -188,8 +183,9 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 "Sec-Fetch-Site": "same-site",
             }
 
+            # Edge API URL for users list
             response = await client.post(
-                edge_url,
+                f"https://edgeapi.slack.com/cache/{eid}/users/list",
                 content=json.dumps(payload),
                 headers=headers,
             )
@@ -201,15 +197,12 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 logger.error("Channel members list error: %s", error)
                 raise ValueError(f"Channel members list failed: {error}")
 
-            return result.get("results", [])
+            members: list[dict[str, Any]] = result.get("results", [])
+            return members
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
-            )
-            raise ValueError(
-                f"Channel members list failed: {e.response.status_code}"
-            ) from e
+            logger.error("Edge API error: %s - %s", e.response.status_code, e.response.text[:200])
+            raise ValueError(f"Channel members list failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error("Channel members list error: %s", e)
             raise
@@ -239,9 +232,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         if not eid:
-            raise ValueError(
-                "Enterprise ID not available. Set enterprise_id in config.json slack.auth section."
-            )
+            raise ValueError("Enterprise ID not available. Set enterprise_id in config.json slack.auth section.")
 
         # Edge API URL for membership check
         edge_url = f"https://edgeapi.slack.com/cache/{eid}/channels/membership"
@@ -291,12 +282,8 @@ class SlackSessionQuery:  # pylint: disable=no-member
             }
 
         except httpx.HTTPStatusError as e:
-            logger.error(
-                "Edge API error: %s - %s", e.response.status_code, e.response.text[:200]
-            )
-            raise ValueError(
-                f"Channel membership check failed: {e.response.status_code}"
-            ) from e
+            logger.error("Edge API error: %s - %s", e.response.status_code, e.response.text[:200])
+            raise ValueError(f"Channel membership check failed: {e.response.status_code}") from e
         except Exception as e:
             logger.error("Channel membership check error: %s", e)
             raise
@@ -330,9 +317,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 if avatar_hash and user_id:
                     avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
                 else:
-                    avatar_url = profile.get(
-                        "image_original", profile.get("image_72", "")
-                    )
+                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
 
                 results.append(
                     {
@@ -362,6 +347,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 "users": results,
             }
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Channel member listing failed", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
@@ -389,7 +375,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{_RNG.randint(100, 999)}"
 
         url = (
             f"https://{self.SLACK_HOST}/api/users.channelSections.list"
@@ -448,7 +434,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Channel sections request failed: %s", e)
+            logger.exception("Channel sections request failed")
             return {"ok": False, "error": str(e), "channel_sections": []}
 
     def get_channel_sections_summary(self, data):
@@ -486,7 +472,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{_RNG.randint(100, 999)}"
 
         url = (
             f"https://{self.SLACK_HOST}/api/conversations.history"
@@ -562,7 +548,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Channel history request failed: %s", e)
+            logger.exception("Channel history request failed")
             return {"ok": False, "error": str(e), "messages": []}
 
     def simplify_channel_history(self, data):
@@ -602,9 +588,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 if avatar_hash and user_id:
                     avatar_url = self.get_avatar_url(user_id, avatar_hash, 512)
                 else:
-                    avatar_url = profile.get(
-                        "image_original", profile.get("image_72", "")
-                    )
+                    avatar_url = profile.get("image_original", profile.get("image_72", ""))
 
                 results.append(
                     {
@@ -631,6 +615,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
                 "users": results,
             }
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("User search failed", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
@@ -655,7 +640,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time())}.{_RNG.randint(100, 999)}"
 
         url = (
             f"https://{self.SLACK_HOST}/api/client.appCommands"
@@ -714,7 +699,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("App commands request failed: %s", e)
+            logger.exception("App commands request failed")
             return {"ok": False, "error": str(e), "app_actions": [], "commands": []}
 
     def get_app_commands_summary(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -742,7 +727,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
         eid = self.enterprise_id or self.workspace_id or self._extract_enterprise_id()
 
         # Build URL with query params
-        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time() * 1000)}.{random.randint(100, 999)}"
+        x_id = f"{uuid.uuid4().hex[:8]}-{int(time.time() * 1000)}.{_RNG.randint(100, 999)}"
 
         url = (
             f"https://{self.SLACK_HOST}/api/users.profile.getSections"
@@ -793,7 +778,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
 
             response = await client.post(url, content=body, headers=headers)
             response.raise_for_status()
-            result = response.json()
+            result: dict[str, Any] = response.json()
 
             if not result.get("ok"):
                 error = result.get("error", "unknown_error")
@@ -882,6 +867,7 @@ class SlackSessionQuery:  # pylint: disable=no-member
             }
 
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("User profile lookup failed", exc_info=True)
             return {
                 "success": False,
                 "user_id": user_id,
