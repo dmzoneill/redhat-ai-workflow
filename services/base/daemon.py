@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Base Daemon Infrastructure
 
@@ -50,8 +49,9 @@ import signal
 import socket
 import sys
 from abc import ABC, abstractmethod
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def sd_notify(state: str) -> bool:
             sock.close()
     except Exception as e:  # pylint: disable=broad-exception-caught
         # Notify boundary: a broken NOTIFY_SOCKET must not stop the daemon.
-        logger.warning("Failed to send sd_notify(%s): %s", state, e)
+        logger.warning("Failed to send sd_notify(%s): %s", state, e, exc_info=True)
         return False
 
 
@@ -127,6 +127,7 @@ class SingleInstance:
         self.name = name
         self.lock_dir = Path(lock_dir)
         self._lock_file: TextIO | None = None
+        self._lock_stack = ExitStack()
         self._acquired = False
 
     @property
@@ -146,38 +147,39 @@ class SingleInstance:
         Returns:
             True if lock acquired, False if another instance is running.
         """
+        # The flock is held only while this handle stays open, so the stack is kept until release().
+        stack = ExitStack()
         try:
-            # The flock is held only while this handle stays open.
-            lock_file = open(  # pylint: disable=consider-using-with
-                self.lock_path, "w", encoding="utf-8"
-            )
-            self._lock_file = lock_file
+            lock_file = stack.enter_context(self.lock_path.open("w", encoding="utf-8"))
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Write PID for external status checks
             self.pid_path.write_text(str(os.getpid()))
-            self._acquired = True
-            return True
         except OSError:
+            stack.close()
             return False
+        self._lock_stack = stack
+        self._lock_file = lock_file
+        self._acquired = True
+        return True
 
     def release(self):
         """Release the lock and clean up files."""
         if self._lock_file:
             try:
                 fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
-                self._lock_file.close()
+                self._lock_stack.close()
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 # Cleanup boundary: unlocking must not raise out of release.
-                logger.debug("Suppressed error: %s", exc)
+                logger.debug("Suppressed error: %s", exc, exc_info=True)
         if self.pid_path.exists():
             try:
                 self.pid_path.unlink()
             except Exception as exc:  # pylint: disable=broad-exception-caught
                 # Cleanup boundary: removing the pid file must not raise.
-                logger.debug("Suppressed error: %s", exc)
+                logger.debug("Suppressed error: %s", exc, exc_info=True)
         self._acquired = False
 
-    def get_running_pid(self) -> Optional[int]:
+    def get_running_pid(self) -> int | None:
         """
         Get PID of running instance.
 
@@ -248,7 +250,7 @@ class BaseDaemon(ABC):
         self.enable_dbus = enable_dbus
         self._shutdown_event = asyncio.Event()
         self._single_instance = SingleInstance(self.name)
-        self._watchdog_task: Optional[asyncio.Task] = None
+        self._watchdog_task: asyncio.Task | None = None
         self._watchdog_healthy = True  # Track if last health check passed
 
     @property
@@ -343,9 +345,9 @@ class BaseDaemon(ABC):
                     self._watchdog_healthy = False
                     # Don't send watchdog ping - systemd will restart us
 
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught
                 # Watchdog boundary: health failures are contained here.
-                logger.error("Watchdog loop error: %s", e)
+                logger.exception("Watchdog loop error")
                 self._watchdog_healthy = False
 
             # Wait for next interval or shutdown
@@ -377,7 +379,7 @@ class BaseDaemon(ABC):
                     return False
             except Exception as e:  # pylint: disable=broad-exception-caught
                 # Watchdog boundary: health failures are contained here.
-                logger.warning("Watchdog: D-Bus check failed: %s", e)
+                logger.warning("Watchdog: D-Bus check failed: %s", e, exc_info=True)
                 return False
 
         # Check 2: Call daemon's health_check() if available
@@ -392,7 +394,7 @@ class BaseDaemon(ABC):
                     return False
             except Exception as e:  # pylint: disable=broad-exception-caught
                 # Watchdog boundary: health failures are contained here.
-                logger.warning("Watchdog: health_check() raised exception: %s", e)
+                logger.warning("Watchdog: health_check() raised exception: %s", e, exc_info=True)
                 return False
 
         return True
@@ -415,19 +417,18 @@ class BaseDaemon(ABC):
             await self.run_daemon()
         except asyncio.CancelledError:
             logger.info("Daemon cancelled")
+            raise
         except Exception as e:  # pylint: disable=broad-exception-caught
             # Lifecycle boundary: log the failure, then propagate it.
-            logger.exception("Daemon error: %s", e)
+            logger.exception("Daemon error")
             sd_notify(f"STATUS=Error: {e}")
             raise
         finally:
             # Stop watchdog
             if self._watchdog_task and not self._watchdog_task.done():
                 self._watchdog_task.cancel()
-                try:
-                    await self._watchdog_task
-                except asyncio.CancelledError:
-                    pass
+                # Let the watchdog finish without swallowing a cancellation of this task
+                await asyncio.wait({self._watchdog_task})
 
             sd_notify("STOPPING=1")
             await self.shutdown()
@@ -442,6 +443,9 @@ class BaseDaemon(ABC):
 
         try:
             asyncio.run(self._run())
+        except asyncio.CancelledError:
+            # Cancellation already logged and cleaned up inside _run(); exit normally.
+            logger.info("Daemon exited after cancellation")
         finally:
             self._single_instance.release()
 
@@ -531,7 +535,7 @@ class BaseDaemon(ABC):
             return 1
 
     @classmethod
-    def main(cls, args: Optional[list] = None):
+    def main(cls, args: list | None = None):
         """
         Main entry point for the daemon.
 
