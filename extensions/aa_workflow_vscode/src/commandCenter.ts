@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any -- untyped D-Bus/JSON payloads; typing them is a separate refactor */
 /**
  * Command Center - Unified Tabbed Interface
  *
@@ -53,7 +52,8 @@ import { createLogger } from "./logger";
 import { getSkillExecutionWatcher } from "./skillExecutionWatcher";
 // NOTE: RefreshCoordinator removed - it was sending messages that were never handled in the webview.
 // UI updates now go through TabManager and tabContentUpdate messages.
-import { dbus } from "./dbusClient";
+import { dbus, type CronState, type MeetState } from "./dbusClient";
+import type { VideoMode } from "./services/VideoService";
 import { execAsync } from "./utils/index";
 import {
   MessageRouter,
@@ -84,6 +84,186 @@ import {
 const logger = createLogger("CommandCenter");
 
 // Debug logging - uses the main AI Workflow output channel
+/** A chat entry in Cursor's composer.composerData storage. */
+interface ComposerEntry {
+  composerId?: string;
+  name?: string;
+  isArchived?: boolean;
+  isDraft?: boolean;
+  lastUpdatedAt?: number;
+}
+
+/** A chat/session row shown in the Create Session tab. */
+interface SessionSummary {
+  id?: string;
+  name: string;
+  lastUpdated?: number | string;
+  source: string;
+  issueKey?: string | null;
+  persona?: string | null;
+  [field: string]: unknown;
+}
+
+/** Status of a background daemon or the MCP server. */
+interface ServiceStatus {
+  running: boolean;
+  status?: unknown;
+  error?: string;
+  pid?: number;
+}
+
+/** Availability of one Ollama inference instance. */
+interface OllamaStatus {
+  available: boolean;
+  port: number;
+}
+
+/** A Jira issue or GitLab MR summary. */
+interface WorkItem {
+  key?: string;
+  id?: string | number;
+  iid?: string;
+  title?: string;
+  summary?: string;
+  status?: string;
+  repo?: string;
+  type?: string;
+  priority?: string;
+  assignee?: string;
+  reporter?: string;
+  sprint?: string;
+  storyPoints?: number;
+  blocked?: boolean;
+  [field: string]: unknown;
+}
+
+/** Current work snapshot shown on the overview tab. */
+interface CurrentWorkSnapshot {
+  activeIssue: WorkItem | null;
+  activeMR: WorkItem | null;
+  followUps: WorkItem[];
+  sprintIssues: WorkItem[];
+  activeRepo: string | null;
+  totalActiveIssues: number;
+  totalActiveMRs: number;
+  allActiveIssues: {
+    key: string;
+    summary: string;
+    project: string;
+    workspace: string;
+  }[];
+  allActiveMRs: {
+    id: string;
+    title: string;
+    project: string;
+    workspace: string;
+  }[];
+}
+
+/** Raw result of a dbus-send call. */
+interface DBusQueryResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+/** Sprint bot state as returned by BotSprint get_state. */
+interface SprintDBusState {
+  issues?: SprintState["issues"];
+  currentSprint?: SprintState["currentSprint"];
+  nextSprint?: SprintState["nextSprint"];
+  automaticMode?: boolean;
+  manuallyStarted?: boolean;
+  backgroundTasks?: boolean;
+  processingIssue?: string | null;
+  lastUpdated?: string;
+}
+
+/** Message payload from the Create Session tab. */
+interface CreateSessionMessage {
+  issueKey?: string;
+  personaId?: string;
+  query?: string;
+  sessionId?: string;
+  config?: {
+    ralph?: {
+      enabled?: boolean;
+      maxIterations?: number;
+      criteria?: string;
+      goals?: string;
+    };
+    [field: string]: unknown;
+  };
+}
+
+/** A meeting note, transcript entry or bot log entry from the Meet daemon. */
+interface MeetingNoteData {
+  title?: string;
+  date?: string;
+  duration?: number;
+  participants?: string[];
+  summary?: string;
+  actionItems?: string[];
+  keyPoints?: string[];
+  [field: string]: unknown;
+}
+
+interface MeetLogEntry {
+  timestamp?: string | number;
+  speaker?: string;
+  level?: string;
+  message?: string;
+  text?: string;
+}
+
+/** The Skills tab state read when deciding whether to skip a re-render. */
+interface SkillsTabView {
+  isMindMapActive?: () => boolean;
+  skillView?: string;
+  detailedExecution?: { status?: string } | null;
+}
+
+/**
+ * Session daemon state. The daemon sends WorkspaceState-shaped workspaces
+ * (data/types), not the WorkspaceInfo declared on the D-Bus client.
+ */
+interface SessionStatePayload {
+  workspaces?: WorkspaceExportedState;
+  workspace_count?: number;
+}
+
+/** Response body from the MCP HTTP tool endpoint. */
+interface McpToolResponse {
+  error?: string;
+  result?: unknown;
+  messages?: unknown[];
+  results?: unknown[];
+  [field: string]: unknown;
+}
+
+/** Per-project vector index info. */
+interface VectorProjectInfo {
+  project: string;
+  indexed: boolean;
+  [field: string]: unknown;
+}
+
+/** A session search hit. */
+interface SessionSearchResult {
+  [field: string]: unknown;
+}
+
+/** Error thrown by child_process exec helpers. */
+interface ExecError {
+  stderr?: string;
+  stdout?: string;
+}
+
+/** Message text for any thrown value. */
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 function debugLog(msg: string) {
   logger.log(msg);
 }
@@ -149,13 +329,13 @@ export class CommandCenterPanel {
 
   // Service state (loaded via D-Bus from daemons)
   // TODO: Migrate these to StateStore
-  private _services: Record<string, any> = {};
-  private _ollama: Record<string, any> = {};
-  private _cronData: any = {};
+  private _services: Record<string, ServiceStatus> = {};
+  private _ollama: Record<string, OllamaStatus> = {};
+  private _cronData: Partial<CronState> = {};
   private _slackChannels: string[] = [];
-  private _sprintIssues: any[] = [];
+  private _sprintIssues: WorkItem[] = [];
   private _sprintIssuesUpdated: string = "";
-  private _meetData: any = {};
+  private _meetData: Partial<MeetState> = {};
   // Cached sprint state from D-Bus (for sync access in UI updates)
   private _cachedSprintState: SprintState | null = null;
 
@@ -459,7 +639,10 @@ export class CommandCenterPanel {
           onLoadCommands: async () => {
             await this._slackService!.getCommands();
           },
-          onSendCommand: async (commandName: string, args: any) => {
+          onSendCommand: async (
+            commandName: string,
+            args: Record<string, string>,
+          ) => {
             await this._slackService!.sendCommand(commandName, args);
           },
           onLoadConfig: async () => {
@@ -474,7 +657,7 @@ export class CommandCenterPanel {
       .register(
         new ServiceMessageHandler({
           // NOTE: refreshServices, serviceControl, testOllamaInstance removed - ServicesTab handles them directly
-          onQueryDBus: (service: string, method: string, args: any[]) =>
+          onQueryDBus: (service, method, args) =>
             this.handleDBusQuery(
               service,
               method,
@@ -514,7 +697,7 @@ export class CommandCenterPanel {
         new VideoPreviewMessageHandler({
           // Using VideoService for decoupled business logic
           onStartVideoPreview: async (device: string, mode: string) => {
-            await this._videoService!.startPreview(device, mode as any);
+            await this._videoService!.startPreview(device, mode as VideoMode);
           },
           onStopVideoPreview: async () => {
             await this._videoService!.stopPreview();
@@ -555,7 +738,7 @@ export class CommandCenterPanel {
             skill: string,
           ) => this.runInferenceTest(message, persona, skill),
           onGetInferenceStats: () => this.getInferenceStats(),
-          onUpdateInferenceConfig: (key: string, value: any) =>
+          onUpdateInferenceConfig: (key: string, value: unknown) =>
             this.updateInferenceConfig(key, value),
           onSemanticSearch: (query: string, project: string) =>
             this.executeSemanticSearch(query, project),
@@ -601,8 +784,10 @@ export class CommandCenterPanel {
       )
       .register(
         new CreateSessionMessageHandler({
-          onCreateSessionAction: (action: string, message: any) =>
-            this.handleCreateSessionAction(action, message),
+          onCreateSessionAction: (
+            action: string,
+            message: CreateSessionMessage,
+          ) => this.handleCreateSessionAction(action, message),
         }),
       )
       .register(
@@ -641,7 +826,8 @@ export class CommandCenterPanel {
     // Set up render callback so tabs can trigger re-renders when their state changes
     this._tabManager.setRenderCallback(() => {
       // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
-      const skillsTab = this._tabManager.getTab("skills") as any;
+      const skillsTab = this._tabManager.getTab("skills") as
+        SkillsTabView | undefined;
       const skipRerender =
         this._currentTab === "skills" && skillsTab?.isMindMapActive?.();
 
@@ -804,7 +990,7 @@ export class CommandCenterPanel {
         { name: "cpu", port: 11437, unit: "ollama-cpu.service" },
       ];
 
-      const statuses: Record<string, any> = {};
+      const statuses: Record<string, OllamaStatus> = {};
 
       // Check all instances via single systemctl call
       const { stdout } = await execAsync(
@@ -1380,9 +1566,11 @@ export class CommandCenterPanel {
       const result = await dbus.stats_getInferenceStats();
 
       if (result.success && result.data) {
-        const data = (result.data as any).stats || result.data;
         // Add the list of all available personas
-        data.available_personas = allPersonas;
+        const data = {
+          ...(result.data.stats || result.data),
+          available_personas: allPersonas,
+        };
         this._panel.webview.postMessage({
           command: "inferenceStatsUpdate",
           data,
@@ -1406,7 +1594,10 @@ export class CommandCenterPanel {
     }
   }
 
-  private async updateInferenceConfig(key: string, value: any): Promise<void> {
+  private async updateInferenceConfig(
+    key: string,
+    value: unknown,
+  ): Promise<void> {
     try {
       // Use D-Bus to update config (uses ConfigManager for thread-safe writes)
       // The key format is "section.subkey" - we need to split into section and key
@@ -1420,7 +1611,8 @@ export class CommandCenterPanel {
 
       const result = await dbus.cron_updateConfig(section, subKey, value);
 
-      const data = result.data as any;
+      const data = result.data as
+        { success?: boolean; error?: string } | undefined;
       if (result.success && data?.success) {
         debugLog(`D-Bus update_config result: ${JSON.stringify(data)}`);
         vscode.window.showInformationMessage(
@@ -1685,8 +1877,12 @@ except Exception as e:
     try {
       const result = await dbus.stats_getSkillExecution();
       if (result.success && result.data) {
-        const data = (result.data as any).execution || result.data;
-        this.updateSkillExecution(data);
+        // The stats daemon sends the camelCase SkillExecution shape from data/types,
+        // not the snake_case interface declared on the D-Bus client.
+        const payload = result.data as unknown as {
+          execution?: SkillExecution;
+        } & SkillExecution;
+        this.updateSkillExecution(payload.execution || payload);
       }
     } catch {
       // D-Bus may not be available
@@ -1759,27 +1955,7 @@ except Exception as e:
    * Returns cached current work (synchronous access).
    * Call loadCurrentWorkAsync() to refresh the cache.
    */
-  private getCachedCurrentWork(): {
-    activeIssue: any;
-    activeMR: any;
-    followUps: any[];
-    sprintIssues: any[];
-    activeRepo: string | null;
-    totalActiveIssues: number;
-    totalActiveMRs: number;
-    allActiveIssues: {
-      key: string;
-      summary: string;
-      project: string;
-      workspace: string;
-    }[];
-    allActiveMRs: {
-      id: string;
-      title: string;
-      project: string;
-      workspace: string;
-    }[];
-  } {
+  private getCachedCurrentWork(): CurrentWorkSnapshot {
     return (
       this._cachedCurrentWork || {
         activeIssue: null,
@@ -1798,7 +1974,7 @@ except Exception as e:
   /**
    * Fetch open MRs from GitLab via MCP tool
    */
-  private async fetchOpenMRs(): Promise<any[]> {
+  private async fetchOpenMRs(): Promise<WorkItem[]> {
     try {
       const { stdout } = await execAsync(
         `cd ~/src/redhat-ai-workflow && source .venv/bin/activate && python -c "
@@ -1811,7 +1987,7 @@ print(result[0].text if result else '[]')
       );
       // Parse the output - it's markdown table format
       const lines = stdout.trim().split("\n");
-      const mrs: any[] = [];
+      const mrs: WorkItem[] = [];
       for (const line of lines) {
         const match = line.match(/^\|\s*!(\d+)\s*\|/);
         if (match) {
@@ -1829,7 +2005,7 @@ print(result[0].text if result else '[]')
    * Fetch sprint issues from Jira via rh-issue CLI
    * Uses JQL: assignee = currentUser() AND sprint in openSprints()
    */
-  private async fetchSprintIssues(): Promise<any[]> {
+  private async fetchSprintIssues(): Promise<WorkItem[]> {
     try {
       // Use rh-issue CLI directly - it's more reliable than Python imports
       // The rh-issue script needs to run from its project directory
@@ -1852,7 +2028,7 @@ print(result[0].text if result else '[]')
       // Parse the output - it's markdown table format
       // Format: Key | Issuetype | Status | Priority | Summary | Assignee | Reporter | Sprint | Story Points | Blocked
       const lines = stdout.trim().split("\n");
-      const issues: any[] = [];
+      const issues: WorkItem[] = [];
       for (const line of lines) {
         // Skip header and separator lines
         if (
@@ -1884,14 +2060,14 @@ print(result[0].text if result else '[]')
 
       logger.log(`Parsed ${issues.length} issues from Jira`);
       return issues;
-    } catch (e: any) {
+    } catch (e) {
       logger.error("Failed to fetch sprint issues", e);
       // Log the actual error message
-      if (e.stderr) {
-        logger.error(`stderr: ${e.stderr}`);
+      if ((e as ExecError).stderr) {
+        logger.error(`stderr: ${(e as ExecError).stderr}`);
       }
-      if (e.stdout) {
-        logger.log(`stdout was: ${e.stdout}`);
+      if ((e as ExecError).stdout) {
+        logger.log(`stdout was: ${(e as ExecError).stdout}`);
       }
       return [];
     }
@@ -2030,8 +2206,8 @@ print(result[0].text if result else '[]')
     try {
       const result = await dbus.config_getSkillsList();
       if (result.success && result.data) {
-        const data = result.data as any;
-        const skills = (data.skills || []).map((s: any) => ({
+        const data = result.data;
+        const skills = (data.skills || []).map((s) => ({
           name: s.name,
           description: s.description || "",
           category: "general",
@@ -2057,7 +2233,7 @@ print(result[0].text if result else '[]')
     try {
       const result = await dbus.config_getSkillDefinition(skillName);
       if (result.success && result.data) {
-        const data = result.data as any;
+        const data = result.data;
         const skill = data.skill;
         if (skill && skill._raw_yaml) {
           this._panel.webview.postMessage({
@@ -2245,11 +2421,13 @@ print(result[0].text if result else '[]')
           state: files.state || [],
           learned: files.learned || [],
           sessions: files.sessions || [],
-          knowledge: (files.knowledge || []).map((k: any) => ({
-            project: k.persona || "",
-            persona: k.file || "",
-            confidence: k.confidence || 0,
-          })),
+          knowledge: (files.knowledge || []).map(
+            (k: { persona?: string; file?: string; confidence?: number }) => ({
+              project: k.persona || "",
+              persona: k.file || "",
+              confidence: k.confidence || 0,
+            }),
+          ),
         };
         return this._cachedMemoryFiles;
       }
@@ -2267,52 +2445,12 @@ print(result[0].text if result else '[]')
   }
 
   // Cache for current work
-  private _cachedCurrentWork: {
-    activeIssue: any;
-    activeMR: any;
-    followUps: any[];
-    sprintIssues: any[];
-    activeRepo: string | null;
-    totalActiveIssues: number;
-    totalActiveMRs: number;
-    allActiveIssues: {
-      key: string;
-      summary: string;
-      project: string;
-      workspace: string;
-    }[];
-    allActiveMRs: {
-      id: string;
-      title: string;
-      project: string;
-      workspace: string;
-    }[];
-  } | null = null;
+  private _cachedCurrentWork: CurrentWorkSnapshot | null = null;
 
   /**
    * Load current work via MemoryDaemon D-Bus.
    */
-  private async loadCurrentWorkAsync(): Promise<{
-    activeIssue: any;
-    activeMR: any;
-    followUps: any[];
-    sprintIssues: any[];
-    activeRepo: string | null;
-    totalActiveIssues: number;
-    totalActiveMRs: number;
-    allActiveIssues: {
-      key: string;
-      summary: string;
-      project: string;
-      workspace: string;
-    }[];
-    allActiveMRs: {
-      id: string;
-      title: string;
-      project: string;
-      workspace: string;
-    }[];
-  }> {
+  private async loadCurrentWorkAsync(): Promise<CurrentWorkSnapshot> {
     try {
       const result = await dbus.memory_getCurrentWork();
       if (result.success && result.data?.work) {
@@ -2330,13 +2468,13 @@ print(result[0].text if result else '[]')
           activeRepo,
           totalActiveIssues: work.activeIssues?.length || (activeIssue ? 1 : 0),
           totalActiveMRs: work.openMRs?.length || (activeMR ? 1 : 0),
-          allActiveIssues: (work.activeIssues || []).map((i: any) => ({
+          allActiveIssues: (work.activeIssues || []).map((i) => ({
             key: i.key || "",
             summary: i.summary || "",
             project: i.repo || "automation-analytics-backend",
             workspace: "current",
           })),
-          allActiveMRs: (work.openMRs || []).map((m: any) => ({
+          allActiveMRs: (work.openMRs || []).map((m) => ({
             id: String(m.id || ""),
             title: m.title || "",
             project: "automation-analytics-backend",
@@ -2386,7 +2524,7 @@ print(result[0].text if result else '[]')
     };
   } {
     const result = {
-      projects: [] as any[],
+      projects: [] as VectorProjectInfo[],
       totals: {
         indexedCount: 0,
         totalChunks: 0,
@@ -2571,7 +2709,7 @@ print(result[0].text if result else '[]')
     iface: string,
     method: string,
     args?: { type: string; value: string }[],
-  ): Promise<{ success: boolean; data?: any; error?: string }> {
+  ): Promise<DBusQueryResult> {
     try {
       // Explicitly set DBUS_SESSION_BUS_ADDRESS in case Cursor doesn't inherit it
       const uid = process.getuid ? process.getuid() : 1000;
@@ -2597,12 +2735,12 @@ print(result[0].text if result else '[]')
       // Parse D-Bus output
       const data = this.parseDBusOutput(stdout);
       return { success: true, data };
-    } catch (e: any) {
-      return { success: false, error: e.message || "D-Bus query failed" };
+    } catch (e) {
+      return { success: false, error: errorMessage(e) || "D-Bus query failed" };
     }
   }
 
-  private parseDBusOutput(output: string): any {
+  private parseDBusOutput(output: string): unknown {
     try {
       // Look for JSON object in the output
       const jsonObjMatch = output.match(/string\s+"(\{[\s\S]*\})"/);
@@ -2640,7 +2778,7 @@ print(result[0].text if result else '[]')
   }
 
   private async refreshServiceStatus() {
-    const serviceStatuses: any[] = [];
+    const serviceStatuses: ({ name: string } & ServiceStatus)[] = [];
 
     for (const service of DBUS_SERVICES) {
       const status = await this.checkServiceStatus(service);
@@ -2661,7 +2799,7 @@ print(result[0].text if result else '[]')
 
   private async checkServiceStatus(
     service: (typeof DBUS_SERVICES)[0],
-  ): Promise<any> {
+  ): Promise<ServiceStatus> {
     try {
       const result = await this.queryDBus(
         service.service,
@@ -2780,8 +2918,10 @@ print(result[0].text if result else '[]')
           break;
         }
       }
-    } catch (e: any) {
-      vscode.window.showErrorMessage(`Service control failed: ${e.message}`);
+    } catch (e) {
+      vscode.window.showErrorMessage(
+        `Service control failed: ${errorMessage(e)}`,
+      );
     }
   }
 
@@ -2792,9 +2932,12 @@ print(result[0].text if result else '[]')
   /**
    * Call an MCP tool via HTTP to the workflow server
    */
-  private async callMcpTool(toolName: string, args: any): Promise<any> {
+  private async callMcpTool(
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<McpToolResponse> {
     try {
-      const response = await new Promise<any>((resolve, reject) => {
+      const response = await new Promise<McpToolResponse>((resolve, reject) => {
         const postData = JSON.stringify({ tool: toolName, args });
         const req = http.request(
           {
@@ -2828,17 +2971,17 @@ print(result[0].text if result else '[]')
         req.end();
       });
       return response;
-    } catch (e: any) {
-      debugLog(`[CreateSession] MCP tool call failed: ${e.message}`);
-      return { error: e.message };
+    } catch (e) {
+      debugLog(`[CreateSession] MCP tool call failed: ${errorMessage(e)}`);
+      return { error: errorMessage(e) };
     }
   }
 
   /**
    * Load Cursor chat sessions from the workspace
    */
-  private loadCursorSessions(): any[] {
-    const sessions: any[] = [];
+  private loadCursorSessions(): SessionSummary[] {
+    const sessions: SessionSummary[] = [];
 
     try {
       // Get workspace URI
@@ -2885,19 +3028,18 @@ print(result[0].text if result else '[]')
             });
 
             if (result.trim()) {
-              const composerData = JSON.parse(result.trim());
+              const composerData = JSON.parse(result.trim()) as {
+                allComposers?: ComposerEntry[];
+              };
               const allComposers = composerData.allComposers || [];
 
               // Filter and sort chats
               const activeChats = allComposers
                 .filter(
-                  (c: any) =>
+                  (c) =>
                     !c.isArchived && !c.isDraft && (c.name || c.lastUpdatedAt),
                 )
-                .sort(
-                  (a: any, b: any) =>
-                    (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0),
-                )
+                .sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
                 .slice(0, 10);
 
               for (const chat of activeChats) {
@@ -2918,8 +3060,10 @@ print(result[0].text if result else '[]')
           debugLog(`[CreateSession] Error parsing workspace.json: ${e}`);
         }
       }
-    } catch (e: any) {
-      debugLog(`[CreateSession] Error loading Cursor sessions: ${e.message}`);
+    } catch (e) {
+      debugLog(
+        `[CreateSession] Error loading Cursor sessions: ${errorMessage(e)}`,
+      );
     }
 
     return sessions;
@@ -2928,8 +3072,8 @@ print(result[0].text if result else '[]')
   /**
    * Load Claude Console sessions from ~/.claude/
    */
-  private loadClaudeSessions(): any[] {
-    const sessions: any[] = [];
+  private loadClaudeSessions(): SessionSummary[] {
+    const sessions: SessionSummary[] = [];
     const claudeDir = path.join(os.homedir(), ".claude");
     const claudeConfigDir = path.join(os.homedir(), ".config", "claude-code");
 
@@ -2969,8 +3113,8 @@ print(result[0].text if result else '[]')
   /**
    * Load Gemini sessions from import directory
    */
-  private loadGeminiSessions(): any[] {
-    const sessions: any[] = [];
+  private loadGeminiSessions(): SessionSummary[] {
+    const sessions: SessionSummary[] = [];
     const geminiDir = path.join(
       os.homedir(),
       ".config",
@@ -2999,7 +3143,10 @@ print(result[0].text if result else '[]')
     return sessions;
   }
 
-  private async handleCreateSessionAction(action: string, message: any) {
+  private async handleCreateSessionAction(
+    action: string,
+    message: CreateSessionMessage,
+  ) {
     try {
       switch (action) {
         case "autoContext":
@@ -3029,11 +3176,11 @@ print(result[0].text if result else '[]')
                   error: result?.error || "Failed to fetch issue",
                 });
               }
-            } catch (e: any) {
+            } catch (e) {
               this._panel?.webview.postMessage({
                 command: "jiraError",
                 issueKey: message.issueKey,
-                error: e.message,
+                error: errorMessage(e),
               });
             }
           }
@@ -3052,9 +3199,9 @@ print(result[0].text if result else '[]')
                 query: message.query,
                 results: result?.messages || [],
               });
-            } catch (e: any) {
+            } catch (e) {
               vscode.window.showErrorMessage(
-                `Slack search failed: ${e.message}`,
+                `Slack search failed: ${errorMessage(e)}`,
               );
             }
           }
@@ -3073,9 +3220,9 @@ print(result[0].text if result else '[]')
                 query: message.query,
                 results: result?.results || [],
               });
-            } catch (e: any) {
+            } catch (e) {
               vscode.window.showErrorMessage(
-                `Code search failed: ${e.message}`,
+                `Code search failed: ${errorMessage(e)}`,
               );
             }
           }
@@ -3090,7 +3237,7 @@ print(result[0].text if result else '[]')
                 message.personaId,
               );
               if (result.success && result.data) {
-                const personaData = (result.data as any).persona || result.data;
+                const personaData = result.data.persona || result.data;
                 const tools = personaData?.tools || [];
                 this._panel?.webview.postMessage({
                   command: "personaTools",
@@ -3098,9 +3245,9 @@ print(result[0].text if result else '[]')
                   tools: tools,
                 });
               }
-            } catch (e: any) {
+            } catch (e) {
               debugLog(
-                `[CreateSession] Failed to load persona tools: ${e.message}`,
+                `[CreateSession] Failed to load persona tools: ${errorMessage(e)}`,
               );
             }
           }
@@ -3118,8 +3265,10 @@ print(result[0].text if result else '[]')
               claude: claudeSessions,
               gemini: geminiSessions,
             });
-          } catch (e: any) {
-            debugLog(`[CreateSession] Failed to load sessions: ${e.message}`);
+          } catch (e) {
+            debugLog(
+              `[CreateSession] Failed to load sessions: ${errorMessage(e)}`,
+            );
           }
           break;
 
@@ -3273,9 +3422,11 @@ print(result[0].text if result else '[]')
         default:
           debugLog(`[CreateSession] Unknown action: ${action}`);
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error("[CreateSession] Error:", e);
-      vscode.window.showErrorMessage(`Create session error: ${e.message}`);
+      vscode.window.showErrorMessage(
+        `Create session error: ${errorMessage(e)}`,
+      );
     }
   }
 
@@ -3507,8 +3658,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
       // NOTE: performanceTabBadgeUpdate message removed - it was never handled in webview.
       // The PerformanceTab class handles its own badge updates via TabManager.
-    } catch (e: any) {
-      vscode.window.showErrorMessage(`Performance action failed: ${e.message}`);
+    } catch (e) {
+      vscode.window.showErrorMessage(
+        `Performance action failed: ${errorMessage(e)}`,
+      );
     }
   }
 
@@ -3577,7 +3730,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         // Check what name Cursor gave the chat
         const updatedData = getComposerData();
         const newChat = updatedData?.allComposers?.find(
-          (c: any) => c.composerId === chatId,
+          (c: ComposerEntry) => c.composerId === chatId,
         );
         const chatName = newChat?.name || "Unknown";
 
@@ -3605,8 +3758,10 @@ Display the question text, evidence, notes, and AI-generated summary.`;
           `Chat created for ${issueKey} but no ID returned`,
         );
       }
-    } catch (e: any) {
-      vscode.window.showErrorMessage(`Chat launcher failed: ${e.message}`);
+    } catch (e) {
+      vscode.window.showErrorMessage(
+        `Chat launcher failed: ${errorMessage(e)}`,
+      );
       logger.error("Chat launcher error", e);
     }
   }
@@ -3697,7 +3852,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   }
 
   // Formatting helpers for meeting data
-  private formatMeetingNote(note: any): string {
+  private formatMeetingNote(note: MeetingNoteData): string {
     const lines = [
       `# ${note.title || "Meeting Notes"}`,
       "",
@@ -3722,7 +3877,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     return lines.join("\n");
   }
 
-  private formatTranscript(transcript: any): string {
+  private formatTranscript(
+    transcript: MeetLogEntry[] | { entries?: MeetLogEntry[] },
+  ): string {
     const entries = Array.isArray(transcript)
       ? transcript
       : transcript.entries || [];
@@ -3749,7 +3906,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     return lines.join("\n");
   }
 
-  private formatBotLog(log: any): string {
+  private formatBotLog(
+    log: MeetLogEntry[] | { entries?: MeetLogEntry[] },
+  ): string {
     const entries = Array.isArray(log) ? log : log.entries || [];
     const lines = ["=== Meeting Bot Log ===", ""];
 
@@ -3803,8 +3962,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       const result = await dbus.config_getToolModules();
       if (result.success && result.data) {
-        const data = result.data as any;
-        const modules: ToolModule[] = (data.modules || []).map((m: any) => ({
+        const data = result.data;
+        const modules: ToolModule[] = (data.modules || []).map((m) => ({
           name: m.name,
           displayName: this._formatModuleName(m.name),
           description: this._getModuleDescription(m.name),
@@ -4006,8 +4165,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     try {
       const result = await dbus.config_getPersonasList();
       if (result.success && result.data) {
-        const data = result.data as any;
-        const personas: Persona[] = (data.personas || []).map((p: any) => {
+        const data = result.data;
+        const personas: Persona[] = (data.personas || []).map((p) => {
           const fileName = p.file
             ? path.basename(p.file).replace(".yaml", "")
             : p.name;
@@ -4276,22 +4435,21 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Load session state via D-Bus from BotSession daemon.
    */
-  private async _loadSessionStateViaDBus(): Promise<any> {
+  private async _loadSessionStateViaDBus(): Promise<SessionStatePayload | null> {
     try {
       const result = await dbus.session_getState();
 
       if (result.success && result.data) {
-        const data = result.data as any;
+        const data = result.data as unknown as SessionStatePayload & {
+          state?: SessionStatePayload;
+        };
         // Handle both direct state and wrapped {success, state} format
-        if (data.state) {
-          return data.state;
-        }
-        return data;
+        return data.state || data;
       }
       debugLog(`Session D-Bus get_state failed: ${result.error}`);
       return null;
-    } catch (e: any) {
-      debugLog(`Session D-Bus error: ${e.message}`);
+    } catch (e) {
+      debugLog(`Session D-Bus error: ${errorMessage(e)}`);
       return null;
     }
   }
@@ -4299,20 +4457,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Load meet state via D-Bus from BotMeet daemon.
    */
-  private async _loadMeetStateViaDBus(): Promise<any> {
+  private async _loadMeetStateViaDBus(): Promise<Partial<MeetState> | null> {
     try {
       const result = await dbus.meet_getState();
 
       if (result.success && result.data) {
-        if (result.data.state) {
-          return result.data.state;
-        }
-        return result.data;
+        // Handle both wrapped {state} and direct state payloads
+        return result.data.state || (result.data as Partial<MeetState>);
       }
       debugLog(`Meet D-Bus get_state failed: ${result.error}`);
       return null;
-    } catch (e: any) {
-      debugLog(`Meet D-Bus error: ${e.message}`);
+    } catch (e) {
+      debugLog(`Meet D-Bus error: ${errorMessage(e)}`);
       return null;
     }
   }
@@ -4320,20 +4476,18 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Load cron state via D-Bus from BotCron daemon.
    */
-  private async _loadCronStateViaDBus(): Promise<any> {
+  private async _loadCronStateViaDBus(): Promise<Partial<CronState> | null> {
     try {
       const result = await dbus.cron_getState();
 
       if (result.success && result.data) {
-        if (result.data.state) {
-          return result.data.state;
-        }
-        return result.data;
+        // Handle both wrapped {state} and direct state payloads
+        return result.data.state || (result.data as Partial<CronState>);
       }
       debugLog(`Cron D-Bus get_state failed: ${result.error}`);
       return null;
-    } catch (e: any) {
-      debugLog(`Cron D-Bus error: ${e.message}`);
+    } catch (e) {
+      debugLog(`Cron D-Bus error: ${errorMessage(e)}`);
       return null;
     }
   }
@@ -4341,7 +4495,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Load sprint state via D-Bus from BotSprint daemon.
    */
-  private async _loadSprintStateViaDBus(): Promise<any> {
+  private async _loadSprintStateViaDBus(): Promise<SprintDBusState | null> {
     try {
       const result = await this.queryDBus(
         "com.aiworkflow.BotSprint",
@@ -4355,15 +4509,15 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       );
 
       if (result.success && result.data) {
-        if (result.data.state) {
-          return result.data.state;
-        }
-        return result.data;
+        const data = result.data as SprintDBusState & {
+          state?: SprintDBusState;
+        };
+        return data.state || data;
       }
       debugLog(`Sprint D-Bus get_state failed: ${result.error}`);
       return null;
-    } catch (e: any) {
-      debugLog(`Sprint D-Bus error: ${e.message}`);
+    } catch (e) {
+      debugLog(`Sprint D-Bus error: ${errorMessage(e)}`);
       return null;
     }
   }
@@ -4396,7 +4550,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
   /**
    * Format services data for UI consumption.
    */
-  private _formatServicesForUI(): any[] {
+  private _formatServicesForUI(): ({
+    name: string;
+  } & Partial<ServiceStatus>)[] {
     const serviceNames = [
       "slack",
       "cron",
@@ -4474,7 +4630,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     if (cycleSecond % 5 === 0) {
       const activeTab = this._tabManager.getTab(this._currentTab);
       if (activeTab) {
-        const skillsTab = this._tabManager.getTab("skills") as any;
+        const skillsTab = this._tabManager.getTab("skills") as
+          SkillsTabView | undefined;
 
         // Skip re-render if Skills tab is showing the mind map (D3 simulation would restart)
         const skipForMindMap =
@@ -4985,7 +5142,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 let toolCount =
                   session.tool_count ??
                   session.static_tool_count ??
-                  (session as any).active_tools?.length ??
+                  session.active_tools?.length ??
                   0;
                 if (toolCount === 0) {
                   // Fallback: calculate from persona's tool modules
@@ -5010,7 +5167,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
                 const sessionName =
                   session.name || `Session ${sessionId.substring(0, 6)}`;
                 const sessionProject =
-                  (session as any).project || item.workspaceProject || "-";
+                  session.project || item.workspaceProject || "-";
                 const issueKeys = session.issue_key
                   ? session.issue_key.split(", ")
                   : [];
@@ -5102,7 +5259,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
 
     for (const item of allSessions) {
       const groupKey =
-        (item.session as any)?.project || item.workspaceProject || "No Project";
+        item.session?.project || item.workspaceProject || "No Project";
       if (!groups.has(groupKey)) {
         groups.set(groupKey, []);
       }
@@ -5288,9 +5445,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
     const activeClass = isActive ? "session-active" : "";
 
     // Per-session project support
-    const sessionProject = (session as any).project || null;
-    const isProjectAutoDetected =
-      (session as any).is_project_auto_detected || false;
+    const sessionProject = session.project || null;
+    const isProjectAutoDetected = session.is_project_auto_detected || false;
     const projectSuffix = isProjectAutoDetected ? " (auto)" : "";
 
     // Format last tool info
@@ -5542,9 +5698,9 @@ Display the question text, evidence, notes, and AI-generated summary.`;
               `No transcript found for meeting: ${selected.label}`,
             );
           }
-        } catch (error: any) {
+        } catch (error) {
           vscode.window.showWarningMessage(
-            `Failed to load transcript: ${error.message}`,
+            `Failed to load transcript: ${errorMessage(error)}`,
           );
         }
       } else {
@@ -5662,7 +5818,7 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       const result = await dbus.session_searchChats(query, 20);
 
       if (result.success && result.data) {
-        const data = result.data as any;
+        const data = result.data;
         const searchResult = typeof data === "string" ? JSON.parse(data) : data;
         this._panel.webview.postMessage({
           type: "searchResults",
@@ -5689,13 +5845,13 @@ Display the question text, evidence, notes, and AI-generated summary.`;
    */
   private _searchSessionsLocal(query: string): void {
     const queryLower = query.toLowerCase();
-    const results: any[] = [];
+    const results: SessionSearchResult[] = [];
 
     if (this._workspaceState) {
       for (const [uri, ws] of Object.entries(this._workspaceState)) {
         const sessions = ws.sessions || {};
         for (const [sid, session] of Object.entries(sessions)) {
-          const sess = session as any;
+          const sess = session;
           const name = sess.name || "";
           const issueKey = sess.issue_key || "";
 
@@ -5819,7 +5975,8 @@ Display the question text, evidence, notes, and AI-generated summary.`;
         // Remove via D-Bus - session daemon owns the state
         const dbusResult = await dbus.session_removeWorkspace(uri);
 
-        const data = dbusResult.data as any;
+        const data = dbusResult.data as
+          { success?: boolean; error?: string } | undefined;
         if (dbusResult.success && data?.success) {
           // Update local state from D-Bus response
           delete this._workspaceState[uri];
@@ -5910,15 +6067,17 @@ Display the question text, evidence, notes, and AI-generated summary.`;
       let agentName = "developer"; // Default
 
       if (workResult.success && workResult.data) {
-        const work = (workResult.data as any).work || workResult.data;
+        const work = (workResult.data.work || workResult.data) as {
+          active_agent?: string;
+          persona?: string;
+        };
         agentName = work?.active_agent || work?.persona || "developer";
       }
 
       // Get persona tools via D-Bus
       const personaResult = await dbus.config_getPersonaDefinition(agentName);
       if (personaResult.success && personaResult.data) {
-        const persona =
-          (personaResult.data as any).persona || personaResult.data;
+        const persona = personaResult.data.persona || personaResult.data;
         const tools = persona?.tools || [];
         this._activeAgentCache = { name: agentName, tools };
         return this._activeAgentCache;
