@@ -279,7 +279,8 @@ async def _speak_in_meeting(controller, pipe_path, text: str) -> str:
         logger.info("Re-muted microphone after TTS message")
 
     if success:
-        return "✅ Message sent to meeting: \"{text[:50]}{'...' if len(text) > 50 else ''}\""
+        preview = f"{text[:50]}..." if len(text) > 50 else text
+        return f'✅ Message sent to meeting: "{preview}"'
     return "❌ Failed to play audio to meeting"
 
 

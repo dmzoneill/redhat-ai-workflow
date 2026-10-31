@@ -288,3 +288,44 @@ def test_public_accessors():
     vars(controller)["_created_at"] = created
     assert controller.created_at is created
     assert browser_controller.GoogleMeetController.SELECTORS["leave_button"]
+
+
+async def test_speak_in_meeting_reports_sent_text(mods, monkeypatch):
+    """The success message includes the (truncated) text, not a literal placeholder."""
+    calls = []
+
+    async def ok():
+        return True
+
+    async def synthesize(_text):
+        return SimpleNamespace(success=True)
+
+    class FakeOutput:
+        """Records playback."""
+
+        def __init__(self, pipe_path):
+            calls.append(("open", pipe_path))
+
+        async def play_tts_result(self, _result):
+            """Pretend to play."""
+            calls.append(("play",))
+            return True
+
+        def close(self):
+            """Pretend to close."""
+            calls.append(("close",))
+
+    async def unmute():
+        calls.append(("unmute",))
+
+    async def mute():
+        calls.append(("mute",))
+
+    export = mods.meet_notes_export
+    monkeypatch.setattr(export, "get_tts_engine", lambda backend: SimpleNamespace(initialize=ok, synthesize=synthesize))
+    monkeypatch.setattr(export, "AudioOutputManager", FakeOutput)
+    controller = SimpleNamespace(unmute_and_speak=unmute, mute=mute)
+    speak = vars(export)["_speak_in_meeting"]
+    assert await speak(controller, "p", "hello") == '✅ Message sent to meeting: "hello"'
+    assert await speak(controller, "p", "x" * 60) == f'✅ Message sent to meeting: "{"x" * 50}..."'
+    assert [c[0] for c in calls[:5]] == ["unmute", "open", "play", "close", "mute"]
