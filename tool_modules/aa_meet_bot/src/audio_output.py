@@ -21,8 +21,8 @@ import asyncio
 import logging
 import os
 import time
+import wave
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -51,7 +51,7 @@ class AudioPipeWriter:
         """
         self.pipe_path = pipe_path
         self.sample_rate = sample_rate
-        self._fd: Optional[int] = None
+        self._fd: int | None = None
         self._is_open = False
 
     def open(self) -> bool:
@@ -65,7 +65,7 @@ class AudioPipeWriter:
             return True
 
         if not self.pipe_path.exists():
-            logger.error(f"Pipe does not exist: {self.pipe_path}")
+            logger.error("Pipe does not exist: %s", self.pipe_path)
             return False
 
         try:
@@ -73,15 +73,13 @@ class AudioPipeWriter:
             # O_NONBLOCK prevents blocking if Chrome isn't reading yet
             self._fd = os.open(str(self.pipe_path), os.O_WRONLY | os.O_NONBLOCK)
             self._is_open = True
-            logger.info(f"Opened audio pipe: {self.pipe_path}")
+            logger.info("Opened audio pipe: %s", self.pipe_path)
             return True
         except OSError as e:
             if e.errno == 6:  # ENXIO - no reader
-                logger.warning(
-                    f"No reader on pipe (Chrome not listening?): {self.pipe_path}"
-                )
+                logger.warning("No reader on pipe (Chrome not listening?): %s", self.pipe_path)
             else:
-                logger.error(f"Failed to open pipe: {e}")
+                logger.error("Failed to open pipe: %s", e)
             return False
 
     def write(self, audio_data: np.ndarray, sample_rate: int = 16000) -> bool:
@@ -95,9 +93,11 @@ class AudioPipeWriter:
         Returns:
             True if written successfully
         """
-        if not self._is_open or self._fd is None:
-            if not self.open():
-                return False
+        if (not self._is_open or self._fd is None) and not self.open():
+            return False
+        fd = self._fd
+        if fd is None:
+            return False
 
         try:
             # Resample if needed
@@ -110,7 +110,7 @@ class AudioPipeWriter:
             pcm_int16 = (audio_data * 32767).astype(np.int16)
 
             # Direct write to pipe - no intermediate file!
-            os.write(self._fd, pcm_int16.tobytes())
+            os.write(fd, pcm_int16.tobytes())
             return True
 
         except BlockingIOError:
@@ -123,8 +123,8 @@ class AudioPipeWriter:
             self._is_open = False
             self._fd = None
             return False
-        except Exception as e:
-            logger.error(f"Failed to write to pipe: {e}")
+        except (OSError, ValueError) as e:
+            logger.error("Failed to write to pipe: %s", e)
             return False
 
     def _resample(
@@ -150,12 +150,12 @@ class AudioPipeWriter:
         if self._fd is not None:
             try:
                 os.close(self._fd)
-            except Exception as e:
-                logger.debug(f"Error closing pipe: {e}")
+            except OSError as e:
+                logger.debug("Error closing pipe: %s", e)
             finally:
                 self._fd = None
                 self._is_open = False
-        logger.info(f"Closed audio pipe: {self.pipe_path}")
+        logger.info("Closed audio pipe: %s", self.pipe_path)
 
     def is_open(self) -> bool:
         """Check if pipe is open."""
@@ -260,18 +260,15 @@ class AudioOutputManager:
                 tts_result.audio_data,
                 tts_result.sample_rate,
             )
-        elif tts_result.audio_path and tts_result.audio_path.exists():
+        if tts_result.audio_path and tts_result.audio_path.exists():
             # Load from file
-            import wave
-
             with wave.open(str(tts_result.audio_path), "rb") as wav:
                 frames = wav.readframes(wav.getnframes())
                 audio_data = np.frombuffer(frames, dtype=np.int16)
                 audio_data = audio_data.astype(np.float32) / 32768.0
                 return await self.play_audio(audio_data, wav.getframerate())
-        else:
-            logger.error("No audio data in TTS result")
-            return False
+        logger.error("No audio data in TTS result")
+        return False
 
     def close(self) -> None:
         """Close the audio output."""
