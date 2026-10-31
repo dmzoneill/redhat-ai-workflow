@@ -42,3 +42,17 @@ def test_exclusive_lock_does_not_block_event_loop(tmp_path):
 def test_diagnose_kube_error(err, expected):
     """Connection test failures are explained by their error text."""
     assert vars(infra_tools)["_diagnose_kube_error"]("s", err, "")[0] == expected
+
+
+def test_safe_state_path_allows_temp_and_home(tmp_path, monkeypatch):
+    """Configured state paths under temp or home are accepted."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    safe = vars(infra_tools)["_safe_state_path"]
+    assert safe(str(tmp_path / "state")) == (tmp_path / "state").resolve()
+    assert safe("~/x.lock") == (tmp_path / "x.lock").resolve()
+
+
+def test_safe_state_path_rejects_outside(tmp_path, monkeypatch):
+    """Configured state paths elsewhere are rejected."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert vars(infra_tools)["_safe_state_path"]("/etc/passwd") is None

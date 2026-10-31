@@ -19,9 +19,6 @@ from typing import TYPE_CHECKING
 
 from mcp.types import TextContent
 
-if TYPE_CHECKING:
-    from fastmcp import FastMCP
-
 # Setup project path for server imports (must be before server imports)
 from tool_modules.common import PROJECT_ROOT  # Sets up sys.path
 
@@ -32,12 +29,25 @@ __project_root__ = PROJECT_ROOT  # Module initialization
 from server.tool_registry import ToolRegistry
 from server.utils import load_config, run_cmd_full, run_cmd_shell, truncate_output
 
+if TYPE_CHECKING:
+    from fastmcp import FastMCP
+
 logger = logging.getLogger(__name__)
 
 
 # File-based state for VPN connection debouncing
 # Uses file lock + timestamp file to coordinate across multiple process/module instances
 # Paths are read from config.json "paths" section with fallbacks to /tmp
+def _safe_state_path(configured: str) -> Path | None:
+    """Return the resolved path if it lies under the temp or home directory."""
+    resolved = os.path.realpath(os.path.expanduser(configured))
+    for base in (tempfile.gettempdir(), os.path.expanduser("~")):
+        root = os.path.realpath(base)
+        if resolved.startswith(root + os.sep):
+            return Path(resolved)
+    return None
+
+
 def _get_infra_path(key: str, default: str) -> Path:
     """Read an infrastructure file path from config.json with fallback."""
     try:
@@ -45,7 +55,10 @@ def _get_infra_path(key: str, default: str) -> Path:
         paths = config.get("paths", {})
         configured = paths.get(key)
         if configured:
-            return Path(configured)
+            safe = _safe_state_path(str(configured))
+            if safe is not None:
+                return safe
+            logger.warning("Ignoring paths.%s outside temp/home directories: %s", key, configured)
     except (OSError, ValueError, AttributeError) as e:
         logger.debug("Suppressed error in _get_infra_path: %s", e)
     return Path(default)
