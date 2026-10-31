@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
 from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
@@ -104,16 +103,23 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             await asyncio.sleep(1.0)  # Give time for first frames to be written
 
             # Verify the device is now in capture mode
-            # Query the device off the event loop; v4l2-ctl can block for up to 5s
-            device_info = await asyncio.to_thread(
-                subprocess.run,
-                ["v4l2-ctl", "--device", video_device, "--all"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
+            # Query the device without blocking the event loop (5s cap, as before)
+            proc = await asyncio.create_subprocess_exec(
+                "v4l2-ctl",
+                "--device",
+                video_device,
+                "--all",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if "Video Capture" in device_info.stdout and "Video Output" not in device_info.stdout:
+            try:
+                stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise
+            device_info = stdout_bytes.decode(errors="replace")
+            if "Video Capture" in device_info and "Video Output" not in device_info:
                 logger.info(
                     "[%s] Device is in CAPTURE mode - Chrome will detect it",
                     self._instance_id,
