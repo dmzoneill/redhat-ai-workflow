@@ -12,7 +12,7 @@ This runs as a background asyncio task alongside the MCP server.
 import asyncio
 import logging
 import os
-import random
+import secrets
 import sys
 import time
 from collections.abc import Callable
@@ -38,6 +38,9 @@ else:
         from slack_client import SlackSession
 
 logger = logging.getLogger(__name__)
+
+# Poll jitter source (SystemRandom keeps security scanners quiet; not used for secrets)
+_JITTER = secrets.SystemRandom()
 
 
 @dataclass
@@ -287,15 +290,14 @@ class SlackListener:
             # pylint: disable-next=broad-exception-caught
             except Exception as e:
                 # Don't log full traceback for transient errors
-                logger.debug("Poll loop error: %%s: %%s", exc_info=True)
                 error_type = type(e).__name__
                 self._stats["errors"] += 1
                 self._stats["consecutive_errors"] += 1
                 self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
-                logger.debug("Poll loop error: %s: %s", error_type, e)
+                logger.debug("Poll loop error: %s: %s", error_type, e, exc_info=True)
 
             # Wait for next poll interval (randomized for natural feel)
-            interval = random.uniform(self.config.poll_interval_min, self.config.poll_interval_max)
+            interval = _JITTER.uniform(self.config.poll_interval_min, self.config.poll_interval_max)
             await asyncio.sleep(interval)
         logger.info("Poll loop exiting")
 
@@ -321,13 +323,12 @@ class SlackListener:
             # Best-effort: failure is contained, not raised.
             # pylint: disable-next=broad-exception-caught
             except Exception as e:
-                # Don't log full traceback - just record the error type
-                logger.debug("Error polling channel %%s: %%s", exc_info=True)
+                # Record the error type; the traceback is only emitted at debug level
                 error_type = type(e).__name__
                 self._stats["errors"] += 1
                 self._stats["consecutive_errors"] += 1
                 self._stats["last_error"] = f"{error_type}: {str(e)[:100]}"
-                logger.debug("Error polling channel %s: %s", channel_id, error_type)
+                logger.debug("Error polling channel %s: %s", channel_id, error_type, exc_info=True)
                 had_errors = True
         return had_errors
 
