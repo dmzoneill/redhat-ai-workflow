@@ -7,7 +7,6 @@ enabling Layer 3 of the tool filtering system.
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 class SkillToolDiscovery:
     """Dynamically discover tools required by a skill from YAML."""
 
-    def __init__(self, skills_dir: Optional[Path] = None):
+    def __init__(self, skills_dir: Path | None = None):
         """Initialize skill discovery.
 
         Args:
@@ -323,39 +322,74 @@ class SkillToolDiscovery:
 
 # ==================== Fast Skill Detection ====================
 
+
+class OrderedSubstrings:
+    """Linear-time matcher for ``a.*b.*c`` style patterns (case-insensitive, single line).
+
+    Each part must appear in order on the same line, as with ``re.search`` where ``.``
+    does not cross newlines. Uses ``str.find`` so there is no regex backtracking.
+    """
+
+    def __init__(self, *parts: str, digit_after_last: bool = False):
+        self.parts = tuple(part.lower() for part in parts)
+        self.digit_after_last = digit_after_last
+
+    def line_matches(self, line: str) -> bool:
+        """Return True if the (lower-cased) parts appear in order within ``line``."""
+        pos = 0
+        for part in self.parts[:-1]:
+            idx = line.find(part, pos)
+            if idx < 0:
+                return False
+            pos = idx + len(part)
+        last = self.parts[-1]
+        idx = line.find(last, pos)
+        while idx >= 0:
+            end = idx + len(last)
+            if not self.digit_after_last or (end < len(line) and line[end].isdigit()):
+                return True
+            idx = line.find(last, idx + 1)
+        return False
+
+    def search(self, text: str) -> bool:
+        """Return True if the parts appear in order on any single line of ``text``."""
+        return any(self.line_matches(line) for line in text.lower().split("\n"))
+
+
 # Skill patterns for fast detection (no NPU needed)
-SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
+SKILL_PATTERNS: dict[str, list[re.Pattern[str] | OrderedSubstrings]] = {
     "test_mr_ephemeral": [
-        re.compile(r"deploy.*mr|test.*mr|spin.*up.*mr", re.I),
-        re.compile(r"ephemeral.*mr\s*\d+", re.I),
-        re.compile(r"deploy.*ephemeral", re.I),
-        re.compile(r"test.*in.*ephemeral", re.I),
+        re.compile(r"deploy.*mr|test.*mr", re.IGNORECASE),
+        OrderedSubstrings("spin", "up", "mr"),
+        re.compile(r"ephemeral.*mr\s*\d+", re.IGNORECASE),
+        re.compile(r"deploy.*ephemeral", re.IGNORECASE),
+        OrderedSubstrings("test", "in", "ephemeral"),
     ],
     "review_pr": [
-        re.compile(r"review.*mr|review.*!\d+", re.I),
-        re.compile(r"check.*mr.*review", re.I),
-        re.compile(r"look.*at.*mr", re.I),
+        re.compile(r"review.*mr|review.*!\d+", re.IGNORECASE),
+        OrderedSubstrings("check", "mr", "review"),
+        OrderedSubstrings("look", "at", "mr"),
     ],
     "start_work": [
-        re.compile(r"start.*work.*aap-\d+", re.I),
-        re.compile(r"begin.*aap-\d+", re.I),
-        re.compile(r"pick.*up.*aap-\d+", re.I),
+        OrderedSubstrings("start", "work", "aap-", digit_after_last=True),
+        re.compile(r"begin.*aap-\d+", re.IGNORECASE),
+        OrderedSubstrings("pick", "up", "aap-", digit_after_last=True),
     ],
     "investigate_slack_alert": [
-        re.compile(r"investigate.*alert", re.I),
-        re.compile(r"look.*into.*alert", re.I),
-        re.compile(r"whats.*firing", re.I),  # codespell:ignore
-        re.compile(r"what.*alerts", re.I),
+        re.compile(r"investigate.*alert", re.IGNORECASE),
+        OrderedSubstrings("look", "into", "alert"),
+        re.compile(r"whats.*firing", re.IGNORECASE),  # codespell:ignore
+        re.compile(r"what.*alerts", re.IGNORECASE),
     ],
     "create_mr": [
-        re.compile(r"create.*mr|open.*mr", re.I),
-        re.compile(r"push.*and.*mr", re.I),
-        re.compile(r"submit.*mr", re.I),
+        re.compile(r"create.*mr|open.*mr", re.IGNORECASE),
+        OrderedSubstrings("push", "and", "mr"),
+        re.compile(r"submit.*mr", re.IGNORECASE),
     ],
     "check_pipeline": [
-        re.compile(r"check.*pipeline|pipeline.*status", re.I),
-        re.compile(r"ci.*status", re.I),
-        re.compile(r"build.*status", re.I),
+        re.compile(r"check.*pipeline|pipeline.*status", re.IGNORECASE),
+        re.compile(r"ci.*status", re.IGNORECASE),
+        re.compile(r"build.*status", re.IGNORECASE),
     ],
 }
 
@@ -374,9 +408,7 @@ def detect_skill(message: str) -> str | None:
     for skill_name, patterns in SKILL_PATTERNS.items():
         for pattern in patterns:
             if pattern.search(message):
-                logger.debug(
-                    "Fast skill detection: %s matched '%s...'", skill_name, message[:50]
-                )
+                logger.debug("Fast skill detection: %s matched '%s...'", skill_name, message[:50])
                 return skill_name
     return None
 
@@ -390,11 +422,11 @@ def add_skill_pattern(skill_name: str, pattern: str) -> None:
     """
     if skill_name not in SKILL_PATTERNS:
         SKILL_PATTERNS[skill_name] = []
-    SKILL_PATTERNS[skill_name].append(re.compile(pattern, re.I))
+    SKILL_PATTERNS[skill_name].append(re.compile(pattern, re.IGNORECASE))
 
 
 # Singleton discovery instance
-_discovery: Optional[SkillToolDiscovery] = None  # pylint: disable=invalid-name
+_discovery: SkillToolDiscovery | None = None  # pylint: disable=invalid-name
 
 
 def get_skill_discovery() -> SkillToolDiscovery:
