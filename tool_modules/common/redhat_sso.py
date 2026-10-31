@@ -32,6 +32,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -95,9 +96,9 @@ class SAMLFormParser(HTMLParser):
             action = attr_dict.get("action")
             if action:
                 self.form_action = action
-        if tag == "input" and attr_dict.get("type", "").lower() == "hidden":
-            name = attr_dict.get("name", "")
-            value = attr_dict.get("value", "")
+        if tag == "input" and (attr_dict.get("type") or "").lower() == "hidden":
+            name = attr_dict.get("name") or ""
+            value = attr_dict.get("value") or ""
             if name == "SAMLResponse":
                 self.saml_response = value
             elif name == "RelayState":
@@ -111,9 +112,7 @@ def extract_hidden_fields(html: str) -> dict[str, str]:
     Works with both lowercase and uppercase HTML tags.
     """
     fields: dict[str, str] = {}
-    for tag_match in re.finditer(
-        r"<input\b([^>]*)/??>", html, re.IGNORECASE | re.DOTALL
-    ):
+    for tag_match in re.finditer(r"<input\b([^>]*)/??>", html, re.IGNORECASE | re.DOTALL):
         attrs_str = tag_match.group(1)
         name_m = re.search(r'name=["\']([^"\']*)["\']', attrs_str, re.IGNORECASE)
         type_m = re.search(r'type=["\']([^"\']*)["\']', attrs_str, re.IGNORECASE)
@@ -124,6 +123,35 @@ def extract_hidden_fields(html: str) -> dict[str, str]:
     return fields
 
 
+# One quoted attribute (name="value" or name='value'). Each tag body is
+# scanned with this single linear pattern rather than nested [^>]*
+# wildcards, which backtrack polynomially on large pages.
+_ATTR_RE = re.compile(r"""([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+_FORM_TAG_RE = re.compile(r"<form\b([^>]*)>", re.IGNORECASE)
+_ANY_TAG_RE = re.compile(r"<[a-zA-Z]([^>]*)>")
+
+
+def _tag_attrs(attrs_str: str) -> dict[str, str]:
+    """Parse quoted attributes from a tag body; names are lower-cased."""
+    attrs: dict[str, str] = {}
+    for m in _ATTR_RE.finditer(attrs_str):
+        attrs.setdefault(m.group(1).lower(), m.group(2) if m.group(2) is not None else m.group(3))
+    return attrs
+
+
+def _form_tags(html: str) -> list[dict[str, str]]:
+    """Return the attributes of every <form> tag in ``html``, in order."""
+    return [_tag_attrs(m.group(1)) for m in _FORM_TAG_RE.finditer(html)]
+
+
+def _first_form_action(html: str) -> str | None:
+    """Return the action of the first <form> that has one, unescaped."""
+    for attrs in _form_tags(html):
+        if attrs.get("action"):
+            return attrs["action"].replace("&amp;", "&")
+    return None
+
+
 def extract_form_action(html: str) -> str | None:
     """Extract the action URL from a Keycloak login form.
 
@@ -132,39 +160,31 @@ def extract_form_action(html: str) -> str | None:
       2. Any form with action containing "authenticate"
       3. Any form with a POST method
     """
-    # Keycloak-specific form
-    m = re.search(
-        r'<form[^>]*id=["\']kc-form-login["\'][^>]*action=["\']([^"\']+)["\']',
-        html,
-        re.IGNORECASE,
+    forms = [attrs for attrs in _form_tags(html) if attrs.get("action")]
+    checks = (
+        lambda attrs: attrs.get("id", "").lower() == "kc-form-login",
+        lambda attrs: "authenticate" in attrs["action"].lower(),
+        lambda attrs: attrs.get("method", "").lower() == "post",
     )
-    if m:
-        return m.group(1).replace("&amp;", "&")
+    for check in checks:
+        for attrs in forms:
+            if check(attrs):
+                return attrs["action"].replace("&amp;", "&")
+    return None
 
-    # Fallback: form with "authenticate" in action
-    m = re.search(
-        r'<form[^>]*action=["\']([^"\']*authenticate[^"\']*)["\']',
-        html,
-        re.IGNORECASE,
-    )
-    if m:
-        return m.group(1).replace("&amp;", "&")
 
-    # Fallback: any POST form
-    m = re.search(
-        r'<form[^>]*method=["\']post["\'][^>]*action=["\']([^"\']+)["\']',
-        html,
-        re.IGNORECASE,
-    )
-    if m:
-        return m.group(1).replace("&amp;", "&")
-
+def _finish_login_url(html: str) -> str | None:
+    """Return the href of the element with id="finishLoginLink", if any."""
+    for m in _ANY_TAG_RE.finditer(html):
+        attrs = _tag_attrs(m.group(1))
+        if attrs.get("id") == "finishLoginLink" and attrs.get("href"):
+            return attrs["href"].replace("&amp;", "&")
     return None
 
 
 def _resolve_url(url: str, base_url: str) -> str:
     """Resolve a potentially relative URL against a base URL."""
-    if url.startswith("http://") or url.startswith("https://"):
+    if url.startswith(("http://", "https://")):
         return url
     p = urlparse(base_url)
     return f"{p.scheme}://{p.netloc}{url}"
@@ -203,8 +223,6 @@ async def keycloak_authenticate(
         SAMLResult with saml_response, relay_state, form_action on success,
         or error message on failure.
     """
-    result = SAMLResult()
-
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=SSO_TIMEOUT,
@@ -213,123 +231,92 @@ async def keycloak_authenticate(
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
     ) as sso_client:
-
-        # ── Step 1: GET the SSO entry point ───────────────────────────
-        logger.info(f"{log_prefix}: GET SSO entry point")
-        resp = await sso_client.get(sso_url)
-
-        # If the response is an HTML page with a SAMLRequest auto-submit
-        # form, we need to POST it to get to the actual Keycloak login.
-        if (
-            resp.status_code == 200
-            and "SAMLRequest" in resp.text
-            and "<form" in resp.text.lower()
-        ):
-            logger.info(f"{log_prefix}: Submitting SAMLRequest auto-submit form")
-            form_action_url = re.search(
-                r'<form[^>]*action=["\']([^"\']+)["\']', resp.text, re.IGNORECASE
-            )
-            if form_action_url:
-                action = form_action_url.group(1).replace("&amp;", "&")
-                action = _resolve_url(action, str(resp.url))
-                fields = extract_hidden_fields(resp.text)
-                resp = await sso_client.post(
-                    action,
-                    data=fields,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    follow_redirects=True,
-                )
-
-        # ── Step 2: Handle Kerberos 401 fallback ─────────────────────
-        if resp.status_code == 401 and "Kerberos" in resp.text:
-            logger.info(f"{log_prefix}: Kerberos 401 fallback")
-            kerb_action = re.search(
-                r'<form[^>]*action=["\']([^"\']+)["\']', resp.text, re.IGNORECASE
-            )
-            if kerb_action:
-                action = kerb_action.group(1).replace("&amp;", "&")
-                action = _resolve_url(action, str(resp.url))
-                hidden = extract_hidden_fields(resp.text)
-                resp = await sso_client.post(
-                    action,
-                    data=hidden,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    follow_redirects=True,
-                )
-
+        resp = await _open_login_page(sso_client, sso_url, log_prefix)
         if resp.status_code != 200:
-            result.error = f"SSO login page failed: HTTP {resp.status_code}"
-            return result
-
-        login_html = resp.text
+            return SAMLResult(error=f"SSO login page failed: HTTP {resp.status_code}")
 
         # ── Step 3: Extract Keycloak login form ──────────────────────
-        form_action = extract_form_action(login_html)
+        form_action = extract_form_action(resp.text)
         if not form_action:
-            result.error = "Could not find Keycloak login form action URL"
-            return result
-
-        form_action = _resolve_url(form_action, str(resp.url))
-        hidden_fields = extract_hidden_fields(login_html)
+            return SAMLResult(error="Could not find Keycloak login form action URL")
 
         # ── Step 4: POST credentials ─────────────────────────────────
-        logger.info(f"{log_prefix}: POST credentials to Keycloak")
-        form_data = {**hidden_fields, "username": username, "password": password}
-        resp = await sso_client.post(
-            form_action,
-            data=form_data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            follow_redirects=True,
-        )
-
+        logger.info("%s: POST credentials to Keycloak", log_prefix)
+        form_data = {**extract_hidden_fields(resp.text), "username": username, "password": password}
+        resp = await _post_form(sso_client, _resolve_url(form_action, str(resp.url)), form_data)
         if resp.status_code != 200:
-            result.error = f"Credentials POST failed: HTTP {resp.status_code}"
-            return result
+            return SAMLResult(error=f"Credentials POST failed: HTTP {resp.status_code}")
 
-        response_html = resp.text
-
-        # Check for login errors
-        if "Invalid username or password" in response_html:
-            result.error = "Invalid username or password"
-            return result
-        if "Account is disabled" in response_html:
-            result.error = "Account is disabled"
-            return result
+        for message in ("Invalid username or password", "Account is disabled"):
+            if message in resp.text:
+                return SAMLResult(error=message)
 
         # ── Step 5: Handle "successfully logged in" page ─────────────
+        response_html = resp.text
         if "successfully logged in" in response_html.lower():
-            logger.info(f"{log_prefix}: Following 'successfully logged in' link")
-            finish_match = re.search(
-                r'id=["\']finishLoginLink["\'][^>]*href=["\']([^"\']+)["\']',
-                response_html,
-            )
-            if not finish_match:
-                finish_match = re.search(
-                    r'href=["\']([^"\']+)["\'][^>]*id=["\']finishLoginLink["\']',
-                    response_html,
-                )
-            if finish_match:
-                finish_url = finish_match.group(1).replace("&amp;", "&")
+            logger.info("%s: Following 'successfully logged in' link", log_prefix)
+            finish_url = _finish_login_url(response_html)
+            if finish_url:
                 resp = await sso_client.get(finish_url, follow_redirects=True)
                 response_html = resp.text
 
         # ── Step 6: Extract SAMLResponse ─────────────────────────────
-        logger.info(f"{log_prefix}: Extracting SAMLResponse")
-        parser = SAMLFormParser()
-        parser.feed(response_html)
+        logger.info("%s: Extracting SAMLResponse", log_prefix)
+        result = _saml_result(response_html)
+        if result.success:
+            logger.info("%s: SAMLResponse extracted successfully", log_prefix)
+        return result
 
-        if not parser.saml_response:
-            result.error = "Could not extract SAMLResponse from SSO response"
-            return result
 
-        result.success = True
-        result.saml_response = parser.saml_response
-        result.relay_state = parser.relay_state or ""
-        result.form_action = parser.form_action or ""
+async def _post_form(client: httpx.AsyncClient, action: str, data: dict[str, str]) -> httpx.Response:
+    """POST url-encoded form data, following redirects."""
+    return await client.post(
+        action,
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        follow_redirects=True,
+    )
 
-        logger.info(f"{log_prefix}: SAMLResponse extracted successfully")
 
-    return result
+async def _submit_first_form(client: httpx.AsyncClient, resp: httpx.Response) -> httpx.Response:
+    """Submit the first form on ``resp`` with its hidden fields, if it has one."""
+    action = _first_form_action(resp.text)
+    if not action:
+        return resp
+    return await _post_form(client, _resolve_url(action, str(resp.url)), extract_hidden_fields(resp.text))
+
+
+async def _open_login_page(client: httpx.AsyncClient, sso_url: str, log_prefix: str) -> httpx.Response:
+    """GET the SSO entry point and pass any SAMLRequest or Kerberos forms."""
+    # ── Step 1: GET the SSO entry point ───────────────────────────
+    logger.info("%s: GET SSO entry point", log_prefix)
+    resp = await client.get(sso_url)
+
+    # An HTML page with a SAMLRequest auto-submit form must be POSTed to
+    # reach the actual Keycloak login.
+    if resp.status_code == 200 and "SAMLRequest" in resp.text and "<form" in resp.text.lower():
+        logger.info("%s: Submitting SAMLRequest auto-submit form", log_prefix)
+        resp = await _submit_first_form(client, resp)
+
+    # ── Step 2: Handle Kerberos 401 fallback ─────────────────────
+    if resp.status_code == 401 and "Kerberos" in resp.text:
+        logger.info("%s: Kerberos 401 fallback", log_prefix)
+        resp = await _submit_first_form(client, resp)
+    return resp
+
+
+def _saml_result(response_html: str) -> SAMLResult:
+    """Build a SAMLResult from the IdP's final auto-submit page."""
+    parser = SAMLFormParser()
+    parser.feed(response_html)
+    if not parser.saml_response:
+        return SAMLResult(error="Could not extract SAMLResponse from SSO response")
+    return SAMLResult(
+        success=True,
+        saml_response=parser.saml_response,
+        relay_state=parser.relay_state or "",
+        form_action=parser.form_action or "",
+    )
 
 
 # ==================== Credential Helpers ====================
@@ -351,32 +338,18 @@ def get_redhatter_credentials(
     Raises:
         RuntimeError: If credentials cannot be fetched
     """
-    import subprocess
+    try:
+        response = httpx.get(f"{service_url}/credentials", timeout=10)
+        response.raise_for_status()
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"redhatter service at {service_url} timed out") from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"redhatter service request failed: {exc}") from exc
 
     try:
-        result = subprocess.run(
-            ["curl", "-sf", f"{service_url}/credentials"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"redhatter service returned exit code {result.returncode}"
-            )
-    except FileNotFoundError:
-        raise RuntimeError("curl not found")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"redhatter service at {service_url} timed out")
-
-    import json
-
-    try:
-        creds = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        raise RuntimeError(
-            f"Invalid JSON from redhatter service: {result.stdout[:100]}"
-        )
+        creds = json.loads(response.text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid JSON from redhatter service: {response.text[:100]}") from exc
 
     sso_creds = creds.get(sso_key, {})
     username = sso_creds.get("username", "")
@@ -384,10 +357,7 @@ def get_redhatter_credentials(
 
     if not username or not password:
         available_keys = list(creds.keys())
-        raise RuntimeError(
-            f"No '{sso_key}' credentials in redhatter response. "
-            f"Available keys: {available_keys}"
-        )
+        raise RuntimeError(f"No '{sso_key}' credentials in redhatter response. Available keys: {available_keys}")
 
     return username, password
 
