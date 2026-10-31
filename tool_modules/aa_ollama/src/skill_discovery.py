@@ -322,33 +322,68 @@ class SkillToolDiscovery:
 
 # ==================== Fast Skill Detection ====================
 
+
+class OrderedSubstrings:
+    """Linear-time matcher for ``a.*b.*c`` style patterns (case-insensitive, single line).
+
+    Each part must appear in order on the same line, as with ``re.search`` where ``.``
+    does not cross newlines. Uses ``str.find`` so there is no regex backtracking.
+    """
+
+    def __init__(self, *parts: str, digit_after_last: bool = False):
+        self.parts = tuple(part.lower() for part in parts)
+        self.digit_after_last = digit_after_last
+
+    def line_matches(self, line: str) -> bool:
+        """Return True if the (lower-cased) parts appear in order within ``line``."""
+        pos = 0
+        for part in self.parts[:-1]:
+            idx = line.find(part, pos)
+            if idx < 0:
+                return False
+            pos = idx + len(part)
+        last = self.parts[-1]
+        idx = line.find(last, pos)
+        while idx >= 0:
+            end = idx + len(last)
+            if not self.digit_after_last or (end < len(line) and line[end].isdigit()):
+                return True
+            idx = line.find(last, idx + 1)
+        return False
+
+    def search(self, text: str) -> bool:
+        """Return True if the parts appear in order on any single line of ``text``."""
+        return any(self.line_matches(line) for line in text.lower().split("\n"))
+
+
 # Skill patterns for fast detection (no NPU needed)
-SKILL_PATTERNS: dict[str, list[re.Pattern]] = {
+SKILL_PATTERNS: dict[str, list[re.Pattern[str] | OrderedSubstrings]] = {
     "test_mr_ephemeral": [
-        re.compile(r"deploy.*mr|test.*mr|(?m:^)(?>.*?spin)(?>.*?up).*mr", re.IGNORECASE),
+        re.compile(r"deploy.*mr|test.*mr", re.IGNORECASE),
+        OrderedSubstrings("spin", "up", "mr"),
         re.compile(r"ephemeral.*mr\s*\d+", re.IGNORECASE),
         re.compile(r"deploy.*ephemeral", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?test)(?>.*?in).*ephemeral", re.IGNORECASE),
+        OrderedSubstrings("test", "in", "ephemeral"),
     ],
     "review_pr": [
         re.compile(r"review.*mr|review.*!\d+", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?check)(?>.*?mr).*review", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?look)(?>.*?at).*mr", re.IGNORECASE),
+        OrderedSubstrings("check", "mr", "review"),
+        OrderedSubstrings("look", "at", "mr"),
     ],
     "start_work": [
-        re.compile(r"(?m)^(?>.*?start)(?>.*?work).*aap-\d", re.IGNORECASE),
+        OrderedSubstrings("start", "work", "aap-", digit_after_last=True),
         re.compile(r"begin.*aap-\d+", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?pick)(?>.*?up).*aap-\d", re.IGNORECASE),
+        OrderedSubstrings("pick", "up", "aap-", digit_after_last=True),
     ],
     "investigate_slack_alert": [
         re.compile(r"investigate.*alert", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?look)(?>.*?into).*alert", re.IGNORECASE),
+        OrderedSubstrings("look", "into", "alert"),
         re.compile(r"whats.*firing", re.IGNORECASE),  # codespell:ignore
         re.compile(r"what.*alerts", re.IGNORECASE),
     ],
     "create_mr": [
         re.compile(r"create.*mr|open.*mr", re.IGNORECASE),
-        re.compile(r"(?m)^(?>.*?push)(?>.*?and).*mr", re.IGNORECASE),
+        OrderedSubstrings("push", "and", "mr"),
         re.compile(r"submit.*mr", re.IGNORECASE),
     ],
     "check_pipeline": [
