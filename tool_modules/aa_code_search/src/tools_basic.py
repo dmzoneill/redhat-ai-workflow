@@ -24,7 +24,7 @@ import re
 import sys
 import time
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -47,6 +47,19 @@ if str(_TOOLS_DIR) not in sys.path:
 _lancedb = None  # pylint: disable=invalid-name
 _sentence_transformer = None  # pylint: disable=invalid-name
 _openvino_model = None  # pylint: disable=invalid-name
+
+# Failures expected from optional ML backends, LanceDB/pyarrow, pandas and file I/O
+# (pyarrow's errors subclass ValueError/OSError; missing backends raise ImportError).
+_INDEX_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+    LookupError,
+    AttributeError,
+    ArithmeticError,
+    ImportError,
+)
 
 # Configuration
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Fast, good quality, runs locally
@@ -105,9 +118,7 @@ def _import_watcher():
 class EmbeddingCache:
     """Thread-safe LRU cache with TTL for query embeddings."""
 
-    def __init__(
-        self, max_size: int = CACHE_MAX_SIZE, ttl_seconds: int = CACHE_TTL_SECONDS
-    ):
+    def __init__(self, max_size: int = CACHE_MAX_SIZE, ttl_seconds: int = CACHE_TTL_SECONDS):
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self._cache: OrderedDict[str, tuple[list[float], float]] = OrderedDict()
@@ -220,28 +231,26 @@ def _get_embedding_model():
     backend = vs_config.get("embedding", {}).get("backend", "sentence-transformers")
 
     # Try OpenVINO backend
-    if backend == "openvino":
-        if _openvino_model is None:
-            try:
-                _openvino_model = _load_openvino_model()
-                if _openvino_model:
-                    logger.info("Using OpenVINO embedding backend")
-                    return _openvino_model
-            # Intentional: log the failure and continue at this boundary.
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("OpenVINO backend failed, falling back: %s", e)
+    if backend == "openvino" and _openvino_model is None:
+        try:
+            _openvino_model = _load_openvino_model()
+            if _openvino_model:
+                logger.info("Using OpenVINO embedding backend")
+                return _openvino_model
+        # Intentional: log the failure and continue at this boundary.
+        except _INDEX_ERRORS as e:
+            logger.warning("OpenVINO backend failed, falling back: %s", e)
 
     # Try ONNX backend
-    if backend == "onnx":
-        if _sentence_transformer is None:
-            try:
-                _sentence_transformer = _load_onnx_model()
-                if _sentence_transformer:
-                    logger.info("Using ONNX embedding backend")
-                    return _sentence_transformer
-            # Intentional: log the failure and continue at this boundary.
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("ONNX backend failed, falling back: %s", e)
+    if backend == "onnx" and _sentence_transformer is None:
+        try:
+            _sentence_transformer = _load_onnx_model()
+            if _sentence_transformer:
+                logger.info("Using ONNX embedding backend")
+                return _sentence_transformer
+        # Intentional: log the failure and continue at this boundary.
+        except _INDEX_ERRORS as e:
+            logger.warning("ONNX backend failed, falling back: %s", e)
 
     # Default: sentence-transformers
     if _sentence_transformer is None:
@@ -252,9 +261,7 @@ def _get_embedding_model():
             _sentence_transformer = SentenceTransformer(DEFAULT_EMBEDDING_MODEL)
             logger.info("Using sentence-transformers embedding backend")
         except ImportError as e:
-            raise ImportError(
-                "sentence-transformers not installed. Run: uv add sentence-transformers"
-            ) from e
+            raise ImportError("sentence-transformers not installed. Run: uv add sentence-transformers") from e
     return _sentence_transformer
 
 
@@ -273,11 +280,7 @@ def _load_openvino_model():
         )
 
         vs_config = _get_vector_search_config()
-        ov_config = (
-            vs_config.get("embedding", {})
-            .get("backend_options", {})
-            .get("openvino", {})
-        )
+        ov_config = vs_config.get("embedding", {}).get("backend_options", {}).get("openvino", {})
         device = ov_config.get("device", "NPU")
 
         # For NPU, we need fixed shapes - use static compilation
@@ -329,7 +332,7 @@ def _load_openvino_model():
         logger.debug("OpenVINO not available: %s", e)
         return None
     # Intentional: convert the failure into an error result for the caller.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.warning("Failed to load OpenVINO model: %s", e)
         return None
 
@@ -353,11 +356,7 @@ def _load_openvino_npu_static():
         )
 
         vs_config = _get_vector_search_config()
-        ov_config = (
-            vs_config.get("embedding", {})
-            .get("backend_options", {})
-            .get("openvino", {})
-        )
+        ov_config = vs_config.get("embedding", {}).get("backend_options", {}).get("openvino", {})
 
         # Fixed sequence length for NPU (shorter = faster, but truncates long queries)
         fixed_seq_len = ov_config.get("fixed_seq_len", 128)
@@ -439,9 +438,7 @@ def _load_openvino_npu_static():
                     {
                         "input_ids": inputs["input_ids"],
                         "attention_mask": inputs["attention_mask"],
-                        "token_type_ids": inputs.get(
-                            "token_type_ids", np.zeros_like(inputs["input_ids"])
-                        ),
+                        "token_type_ids": inputs.get("token_type_ids", np.zeros_like(inputs["input_ids"])),
                     }
                 )
 
@@ -452,9 +449,7 @@ def _load_openvino_npu_static():
                 attention_mask = inputs["attention_mask"]
                 mask_expanded = np.expand_dims(attention_mask, -1)
                 sum_embeddings = np.sum(last_hidden_state * mask_expanded, axis=1)
-                sum_mask = np.clip(
-                    np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None
-                )
+                sum_mask = np.clip(np.sum(mask_expanded, axis=1), a_min=1e-9, a_max=None)
                 embeddings = sum_embeddings / sum_mask
 
                 return embeddings
@@ -464,7 +459,7 @@ def _load_openvino_npu_static():
         return embedder
 
     # Intentional: convert the failure into an error result for the caller.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.warning("Failed to load NPU static model: %s", e)
         import traceback  # pylint: disable=import-outside-toplevel
 
@@ -500,7 +495,7 @@ def _load_onnx_model():
         return model
 
     # Intentional: convert the failure into an error result for the caller.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.debug("ONNX backend not available: %s", e)
         return None
 
@@ -513,7 +508,7 @@ def _load_config() -> dict:
 
         return config_manager.get_all()
     # Intentional: convert the failure into an error result for the caller.
-    except Exception:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS:
         return {}
 
 
@@ -692,9 +687,7 @@ def _chunk_by_size(
 
             # Start new chunk with overlap
             overlap_lines = int(CHUNK_OVERLAP / 50)  # Approximate lines for overlap
-            current_chunk_lines = (
-                current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
-            )
+            current_chunk_lines = current_chunk_lines[-overlap_lines:] if overlap_lines > 0 else []
             current_start = current_start + len(current_chunk_lines) - overlap_lines
             current_size = sum(len(line_text) + 1 for line_text in current_chunk_lines)
 
@@ -789,10 +782,25 @@ def _should_index_file(file_path: Path, project_path: Path) -> bool:
     return file_path.suffix.lower() in code_extensions
 
 
+def _now() -> datetime:
+    """Current local time, timezone-aware."""
+    return datetime.now(tz=timezone.utc).astimezone()
+
+
+def _parse_timestamp(value: str) -> datetime:
+    """Parse an ISO timestamp; naive values (older metadata) are local time."""
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.astimezone()
+
+
 def _compute_file_hash(file_path: Path) -> str:
-    """Compute hash of file content for change detection."""
+    """Compute hash of file content for change detection.
+
+    SHA-256 (not MD5): indexes built with MD5 hashes see every file as changed
+    once and are re-indexed on the next run.
+    """
     content = file_path.read_bytes()
-    return hashlib.md5(content).hexdigest()
+    return hashlib.sha256(content).hexdigest()
 
 
 def _is_index_stale(project: str, max_age_minutes: int = INDEX_STALE_MINUTES) -> bool:
@@ -806,11 +814,11 @@ def _is_index_stale(project: str, max_age_minutes: int = INDEX_STALE_MINUTES) ->
         with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
-        indexed_at = datetime.fromisoformat(metadata.get("indexed_at", ""))
-        age = datetime.now() - indexed_at
+        indexed_at = _parse_timestamp(metadata.get("indexed_at", ""))
+        age = _now() - indexed_at
         return age > timedelta(minutes=max_age_minutes)
     # Intentional: convert the failure into an error result for the caller.
-    except Exception:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS:
         return True
 
 
@@ -860,9 +868,7 @@ def _index_project(project: str, force: bool = False) -> dict:
             with open(metadata_path, encoding="utf-8") as f:
                 existing_hashes = json.load(f).get("file_hashes", {})
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(
-                "Corrupted metadata.json for %s, will re-index: %s", project, e
-            )
+            logger.warning("Corrupted metadata.json for %s, will re-index: %s", project, e)
             existing_hashes = {}
 
     new_hashes = {}
@@ -918,8 +924,8 @@ def _index_project(project: str, force: bool = False) -> dict:
             stats["chunks_created"] += len(chunks)
 
         # Intentional: log the failure and continue at this boundary.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            stats["errors"].append(f"{rel_path}: {str(e)}")
+        except _INDEX_ERRORS as e:
+            stats["errors"].append(f"{rel_path}: {e!s}")
 
     # Create or overwrite table
     index_created = False
@@ -932,15 +938,11 @@ def _index_project(project: str, force: bool = False) -> dict:
             # Append to existing (for incremental updates)
             # First delete existing entries for changed files
             table = db.open_table(table_name)
-            changed_files = set(new_hashes.keys()) - set(
-                k for k, v in existing_hashes.items() if new_hashes.get(k) == v
-            )
+            changed_files = set(new_hashes.keys()) - {k for k, v in existing_hashes.items() if new_hashes.get(k) == v}
             if changed_files:
                 # LanceDB doesn't have easy delete, so we recreate
                 existing_data = table.to_pandas().to_dict("records")
-                filtered_data = [
-                    d for d in existing_data if d.get("file_path") not in changed_files
-                ]
+                filtered_data = [d for d in existing_data if d.get("file_path") not in changed_files]
                 all_data = filtered_data + all_data
                 table = db.create_table(table_name, data=all_data, mode="overwrite")
                 index_created = True
@@ -995,10 +997,8 @@ def _index_project(project: str, force: bool = False) -> dict:
                 )
 
             # Intentional: log the failure and continue at this boundary.
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning(
-                    "Failed to create index (falling back to brute force): %s", e
-                )
+            except _INDEX_ERRORS as e:
+                logger.warning("Failed to create index (falling back to brute force): %s", e)
                 stats["index_type"] = "FLAT"
                 stats["index_error"] = str(e)
         elif len(all_data) < 256:
@@ -1014,14 +1014,14 @@ def _index_project(project: str, force: bool = False) -> dict:
             stats["optimize_time_ms"] = (time.time() - optimize_start) * 1000
             logger.info("Optimized table in %.0fms", stats["optimize_time_ms"])
         # Intentional: log the failure and continue at this boundary.
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except _INDEX_ERRORS as e:
             logger.warning("Failed to optimize table: %s", e)
             stats["optimize_error"] = str(e)
 
     # Save metadata
     metadata = {
         "project": project,
-        "indexed_at": datetime.now().isoformat(),
+        "indexed_at": _now().isoformat(),
         "file_hashes": new_hashes,
         "stats": stats,
         "index_config": {
@@ -1072,9 +1072,7 @@ def _search_code(
     if auto_update:
         update_stats = _auto_update_if_stale(project)
         if update_stats and "error" not in update_stats:
-            logger.info(
-                "Auto-updated index: %s files", update_stats.get("files_indexed", 0)
-            )
+            logger.info("Auto-updated index: %s files", update_stats.get("files_indexed", 0))
 
     # Get LanceDB connection
     db = _get_lance_db(project)
@@ -1111,16 +1109,9 @@ def _search_code(
     try:
         results = search_query.to_pandas()
     # Intentional: convert the failure into an error result for the caller.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.error("LanceDB search failed for project '%s': %s", project, e)
-        return [
-            {
-                "error": (
-                    f"Search failed: {e}. Try re-indexing with "
-                    f"code_index(project='{project}', force=True)"
-                )
-            }
-        ]
+        return [{"error": (f"Search failed: {e}. Try re-indexing with code_index(project='{project}', force=True)")}]
 
     search_time_ms = (time.time() - search_start) * 1000
 
@@ -1140,28 +1131,17 @@ def _search_code(
     }
     missing_cols = required_cols - set(results.columns)
     if missing_cols:
-        logger.error(
-            "Index schema mismatch for '%s': missing columns %s", project, missing_cols
-        )
-        return [
-            {
-                "error": (
-                    "Index schema mismatch. Re-index with "
-                    f"code_index(project='{project}', force=True)"
-                )
-            }
-        ]
+        logger.error("Index schema mismatch for '%s': missing columns %s", project, missing_cols)
+        return [{"error": (f"Index schema mismatch. Re-index with code_index(project='{project}', force=True)")}]
 
     # Apply filters
     try:
         if file_filter:
-            results = results[
-                results["file_path"].str.contains(file_filter, case=False)
-            ]
+            results = results[results["file_path"].str.contains(file_filter, case=False)]
         if type_filter:
             results = results[results["type"] == type_filter]
     # Intentional: log the failure and continue at this boundary.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.warning("Filter application failed: %s", e)
         # Continue without filters rather than crashing
 
@@ -1226,7 +1206,7 @@ def _get_index_stats(project: str) -> dict:
             table = db.open_table(table_name)
             chunk_count = len(table)
     # Intentional: log the failure and continue at this boundary.
-    except Exception as exc:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as exc:
         logger.debug("Suppressed error: %s", exc)
 
     # Calculate disk size
@@ -1250,8 +1230,8 @@ def _get_index_stats(project: str) -> dict:
     is_stale = False
     if indexed_at:
         try:
-            indexed_time = datetime.fromisoformat(indexed_at)
-            age = datetime.now() - indexed_time
+            indexed_time = _parse_timestamp(indexed_at)
+            age = _now() - indexed_time
             if age.days > 0:
                 index_age = f"{age.days}d ago"
             elif age.seconds >= 3600:
@@ -1262,7 +1242,7 @@ def _get_index_stats(project: str) -> dict:
                 index_age = "just now"
             is_stale = age > timedelta(minutes=INDEX_STALE_MINUTES)
         # Intentional: log the failure and continue at this boundary.
-        except Exception as exc:  # pylint: disable=broad-exception-caught
+        except _INDEX_ERRORS as exc:
             logger.debug("Suppressed error: %s", exc)
 
     # Get search stats
@@ -1303,9 +1283,7 @@ def _get_index_stats(project: str) -> dict:
     }
 
 
-def _update_search_stats(
-    project: str, search_time_ms: float, details: dict | None = None
-) -> None:
+def _update_search_stats(project: str, search_time_ms: float, details: dict | None = None) -> None:
     """Update search statistics in metadata."""
     metadata_path = VECTOR_DB_PATH / project / "metadata.json"
 
@@ -1332,7 +1310,7 @@ def _update_search_stats(
 
         search_stats["total_searches"] += 1
         search_stats["total_search_time_ms"] += search_time_ms
-        search_stats["last_search"] = datetime.now().isoformat()
+        search_stats["last_search"] = _now().isoformat()
         search_stats["avg_search_time_ms"] = round(
             search_stats["total_search_time_ms"] / search_stats["total_searches"], 1
         )
@@ -1348,23 +1326,19 @@ def _update_search_stats(
             embed_time = details.get("embed_time_ms", 0)
             prev_avg_embed = search_stats.get("avg_embed_time_ms", 0)
             n = search_stats["total_searches"]
-            search_stats["avg_embed_time_ms"] = round(
-                (prev_avg_embed * (n - 1) + embed_time) / n, 2
-            )
+            search_stats["avg_embed_time_ms"] = round((prev_avg_embed * (n - 1) + embed_time) / n, 2)
 
             # Running average for vector search time
             vector_time = details.get("search_time_ms", 0)
             prev_avg_vector = search_stats.get("avg_vector_search_time_ms", 0)
-            search_stats["avg_vector_search_time_ms"] = round(
-                (prev_avg_vector * (n - 1) + vector_time) / n, 2
-            )
+            search_stats["avg_vector_search_time_ms"] = round((prev_avg_vector * (n - 1) + vector_time) / n, 2)
 
         metadata["search_stats"] = search_stats
 
         with open(metadata_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
     # Intentional: log the failure and continue at this boundary.
-    except Exception as e:  # pylint: disable=broad-exception-caught
+    except _INDEX_ERRORS as e:
         logger.debug("Failed to update search stats: %s", e)
 
 
@@ -1404,12 +1378,8 @@ def get_all_vector_stats() -> dict:
             "index_type": vs_config.get("index_type", INDEX_TYPE),
             "nprobes": vs_config.get("search", {}).get("nprobes", DEFAULT_NPROBES),
             "cache_enabled": vs_config.get("cache", {}).get("enabled", CACHE_ENABLED),
-            "embedding_model": vs_config.get("embedding", {}).get(
-                "model", DEFAULT_EMBEDDING_MODEL
-            ),
-            "embedding_backend": vs_config.get("embedding", {}).get(
-                "backend", "sentence-transformers"
-            ),
+            "embedding_model": vs_config.get("embedding", {}).get("model", DEFAULT_EMBEDDING_MODEL),
+            "embedding_backend": vs_config.get("embedding", {}).get("backend", "sentence-transformers"),
         },
     }
 
@@ -1472,9 +1442,7 @@ def get_all_vector_stats() -> dict:
         result["totals"]["total_size"] = f"{total_bytes} B"
 
     # Calculate overall cache hit rate
-    total_cache = (
-        result["totals"]["total_cache_hits"] + result["totals"]["total_cache_misses"]
-    )
+    total_cache = result["totals"]["total_cache_hits"] + result["totals"]["total_cache_misses"]
     if total_cache > 0:
         hit_rate = result["totals"]["total_cache_hits"] / total_cache * 100
         result["totals"]["cache_hit_rate"] = f"{hit_rate:.1f}%"
@@ -1506,13 +1474,9 @@ def get_vector_health() -> dict:
     }
 
     # Calculate average search time across all projects
-    search_times = [
-        p.get("avg_search_ms", 0) for p in stats["projects"] if p.get("indexed")
-    ]
+    search_times = [p.get("avg_search_ms", 0) for p in stats["projects"] if p.get("indexed")]
     if search_times:
-        health["metrics"]["avg_search_time_ms"] = round(
-            sum(search_times) / len(search_times), 1
-        )
+        health["metrics"]["avg_search_time_ms"] = round(sum(search_times) / len(search_times), 1)
 
     # Check for issues
     for proj in stats["projects"]:
@@ -1521,9 +1485,7 @@ def get_vector_health() -> dict:
             continue
 
         if proj.get("is_stale"):
-            health["issues"].append(
-                f"Project '{proj['project']}' index is stale ({proj.get('index_age', 'unknown')})"
-            )
+            health["issues"].append(f"Project '{proj['project']}' index is stale ({proj.get('index_age', 'unknown')})")
 
         if proj.get("index_type") == "FLAT" and proj.get("chunks", 0) > 1000:
             health["recommendations"].append(
@@ -1532,9 +1494,7 @@ def get_vector_health() -> dict:
             )
 
         if proj.get("avg_search_ms", 0) > 500:
-            health["issues"].append(
-                f"Project '{proj['project']}' search is slow ({proj['avg_search_ms']:.0f}ms avg)"
-            )
+            health["issues"].append(f"Project '{proj['project']}' search is slow ({proj['avg_search_ms']:.0f}ms avg)")
 
     # Check cache effectiveness
     cache_stats = stats.get("cache", {})
@@ -1550,68 +1510,42 @@ def get_vector_health() -> dict:
     return health
 
 
-# ============================================================================
-# MCP Tool Registration
-# ============================================================================
+async def _code_index_impl(
+    project: str = "",
+    force: bool = False,
+) -> list[TextContent]:
+    """Implementation of the code_index tool."""
+    if not project:
+        # Try to detect from config
+        config = _load_config()
+        projects = list(config.get("repositories", {}).keys())
+        if len(projects) == 1:
+            project = projects[0]
+        else:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                )
+            ]
 
+    try:
+        stats = _index_project(project, force=force)
 
-# pylint: disable-next=too-many-statements
-def register_tools(registry: Any) -> None:  # noqa: C901
-    """Register code search tools with the MCP registry."""
+        if "error" in stats:
+            return [TextContent(type="text", text=f"❌ {stats['error']}")]
 
-    @registry.tool()
-    async def code_index(
-        project: str = "",
-        force: bool = False,
-    ) -> list[TextContent]:
-        """
-        Index a project's code into the vector database for semantic search.
+        # Build result message
+        index_type = stats.get("index_type", "FLAT")
+        index_info = f"- Index type: **{index_type}**"
+        if stats.get("num_partitions"):
+            index_info += f" ({stats['num_partitions']} partitions)"
+        if stats.get("index_time_ms"):
+            index_info += f"\n- Index build time: {stats['index_time_ms']:.0f}ms"
+        if stats.get("index_note"):
+            index_info += f"\n- Note: {stats['index_note']}"
 
-        This creates embeddings for all code files and stores them locally.
-        Subsequent searches will be fast and semantic (meaning-based).
-
-        Args:
-            project: Project name from config.json. Auto-detects if empty.
-            force: If True, re-index all files. Otherwise only index changed files.
-
-        Returns:
-            Indexing statistics.
-
-        Example:
-            code_index("automation-analytics-backend")
-            code_index("automation-analytics-backend", force=True)  # Full re-index
-        """
-        if not project:
-            # Try to detect from config
-            config = _load_config()
-            projects = list(config.get("repositories", {}).keys())
-            if len(projects) == 1:
-                project = projects[0]
-            else:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Please specify a project. Available: {', '.join(projects)}",
-                    )
-                ]
-
-        try:
-            stats = _index_project(project, force=force)
-
-            if "error" in stats:
-                return [TextContent(type="text", text=f"❌ {stats['error']}")]
-
-            # Build result message
-            index_type = stats.get("index_type", "FLAT")
-            index_info = f"- Index type: **{index_type}**"
-            if stats.get("num_partitions"):
-                index_info += f" ({stats['num_partitions']} partitions)"
-            if stats.get("index_time_ms"):
-                index_info += f"\n- Index build time: {stats['index_time_ms']:.0f}ms"
-            if stats.get("index_note"):
-                index_info += f"\n- Note: {stats['index_note']}"
-
-            result = f"""✅ **Indexed {project}**
+        result = f"""✅ **Indexed {project}**
 
 📊 **Statistics:**
 - Files indexed: {stats["files_indexed"]}
@@ -1619,397 +1553,296 @@ def register_tools(registry: Any) -> None:  # noqa: C901
 - Code chunks created: {stats["chunks_created"]}
 {index_info}
 """
-            if stats["errors"]:
-                err_lines = [f"- {err}" for err in stats["errors"][:5]]
-                if len(stats["errors"]) > 5:
-                    err_lines.append(f"- ... and {len(stats['errors']) - 5} more")
-                result += (
-                    f"\n⚠️ **Errors ({len(stats['errors'])}):**\n"
-                    + "\n".join(err_lines)
-                    + "\n"
-                )
+        if stats["errors"]:
+            err_lines = [f"- {err}" for err in stats["errors"][:5]]
+            if len(stats["errors"]) > 5:
+                err_lines.append(f"- ... and {len(stats['errors']) - 5} more")
+            result += f"\n⚠️ **Errors ({len(stats['errors'])}):**\n" + "\n".join(err_lines) + "\n"
 
-            result += (
-                f"\n💡 Now use `code_search('{project}', 'your query')` "
-                "to search semantically."
+        result += f"\n💡 Now use `code_search('{project}', 'your query')` to search semantically."
+        result += "\n🏥 Use `code_health()` to check performance metrics."
+
+        return [TextContent(type="text", text=result)]
+
+    except ImportError as e:
+        return [
+            TextContent(
+                type="text",
+                text=(f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```"),
             )
-            result += "\n🏥 Use `code_health()` to check performance metrics."
-
-            return [TextContent(type="text", text=result)]
-
-        except ImportError as e:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Missing dependency: {e}\n\n"
-                        "Install with:\n```\nuv add lancedb sentence-transformers\n```"
-                    ),
-                )
-            ]
-        # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            return [TextContent(type="text", text=f"❌ Indexing failed: {e}")]
-
-    @registry.tool()
-    async def code_search(
-        query: str,
-        project: str = "",
-        limit: int = 10,
-        file_filter: str = "",
-        type_filter: str = "",
-    ) -> list[TextContent]:
-        """
-        Semantic search across indexed code.
-
-        Finds code by meaning, not just exact text matches. Great for questions like:
-        - "Where do we handle billing calculations?"
-        - "How is user authentication implemented?"
-        - "What validates API input?"
-
-        Args:
-            query: Natural language query describing what you're looking for.
-            project: Project name. Auto-detects if only one project configured.
-            limit: Maximum results to return (default 10).
-            file_filter: Filter to specific file path pattern (e.g., "billing/").
-            type_filter: Filter by code type: "function", "class", "module".
-
-        Returns:
-            Matching code chunks ranked by relevance.
-
-        Example:
-            code_search("How does billing calculate vCPU hours?", "automation-analytics-backend")
-            code_search("error handling", project="backend", file_filter="api/")
-        """
-        if not project:
-            config = _load_config()
-            projects = list(config.get("repositories", {}).keys())
-            if len(projects) == 1:
-                project = projects[0]
-            else:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Please specify a project. Available: {', '.join(projects)}",
-                    )
-                ]
-
-        try:
-            results = _search_code(
-                query=query,
-                project=project,
-                limit=limit,
-                file_filter=file_filter,
-                type_filter=type_filter,
-            )
-
-            if not results:
-                return [
-                    TextContent(
-                        type="text",
-                        text=(
-                            f"No results found for: {query}\n\nTry a different query or "
-                            f"check if the project is indexed with `code_stats('{project}')`"
-                        ),
-                    )
-                ]
-
-            if "error" in results[0]:
-                return [TextContent(type="text", text=f"❌ {results[0]['error']}")]
-
-            parts = [f'## 🔍 Search Results for: "{query}"\n']
-
-            for i, result in enumerate(results, 1):
-                # Truncate long content
-                content = result["content"]
-                if len(content) > 800:
-                    content = content[:800] + "\n... (truncated)"
-
-                parts.append(
-                    f"### {i}. `{result['file_path']}` "
-                    f"(lines {result['start_line']}-{result['end_line']})\n"
-                    f"**Type:** {result['type']} | **Name:** {result['name']}"
-                    f" | **Relevance:** {result['similarity']:.0%}\n\n"
-                    f"```{result['language']}\n{content}\n```\n"
-                )
-
-            output = "\n".join(parts)
-            return [TextContent(type="text", text=output)]
-
-        except ImportError as e:
-            return [
-                TextContent(
-                    type="text",
-                    text=(
-                        f"❌ Missing dependency: {e}\n\n"
-                        "Install with:\n```\nuv add lancedb sentence-transformers\n```"
-                    ),
-                )
-            ]
-        # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            return [TextContent(type="text", text=f"❌ Search failed: {e}")]
-
-    @registry.tool()
-    # pylint: disable-next=too-many-locals
-    async def code_stats(
-        project: str = "",
-    ) -> list[TextContent]:
-        """
-        Get comprehensive statistics about indexed code.
-
-        Shows indexing status, disk usage, search stats, and watcher status.
-
-        Args:
-            project: Project name. Lists all if empty.
-
-        Returns:
-            Detailed indexing and search statistics.
-        """
-        watcher_mod = _import_watcher()
-        get_watcher = watcher_mod.get_watcher
-
-        config = _load_config()
-        projects = list(config.get("repositories", {}).keys())
-
-        if project:
-            projects = [project] if project in projects else []
-
-        if not projects:
-            return [
-                TextContent(
-                    type="text", text=f"❌ Project '{project}' not found in config.json"
-                )
-            ]
-
-        output = "## 📊 Code Index Statistics\n\n"
-
-        # Summary stats
-        total_chunks = 0
-        total_size_bytes = 0
-        total_searches = 0
-
-        for proj in projects:
-            stats = _get_index_stats(proj)
-
-            if stats.get("indexed"):
-                total_chunks += stats.get("chunks_count", 0)
-                total_size_bytes += stats.get("disk_size_bytes", 0)
-                total_searches += stats.get("search_count", 0)
-
-                # Status indicator
-                stale_indicator = "⚠️ STALE" if stats.get("is_stale") else ""
-                watcher = get_watcher(proj)
-                watcher_indicator = "👁️" if watcher and watcher.is_running else ""
-
-                output += f"### ✅ {proj} {stale_indicator} {watcher_indicator}\n\n"
-
-                output += "| Metric | Value |\n"
-                output += "|--------|-------|\n"
-                output += f"| **Files** | {stats.get('files_total', 0)} indexed |\n"
-                output += f"| **Chunks** | {stats.get('chunks_count', 0):,} |\n"
-                output += f"| **Disk Size** | {stats.get('disk_size', '0 B')} |\n"
-                output += (
-                    f"| **Last Indexed** | {stats.get('index_age', 'Unknown')} |\n"
-                )
-                output += (
-                    f"| **Model** | `{stats.get('embedding_model', 'unknown')}` |\n"
-                )
-
-                # Search stats
-                if stats.get("search_count", 0) > 0:
-                    output += (
-                        f"| **Searches** | {stats.get('search_count', 0):,} total |\n"
-                    )
-                    output += (
-                        "| **Avg Search Time** | "
-                        f"{stats.get('avg_search_time_ms', 0):.0f}ms |\n"
-                    )
-
-                # Watcher status
-                if watcher:
-                    ws = watcher.status
-                    output += f"| **Watcher** | {'🟢 Active' if ws['running'] else '🔴 Stopped'} |\n"
-                    if ws.get("changes_pending", 0) > 0:
-                        output += f"| **Pending Changes** | {ws['changes_pending']} |\n"
-
-                output += "\n"
-            else:
-                output += f"### ❌ {proj} (not indexed)\n"
-                output += f"Run `code_index('{proj}')` to index.\n\n"
-
-        # Overall summary if multiple projects
-        if len(projects) > 1:
-            if total_size_bytes >= 1024 * 1024:
-                total_size = f"{total_size_bytes / (1024 * 1024):.1f} MB"
-            elif total_size_bytes >= 1024:
-                total_size = f"{total_size_bytes / 1024:.1f} KB"
-            else:
-                total_size = f"{total_size_bytes} B"
-
-            output += "---\n\n"
-            output += (
-                f"**Total:** {total_chunks:,} chunks, {total_size}, "
-                f"{total_searches:,} searches\n"
-            )
-
-        return [TextContent(type="text", text=output)]
-
-    @registry.tool()
-    # pylint: disable-next=too-many-locals,too-many-branches
-    async def code_compact(
-        project: str = "",
-    ) -> list[TextContent]:
-        """
-        Optimize vector database files to reduce disk usage.
-
-        LanceDB creates new fragment files on each write/update. Over time this
-        causes significant disk bloat (can grow to GB). This tool merges fragments
-        and removes old versions.
-
-        Args:
-            project: Project name. If empty, optimizes all projects.
-
-        Returns:
-            Optimization statistics showing space saved.
-
-        Example:
-            code_compact("redhat-ai-workflow")  # Optimize single project
-            code_compact()  # Optimize all projects
-        """
-        config = _load_config()
-        projects = list(config.get("repositories", {}).keys())
-
-        if project:
-            if project not in projects:
-                return [
-                    TextContent(
-                        type="text",
-                        text=f"❌ Project '{project}' not found in config.json",
-                    )
-                ]
-            projects = [project]
-
-        results = []
-        total_saved = 0
-
-        for proj in projects:
-            try:
-                db = _get_lance_db(proj)
-                table_name = _get_table_name(proj)
-
-                if table_name not in db.table_names():
-                    results.append(f"⏭️ **{proj}**: Not indexed (skipped)")
-                    continue
-
-                table = db.open_table(table_name)
-
-                # Get size before
-                db_path = VECTOR_DB_PATH / proj
-                size_before = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
-                files_before = len(list(db_path.rglob("*.lance")))
-
-                # Optimize - remove all old versions
-                table.optimize(cleanup_older_than=timedelta(days=0))
-
-                # Get size after
-                size_after = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
-                files_after = len(list(db_path.rglob("*.lance")))
-                saved = size_before - size_after
-                total_saved += saved
-
-                if saved > 0:
-                    if saved >= 1024 * 1024:
-                        saved_str = f"{saved / (1024 * 1024):.1f} MB"
-                    elif saved >= 1024:
-                        saved_str = f"{saved / 1024:.1f} KB"
-                    else:
-                        saved_str = f"{saved} B"
-                    results.append(
-                        f"✅ **{proj}**: {files_before} → {files_after} files, saved {saved_str}"
-                    )
-                else:
-                    results.append(
-                        f"✅ **{proj}**: Already optimized ({files_after} files)"
-                    )
-
-            # Intentional: log the failure and continue at this boundary.
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                results.append(f"❌ **{proj}**: {e}")
-
-        output = "## 🗜️ Vector Database Optimization\n\n"
-        output += "\n".join(results)
-
-        if total_saved >= 1024 * 1024:
-            total_str = f"{total_saved / (1024 * 1024):.1f} MB"
-        elif total_saved >= 1024:
-            total_str = f"{total_saved / 1024:.1f} KB"
-        else:
-            total_str = f"{total_saved} B"
-        output += f"\n\n**Total space saved:** {total_str}"
-
-        return [TextContent(type="text", text=output)]
-
-    @registry.tool()
-    async def knowledge_deep_scan(
-        project: str,
-        update_memory: bool = True,  # pylint: disable=unused-argument
-    ) -> list[TextContent]:
-        """
-        Deep scan a project using vector search + Claude analysis.
-
-        This tool:
-        1. Ensures the project is indexed
-        2. Uses semantic search to find key patterns
-        3. Returns structured findings for Claude to analyze
-        4. Optionally updates knowledge memory with findings
-
-        Args:
-            project: Project name from config.json.
-            update_memory: If True, update knowledge memory with findings.
-
-        Returns:
-            Deep scan results with architecture, patterns, and gotchas.
-
-        Example:
-            knowledge_deep_scan("automation-analytics-backend")
-        """
-        # Check if indexed
-        stats = _get_index_stats(project)
-        if not stats.get("indexed"):
-            # Index first
-            index_result = _index_project(project)
-            if "error" in index_result:
-                return [TextContent(type="text", text=f"❌ {index_result['error']}")]
-            stats = _get_index_stats(project)
-
-        # Define semantic queries to understand the codebase
-        queries = [
-            ("API routes and endpoints", "api"),
-            ("Database models and schemas", "models"),
-            ("Authentication and authorization", "auth"),
-            ("Error handling and exceptions", "errors"),
-            ("Configuration and settings", "config"),
-            ("Background tasks and workers", "tasks"),
-            ("Data validation and input checking", "validation"),
-            ("External service integrations", "integrations"),
-            ("Logging and monitoring", "logging"),
-            ("Testing patterns and fixtures", "testing"),
         ]
+    # Intentional: convert the failure into an error result for the caller.
+    except _INDEX_ERRORS as e:
+        return [TextContent(type="text", text=f"❌ Indexing failed: {e}")]
 
-        findings = {}
 
-        for query, key in queries:
-            try:
-                results = _search_code(query, project, limit=5)
-                if results and "error" not in results[0]:
-                    findings[key] = results
-            # Intentional: log the failure and continue at this boundary.
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                logger.debug("Suppressed error: %s", exc)
+async def _code_search_impl(
+    query: str,
+    project: str = "",
+    limit: int = 10,
+    file_filter: str = "",
+    type_filter: str = "",
+) -> list[TextContent]:
+    """Implementation of the code_search tool."""
+    if not project:
+        config = _load_config()
+        projects = list(config.get("repositories", {}).keys())
+        if len(projects) == 1:
+            project = projects[0]
+        else:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                )
+            ]
 
-        # Format findings for Claude to analyze
-        output = f"""## 🔬 Deep Scan Results: {project}
+    try:
+        results = _search_code(
+            query=query,
+            project=project,
+            limit=limit,
+            file_filter=file_filter,
+            type_filter=type_filter,
+        )
+
+        if not results:
+            return [
+                TextContent(
+                    type="text",
+                    text=(
+                        f"No results found for: {query}\n\nTry a different query or "
+                        f"check if the project is indexed with `code_stats('{project}')`"
+                    ),
+                )
+            ]
+
+        if "error" in results[0]:
+            return [TextContent(type="text", text=f"❌ {results[0]['error']}")]
+
+        parts = [f'## 🔍 Search Results for: "{query}"\n']
+
+        for i, result in enumerate(results, 1):
+            # Truncate long content
+            content = result["content"]
+            if len(content) > 800:
+                content = content[:800] + "\n... (truncated)"
+
+            parts.append(
+                f"### {i}. `{result['file_path']}` "
+                f"(lines {result['start_line']}-{result['end_line']})\n"
+                f"**Type:** {result['type']} | **Name:** {result['name']}"
+                f" | **Relevance:** {result['similarity']:.0%}\n\n"
+                f"```{result['language']}\n{content}\n```\n"
+            )
+
+        output = "\n".join(parts)
+        return [TextContent(type="text", text=output)]
+
+    except ImportError as e:
+        return [
+            TextContent(
+                type="text",
+                text=(f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add lancedb sentence-transformers\n```"),
+            )
+        ]
+    # Intentional: convert the failure into an error result for the caller.
+    except _INDEX_ERRORS as e:
+        return [TextContent(type="text", text=f"❌ Search failed: {e}")]
+
+
+# pylint: disable-next=too-many-locals
+async def _code_stats_impl(
+    project: str = "",
+) -> list[TextContent]:
+    """Implementation of the code_stats tool."""
+    watcher_mod = _import_watcher()
+    get_watcher = watcher_mod.get_watcher
+
+    config = _load_config()
+    projects = list(config.get("repositories", {}).keys())
+
+    if project:
+        projects = [project] if project in projects else []
+
+    if not projects:
+        return [TextContent(type="text", text=f"❌ Project '{project}' not found in config.json")]
+
+    output = "## 📊 Code Index Statistics\n\n"
+
+    # Summary stats
+    total_chunks = 0
+    total_size_bytes = 0
+    total_searches = 0
+
+    for proj in projects:
+        stats = _get_index_stats(proj)
+
+        if stats.get("indexed"):
+            total_chunks += stats.get("chunks_count", 0)
+            total_size_bytes += stats.get("disk_size_bytes", 0)
+            total_searches += stats.get("search_count", 0)
+
+            # Status indicator
+            stale_indicator = "⚠️ STALE" if stats.get("is_stale") else ""
+            watcher = get_watcher(proj)
+            watcher_indicator = "👁️" if watcher and watcher.is_running else ""
+
+            output += f"### ✅ {proj} {stale_indicator} {watcher_indicator}\n\n"
+
+            output += "| Metric | Value |\n"
+            output += "|--------|-------|\n"
+            output += f"| **Files** | {stats.get('files_total', 0)} indexed |\n"
+            output += f"| **Chunks** | {stats.get('chunks_count', 0):,} |\n"
+            output += f"| **Disk Size** | {stats.get('disk_size', '0 B')} |\n"
+            output += f"| **Last Indexed** | {stats.get('index_age', 'Unknown')} |\n"
+            output += f"| **Model** | `{stats.get('embedding_model', 'unknown')}` |\n"
+
+            # Search stats
+            if stats.get("search_count", 0) > 0:
+                output += f"| **Searches** | {stats.get('search_count', 0):,} total |\n"
+                output += f"| **Avg Search Time** | {stats.get('avg_search_time_ms', 0):.0f}ms |\n"
+
+            # Watcher status
+            if watcher:
+                ws = watcher.status
+                output += f"| **Watcher** | {'🟢 Active' if ws['running'] else '🔴 Stopped'} |\n"
+                if ws.get("changes_pending", 0) > 0:
+                    output += f"| **Pending Changes** | {ws['changes_pending']} |\n"
+
+            output += "\n"
+        else:
+            output += f"### ❌ {proj} (not indexed)\n"
+            output += f"Run `code_index('{proj}')` to index.\n\n"
+
+    # Overall summary if multiple projects
+    if len(projects) > 1:
+        if total_size_bytes >= 1024 * 1024:
+            total_size = f"{total_size_bytes / (1024 * 1024):.1f} MB"
+        elif total_size_bytes >= 1024:
+            total_size = f"{total_size_bytes / 1024:.1f} KB"
+        else:
+            total_size = f"{total_size_bytes} B"
+
+        output += "---\n\n"
+        output += f"**Total:** {total_chunks:,} chunks, {total_size}, {total_searches:,} searches\n"
+
+    return [TextContent(type="text", text=output)]
+
+
+# pylint: disable-next=too-many-locals,too-many-branches
+async def _code_compact_impl(
+    project: str = "",
+) -> list[TextContent]:
+    """Implementation of the code_compact tool."""
+    config = _load_config()
+    projects = list(config.get("repositories", {}).keys())
+
+    if project:
+        if project not in projects:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"❌ Project '{project}' not found in config.json",
+                )
+            ]
+        projects = [project]
+
+    results = []
+    total_saved = 0
+
+    for proj in projects:
+        try:
+            db = _get_lance_db(proj)
+            table_name = _get_table_name(proj)
+
+            if table_name not in db.table_names():
+                results.append(f"⏭️ **{proj}**: Not indexed (skipped)")
+                continue
+
+            table = db.open_table(table_name)
+
+            # Get size before
+            db_path = VECTOR_DB_PATH / proj
+            size_before = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
+            files_before = len(list(db_path.rglob("*.lance")))
+
+            # Optimize - remove all old versions
+            table.optimize(cleanup_older_than=timedelta(days=0))
+
+            # Get size after
+            size_after = sum(f.stat().st_size for f in db_path.rglob("*.lance"))
+            files_after = len(list(db_path.rglob("*.lance")))
+            saved = size_before - size_after
+            total_saved += saved
+
+            if saved > 0:
+                if saved >= 1024 * 1024:
+                    saved_str = f"{saved / (1024 * 1024):.1f} MB"
+                elif saved >= 1024:
+                    saved_str = f"{saved / 1024:.1f} KB"
+                else:
+                    saved_str = f"{saved} B"
+                results.append(f"✅ **{proj}**: {files_before} → {files_after} files, saved {saved_str}")
+            else:
+                results.append(f"✅ **{proj}**: Already optimized ({files_after} files)")
+
+        # Intentional: log the failure and continue at this boundary.
+        except _INDEX_ERRORS as e:
+            results.append(f"❌ **{proj}**: {e}")
+
+    output = "## 🗜️ Vector Database Optimization\n\n"
+    output += "\n".join(results)
+
+    if total_saved >= 1024 * 1024:
+        total_str = f"{total_saved / (1024 * 1024):.1f} MB"
+    elif total_saved >= 1024:
+        total_str = f"{total_saved / 1024:.1f} KB"
+    else:
+        total_str = f"{total_saved} B"
+    output += f"\n\n**Total space saved:** {total_str}"
+
+    return [TextContent(type="text", text=output)]
+
+
+async def _knowledge_deep_scan_impl(project: str) -> list[TextContent]:
+    """Implementation of the knowledge_deep_scan tool."""
+    # Check if indexed
+    stats = _get_index_stats(project)
+    if not stats.get("indexed"):
+        # Index first
+        index_result = _index_project(project)
+        if "error" in index_result:
+            return [TextContent(type="text", text=f"❌ {index_result['error']}")]
+        stats = _get_index_stats(project)
+
+    # Define semantic queries to understand the codebase
+    queries = [
+        ("API routes and endpoints", "api"),
+        ("Database models and schemas", "models"),
+        ("Authentication and authorization", "auth"),
+        ("Error handling and exceptions", "errors"),
+        ("Configuration and settings", "config"),
+        ("Background tasks and workers", "tasks"),
+        ("Data validation and input checking", "validation"),
+        ("External service integrations", "integrations"),
+        ("Logging and monitoring", "logging"),
+        ("Testing patterns and fixtures", "testing"),
+    ]
+
+    findings = {}
+
+    for query, key in queries:
+        try:
+            results = _search_code(query, project, limit=5)
+            if results and "error" not in results[0]:
+                findings[key] = results
+        # Intentional: log the failure and continue at this boundary.
+        except _INDEX_ERRORS as exc:
+            logger.debug("Suppressed error: %s", exc)
+
+    # Format findings for Claude to analyze
+    output = f"""## 🔬 Deep Scan Results: {project}
 
 **Indexed:** {stats.get("chunks_count", 0)} code chunks from {stats.get("file_count", 0)} files
 
@@ -2019,16 +1852,15 @@ def register_tools(registry: Any) -> None:  # noqa: C901
 
 """
 
-        for key, results in findings.items():
-            category_lines = [f"#### {key.replace('_', ' ').title()}\n"]
-            for r in results[:3]:  # Top 3 per category
-                category_lines.append(
-                    f"- `{r['file_path']}:{r['start_line']}` - {r['type']}"
-                    f" `{r['name']}` ({r['similarity']:.0%} match)"
-                )
-            output += "\n".join(category_lines) + "\n\n"
+    for key, results in findings.items():
+        category_lines = [f"#### {key.replace('_', ' ').title()}\n"]
+        for r in results[:3]:  # Top 3 per category
+            category_lines.append(
+                f"- `{r['file_path']}:{r['start_line']}` - {r['type']} `{r['name']}` ({r['similarity']:.0%} match)"
+            )
+        output += "\n".join(category_lines) + "\n\n"
 
-        output += """---
+    output += """---
 
 ### 🧠 Claude Analysis Instructions
 
@@ -2047,110 +1879,85 @@ knowledge_update("PROJECT", "developer", "gotchas", "- issue: X\\n  reason: Y\\n
 ```
 """.replace("PROJECT", project)
 
-        return [TextContent(type="text", text=output)]
+    return [TextContent(type="text", text=output)]
 
-    @registry.tool()
-    # pylint: disable-next=too-many-locals,too-many-return-statements
-    async def code_watch(
-        project: str = "",
-        action: str = "start",
-        debounce_seconds: float = 5.0,
-    ) -> list[TextContent]:
-        """
-        Start or stop automatic index updates for a project.
 
-        The watcher monitors file changes and automatically re-indexes
-        after a quiet period (debounce). This keeps the index fresh
-        without manual intervention.
+# pylint: disable-next=too-many-locals,too-many-return-statements
+async def _code_watch_impl(
+    project: str = "",
+    action: str = "start",
+    debounce_seconds: float = 5.0,
+) -> list[TextContent]:
+    """Implementation of the code_watch tool."""
+    watcher_mod = _import_watcher()
+    get_all_watchers = watcher_mod.get_all_watchers
+    start_watcher = watcher_mod.start_watcher
+    stop_watcher = watcher_mod.stop_watcher
 
-        Args:
-            project: Project name from config.json. Required for start/stop.
-            action: "start", "stop", or "status"
-            debounce_seconds: Wait this long after last change before re-indexing (default 5s)
-
-        Returns:
-            Watcher status.
-
-        Example:
-            code_watch("automation-analytics-backend", "start")
-            code_watch("automation-analytics-backend", "stop")
-            code_watch(action="status")  # Show all watchers
-        """
-        watcher_mod = _import_watcher()
-        get_all_watchers = watcher_mod.get_all_watchers
-        start_watcher = watcher_mod.start_watcher
-        stop_watcher = watcher_mod.stop_watcher
-
-        if action == "status":
-            watchers = get_all_watchers()
-            if not watchers:
-                return [
-                    TextContent(
-                        type="text",
-                        text=(
-                            "## 👁️ Code Watchers\n\nNo active watchers."
-                            "\n\nStart one with `code_watch('project', 'start')`"
-                        ),
-                    )
-                ]
-
-            watcher_parts = ["## 👁️ Code Watchers\n"]
-            for proj, watcher in watchers.items():
-                status = watcher.status
-                icon = "🟢" if status["running"] else "🔴"
-                watcher_parts.append(
-                    f"### {icon} {proj}\n"
-                    f"- **Running:** {status['running']}\n"
-                    f"- **Last update:** {status['last_update'] or 'Never'}\n"
-                    f"- **Pending changes:** {status['changes_pending']}\n"
-                    f"- **Debounce:** {status['debounce_seconds']}s\n"
-                )
-
-            output = "\n".join(watcher_parts)
-            return [TextContent(type="text", text=output)]
-
-        if not project:
-            config = _load_config()
-            projects = list(config.get("repositories", {}).keys())
+    if action == "status":
+        watchers = get_all_watchers()
+        if not watchers:
             return [
                 TextContent(
                     type="text",
-                    text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+                    text=(
+                        "## 👁️ Code Watchers\n\nNo active watchers.\n\nStart one with `code_watch('project', 'start')`"
+                    ),
                 )
             ]
 
-        project_path = _get_project_path(project)
-        if not project_path or not project_path.exists():
-            return [
-                TextContent(type="text", text=f"❌ Project path not found: {project}")
-            ]
+        watcher_parts = ["## 👁️ Code Watchers\n"]
+        for proj, watcher in watchers.items():
+            status = watcher.status
+            icon = "🟢" if status["running"] else "🔴"
+            watcher_parts.append(
+                f"### {icon} {proj}\n"
+                f"- **Running:** {status['running']}\n"
+                f"- **Last update:** {status['last_update'] or 'Never'}\n"
+                f"- **Pending changes:** {status['changes_pending']}\n"
+                f"- **Debounce:** {status['debounce_seconds']}s\n"
+            )
 
-        if action == "start":
-            try:
-                # Ensure project is indexed first
-                stats = _get_index_stats(project)
-                if not stats.get("indexed"):
-                    return [
-                        TextContent(
-                            type="text",
-                            text=(
-                                f"❌ Project '{project}' not indexed. "
-                                f"Run `code_index('{project}')` first."
-                            ),
-                        )
-                    ]
+        output = "\n".join(watcher_parts)
+        return [TextContent(type="text", text=output)]
 
-                watcher = await start_watcher(
-                    project=project,
-                    project_path=project_path,
-                    index_func=_index_project,
-                    debounce_seconds=debounce_seconds,
-                )
+    if not project:
+        config = _load_config()
+        projects = list(config.get("repositories", {}).keys())
+        return [
+            TextContent(
+                type="text",
+                text=f"❌ Please specify a project. Available: {', '.join(projects)}",
+            )
+        ]
 
+    project_path = _get_project_path(project)
+    if not project_path or not project_path.exists():
+        return [TextContent(type="text", text=f"❌ Project path not found: {project}")]
+
+    if action == "start":
+        try:
+            # Ensure project is indexed first
+            stats = _get_index_stats(project)
+            if not stats.get("indexed"):
                 return [
                     TextContent(
                         type="text",
-                        text=f"""✅ **Started watching {project}**
+                        text=(f"❌ Project '{project}' not indexed. Run `code_index('{project}')` first."),
+                    )
+                ]
+
+            watcher = await start_watcher(
+                project=project,
+                project_path=project_path,
+                index_func=_index_project,
+                debounce_seconds=debounce_seconds,
+            )
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"""✅ **Started watching {project}**
 
 📁 Path: `{project_path}`
 ⏱️ Debounce: {debounce_seconds}s (waits for quiet period before re-indexing)
@@ -2159,128 +1966,100 @@ The index will automatically update when you save files.
 Use `code_watch(action='status')` to check watcher status.
 Use `code_watch('{project}', 'stop')` to stop watching.
 """,
-                    )
-                ]
+                )
+            ]
 
-            except ImportError as e:
-                return [
-                    TextContent(
-                        type="text",
-                        text=(
-                            f"❌ Missing dependency: {e}\n\n"
-                            "Install with:\n```\nuv add watchfiles\n```"
-                        ),
-                    )
-                ]
-            # Intentional: convert the failure into an error result for the caller.
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                return [
-                    TextContent(type="text", text=f"❌ Failed to start watcher: {e}")
-                ]
+        except ImportError as e:
+            return [
+                TextContent(
+                    type="text",
+                    text=(f"❌ Missing dependency: {e}\n\nInstall with:\n```\nuv add watchfiles\n```"),
+                )
+            ]
+        # Intentional: convert the failure into an error result for the caller.
+        except _INDEX_ERRORS as e:
+            return [TextContent(type="text", text=f"❌ Failed to start watcher: {e}")]
 
-        if action == "stop":
-            stopped = await stop_watcher(project)
-            if stopped:
-                return [TextContent(type="text", text=f"✅ Stopped watching {project}")]
-            warning = f"⚠️ No active watcher for {project}"
-            return [TextContent(type="text", text=warning)]
+    if action == "stop":
+        stopped = await stop_watcher(project)
+        if stopped:
+            return [TextContent(type="text", text=f"✅ Stopped watching {project}")]
+        warning = f"⚠️ No active watcher for {project}"
+        return [TextContent(type="text", text=warning)]
 
-        unknown = f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'."
-        return [TextContent(type="text", text=unknown)]
+    unknown = f"❌ Unknown action: {action}. Use 'start', 'stop', or 'status'."
+    return [TextContent(type="text", text=unknown)]
 
-    @registry.tool()
-    async def code_watch_all(
-        action: str = "start",
-        debounce_seconds: float = 5.0,
-    ) -> list[TextContent]:
-        """
-        Start or stop watchers for all configured projects.
 
-        Args:
-            action: "start" or "stop"
-            debounce_seconds: Wait time before re-indexing (default 5s)
+async def _code_watch_all_impl(
+    action: str = "start",
+    debounce_seconds: float = 5.0,
+) -> list[TextContent]:
+    """Implementation of the code_watch_all tool."""
+    watcher_mod = _import_watcher()
+    start_watcher = watcher_mod.start_watcher
+    stop_all_watchers = watcher_mod.stop_all_watchers
 
-        Returns:
-            Status of all watchers.
-        """
-        watcher_mod = _import_watcher()
-        start_watcher = watcher_mod.start_watcher
-        stop_all_watchers = watcher_mod.stop_all_watchers
+    config = _load_config()
+    projects = list(config.get("repositories", {}).keys())
 
-        config = _load_config()
-        projects = list(config.get("repositories", {}).keys())
+    if action == "start":
+        results = []
+        for project in projects:
+            project_path = _get_project_path(project)
+            if not project_path or not project_path.exists():
+                results.append(f"⚠️ {project}: path not found")
+                continue
 
-        if action == "start":
-            results = []
-            for project in projects:
-                project_path = _get_project_path(project)
-                if not project_path or not project_path.exists():
-                    results.append(f"⚠️ {project}: path not found")
-                    continue
+            stats = _get_index_stats(project)
+            if not stats.get("indexed"):
+                results.append(f"⚠️ {project}: not indexed (run code_index first)")
+                continue
 
-                stats = _get_index_stats(project)
-                if not stats.get("indexed"):
-                    results.append(f"⚠️ {project}: not indexed (run code_index first)")
-                    continue
+            try:
+                await start_watcher(
+                    project=project,
+                    project_path=project_path,
+                    index_func=_index_project,
+                    debounce_seconds=debounce_seconds,
+                )
+                results.append(f"✅ {project}: watching")
+            # Intentional: log the failure and continue at this boundary.
+            except _INDEX_ERRORS as e:
+                results.append(f"❌ {project}: {e}")
 
-                try:
-                    await start_watcher(
-                        project=project,
-                        project_path=project_path,
-                        index_func=_index_project,
-                        debounce_seconds=debounce_seconds,
-                    )
-                    results.append(f"✅ {project}: watching")
-                # Intentional: log the failure and continue at this boundary.
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    results.append(f"❌ {project}: {e}")
+        output = "## 👁️ Started Watchers\n\n"
+        output += "\n".join(results)
+        output += f"\n\n**Debounce:** {debounce_seconds}s"
 
-            output = "## 👁️ Started Watchers\n\n"
-            output += "\n".join(results)
-            output += f"\n\n**Debounce:** {debounce_seconds}s"
+        return [TextContent(type="text", text=output)]
 
-            return [TextContent(type="text", text=output)]
+    if action == "stop":
+        count = await stop_all_watchers()
+        return [TextContent(type="text", text=f"✅ Stopped {count} watcher(s)")]
 
-        if action == "stop":
-            count = await stop_all_watchers()
-            return [TextContent(type="text", text=f"✅ Stopped {count} watcher(s)")]
+    return [
+        TextContent(
+            type="text",
+            text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.",
+        )
+    ]
 
-        return [
-            TextContent(
-                type="text",
-                text=f"❌ Unknown action: {action}. Use 'start' or 'stop'.",
-            )
-        ]
 
-    @registry.tool()
-    async def code_health() -> list[TextContent]:
-        """
-        Get health status and performance metrics for vector search.
+async def _code_health_impl() -> list[TextContent]:
+    """Implementation of the code_health tool."""
+    try:
+        health = get_vector_health()
+        stats = get_all_vector_stats()
 
-        Shows:
-        - Overall health status
-        - Performance metrics (search times, cache hit rates)
-        - Issues and recommendations
-        - Index configuration
+        # Status emoji
+        status_emoji = {
+            "healthy": "🟢",
+            "degraded": "🟡",
+            "unhealthy": "🔴",
+        }.get(health["status"], "⚪")
 
-        Returns:
-            Health dashboard with actionable recommendations.
-
-        Example:
-            code_health()
-        """
-        try:
-            health = get_vector_health()
-            stats = get_all_vector_stats()
-
-            # Status emoji
-            status_emoji = {
-                "healthy": "🟢",
-                "degraded": "🟡",
-                "unhealthy": "🔴",
-            }.get(health["status"], "⚪")
-
-            output = f"""## 🏥 Vector Search Health
+        output = f"""## 🏥 Vector Search Health
 
 ### Status: {status_emoji} {health["status"].upper()}
 
@@ -2320,21 +2099,242 @@ Use `code_watch('{project}', 'stop')` to stop watching.
 
 """
 
-            if health["issues"]:
-                issue_lines = [f"- {issue}" for issue in health["issues"]]
-                output += "---\n\n### ⚠️ Issues\n\n" + "\n".join(issue_lines) + "\n\n"
+        if health["issues"]:
+            issue_lines = [f"- {issue}" for issue in health["issues"]]
+            output += "---\n\n### ⚠️ Issues\n\n" + "\n".join(issue_lines) + "\n\n"
 
-            if health["recommendations"]:
-                rec_lines = [f"- {rec}" for rec in health["recommendations"]]
-                output += (
-                    "---\n\n### 💡 Recommendations\n\n" + "\n".join(rec_lines) + "\n\n"
-                )
+        if health["recommendations"]:
+            rec_lines = [f"- {rec}" for rec in health["recommendations"]]
+            output += "---\n\n### 💡 Recommendations\n\n" + "\n".join(rec_lines) + "\n\n"
 
-            return [TextContent(type="text", text=output)]
+        return [TextContent(type="text", text=output)]
 
-        # Intentional: convert the failure into an error result for the caller.
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            return [TextContent(type="text", text=f"❌ Health check failed: {e}")]
+    # Intentional: convert the failure into an error result for the caller.
+    except _INDEX_ERRORS as e:
+        return [TextContent(type="text", text=f"❌ Health check failed: {e}")]
+
+
+async def _code_cache_impl(
+    action: str = "stats",
+) -> list[TextContent]:
+    """Implementation of the code_cache tool."""
+    if action == "clear":
+        _embedding_cache.clear()
+        return [TextContent(type="text", text="✅ Embedding cache cleared")]
+
+    stats = _embedding_cache.stats()
+
+    output = f"""## 🗄️ Embedding Cache
+
+| Metric | Value |
+|--------|-------|
+| **Size** | {stats["size"]} / {stats["max_size"]} |
+| **Hit Rate** | {stats["hit_rate"]} |
+| **Hits** | {stats["hits"]} |
+| **Misses** | {stats["misses"]} |
+
+💡 Cache stores query embeddings to speed up repeated searches.
+Use `code_cache('clear')` to clear the cache.
+"""
+
+    return [TextContent(type="text", text=output)]
+
+
+# ============================================================================
+# MCP Tool Registration
+# ============================================================================
+
+
+def register_tools(registry: Any) -> None:
+    """Register code search tools with the MCP registry."""
+
+    @registry.tool()
+    async def code_index(
+        project: str = "",
+        force: bool = False,
+    ) -> list[TextContent]:
+        """
+        Index a project's code into the vector database for semantic search.
+
+        This creates embeddings for all code files and stores them locally.
+        Subsequent searches will be fast and semantic (meaning-based).
+
+        Args:
+            project: Project name from config.json. Auto-detects if empty.
+            force: If True, re-index all files. Otherwise only index changed files.
+
+        Returns:
+            Indexing statistics.
+
+        Example:
+            code_index("automation-analytics-backend")
+            code_index("automation-analytics-backend", force=True)  # Full re-index
+        """
+        return await _code_index_impl(project=project, force=force)
+
+    @registry.tool()
+    async def code_search(
+        query: str,
+        project: str = "",
+        limit: int = 10,
+        file_filter: str = "",
+        type_filter: str = "",
+    ) -> list[TextContent]:
+        """
+        Semantic search across indexed code.
+
+        Finds code by meaning, not just exact text matches. Great for questions like:
+        - "Where do we handle billing calculations?"
+        - "How is user authentication implemented?"
+        - "What validates API input?"
+
+        Args:
+            query: Natural language query describing what you're looking for.
+            project: Project name. Auto-detects if only one project configured.
+            limit: Maximum results to return (default 10).
+            file_filter: Filter to specific file path pattern (e.g., "billing/").
+            type_filter: Filter by code type: "function", "class", "module".
+
+        Returns:
+            Matching code chunks ranked by relevance.
+
+        Example:
+            code_search("How does billing calculate vCPU hours?", "automation-analytics-backend")
+            code_search("error handling", project="backend", file_filter="api/")
+        """
+        return await _code_search_impl(
+            query=query, project=project, limit=limit, file_filter=file_filter, type_filter=type_filter
+        )
+
+    @registry.tool()
+    async def code_stats(
+        project: str = "",
+    ) -> list[TextContent]:
+        """
+        Get comprehensive statistics about indexed code.
+
+        Shows indexing status, disk usage, search stats, and watcher status.
+
+        Args:
+            project: Project name. Lists all if empty.
+
+        Returns:
+            Detailed indexing and search statistics.
+        """
+        return await _code_stats_impl(project=project)
+
+    @registry.tool()
+    async def code_compact(
+        project: str = "",
+    ) -> list[TextContent]:
+        """
+        Optimize vector database files to reduce disk usage.
+
+        LanceDB creates new fragment files on each write/update. Over time this
+        causes significant disk bloat (can grow to GB). This tool merges fragments
+        and removes old versions.
+
+        Args:
+            project: Project name. If empty, optimizes all projects.
+
+        Returns:
+            Optimization statistics showing space saved.
+
+        Example:
+            code_compact("redhat-ai-workflow")  # Optimize single project
+            code_compact()  # Optimize all projects
+        """
+        return await _code_compact_impl(project=project)
+
+    @registry.tool()
+    async def knowledge_deep_scan(
+        project: str,
+        update_memory: bool = True,  # pylint: disable=unused-argument
+    ) -> list[TextContent]:
+        """
+        Deep scan a project using vector search + Claude analysis.
+
+        This tool:
+        1. Ensures the project is indexed
+        2. Uses semantic search to find key patterns
+        3. Returns structured findings for Claude to analyze
+        4. Optionally updates knowledge memory with findings
+
+        Args:
+            project: Project name from config.json.
+            update_memory: If True, update knowledge memory with findings.
+
+        Returns:
+            Deep scan results with architecture, patterns, and gotchas.
+
+        Example:
+            knowledge_deep_scan("automation-analytics-backend")
+        """
+        return await _knowledge_deep_scan_impl(project=project)
+
+    @registry.tool()
+    async def code_watch(
+        project: str = "",
+        action: str = "start",
+        debounce_seconds: float = 5.0,
+    ) -> list[TextContent]:
+        """
+        Start or stop automatic index updates for a project.
+
+        The watcher monitors file changes and automatically re-indexes
+        after a quiet period (debounce). This keeps the index fresh
+        without manual intervention.
+
+        Args:
+            project: Project name from config.json. Required for start/stop.
+            action: "start", "stop", or "status"
+            debounce_seconds: Wait this long after last change before re-indexing (default 5s)
+
+        Returns:
+            Watcher status.
+
+        Example:
+            code_watch("automation-analytics-backend", "start")
+            code_watch("automation-analytics-backend", "stop")
+            code_watch(action="status")  # Show all watchers
+        """
+        return await _code_watch_impl(project=project, action=action, debounce_seconds=debounce_seconds)
+
+    @registry.tool()
+    async def code_watch_all(
+        action: str = "start",
+        debounce_seconds: float = 5.0,
+    ) -> list[TextContent]:
+        """
+        Start or stop watchers for all configured projects.
+
+        Args:
+            action: "start" or "stop"
+            debounce_seconds: Wait time before re-indexing (default 5s)
+
+        Returns:
+            Status of all watchers.
+        """
+        return await _code_watch_all_impl(action=action, debounce_seconds=debounce_seconds)
+
+    @registry.tool()
+    async def code_health() -> list[TextContent]:
+        """
+        Get health status and performance metrics for vector search.
+
+        Shows:
+        - Overall health status
+        - Performance metrics (search times, cache hit rates)
+        - Issues and recommendations
+        - Index configuration
+
+        Returns:
+            Health dashboard with actionable recommendations.
+
+        Example:
+            code_health()
+        """
+        return await _code_health_impl()
 
     @registry.tool()
     async def code_cache(
@@ -2355,23 +2355,4 @@ Use `code_watch('{project}', 'stop')` to stop watching.
             code_cache()  # Show stats
             code_cache("clear")  # Clear cache
         """
-        if action == "clear":
-            _embedding_cache.clear()
-            return [TextContent(type="text", text="✅ Embedding cache cleared")]
-
-        stats = _embedding_cache.stats()
-
-        output = f"""## 🗄️ Embedding Cache
-
-| Metric | Value |
-|--------|-------|
-| **Size** | {stats["size"]} / {stats["max_size"]} |
-| **Hit Rate** | {stats["hit_rate"]} |
-| **Hits** | {stats["hits"]} |
-| **Misses** | {stats["misses"]} |
-
-💡 Cache stores query embeddings to speed up repeated searches.
-Use `code_cache('clear')` to clear the cache.
-"""
-
-        return [TextContent(type="text", text=output)]
+        return await _code_cache_impl(action=action)
