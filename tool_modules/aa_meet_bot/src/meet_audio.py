@@ -17,7 +17,7 @@ import asyncio
 import logging
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from tool_modules.aa_meet_bot.src.meet_runtime import MeetControllerView
 from tool_modules.aa_meet_bot.src.pulse_defaults import default_source_metadata_args
@@ -46,10 +46,10 @@ class AudioMixin:
     """PulseAudio routing methods shared by the controller and MeetAudio."""
 
     # Declared for mixins that read sibling state.
-    _audio_sink_name: Optional[str]
+    _audio_sink_name: str | None
     _browser_pid: Any
-    _device_manager: Optional[InstanceDeviceManager]
-    _devices: Optional[InstanceDevices]
+    _device_manager: InstanceDeviceManager | None
+    _devices: InstanceDevices | None
     _instance_id: Any
     state: Any
 
@@ -71,7 +71,8 @@ class AudioMixin:
 
         try:
             # Check if sink already exists
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["pactl", "list", "short", "sinks"],
                 capture_output=True,
                 text=True,
@@ -87,7 +88,8 @@ class AudioMixin:
                 return True
 
             # Create null sink (audio goes nowhere, but can be monitored)
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 [
                     "pactl",
                     "load-module",
@@ -102,24 +104,18 @@ class AudioMixin:
 
             if result.returncode == 0:
                 self._audio_sink_name = sink_name
-                logger.info(
-                    "[%s] Created virtual audio sink: %s", self._instance_id, sink_name
-                )
+                logger.info("[%s] Created virtual audio sink: %s", self._instance_id, sink_name)
                 logger.info(
                     "[%s] To listen: pactl set-default-source %s.monitor",
                     self._instance_id,
                     sink_name,
                 )
                 return True
-            logger.warning(
-                "[%s] Failed to create audio sink: %s", self._instance_id, result.stderr
-            )
+            logger.warning("[%s] Failed to create audio sink: %s", self._instance_id, result.stderr)
             return False
 
         except _PACTL_ERRORS as e:
-            logger.warning(
-                "[%s] Could not create virtual audio sink: %s", self._instance_id, e
-            )
+            logger.warning("[%s] Could not create virtual audio sink: %s", self._instance_id, e)
             return False
 
     async def _remove_virtual_audio_sink(self) -> None:
@@ -130,7 +126,8 @@ class AudioMixin:
 
         try:
             # Find the module index for our sink
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["pactl", "list", "short", "modules"],
                 capture_output=True,
                 text=True,
@@ -140,9 +137,7 @@ class AudioMixin:
             for line in result.stdout.strip().split("\n"):
                 if self._audio_sink_name in line:
                     module_index = line.split()[0]
-                    subprocess.run(
-                        ["pactl", "unload-module", module_index], check=False
-                    )
+                    await asyncio.to_thread(subprocess.run, ["pactl", "unload-module", module_index], check=False)
                     logger.info(
                         "[%s] Removed virtual audio sink: %s",
                         self._instance_id,
@@ -152,11 +147,9 @@ class AudioMixin:
 
             self._audio_sink_name = None
         except _PACTL_ERRORS as e:
-            logger.warning(
-                "[%s] Could not remove virtual audio sink: %s", self._instance_id, e
-            )
+            logger.warning("[%s] Could not remove virtual audio sink: %s", self._instance_id, e)
 
-    def get_monitor_source(self) -> Optional[str]:
+    def get_monitor_source(self) -> str | None:
         """Get the monitor source name for capturing meeting audio.
 
         This is the source that captures all audio going to the sink.
@@ -171,7 +164,7 @@ class AudioMixin:
             return f"{self._audio_sink_name}.monitor"
         return None
 
-    def get_pipe_path(self) -> Optional[Path]:
+    def get_pipe_path(self) -> Path | None:
         """Get the named pipe path for TTS audio injection.
 
         Write PCM audio (16kHz, 16-bit, mono) to this pipe to inject
@@ -285,9 +278,7 @@ class AudioMixin:
             await asyncio.sleep(1)
 
         if not self.state or not self.state.joined:
-            logger.warning(
-                "[%s] Audio routing: meeting not joined, giving up", self._instance_id
-            )
+            logger.warning("[%s] Audio routing: meeting not joined, giving up", self._instance_id)
             return
 
         logger.info("[%s] Meeting joined, starting audio routing...", self._instance_id)
@@ -296,7 +287,8 @@ class AudioMixin:
         while self.state and self.state.joined:
             await asyncio.sleep(3)  # Check every 3 seconds
             try:
-                result = subprocess.run(
+                result = await asyncio.to_thread(
+                    subprocess.run,
                     ["pactl", "list", "sink-inputs"],
                     capture_output=True,
                     text=True,
@@ -304,9 +296,7 @@ class AudioMixin:
                 )
                 streams_routed += self._route_sink_input_listing(result.stdout)
             except _PACTL_ERRORS as e:
-                logger.debug(
-                    "[%s] Audio routing check failed: %s", self._instance_id, e
-                )
+                logger.debug("[%s] Audio routing check failed: %s", self._instance_id, e)
 
         if streams_routed > 0:
             logger.info(
@@ -337,9 +327,7 @@ class AudioMixin:
                     sink_input_id,
                 )
                 return True
-            logger.debug(
-                "Failed to move sink-input %s: %s", sink_input_id, result.stderr
-            )
+            logger.debug("Failed to move sink-input %s: %s", sink_input_id, result.stderr)
             return False
         except _PACTL_ERRORS as e:
             logger.debug("Failed to move sink-input %s: %s", sink_input_id, e)
@@ -372,9 +360,7 @@ class AudioMixin:
                 if line.startswith("Sink Input #"):
                     # Check if previous input matches our criteria
                     if current_input_id and is_chrome:
-                        if not only_our_browser or (
-                            self._browser_pid and current_pid == str(self._browser_pid)
-                        ):
+                        if not only_our_browser or (self._browser_pid and current_pid == str(self._browser_pid)):
                             sink_inputs.append(current_input_id)
                         elif only_our_browser and not self._browser_pid:
                             # If we don't have browser PID yet, include all Chrome inputs
@@ -390,13 +376,10 @@ class AudioMixin:
                     current_pid = line.split("=")[1].strip().strip('"')
 
             # Don't forget the last one
-            if current_input_id and is_chrome:
-                if not only_our_browser or (
-                    self._browser_pid and current_pid == str(self._browser_pid)
-                ):
-                    sink_inputs.append(current_input_id)
-                elif only_our_browser and not self._browser_pid:
-                    sink_inputs.append(current_input_id)
+            # Keep it unless we only want our browser and know its PID but this stream isn't it
+            our_browser_or_unknown = not self._browser_pid or current_pid == str(self._browser_pid)
+            if current_input_id and is_chrome and (not only_our_browser or our_browser_or_unknown):
+                sink_inputs.append(current_input_id)
 
         except _PACTL_ERRORS as e:
             logger.debug("Failed to get Chrome sink inputs: %s", e)
@@ -520,10 +503,9 @@ class AudioMixin:
                 line = line.strip()
 
                 if line.startswith("Sink Input #"):
-                    if current_input_id and is_chrome:
-                        # Check if this Chrome stream is on our null sink
-                        if current_sink and self._audio_sink_name in current_sink:
-                            return True  # Found at least one muted stream
+                    # Check if this Chrome stream is on our null sink
+                    if current_input_id and is_chrome and current_sink and self._audio_sink_name in current_sink:
+                        return True  # Found at least one muted stream
                     current_input_id = line.split("#")[1]
                     is_chrome = False
                     current_sink = None
@@ -535,11 +517,7 @@ class AudioMixin:
                         is_chrome = True
 
             # Check the last one
-            if current_input_id and is_chrome and current_sink:
-                if self._audio_sink_name in current_sink:
-                    return True
-
-            return False
+            return bool(current_input_id and is_chrome and current_sink and self._audio_sink_name in current_sink)
 
         except _PACTL_ERRORS as e:
             logger.debug("Failed to check audio mute state: %s", e)
@@ -566,7 +544,8 @@ class AudioMixin:
 
         try:
             # First, check what the current default is
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["pactl", "get-default-source"],
                 capture_output=True,
                 text=True,
@@ -585,7 +564,8 @@ class AudioMixin:
 
             # Current default is meetbot - need to find and restore user's source
             # Get all available sources
-            result = subprocess.run(
+            result = await asyncio.to_thread(
+                subprocess.run,
                 ["pactl", "list", "sources", "short"],
                 capture_output=True,
                 text=True,
@@ -601,22 +581,17 @@ class AudioMixin:
                 if len(parts) >= 2:
                     source_name = parts[1]
                     # Skip monitors and meetbot sources
-                    if (
-                        ".monitor" not in source_name
-                        and "meet_bot" not in source_name.lower()
-                    ):
+                    if ".monitor" not in source_name and "meet_bot" not in source_name.lower():
                         user_source = source_name
                         # Don't break - keep looking in case there's a USB/Bluetooth device
                         # USB/Bluetooth devices typically have "usb" or "bluez" in the name
-                        if (
-                            "usb" in source_name.lower()
-                            or "bluez" in source_name.lower()
-                        ):
+                        if "usb" in source_name.lower() or "bluez" in source_name.lower():
                             break  # Prefer external devices
 
             if user_source:
                 # Use pw-metadata for persistent default (pactl gets overridden by PipeWire)
-                subprocess.run(
+                await asyncio.to_thread(
+                    subprocess.run,
                     default_source_metadata_args(user_source),
                     capture_output=True,
                     check=False,
@@ -627,14 +602,10 @@ class AudioMixin:
                     user_source,
                 )
             else:
-                logger.warning(
-                    "[%s] No user audio source found to restore", self._instance_id
-                )
+                logger.warning("[%s] No user audio source found to restore", self._instance_id)
 
         except _PACTL_ERRORS as e:
-            logger.warning(
-                "[%s] Failed to restore default source: %s", self._instance_id, e
-            )
+            logger.warning("[%s] Failed to restore default source: %s", self._instance_id, e)
 
     async def _move_user_browser_to_original_source(
         self,
@@ -655,7 +626,7 @@ class AudioMixin:
             self._instance_id,
         )
 
-    def get_audio_sink_name(self) -> Optional[str]:
+    def get_audio_sink_name(self) -> str | None:
         """Get the name of the virtual audio sink for this instance.
 
         To listen to meeting audio:
@@ -664,7 +635,7 @@ class AudioMixin:
         """
         return self._audio_sink_name
 
-    def get_audio_devices(self) -> Optional[InstanceDevices]:
+    def get_audio_devices(self) -> InstanceDevices | None:
         """Get the per-instance audio devices for this controller.
 
         Returns:
