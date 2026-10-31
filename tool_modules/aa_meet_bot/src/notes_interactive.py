@@ -5,7 +5,7 @@ import json
 import logging
 import traceback
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from tool_modules.aa_meet_bot.src.audio_capture import RealtimeSTTPipeline
 from tool_modules.aa_meet_bot.src.browser_controller import CaptionEntry
@@ -16,6 +16,9 @@ from tool_modules.aa_meet_bot.src.tts_engine import TTSEngine
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordEvent
 
 logger = logging.getLogger(__name__)
+
+# Strong references to fire-and-forget tasks until they finish
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
 
 _video_dbus_available = False
 try:
@@ -41,11 +44,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
         """
         try:
             # Create meeting ID from database ID or generate one
-            meeting_id = (
-                str(self.state.meeting_id)
-                if self.state.meeting_id
-                else f"meet-{id(self)}"
-            )
+            meeting_id = str(self.state.meeting_id) if self.state.meeting_id else f"meet-{id(self)}"
             meeting_title = self.state.title or "Untitled Meeting"
 
             # Initialize LLM responder with meeting context
@@ -58,10 +57,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 meeting_title,
                 meeting_id,
             )
-            logger.info(
-                "🎤 Interactive mode: Conversation history will be maintained "
-                "throughout this meeting"
-            )
+            logger.info("🎤 Interactive mode: Conversation history will be maintained throughout this meeting")
 
             # Set up wake word callback for voice responses
             logger.info(
@@ -69,8 +65,8 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 self.config.wake_word,
             )
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to set up interactive mode: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to set up interactive mode")
             self.__dict__["_interactive_mode"] = False
 
     async def _start_video_integration(self) -> None:
@@ -100,17 +96,11 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                     video_device = devices.video_device
                     sink_name = devices.sink_name
                     # Audio source is the sink monitor (logging only; capture uses sink-input)
-                    audio_source = (
-                        f"{devices.sink_name}.monitor" if devices.sink_name else None
-                    )
-                    logger.info(
-                        "📺 Device info: video=%s, audio=%s", video_device, audio_source
-                    )
+                    audio_source = f"{devices.sink_name}.monitor" if devices.sink_name else None
+                    logger.info("📺 Device info: video=%s, audio=%s", video_device, audio_source)
 
             if not video_device:
-                logger.warning(
-                    "📺 No video device available, skipping video integration"
-                )
+                logger.warning("📺 No video device available, skipping video integration")
                 return
 
             # Find Chromium's sink-input index for monitor-stream capture
@@ -119,9 +109,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             if sink_input_index is not None:
                 logger.info("📺 Found Chromium sink-input index: %s", sink_input_index)
             else:
-                logger.warning(
-                    "📺 Could not find Chromium sink-input, waveform may not work"
-                )
+                logger.warning("📺 Could not find Chromium sink-input, waveform may not work")
 
             # Update audio source on the video daemon
             # The video daemon is already rendering - just update the audio capture
@@ -158,9 +146,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                     logger.info("📺 Video integration active on %s", video_device)
 
                     # Start participant polling task
-                    self.__dict__["_participant_poll_task"] = asyncio.create_task(
-                        self._poll_participants()
-                    )
+                    self.__dict__["_participant_poll_task"] = asyncio.create_task(self._poll_participants())
                 else:
                     # May fail if video was disabled - that's OK, keep black screen
                     logger.info("📺 Video result: %s", result)
@@ -170,13 +156,11 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 logger.warning("📺 Could not connect to video daemon D-Bus service")
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("📺 Failed to start video integration: %s", e)
+            logger.warning("📺 Failed to start video integration: %s", e, exc_info=True)
 
     # Live flow kept together after the duplicate copy was removed.
     # pylint: disable-next=too-many-branches,too-many-locals
-    async def _find_chromium_sink_input(
-        self, target_sink: Optional[str]
-    ) -> Optional[int]:
+    async def _find_chromium_sink_input(self, target_sink: str | None) -> int | None:
         """Find Chromium's sink-input index for monitor-stream capture.
 
         PipeWire's null-sink monitors don't work properly (output zeros).
@@ -231,9 +215,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 if line.startswith("Sink Input #"):
                     # Save previous if it was Chromium
                     if is_chromium and current_index is not None:
-                        sink_name = sink_id_to_name.get(
-                            current_sink_id, current_sink_id
-                        )
+                        sink_name = sink_id_to_name.get(current_sink_id, current_sink_id)
                         chromium_candidates.append((current_index, sink_name))
 
                     # Start new sink-input
@@ -290,7 +272,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             return None
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning("📺 Error finding Chromium sink-input: %s", e)
+            logger.warning("📺 Error finding Chromium sink-input: %s", e, exc_info=True)
             return None
 
     async def _poll_participants(self) -> None:
@@ -305,11 +287,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
         rapid_interval = 2.0  # Fast polling at start
         normal_interval = 15.0  # Match video rotation interval
 
-        while (
-            self.state.status == "capturing"
-            and self._controller
-            and self._video_daemon_active
-        ):
+        while self.state.status == "capturing" and self._controller and self._video_daemon_active:
             try:
                 # Get participants from Google Meet
                 participants = await self._controller.get_participants()
@@ -323,12 +301,10 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                             len(participants),
                         )
                     else:
-                        logger.debug(
-                            "📺 Sent %s participants to video daemon", len(participants)
-                        )
+                        logger.debug("📺 Sent %s participants to video daemon", len(participants))
 
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("Participant poll error: %s", e)
+                logger.debug("Participant poll error: %s", e, exc_info=True)
 
             poll_count += 1
 
@@ -358,17 +334,15 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 if not (result and result.get("success")):
                     logger.debug("📺 update_attendees returned: %s", result)
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.debug("📺 Failed to update attendees: %s", e)
+            logger.debug("📺 Failed to update attendees: %s", e, exc_info=True)
 
     async def _stop_video_integration(self) -> None:
         """Stop video daemon integration."""
         # Cancel polling task
         if self._participant_poll_task:
             self._participant_poll_task.cancel()
-            try:
-                await self._participant_poll_task
-            except asyncio.CancelledError:
-                pass
+            # Wait for the cancelled task without swallowing a cancellation of this coroutine
+            await asyncio.wait({self._participant_poll_task})
             self.__dict__["_participant_poll_task"] = None
 
         # Stop video daemon rendering via D-Bus
@@ -384,7 +358,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                     else:
                         logger.debug("📺 stop_video returned: %s", result)
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.debug("📺 Failed to stop video daemon: %s", e)
+                logger.debug("📺 Failed to stop video daemon: %s", e, exc_info=True)
 
             self.__dict__["_video_daemon_active"] = False
 
@@ -420,9 +394,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 # Fallback to constructed name from instance_id
                 safe_id = instance_id.replace("-", "_")
                 monitor_source = f"meet_bot_{safe_id}.monitor"
-                logger.info(
-                    "🧠 NPU STT: Using constructed sink name: %s", monitor_source
-                )
+                logger.info("🧠 NPU STT: Using constructed sink name: %s", monitor_source)
             else:
                 logger.warning("No instance_id or devices - cannot set up NPU STT")
                 return
@@ -442,17 +414,15 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
             # Start the pipeline
             if await self._npu_stt_pipeline.start():
-                logger.info(
-                    "🧠 NPU STT pipeline started - real-time transcription active"
-                )
+                logger.info("🧠 NPU STT pipeline started - real-time transcription active")
             else:
                 logger.error("🧠 Failed to start NPU STT pipeline")
                 self.__dict__["_npu_stt_pipeline"] = None
 
         except ImportError as e:
             logger.warning("NPU STT not available: %s", e)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to set up NPU STT: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to set up NPU STT")
 
     def _on_npu_transcription(self, text: str, is_final: bool) -> None:
         """Handle transcription from NPU STT.
@@ -472,15 +442,13 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             logger.debug("🧠 NPU (ignored - bot speaking): '%s'", text)
             return
 
-        logger.info(
-            "🧠 NPU→WakeWord %s: '%s'", "[FINAL]" if is_final else "[partial]", text
-        )
+        logger.info("🧠 NPU→WakeWord %s: '%s'", "[FINAL]" if is_final else "[partial]", text)
 
         # Create a transcript entry (speaker is "Meeting" since we can't identify)
         transcript_entry = TranscriptEntry(
             speaker="Meeting Audio",  # NPU STT doesn't know who's speaking
             text=text.strip(),
-            timestamp=datetime.now(),
+            timestamp=datetime.now().astimezone(),
         )
 
         # Add to buffer
@@ -494,7 +462,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             mock_caption = CaptionEntry(
                 speaker="Meeting Audio",
                 text=text.strip(),
-                timestamp=datetime.now(),
+                timestamp=datetime.now().astimezone(),
                 is_update=False,
                 caption_id=0,
             )
@@ -520,14 +488,15 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
         if event:
             # Complete command detected - handle it immediately!
-            logger.info(
-                "🔔 COMPLETE COMMAND from %s: %s", event.speaker, event.command_text
-            )
+            logger.info("🔔 COMPLETE COMMAND from %s: %s", event.speaker, event.command_text)
             self.state.wake_word_triggers += 1
 
             if self._interactive_mode:
                 # Handle immediately - don't wait for pause
-                asyncio.create_task(self._handle_wake_word_command(event))
+                task = asyncio.create_task(self._handle_wake_word_command(event))
+                # Keep a strong reference so the task is not garbage-collected mid-run
+                _BACKGROUND_TASKS.add(task)
+                task.add_done_callback(_BACKGROUND_TASKS.discard)
 
             if self._on_wake_word_callback:
                 self._on_wake_word_callback(event)
@@ -536,9 +505,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             # Wake word detected but waiting for more input - start pause checker
             if not self._wake_word_check_task or self._wake_word_check_task.done():
                 logger.info("🎯 Wake word detected, starting pause checker...")
-                self.__dict__["_wake_word_check_task"] = asyncio.create_task(
-                    self._check_wake_word_pause()
-                )
+                self.__dict__["_wake_word_check_task"] = asyncio.create_task(self._check_wake_word_pause())
 
     async def _handle_wake_word_command(self, event: WakeWordEvent) -> None:
         """Handle a wake word command in interactive mode.
@@ -590,8 +557,8 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 else:
                     logger.warning("No response generated")
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Error handling wake word command: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Error handling wake word command")
         finally:
             self.__dict__["_responding"] = False
             # Reset wake word detector to clear old buffered captions
@@ -600,9 +567,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 self._wake_word_manager.text_detector.reset()
                 logger.debug("Wake word detector reset after response")
 
-    async def _stream_and_speak(
-        self, command: str, speaker: str, context_before: list
-    ) -> None:
+    async def _stream_and_speak(self, command: str, speaker: str, context_before: list) -> None:
         """Stream LLM response and speak sentences as they arrive.
 
         This reduces perceived latency by starting TTS as soon as the first
@@ -623,8 +588,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             return
 
         # Build messages for Ollama
-        build_messages = getattr(self._llm_responder, "_build_messages")
-        messages = build_messages(command, speaker, context_before)
+        messages = self._llm_responder.build_messages(command, speaker, context_before)
 
         sentence_count = 0
         full_response = []
@@ -632,9 +596,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
         async for sentence in self._llm_responder.stream_ollama_sentences(messages):
             sentence_count += 1
             full_response.append(sentence)
-            logger.info(
-                "🔊 Streaming sentence %s: %s...", sentence_count, sentence[:50]
-            )
+            logger.info("🔊 Streaming sentence %s: %s...", sentence_count, sentence[:50])
 
             # Speak this sentence immediately
             duration = await tts.speak_to_pipe(sentence, pipe_path)
@@ -644,12 +606,8 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
         if full_response:
             # Add to conversation history
-            self._llm_responder.conversation_history.append(
-                {"role": "user", "content": command}
-            )
-            self._llm_responder.conversation_history.append(
-                {"role": "assistant", "content": " ".join(full_response)}
-            )
+            self._llm_responder.conversation_history.append({"role": "user", "content": command})
+            self._llm_responder.conversation_history.append({"role": "assistant", "content": " ".join(full_response)})
             logger.info("🎤 Streamed %s sentences", sentence_count)
         else:
             logger.warning("No response from streaming")
@@ -666,8 +624,8 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
         try:
             await self._speak_response_audio_only(text)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("TTS error: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("TTS error")
 
             traceback.print_exc()
 
@@ -712,8 +670,8 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
             else:
                 logger.warning("Failed to write audio to pipe")
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("TTS error: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("TTS error")
 
             traceback.print_exc()
 
@@ -742,12 +700,12 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
 
             # Write to database
             await self.db.add_transcript_entries(self.state.meeting_id, entries)
-            self.state.last_flush = datetime.now()
+            self.state.last_flush = datetime.now().astimezone()
 
             logger.debug("Flushed %s transcript entries", len(entries))
 
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.error("Failed to flush transcript buffer: %s", e)
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.exception("Failed to flush transcript buffer")
             # Put entries back in buffer
             self.state.transcript_buffer = entries + self.state.transcript_buffer
 
@@ -767,11 +725,7 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                 break
 
             # Also check if controller state shows not joined
-            if (
-                self._controller
-                and self._controller.state
-                and not self._controller.state.joined
-            ):
+            if self._controller and self._controller.state and not self._controller.state.joined:
                 logger.warning("Browser health monitor: Meeting ended (not joined)")
                 await self._cleanup_stale_meeting()
                 break
@@ -789,11 +743,10 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                         consecutive_failures,
                         max_failures,
                         e,
+                        exc_info=True,
                     )
                     if consecutive_failures >= max_failures:
-                        logger.warning(
-                            "Browser health monitor: Page unresponsive - triggering cleanup"
-                        )
+                        logger.warning("Browser health monitor: Page unresponsive - triggering cleanup")
                         await self._cleanup_stale_meeting()
                         break
 
@@ -806,16 +759,11 @@ class NotesInteractiveMixin(DynamicFields):  # pylint: disable=too-few-public-me
                         await self._cleanup_stale_meeting()
                         break
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "Browser health monitor: Browser check failed: %s", e
-                    )
+                    logger.warning("Browser health monitor: Browser check failed: %s", e, exc_info=True)
                     # Don't cleanup on exception - could be a transient error
                     consecutive_failures += 1
                     if consecutive_failures >= max_failures:
-                        logger.warning(
-                            "Browser health monitor: Too many browser check "
-                            "failures - triggering cleanup"
-                        )
+                        logger.warning("Browser health monitor: Too many browser check failures - triggering cleanup")
                         await self._cleanup_stale_meeting()
                         break
 
