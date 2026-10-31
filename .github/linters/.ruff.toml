@@ -3,5 +3,6 @@
 line-length = 120
 cache-dir = "/tmp/.ruff_cache"
 
-[lint]
-ignore = ["E203"]
+[lint.isort]
+# Same first-party packages as .isort.cfg so ruff (I001) and isort agree.
+known-first-party = ["server", "services", "tool_modules", "scripts", "tests"]

@@ -8,7 +8,7 @@ import os
 import re
 import signal
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
@@ -632,7 +632,8 @@ class SessionAuthMixin:
 
     def update_activity(self) -> None:
         """Update last activity timestamp."""
-        self._last_activity = datetime.now()
+        # Naive local time, matching the timestamps set in meet_runtime and read by callers.
+        self._last_activity = datetime.now(timezone.utc).astimezone().replace(tzinfo=None)
 
     def get_instance_info(self) -> dict:
         """Get information about this instance."""
@@ -653,7 +654,7 @@ class SessionAuthMixin:
     @classmethod
     async def cleanup_hung_instances(cls, max_age_minutes: int = 120) -> list[str]:
         """Find and kill instances that haven't had activity for too long."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc).astimezone().replace(tzinfo=None)
         killed = []
 
         for instance_id, controller in list(cls._instances.items()):
