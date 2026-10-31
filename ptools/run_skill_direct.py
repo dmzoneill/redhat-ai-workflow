@@ -7,8 +7,8 @@ from pathlib import Path
 
 import yaml
 
-# Add project root to sys.path first to ensure 'server' package is found correctly
-PROJECT_ROOT = Path(__file__).parent.resolve()
+# Repo root (this script lives in ptools/); added to sys.path first so the server package resolves
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
