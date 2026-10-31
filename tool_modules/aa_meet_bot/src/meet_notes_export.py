@@ -453,7 +453,7 @@ async def _periodic_cleanup_task() -> None:
 
         except asyncio.CancelledError:
             logger.info("🔊 Periodic cleanup task cancelled")
-            break
+            raise
         except MEET_ERRORS as e:
             logger.error("🔊 Periodic cleanup error: %s", e)
 

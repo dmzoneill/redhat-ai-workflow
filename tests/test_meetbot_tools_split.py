@@ -65,7 +65,7 @@ EXPECTED_TOOLS = [
 def fixture_mods(monkeypatch):
     """Import the split modules, stubbing voice_pipeline if it cannot be imported."""
     try:
-        importlib.import_module(f"{_PKG}.voice_pipeline")
+        importlib.import_module("tool_modules.aa_meet_bot.src.voice_pipeline")
     except ValueError:
         stub = types.ModuleType(f"{_PKG}.voice_pipeline")
         stub.get_pipeline_manager = lambda: None
@@ -73,7 +73,14 @@ def fixture_mods(monkeypatch):
         monkeypatch.setitem(sys.modules, f"{_PKG}.voice_pipeline", stub)
     for name in _SPLIT_MODULES:
         monkeypatch.delitem(sys.modules, f"{_PKG}.{name}", raising=False)
-    loaded = SimpleNamespace(**{name: importlib.import_module(f"{_PKG}.{name}") for name in _SPLIT_MODULES})
+    loaded = SimpleNamespace(
+        meet_bot_state=importlib.import_module("tool_modules.aa_meet_bot.src.meet_bot_state"),
+        meet_bot_core_tools=importlib.import_module("tool_modules.aa_meet_bot.src.meet_bot_core_tools"),
+        meet_notes_tools=importlib.import_module("tool_modules.aa_meet_bot.src.meet_notes_tools"),
+        meet_notes_maintenance=importlib.import_module("tool_modules.aa_meet_bot.src.meet_notes_maintenance"),
+        meet_notes_export=importlib.import_module("tool_modules.aa_meet_bot.src.meet_notes_export"),
+        tools_basic=importlib.import_module("tool_modules.aa_meet_bot.src.tools_basic"),
+    )
     state = loaded.meet_bot_state
     monkeypatch.setattr(state, "BOT", state.BOT.__class__())
     monkeypatch.setattr(state, "NOTES", state.NOTES.__class__())
@@ -271,8 +278,8 @@ async def test_cleanup_reports_hung_instances(mods, monkeypatch):
 
 def test_public_accessors():
     """NotesBot.controller and GoogleMeetController.created_at expose the private fields."""
-    notes_bot = importlib.import_module(f"{_PKG}.notes_bot")
-    browser_controller = importlib.import_module(f"{_PKG}.browser_controller")
+    notes_bot = importlib.import_module("tool_modules.aa_meet_bot.src.notes_bot")
+    browser_controller = importlib.import_module("tool_modules.aa_meet_bot.src.browser_controller")
     bot = notes_bot.NotesBot.__new__(notes_bot.NotesBot)
     vars(bot)["_controller"] = "c"
     assert bot.controller == "c"

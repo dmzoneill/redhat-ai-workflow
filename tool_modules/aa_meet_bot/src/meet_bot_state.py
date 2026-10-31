@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -13,16 +14,19 @@ from tool_modules.aa_meet_bot.src.notes_session import NotesBotManager, get_bot_
 from tool_modules.aa_meet_bot.src.virtual_devices import VirtualDeviceManager
 from tool_modules.aa_meet_bot.src.wake_word import WakeWordManager
 
+logger = logging.getLogger(__name__)
+
 MAX_APPROVED_MEETINGS = 50
 
 
 def _optional_playwright_errors() -> tuple[type[Exception], ...]:
     """Return Playwright's base error when Playwright is installed."""
+    errors: list[type[Exception]] = []
     try:
-        module = importlib.import_module("playwright.async_api")
+        errors.append(importlib.import_module("playwright.async_api").Error)
     except ImportError:
-        return ()
-    return (module.Error,)
+        logger.debug("Playwright not installed; no browser errors to catch")
+    return tuple(errors)
 
 
 # Failures expected at the tool boundary: browser automation, audio/video
