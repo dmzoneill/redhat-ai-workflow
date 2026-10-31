@@ -215,7 +215,7 @@ def test_weekdays_between_skips_weekend():
 
 
 def test_load_daily_files_marks_bad_files(tmp_path):
-    """Unparseable or non-object files load as None."""
+    """Unparsable or non-object files load as None."""
     (tmp_path / "a.json").write_text("[1]", encoding="utf-8")
     (tmp_path / "b.json").write_text("{", encoding="utf-8")
     assert [data for _, data in load_daily_files(tmp_path)] == [None, None]
