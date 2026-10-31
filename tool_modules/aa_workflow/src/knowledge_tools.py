@@ -8,6 +8,7 @@ Provides tools for:
 - knowledge_query: Query specific knowledge sections
 """
 
+import asyncio
 import copy
 import json
 import logging
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from mcp.types import TextContent
+
 from server.tool_registry import ToolRegistry
 from server.utils import load_config
 
@@ -32,6 +34,18 @@ if TYPE_CHECKING:
     from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
+
+
+async def _load_yaml(path: Path | str) -> Any:
+    """Read and parse a YAML file without blocking the event loop."""
+    return yaml.safe_load(await asyncio.to_thread(Path(path).read_text, encoding="utf-8"))
+
+
+async def _dump_yaml(path: Path | str, data: Any, **kwargs: Any) -> None:
+    """Serialise data as YAML and write it without blocking the event loop."""
+    text = yaml.dump(data, **kwargs)
+    await asyncio.to_thread(Path(path).write_text, text, encoding="utf-8")
+
 
 # Knowledge directory structure
 KNOWLEDGE_DIR = MEMORY_DIR / "knowledge" / "personas"
@@ -91,7 +105,7 @@ def _load_knowledge(persona: str, project: str) -> dict | None:
             return yaml.safe_load(f) or {}
     # Unreadable knowledge files are treated as missing.
     except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.warning("Failed to load knowledge %s: %s", knowledge_path, e)
+        logger.warning("Failed to load knowledge %s: %s", knowledge_path, e, exc_info=True)
         return None
 
 
@@ -102,14 +116,12 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
 
     # Check for significant changes before saving
     old_knowledge = _load_knowledge(persona, project)
-    notifications = _check_for_significant_changes(
-        old_knowledge, knowledge, project, persona
-    )
+    notifications = _check_for_significant_changes(old_knowledge, knowledge, project, persona)
 
     try:
         # Update metadata
         knowledge.setdefault("metadata", {})
-        knowledge["metadata"]["last_updated"] = datetime.now().isoformat()
+        knowledge["metadata"]["last_updated"] = datetime.now().astimezone().isoformat()
         knowledge["metadata"]["project"] = project
         knowledge["metadata"]["persona"] = persona
 
@@ -122,8 +134,8 @@ def _save_knowledge(persona: str, project: str, knowledge: dict) -> bool:
 
         return True
     # Saving is best-effort; callers still have the in-memory knowledge.
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.error("Failed to save knowledge %s: %s", knowledge_path, e)
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("Failed to save knowledge %s", knowledge_path)
         return False
 
 
@@ -148,32 +160,25 @@ def _check_for_significant_changes(
     new_confidence = new_meta.get("confidence", 0)
 
     if old_confidence < CONFIDENCE_MILESTONE <= new_confidence:
-        notifications.append(
-            f"🎉 Knowledge confidence reached {new_confidence:.0%} for {project}/{persona}!"
-        )
+        notifications.append(f"🎉 Knowledge confidence reached {new_confidence:.0%} for {project}/{persona}!")
 
     # Check learning count milestones
     old_learnings = len(old_knowledge.get("learned_from_tasks", []))
     new_learnings = len(new_knowledge.get("learned_from_tasks", []))
 
-    if new_learnings > old_learnings:
-        # Check for milestone (every 5 learnings)
-        if (
-            new_learnings // SIGNIFICANT_LEARNING_COUNT
-            > old_learnings // SIGNIFICANT_LEARNING_COUNT
-        ):
-            notifications.append(
-                f"📈 {new_learnings} learnings recorded for {project}/{persona}"
-            )
+    # Check for milestone (every 5 learnings)
+    if (
+        new_learnings > old_learnings
+        and new_learnings // SIGNIFICANT_LEARNING_COUNT > old_learnings // SIGNIFICANT_LEARNING_COUNT
+    ):
+        notifications.append(f"📈 {new_learnings} learnings recorded for {project}/{persona}")
 
     # Check gotchas count
     old_gotchas = len(old_knowledge.get("gotchas", []))
     new_gotchas = len(new_knowledge.get("gotchas", []))
 
     if new_gotchas > old_gotchas:
-        notifications.append(
-            f"⚠️ New gotcha added for {project}/{persona} (total: {new_gotchas})"
-        )
+        notifications.append(f"⚠️ New gotcha added for {project}/{persona} (total: {new_gotchas})")
 
     return notifications
 
@@ -195,6 +200,7 @@ def _detect_project_from_path(path: str | Path | None = None) -> str | None:
             check_path = Path.cwd().resolve()
         # cwd can fail in restricted environments; detection then returns None.
         except Exception:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error", exc_info=True)
             return None
 
     repositories = config.get("repositories", {})
@@ -203,7 +209,7 @@ def _detect_project_from_path(path: str | Path | None = None) -> str | None:
         # Check if check_path is the project path or a subdirectory
         try:
             check_path.relative_to(project_path)
-            return project_name
+            return str(project_name)
         except ValueError:
             continue
 
@@ -231,6 +237,7 @@ async def _detect_project_from_ctx(ctx: Any) -> str | None:
         return await get_workspace_project(ctx)
     # Workspace lookup is optional; path detection is the fallback.
     except Exception:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error", exc_info=True)
         # Fall back to path-based detection
         return _detect_project_from_path()
 
@@ -274,6 +281,7 @@ async def _get_persona_from_ctx(ctx: Any) -> str:
         return await get_workspace_persona(ctx)
     # Workspace persona lookup is optional.
     except Exception:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error", exc_info=True)
         # Fall back to global persona
         return _get_current_persona() or "developer"
 
@@ -334,11 +342,10 @@ def _scan_project_structure(project_path: Path) -> dict:
             with open(project_path / "pyproject.toml", "rb") as toml_file:
                 pyproject = tomllib.load(toml_file)
             deps = pyproject.get("project", {}).get("dependencies", [])
-            result["dependencies"] = [
-                d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]
-            ]
+            result["dependencies"] = [d.split("[")[0].split(">=")[0].split("==")[0] for d in deps[:20]]
         # Optional config files may be missing, binary, or invalid.
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error", exc_info=True)
             logger.debug(
                 "Suppressed error in _scan_project_structure (pyproject.toml): %s",
                 e,
@@ -352,6 +359,7 @@ def _scan_project_structure(project_path: Path) -> dict:
             result["dependencies"] = deps
         # Optional config files may be missing or invalid JSON.
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error", exc_info=True)
             logger.debug(
                 "Suppressed error in _scan_project_structure (package.json): %s",
                 e,
@@ -378,6 +386,7 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
                     break
         # README may be unreadable or use an unexpected encoding.
         except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.debug("Suppressed error", exc_info=True)
             logger.debug(
                 "Suppressed error in _generate_initial_knowledge (readme): %s",
                 e,
@@ -403,40 +412,27 @@ def _generate_initial_knowledge(project: str, persona: str, project_path: Path) 
         "deployment": [],
     }
 
-    if (
-        "pyproject.toml" in structure["config_files"]
-        or "setup.py" in structure["config_files"]
-    ):
-        patterns["coding"].append(
-            {"pattern": "Python project", "location": "pyproject.toml"}
-        )
+    if "pyproject.toml" in structure["config_files"] or "setup.py" in structure["config_files"]:
+        patterns["coding"].append({"pattern": "Python project", "location": "pyproject.toml"})
         if structure["test_files"]:
-            patterns["testing"].append(
-                {"pattern": "pytest test suite", "example": "pytest tests/"}
-            )
+            patterns["testing"].append({"pattern": "pytest test suite", "example": "pytest tests/"})
 
     if "package.json" in structure["config_files"]:
-        patterns["coding"].append(
-            {"pattern": "Node.js/JavaScript project", "location": "package.json"}
-        )
+        patterns["coding"].append({"pattern": "Node.js/JavaScript project", "location": "package.json"})
 
     if ".gitlab-ci.yml" in structure["config_files"]:
-        patterns["deployment"].append(
-            {"pattern": "GitLab CI/CD", "notes": "Pipeline defined in .gitlab-ci.yml"}
-        )
+        patterns["deployment"].append({"pattern": "GitLab CI/CD", "notes": "Pipeline defined in .gitlab-ci.yml"})
 
     if "Dockerfile" in structure["config_files"]:
-        patterns["deployment"].append(
-            {"pattern": "Docker containerization", "notes": "Dockerfile present"}
-        )
+        patterns["deployment"].append({"pattern": "Docker containerization", "notes": "Dockerfile present"})
 
     # Build the knowledge structure
     knowledge = {
         "metadata": {
             "project": project,
             "persona": persona,
-            "last_updated": datetime.now().isoformat(),
-            "last_scanned": datetime.now().isoformat(),
+            "last_updated": datetime.now().astimezone().isoformat(),
+            "last_scanned": datetime.now().astimezone().isoformat(),
             "confidence": 0.3,  # Low confidence for auto-generated
             "auto_generated": True,
         },
@@ -478,9 +474,7 @@ def _format_knowledge_summary(  # pylint: disable=too-many-locals
     if arch.get("key_modules"):
         lines.append("### 📁 Key Modules")
         for module in arch["key_modules"][:5]:
-            lines.append(
-                f"- **{module.get('path', '?')}**: {module.get('purpose', '')}"
-            )
+            lines.append(f"- **{module.get('path', '?')}**: {module.get('purpose', '')}")
         lines.append("")
 
     if arch.get("dependencies"):
@@ -506,9 +500,7 @@ def _format_knowledge_summary(  # pylint: disable=too-many-locals
     if gotchas:
         lines.append(f"### ⚠️ Gotchas ({len(gotchas)})")
         for gotcha in gotchas[:3]:
-            lines.append(
-                f"- **{gotcha.get('issue', '?')}**: {gotcha.get('solution', '')}"
-            )
+            lines.append(f"- **{gotcha.get('issue', '?')}**: {gotcha.get('solution', '')}")
         lines.append("")
 
     # Learned from tasks
@@ -516,10 +508,7 @@ def _format_knowledge_summary(  # pylint: disable=too-many-locals
     if learned:
         lines.append(f"### 📝 Learned from Tasks ({len(learned)})")
         for item in learned[-3:]:  # Show most recent
-            lines.append(
-                f"- [{item.get('date', '?')}] {item.get('task', '?')}: "
-                f"{item.get('learning', '')[:100]}"
-            )
+            lines.append(f"- [{item.get('date', '?')}] {item.get('task', '?')}: {item.get('learning', '')[:100]}")
         lines.append("")
 
     return "\n".join(lines)
@@ -690,15 +679,11 @@ async def _knowledge_scan_impl(  # pylint: disable=too-many-locals
             new_patterns = new_knowledge.get("patterns", {}).get(category, [])
             # Deduplicate by pattern text
             existing_texts = {p.get("pattern", "") for p in existing_patterns}
-            merged = existing_patterns + [
-                p for p in new_patterns if p.get("pattern", "") not in existing_texts
-            ]
+            merged = existing_patterns + [p for p in new_patterns if p.get("pattern", "") not in existing_texts]
             new_knowledge["patterns"][category] = merged
 
         # Increase confidence if we had existing knowledge
-        new_knowledge["metadata"]["confidence"] = min(
-            existing.get("metadata", {}).get("confidence", 0.3) + 0.1, 1.0
-        )
+        new_knowledge["metadata"]["confidence"] = min(existing.get("metadata", {}).get("confidence", 0.3) + 0.1, 1.0)
 
     _save_knowledge(persona, project, new_knowledge)
 
@@ -769,9 +754,7 @@ async def _knowledge_update_impl(
             target[final_key] = parsed_content
 
         # Increase confidence slightly on manual updates
-        knowledge["metadata"]["confidence"] = min(
-            knowledge.get("metadata", {}).get("confidence", 0.5) + 0.05, 1.0
-        )
+        knowledge["metadata"]["confidence"] = min(knowledge.get("metadata", {}).get("confidence", 0.5) + 0.05, 1.0)
 
         _save_knowledge(persona, project, knowledge)
 
@@ -785,6 +768,7 @@ async def _knowledge_update_impl(
 
     # Update failures are reported to the caller as text.
     except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.debug("Suppressed error", exc_info=True)
         return [TextContent(type="text", text=f"❌ Error updating knowledge: {e}")]
 
 
@@ -847,10 +831,7 @@ async def _knowledge_query_impl(
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        f"## Knowledge: {project}/{persona} → {section}\n\n"
-                        f"```yaml\n{formatted}```"
-                    ),
+                    text=(f"## Knowledge: {project}/{persona} → {section}\n\n```yaml\n{formatted}```"),
                 )
             ]
         return [
@@ -921,7 +902,7 @@ async def _knowledge_learn_impl(  # pylint: disable=too-many-branches
     entry: Any
     if section == "learned_from_tasks":
         entry = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
+            "date": datetime.now().astimezone().strftime("%Y-%m-%d"),
             "task": task or "manual",
             "learning": learning,
         }
@@ -958,9 +939,7 @@ async def _knowledge_learn_impl(  # pylint: disable=too-many-branches
         target[final_key] = entry
 
     # Increase confidence
-    knowledge["metadata"]["confidence"] = min(
-        knowledge.get("metadata", {}).get("confidence", 0.5) + 0.02, 1.0
-    )
+    knowledge["metadata"]["confidence"] = min(knowledge.get("metadata", {}).get("confidence", 0.5) + 0.02, 1.0)
 
     _save_knowledge(persona, project, knowledge)
 
@@ -1010,21 +989,14 @@ async def _knowledge_list_impl() -> list[TextContent]:
                 project = kf.stem
                 # Load to get confidence
                 try:
-                    with open(kf, encoding="utf-8") as f:
-                        data = yaml.safe_load(f) or {}
+                    data = await _load_yaml(kf) or {}
                     confidence = data.get("metadata", {}).get("confidence", 0)
-                    confidence_emoji = (
-                        "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
-                    )
-                    last_updated = data.get("metadata", {}).get("last_updated", "?")[
-                        :10
-                    ]
-                    lines.append(
-                        f"- **{project}** {confidence_emoji} {confidence:.0%} "
-                        f"(updated: {last_updated})"
-                    )
+                    confidence_emoji = "🟢" if confidence > 0.7 else "🟡" if confidence > 0.4 else "🔴"
+                    last_updated = data.get("metadata", {}).get("last_updated", "?")[:10]
+                    lines.append(f"- **{project}** {confidence_emoji} {confidence:.0%} (updated: {last_updated})")
                 # A single unreadable file should not hide the rest of the list.
                 except Exception:  # pylint: disable=broad-exception-caught
+                    logger.debug("- **", exc_info=True)
                     lines.append(f"- **{project}** ❓")
             lines.append("")
 
