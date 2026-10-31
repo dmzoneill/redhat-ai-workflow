@@ -1,7 +1,6 @@
 """Tests for the session daemon and its helpers (services/session)."""
 
 import asyncio
-import importlib
 import json
 import os
 import sqlite3
@@ -15,7 +14,7 @@ from services.session.cursor_db import ActiveSessionScanner, content_matches, fo
 from services.session.daemon import SessionDaemon
 from services.session.sync_work import SessionTracker, write_state_file
 
-daemon_module = importlib.import_module(SessionDaemon.__module__)
+DAEMON = "services.session.daemon"
 
 
 def _workspace(storage: Path, name: str, folder: str, composers: list[dict], focused: list[str]) -> Path:
@@ -104,10 +103,10 @@ def daemon_fixture(storage, tmp_path, monkeypatch) -> SessionDaemon:
     state_file = tmp_path / "state" / "session_state.json"
     FakeRegistry.workspaces = {"file:///repo/a": {"sessions": {"s1": {}}}, "file:///gone": {"sessions": {}}}
     FakeRegistry.calls = []
-    for module in (daemon_module, sync_work):
-        monkeypatch.setattr(module, "WorkspaceRegistry", FakeRegistry)
-        monkeypatch.setattr(module, "SESSION_STATE_FILE", state_file)
-    monkeypatch.setattr(daemon_module, "CURSOR_WORKSPACE_STORAGE", storage)
+    for module in (DAEMON, "services.session.sync_work"):
+        monkeypatch.setattr(f"{module}.WorkspaceRegistry", FakeRegistry)
+        monkeypatch.setattr(f"{module}.SESSION_STATE_FILE", state_file)
+    monkeypatch.setattr(f"{DAEMON}.CURSOR_WORKSPACE_STORAGE", storage)
     monkeypatch.setattr(sync_work.write_state_file, "__defaults__", (state_file,))
     d = SessionDaemon(enable_dbus=False)
     d.__dict__["_scanner"] = ActiveSessionScanner(storage, {"/repo/a"})
