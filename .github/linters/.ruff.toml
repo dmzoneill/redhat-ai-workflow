@@ -1,4 +1,4 @@
-# Match Black's 120-column layout from pyproject.toml.
+# 120-column layout, shared with pyproject.toml [tool.ruff] and ruff-format.
 # Super-linter's default template also uses 120.
 line-length = 120
 cache-dir = "/tmp/.ruff_cache"

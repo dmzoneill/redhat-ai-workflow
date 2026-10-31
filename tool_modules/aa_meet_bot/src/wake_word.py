@@ -7,9 +7,9 @@ Fallback: Audio-based detection using openWakeWord or Porcupine
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, Optional
 
 from tool_modules.common import PROJECT_ROOT
 
@@ -31,10 +31,7 @@ class WakeWordEvent:
     source: str  # "caption" or "audio"
 
     def __str__(self) -> str:
-        return (
-            f"[{self.timestamp.strftime('%H:%M:%S')}] Wake word from "
-            f"{self.speaker}: {self.command_text}"
-        )
+        return f"[{self.timestamp.strftime('%H:%M:%S')}] Wake word from {self.speaker}: {self.command_text}"
 
 
 # pylint: disable-next=too-many-instance-attributes
@@ -58,28 +55,26 @@ class TextWakeWordDetector:
 
         # State tracking
         self.listening_for_command = False
-        self.command_start_time: Optional[datetime] = None
-        self.command_speaker: Optional[str] = None
+        self.command_start_time: datetime | None = None
+        self.command_speaker: str | None = None
         self.command_buffer: list[str] = []
 
         # Timing
-        self.pause_threshold = timedelta(
-            seconds=1.0
-        )  # Reduced from 2s for faster response
+        self.pause_threshold = timedelta(seconds=1.0)  # Reduced from 2s for faster response
         self.command_timeout = timedelta(seconds=8)  # Max time to wait for command
 
         # Track last processed text to avoid re-triggering on updates
         self._last_processed_text: str = ""
 
         # Callback
-        self._callback: Optional[Callable[[WakeWordEvent], None]] = None
+        self._callback: Callable[[WakeWordEvent], None] | None = None
 
     def set_callback(self, callback: Callable[[WakeWordEvent], None]) -> None:
         """Set callback for wake word events."""
         self._callback = callback
 
     # pylint: disable-next=too-many-branches
-    def process_caption(self, speaker: str, text: str) -> Optional[WakeWordEvent]:
+    def process_caption(self, speaker: str, text: str) -> WakeWordEvent | None:
         """
         Process a caption entry and check for wake word.
 
@@ -90,7 +85,7 @@ class TextWakeWordDetector:
         Returns:
             WakeWordEvent if a complete command is detected, None otherwise.
         """
-        now = datetime.now()
+        now = datetime.now().astimezone()
 
         # Add to context buffer
         self.context_buffer.append((speaker, text, now))
@@ -158,9 +153,7 @@ class TextWakeWordDetector:
             # Check if we already have a complete command (ends with ? ! .)
             # This handles cases like "David, how are you?" in a single transcription
             if command_start and command_start.rstrip()[-1:] in ".?!":
-                logger.info(
-                    "🎯 Complete command detected immediately: %s", command_start
-                )
+                logger.info("🎯 Complete command detected immediately: %s", command_start)
                 self.command_buffer = [command_start]
                 self.command_speaker = speaker
                 self.command_start_time = now
@@ -198,7 +191,7 @@ class TextWakeWordDetector:
 
         return None
 
-    def check_pause(self, current_time: datetime) -> Optional[WakeWordEvent]:
+    def check_pause(self, current_time: datetime) -> WakeWordEvent | None:
         """
         Check if there's been a pause indicating command is complete.
 
@@ -218,13 +211,10 @@ class TextWakeWordDetector:
     def _create_event(self, speaker: str) -> WakeWordEvent:
         """Create a wake word event from current state."""
         # Get context before wake word
-        context = [
-            f"{s}: {t}"
-            for s, t, _ in self.context_buffer[: -len(self.command_buffer) - 1]
-        ]
+        context = [f"{s}: {t}" for s, t, _ in self.context_buffer[: -len(self.command_buffer) - 1]]
 
         event = WakeWordEvent(
-            timestamp=self.command_start_time or datetime.now(),
+            timestamp=self.command_start_time or datetime.now().astimezone(),
             speaker=speaker or "Unknown",
             context_before=context[-5:],  # Last 5 context entries
             command_text=" ".join(self.command_buffer),
@@ -272,7 +262,7 @@ class AudioWakeWordDetector:
         self.wake_word = wake_word
         self.model = None
         self.running = False
-        self._callback: Optional[Callable[[WakeWordEvent], None]] = None
+        self._callback: Callable[[WakeWordEvent], None] | None = None
 
     async def initialize(self) -> bool:
         """Initialize the wake word model."""
@@ -292,13 +282,11 @@ class AudioWakeWordDetector:
             return True
 
         except ImportError:
-            logger.warning(
-                "openwakeword not installed - audio wake word detection disabled"
-            )
+            logger.warning("openwakeword not installed - audio wake word detection disabled")
             return False
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - best-effort, failure is logged
             logger.error("Failed to initialize audio wake word detector: %s", e)
             return False
 
@@ -306,7 +294,7 @@ class AudioWakeWordDetector:
         """Set callback for wake word events."""
         self._callback = callback
 
-    async def process_audio(self, audio_chunk: bytes) -> Optional[WakeWordEvent]:
+    async def process_audio(self, audio_chunk: bytes) -> WakeWordEvent | None:
         """
         Process an audio chunk and check for wake word.
 
@@ -332,12 +320,10 @@ class AudioWakeWordDetector:
             # Check if any wake word detected
             for wakeword, score in prediction.items():
                 if score > 0.5:  # Confidence threshold
-                    logger.info(
-                        "Audio wake word detected: %s (score: %s)", wakeword, score
-                    )
+                    logger.info("Audio wake word detected: %s (score: %s)", wakeword, score)
 
                     event = WakeWordEvent(
-                        timestamp=datetime.now(),
+                        timestamp=datetime.now().astimezone(),
                         speaker="Unknown",  # Can't determine from audio alone
                         context_before=[],
                         command_text="",  # Will be filled by STT
@@ -351,7 +337,7 @@ class AudioWakeWordDetector:
 
         # Best-effort: failure is contained, not raised.
         # pylint: disable-next=broad-exception-caught
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - best-effort, failure is logged
             logger.debug("Audio processing error: %s", e)
 
         return None
@@ -375,7 +361,7 @@ class WakeWordManager:
         self.text_detector = TextWakeWordDetector(wake_word=config.wake_word)
         self.audio_detector = AudioWakeWordDetector(wake_word=config.wake_word)
         self.use_audio_fallback = False
-        self._callback: Optional[Callable[[WakeWordEvent], None]] = None
+        self._callback: Callable[[WakeWordEvent], None] | None = None
 
     async def initialize(self, enable_audio_fallback: bool = False) -> bool:
         """Initialize wake word detection."""
@@ -395,13 +381,11 @@ class WakeWordManager:
         if self.use_audio_fallback:
             self.audio_detector.set_callback(callback)
 
-    def process_caption(self, speaker: str, text: str) -> Optional[WakeWordEvent]:
+    def process_caption(self, speaker: str, text: str) -> WakeWordEvent | None:
         """Process a caption for wake word detection."""
         return self.text_detector.process_caption(speaker, text)
 
-    def process_stt_result(
-        self, text: str, speaker: str = "Meeting"
-    ) -> Optional[WakeWordEvent]:
+    def process_stt_result(self, text: str, speaker: str = "Meeting") -> WakeWordEvent | None:
         """
         Process an STT transcription result for wake word detection.
 
@@ -416,15 +400,15 @@ class WakeWordManager:
         """
         return self.text_detector.process_caption(speaker, text)
 
-    async def process_audio(self, audio_chunk: bytes) -> Optional[WakeWordEvent]:
+    async def process_audio(self, audio_chunk: bytes) -> WakeWordEvent | None:
         """Process audio for wake word detection (fallback)."""
         if self.use_audio_fallback:
             return await self.audio_detector.process_audio(audio_chunk)
         return None
 
-    def check_pause(self) -> Optional[WakeWordEvent]:
+    def check_pause(self) -> WakeWordEvent | None:
         """Check for command completion due to pause."""
-        return self.text_detector.check_pause(datetime.now())
+        return self.text_detector.check_pause(datetime.now().astimezone())
 
     async def cleanup(self) -> None:
         """Clean up resources."""
@@ -435,7 +419,7 @@ class WakeWordManager:
 async def process_stt_stream_for_wake_word(
     stt_stream,
     wake_word: str = "david",
-    callback: Optional[Callable[[WakeWordEvent], None]] = None,
+    callback: Callable[[WakeWordEvent], None] | None = None,
 ) -> None:
     """
     Process an STT stream and detect wake words.

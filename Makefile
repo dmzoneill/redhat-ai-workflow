@@ -86,11 +86,11 @@ help:
 	@printf "\n"
 	@printf "\033[1mDevelopment:\033[0m\n"
 	@printf "  \033[32mmake install\033[0m            Install dependencies\n"
-	@printf "  \033[32mmake install-dev\033[0m        Install dev dependencies (pytest, black, etc)\n"
+	@printf "  \033[32mmake install-dev\033[0m        Install dev dependencies (pytest, ruff, etc)\n"
 	@printf "  \033[32mmake test\033[0m               Run unit tests\n"
-	@printf "  \033[32mmake lint\033[0m               Run linters (flake8, black --check)\n"
+	@printf "  \033[32mmake lint\033[0m               Run linters (flake8, ruff format --check)\n"
 	@printf "  \033[32mmake super-lint\033[0m         Run GitHub Super-Linter (via Docker)\n"
-	@printf "  \033[32mmake format\033[0m             Auto-format code with black\n"
+	@printf "  \033[32mmake format\033[0m             Auto-format code with ruff format\n"
 	@printf "  \033[32mmake check-env\033[0m          Validate Slack configuration\n"
 	@printf "\n"
 	@printf "\033[1mTesting:\033[0m\n"
@@ -411,7 +411,7 @@ validate-skills:
 lint:
 	@printf "\033[36mRunning linters...\033[0m\n"
 	cd $(PROJECT_ROOT) && flake8 scripts/ tool_modules/ tests/ --ignore=E501,W503,E402,C901,E203,E226,E228,F841
-	cd $(PROJECT_ROOT) && black --check scripts/ tool_modules/ tests/
+	cd $(PROJECT_ROOT) && ruff format --check scripts/ tool_modules/ tests/
 	@printf "\033[32m✅ Linting passed\033[0m\n"
 
 super-lint:
@@ -421,7 +421,7 @@ super-lint:
 
 format:
 	@printf "\033[36mFormatting code...\033[0m\n"
-	cd $(PROJECT_ROOT) && black scripts/ tool_modules/ tests/
+	cd $(PROJECT_ROOT) && ruff format scripts/ tool_modules/ tests/
 	@printf "\033[32m✅ Code formatted\033[0m\n"
 
 # =============================================================================
