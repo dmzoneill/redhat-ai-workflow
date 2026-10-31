@@ -13,8 +13,9 @@ This is the primary mode for the meeting scheduler.
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 from tool_modules.aa_meet_bot.src.notes_interactive import NotesInteractiveMixin
 from tool_modules.aa_meet_bot.src.notes_lifecycle import NotesLifecycleMixin
@@ -49,16 +50,14 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class NotesBot(  # pylint: disable=too-many-instance-attributes
-    NotesInteractiveMixin, NotesLifecycleMixin
-):
+class NotesBot(NotesInteractiveMixin, NotesLifecycleMixin):  # pylint: disable=too-many-instance-attributes
     """
     Simple meeting note-taking bot.
 
     Joins meetings and captures transcripts without AI interaction.
     """
 
-    def __init__(self, db: Optional[MeetingNotesDB] = None):
+    def __init__(self, db: MeetingNotesDB | None = None):
         """
         Initialize the notes bot.
 
@@ -67,22 +66,22 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         """
         self.config = get_config()
         self.db = db
-        self._controller: Optional[GoogleMeetController] = None
+        self._controller: GoogleMeetController | None = None
         self.state = NotesBotState()
-        self._flush_task: Optional[asyncio.Task] = None
-        self._screenshot_task: Optional[asyncio.Task] = None
-        self._browser_monitor_task: Optional[asyncio.Task] = None
-        self._on_caption_callback: Optional[Callable[[TranscriptEntry], None]] = None
+        self._flush_task: asyncio.Task | None = None
+        self._screenshot_task: asyncio.Task | None = None
+        self._browser_monitor_task: asyncio.Task | None = None
+        self._on_caption_callback: Callable[[TranscriptEntry], None] | None = None
 
         # Wake word detection
-        self._wake_word_manager: Optional[WakeWordManager] = None
-        self._on_wake_word_callback: Optional[Callable[[WakeWordEvent], None]] = None
+        self._wake_word_manager: WakeWordManager | None = None
+        self._on_wake_word_callback: Callable[[WakeWordEvent], None] | None = None
         self._enable_wake_word: bool = True  # Enable by default
-        self._wake_word_check_task: Optional[asyncio.Task] = None
-        self._pending_wake_event: Optional[WakeWordEvent] = None
+        self._wake_word_check_task: asyncio.Task | None = None
+        self._pending_wake_event: WakeWordEvent | None = None
 
         # Interactive mode components
-        self._llm_responder: Optional[LLMResponder] = None
+        self._llm_responder: LLMResponder | None = None
         self._interactive_mode: bool = False
         self._responding: bool = False  # Prevent overlapping responses
 
@@ -92,7 +91,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
 
         # Video daemon integration via D-Bus
         self._video_daemon_active: bool = False
-        self._participant_poll_task: Optional[asyncio.Task] = None
+        self._participant_poll_task: asyncio.Task | None = None
         self._enable_video_integration: bool = _video_dbus_available
 
     async def initialize(self) -> bool:
@@ -171,9 +170,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
             killed = await PulseAudioCapture.kill_all_captures()
             results["audio_captures_killed"] = killed
             if killed > 0:
-                logger.info(
-                    "%sKilled %s tracked audio capture processes", prefix, killed
-                )
+                logger.info("%sKilled %s tracked audio capture processes", prefix, killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
             results["errors"].append(f"Audio capture cleanup: {e}")
 
@@ -183,18 +180,12 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 cleanup_orphaned_meetbot_devices,
             )
 
-            cleanup_results = await cleanup_orphaned_meetbot_devices(
-                active_instance_ids=set()
-            )
+            cleanup_results = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
 
             results["modules_removed"] = len(cleanup_results.get("removed_modules", []))
-            results["processes_killed"] = len(
-                cleanup_results.get("killed_processes", [])
-            )
+            results["processes_killed"] = len(cleanup_results.get("killed_processes", []))
             results["pipes_removed"] = len(cleanup_results.get("removed_pipes", []))
-            results["video_devices_removed"] = len(
-                cleanup_results.get("removed_video_devices", [])
-            )
+            results["video_devices_removed"] = len(cleanup_results.get("removed_video_devices", []))
             results["errors"].extend(cleanup_results.get("errors", []))
 
             total = (
@@ -260,7 +251,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         event_id: str = "",
         description: str = "",
         organizer: str = "",
-        attendees: Optional[list[str]] = None,
+        attendees: list[str] | None = None,
         mode: str = "notes",
         use_npu_stt: bool = True,  # Enable NPU STT by default for local transcription
         video_enabled: bool = False,  # Show full AI video overlay (default: black screen)
@@ -294,9 +285,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
 
         # Set NPU STT flag and video flag
         self._use_npu_stt = use_npu_stt
-        self._video_enabled = (  # pylint: disable=attribute-defined-outside-init
-            video_enabled
-        )
+        self._video_enabled = video_enabled  # pylint: disable=attribute-defined-outside-init
         logger.info(
             "JOIN: NPU STT: %s, Video: %s",
             "enabled" if use_npu_stt else "disabled",
@@ -312,9 +301,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         if self.state.status == "capturing":
             # Check if browser is still alive
             if self._controller and self._controller.is_browser_closed():
-                logger.warning(
-                    "JOIN: Browser was closed - cleaning up stale meeting state"
-                )
+                logger.warning("JOIN: Browser was closed - cleaning up stale meeting state")
                 await self._cleanup_stale_meeting()
             else:
                 logger.warning("JOIN: Already in a meeting")
@@ -340,12 +327,10 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                     attendees=attendees or [],
                     status="in_progress",
                     bot_mode=mode,
-                    actual_start=datetime.now(),
+                    actual_start=datetime.now().astimezone(),
                 )
                 self.state.meeting_id = await self.db.create_meeting(meeting)
-                logger.info(
-                    "Created meeting record: %s (mode=%s)", self.state.meeting_id, mode
-                )
+                logger.info("Created meeting record: %s (mode=%s)", self.state.meeting_id, mode)
 
             # START NPU STT IMMEDIATELY - audio devices are already created during browser init
             # This ensures we're listening from the moment Chrome connects to the meeting
@@ -369,17 +354,15 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 if controller.state and controller.state.errors:
                     self.state.errors.extend(controller.state.errors)
                 else:
-                    self.state.errors.append(
-                        "Failed to join meeting - check browser controller logs"
-                    )
+                    self.state.errors.append("Failed to join meeting - check browser controller logs")
                 return False
 
             # Start caption capture
             await controller.start_caption_capture(self._on_caption)
 
             self.state.status = "capturing"
-            self.state.joined_at = datetime.now()
-            self.state.last_flush = datetime.now()
+            self.state.joined_at = datetime.now().astimezone()
+            self.state.last_flush = datetime.now().astimezone()
 
             # Emit toast notification for meeting joined
             try:
@@ -396,14 +379,10 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
             self._flush_task = asyncio.create_task(self._flush_loop())
 
             # Start screenshot capture loop (every 10 seconds)
-            self._screenshot_task = asyncio.create_task(
-                controller.start_screenshot_loop(interval_seconds=10)
-            )
+            self._screenshot_task = asyncio.create_task(controller.start_screenshot_loop(interval_seconds=10))
 
             # Start browser health monitor (checks if browser was closed)
-            self._browser_monitor_task = asyncio.create_task(
-                self._monitor_browser_health()
-            )
+            self._browser_monitor_task = asyncio.create_task(self._monitor_browser_health())
 
             # NPU STT was already started early (before UI automation)
             # No need to start it again here
@@ -452,9 +431,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 )
             else:
                 # Index out of range (shouldn't happen), treat as new
-                self.state.caption_id_to_index[cap_id] = len(
-                    self.state.transcript_buffer
-                )
+                self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
                 self.state.transcript_buffer.append(transcript_entry)
                 self.state.captions_captured += 1
                 logger.debug(
@@ -469,9 +446,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
                 self.state.transcript_buffer[-1] = transcript_entry
                 if cap_id:
                     # Track this ID for future updates
-                    self.state.caption_id_to_index[cap_id] = (
-                        len(self.state.transcript_buffer) - 1
-                    )
+                    self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer) - 1
                 logger.debug(
                     "Caption UPDATE (fallback): [%s] %s...",
                     entry.speaker,
@@ -480,9 +455,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
             else:
                 # Speaker changed, treat as new
                 if cap_id:
-                    self.state.caption_id_to_index[cap_id] = len(
-                        self.state.transcript_buffer
-                    )
+                    self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
                 self.state.transcript_buffer.append(transcript_entry)
                 self.state.captions_captured += 1
                 logger.debug(
@@ -493,9 +466,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         else:
             # NEW caption
             if cap_id:
-                self.state.caption_id_to_index[cap_id] = len(
-                    self.state.transcript_buffer
-                )
+                self.state.caption_id_to_index[cap_id] = len(self.state.transcript_buffer)
             self.state.transcript_buffer.append(transcript_entry)
             self.state.captions_captured += 1
             logger.debug(
@@ -554,16 +525,12 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
 
             # Log progress every 2 seconds
             if check_count % 4 == 0:
-                buffer_text = (
-                    " ".join(detector.command_buffer)
-                    if detector.command_buffer
-                    else "(empty)"
-                )
+                buffer_text = " ".join(detector.command_buffer) if detector.command_buffer else "(empty)"
                 logger.debug("🎯 Still listening... buffer: %s...", buffer_text[:50])
 
             # Check for timeout (10 seconds)
             if detector.command_start_time:
-                elapsed = datetime.now() - detector.command_start_time
+                elapsed = datetime.now().astimezone() - detector.command_start_time
                 if elapsed.total_seconds() > 10:
                     logger.info("Wake word command timeout - no pause detected in 10s")
                     detector._reset_command_state()  # pylint: disable=protected-access
@@ -585,7 +552,7 @@ class NotesBot(  # pylint: disable=too-many-instance-attributes
         }
 
         if self.state.joined_at:
-            duration = datetime.now() - self.state.joined_at
+            duration = datetime.now().astimezone() - self.state.joined_at
             status["duration_minutes"] = round(duration.total_seconds() / 60, 1)
 
         return status
@@ -640,9 +607,7 @@ async def kill_tracked_captures(results: dict, prefix: str, label: str) -> None:
     results["captures_killed"] = results.get("captures_killed", 0)
 
 
-def record_device_cleanup(
-    results: dict, cleanup_results: dict, prefix: str, label: str
-) -> None:
+def record_device_cleanup(results: dict, cleanup_results: dict, prefix: str, label: str) -> None:
     """Copy device-cleanup counts into the manager result."""
     for key in (
         "modules_removed",

@@ -28,11 +28,9 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
                 await self.db.update_meeting(
                     self.state.meeting_id,
                     status="completed",
-                    actual_end=datetime.now(),
+                    actual_end=datetime.now().astimezone(),
                 )
-                logger.info(
-                    "CLEANUP: Meeting %s marked as completed", self.state.meeting_id
-                )
+                logger.info("CLEANUP: Meeting %s marked as completed", self.state.meeting_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.warning("CLEANUP: Failed to update meeting record: %s", e)
 
@@ -41,9 +39,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         if self._controller:
             logger.info("CLEANUP: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
                 logger.info("CLEANUP: Browser controller closed")
             except asyncio.TimeoutError:
                 logger.warning("CLEANUP: Timeout closing controller, force killing...")
@@ -130,9 +126,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         try:
             killed = await PulseAudioCapture.kill_all_captures()
             if killed > 0:
-                logger.info(
-                    "CLEANUP: Force-killed %s orphaned audio capture processes", killed
-                )
+                logger.info("CLEANUP: Force-killed %s orphaned audio capture processes", killed)
         except Exception as e:  # pylint: disable=broad-exception-caught
             logger.warning("CLEANUP: Error killing audio captures: %s", e)
             cleanup_errors.append(f"Audio capture kill error: {e}")
@@ -146,7 +140,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 logger.info("CLEANUP: Cancelling %s...", _task_name)
                 task.cancel()
@@ -208,7 +202,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         }
 
         if self.db and self.state.meeting_id:
-            now = datetime.now()
+            now = datetime.now().astimezone()
 
             # Calculate duration
             if self.state.joined_at:
@@ -230,9 +224,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         if self._controller:
             logger.info("LEAVE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=False), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=False), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("LEAVE: Timeout closing controller")
             except Exception as e:  # pylint: disable=broad-exception-caught
@@ -257,9 +249,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         self.__dict__["state"] = NotesBotState()
 
         logger.info("=" * 60)
-        logger.info(
-            "LEAVE: Meeting ended. Captured %s captions.", result["captions_captured"]
-        )
+        logger.info("LEAVE: Meeting ended. Captured %s captions.", result["captions_captured"])
         logger.info("=" * 60)
 
         return result
@@ -319,7 +309,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
                 try:
@@ -369,9 +359,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
         if self._controller:
             logger.info("CLOSE: Closing browser controller...")
             try:
-                await asyncio.wait_for(
-                    self._controller.close(restore_browser_audio=True), timeout=10.0
-                )
+                await asyncio.wait_for(self._controller.close(restore_browser_audio=True), timeout=10.0)
             except asyncio.TimeoutError:
                 logger.warning("CLOSE: Timeout closing controller, force killing...")
                 try:
@@ -437,7 +425,7 @@ class NotesLifecycleMixin(DynamicFields):  # pylint: disable=too-few-public-meth
             ("participant_poll_task", getattr(self, "_participant_poll_task", None)),
         ]
 
-        for _task_name, task in tasks_to_cancel:  # noqa: B007
+        for _task_name, task in tasks_to_cancel:
             if task and not task.done():
                 task.cancel()
                 try:
