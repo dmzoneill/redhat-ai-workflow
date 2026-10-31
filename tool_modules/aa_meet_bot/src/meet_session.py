@@ -9,8 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Coroutine
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from tool_modules.aa_meet_bot.src.meet_runtime import BrowserClosedError
 from tool_modules.aa_meet_bot.src.virtual_devices import (
@@ -20,6 +21,16 @@ from tool_modules.aa_meet_bot.src.virtual_devices import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Strong references to fire-and-forget tasks so they are not garbage-collected mid-run
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, Any]) -> None:
+    """Start a fire-and-forget task and keep a reference until it finishes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
 
 
 class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -32,16 +43,14 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
     _on_browser_close: Any
     _restore_user_default_source: Any
     _route_browser_audio_to_sink: Any
-    _audio_sink_name: Optional[str]
-    _device_manager: Optional[InstanceDeviceManager]
-    _devices: Optional[InstanceDevices]
+    _audio_sink_name: str | None
+    _device_manager: InstanceDeviceManager | None
+    _devices: InstanceDevices | None
     config: Any
     state: Any
     update_activity: Any
 
-    async def _start_video_stream(
-        self, video_device: str, video_enabled: bool = False
-    ) -> bool:
+    async def _start_video_stream(self, video_device: str, video_enabled: bool = False) -> bool:
         """
         Start video daemon streaming to the virtual camera device.
 
@@ -63,17 +72,13 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
 
             client = get_client("video")
             if not await client.connect():
-                logger.warning(
-                    "[%s] Could not connect to video daemon", self._instance_id
-                )
+                logger.warning("[%s] Could not connect to video daemon", self._instance_id)
                 return False
 
             # Start black screen or full video based on video_enabled setting
             if video_enabled:
                 # Full AI video overlay
-                audio_source = (
-                    f"{self._devices.sink_name}.monitor" if self._devices else ""
-                )
+                audio_source = f"{self._devices.sink_name}.monitor" if self._devices else ""
                 result = await client.call_method(
                     "start_video",
                     [video_device, audio_source, "", 1920, 1080, False],
@@ -88,51 +93,45 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             await client.disconnect()
 
             if not result or not result.get("success"):
-                logger.warning(
-                    "[%s] Video daemon start failed: %s", self._instance_id, result
-                )
+                logger.warning("[%s] Video daemon start failed: %s", self._instance_id, result)
                 return False
 
             # Wait for the device to switch to CAPTURE mode
             # With exclusive_caps=1, the device only shows as CAPTURE when actively streaming
             # Chrome will only detect it as a camera when it's in CAPTURE mode
-            logger.info(
-                "[%s] Waiting for video device to become active...", self._instance_id
-            )
+            logger.info("[%s] Waiting for video device to become active...", self._instance_id)
             await asyncio.sleep(1.0)  # Give time for first frames to be written
 
             # Verify the device is now in capture mode
-            import subprocess  # pylint: disable=import-outside-toplevel
-
-            device_info = subprocess.run(
-                ["v4l2-ctl", "--device", video_device, "--all"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
+            # Query the device without blocking the event loop (5s cap, as before)
+            proc = await asyncio.create_subprocess_exec(
+                "v4l2-ctl",
+                "--device",
+                video_device,
+                "--all",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
-            if (
-                "Video Capture" in device_info.stdout
-                and "Video Output" not in device_info.stdout
-            ):
+            try:
+                stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                raise
+            device_info = stdout_bytes.decode(errors="replace")
+            if "Video Capture" in device_info and "Video Output" not in device_info:
                 logger.info(
                     "[%s] Device is in CAPTURE mode - Chrome will detect it",
                     self._instance_id,
                 )
             else:
-                logger.warning(
-                    "[%s] Device may not be in pure CAPTURE mode", self._instance_id
-                )
+                logger.warning("[%s] Device may not be in pure CAPTURE mode", self._instance_id)
 
-            logger.info(
-                "[%s] Video stream started on %s", self._instance_id, video_device
-            )
+            logger.info("[%s] Video stream started on %s", self._instance_id, video_device)
             return True
 
         except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning(
-                "[%s] Failed to start video stream: %s", self._instance_id, e
-            )
+            logger.warning("[%s] Failed to start video stream: %s", self._instance_id, e, exc_info=True)
             return False
 
     async def _copy_profile_data(self, source_dir: Path, dest_dir: Path) -> None:
@@ -166,7 +165,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     shutil.copy2(src, dst)
                     logger.debug("Copied %s to instance profile", file_rel)
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.warning("Failed to copy %s: %s", file_rel, e)
+                    logger.warning("Failed to copy %s: %s", file_rel, e, exc_info=True)
 
         for dir_rel in dirs_to_copy:
             src = source_dir / dir_rel
@@ -176,7 +175,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     shutil.copytree(src, dst)
                     logger.debug("Copied %s to instance profile", dir_rel)
                 except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.warning("Failed to copy %s: %s", dir_rel, e)
+                    logger.warning("Failed to copy %s: %s", dir_rel, e, exc_info=True)
 
         logger.info("[%s] Profile data copied from main profile", self._instance_id)
 
@@ -198,13 +197,9 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # Check DISPLAY is set (required for headless=False)
             display = os.environ.get("DISPLAY")
             if not display:
-                logger.error(
-                    "DISPLAY environment variable not set - cannot launch visible browser"
-                )
+                logger.error("DISPLAY environment variable not set - cannot launch visible browser")
                 if self.state:
-                    self.state.errors.append(
-                        "DISPLAY not set - browser requires X11 display"
-                    )
+                    self.state.errors.append("DISPLAY not set - browser requires X11 display")
                 return False
 
             logger.info("Starting browser with DISPLAY=%s", display)
@@ -212,15 +207,9 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # ========== CLEANUP ORPHANED DEVICES ==========
             # Remove any stale MeetBot devices from previous sessions
             # This prevents accumulation of orphaned sinks/sources/video devices
-            logger.info(
-                "[%s] Cleaning up orphaned MeetBot devices...", self._instance_id
-            )
-            cleanup_result = await cleanup_orphaned_meetbot_devices(
-                active_instance_ids=set()
-            )
-            if cleanup_result.get("removed_modules") or cleanup_result.get(
-                "removed_video_devices"
-            ):
+            logger.info("[%s] Cleaning up orphaned MeetBot devices...", self._instance_id)
+            cleanup_result = await cleanup_orphaned_meetbot_devices(active_instance_ids=set())
+            if cleanup_result.get("removed_modules") or cleanup_result.get("removed_video_devices"):
                 logger.info(
                     "[%s] Cleanup removed: %s audio modules, %s video devices",
                     self._instance_id,
@@ -231,9 +220,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # ========== AUDIO PRE-ROUTING ==========
             # Create per-instance audio devices BEFORE launching Chrome
             # This ensures audio is routed correctly from the moment Chrome starts
-            logger.info(
-                "[%s] Creating per-instance audio devices...", self._instance_id
-            )
+            logger.info("[%s] Creating per-instance audio devices...", self._instance_id)
             self._device_manager = InstanceDeviceManager(self._instance_id)
             self._devices = await self._device_manager.create_all()
 
@@ -250,9 +237,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     self._instance_id,
                     self._devices.source_name,
                 )
-                logger.info(
-                    "[%s]   Pipe: %s", self._instance_id, self._devices.pipe_path
-                )
+                logger.info("[%s]   Pipe: %s", self._instance_id, self._devices.pipe_path)
             else:
                 logger.warning(
                     "[%s] Failed to create audio devices, falling back to legacy method",
@@ -264,9 +249,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             virtual_camera = None
             if self._devices and self._devices.video_device:
                 virtual_camera = self._devices.video_device
-                logger.info(
-                    "[%s] Video device available: %s", self._instance_id, virtual_camera
-                )
+                logger.info("[%s] Video device available: %s", self._instance_id, virtual_camera)
             elif Path(self.config.video.virtual_camera_device).exists():
                 virtual_camera = self.config.video.virtual_camera_device
                 logger.info(
@@ -293,9 +276,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                         lock_path.unlink()
                         logger.info("Removed stale lock file: %s", lock_file)
                     except Exception as e:  # pylint: disable=broad-exception-caught
-                        logger.warning(
-                            "Could not remove lock file %s: %s", lock_file, e
-                        )
+                        logger.warning("Could not remove lock file %s: %s", lock_file, e, exc_info=True)
             logger.info("Using profile directory: %s", profile_dir)
 
             # Verify avatar image exists
@@ -328,9 +309,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                 browser_env["PULSE_SINK"] = self._devices.sink_name
                 browser_env["PULSE_SOURCE"] = self._devices.source_name
                 logger.info("[%s] Pre-routing audio via env vars:", self._instance_id)
-                logger.info(
-                    "[%s]   PULSE_SINK=%s", self._instance_id, self._devices.sink_name
-                )
+                logger.info("[%s]   PULSE_SINK=%s", self._instance_id, self._devices.sink_name)
                 logger.info(
                     "[%s]   PULSE_SOURCE=%s",
                     self._instance_id,
@@ -368,13 +347,9 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     self._instance_id,
                     virtual_camera,
                 )
-                video_ready = await self._start_video_stream(
-                    virtual_camera, self._video_enabled
-                )
+                video_ready = await self._start_video_stream(virtual_camera, self._video_enabled)
                 if video_ready:
-                    video_mode = (
-                        "full AI overlay" if self._video_enabled else "black screen"
-                    )
+                    video_mode = "full AI overlay" if self._video_enabled else "black screen"
                     logger.info(
                         "[%s] Video stream active (%s) - Chrome will see virtual camera",
                         self._instance_id,
@@ -432,18 +407,14 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                     "[%s] Using legacy audio routing (no pre-routing)",
                     self._instance_id,
                 )
-                asyncio.create_task(self._route_browser_audio_to_sink())
+                _spawn_background(self._route_browser_audio_to_sink())
 
             # CRITICAL: Restore the user's default audio source
             # PipeWire/Chrome may have switched the default to our virtual source
             # This runs in the background to restore it after Chrome settles
-            asyncio.create_task(self._restore_user_default_source())
+            _spawn_background(self._restore_user_default_source())
 
-            self.page = (
-                self.browser.pages[0]
-                if self.browser.pages
-                else await self.browser.new_page()
-            )
+            self.page = self.browser.pages[0] if self.browser.pages else await self.browser.new_page()
 
             # Skip stealth scripts - they may break Google Meet UI
             # await self._inject_stealth_scripts()
@@ -453,9 +424,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
             # The browser will navigate directly to the meeting URL when join_meeting is called
             # Audio devices will be initialized when we navigate to the actual meeting
 
-            logger.info(
-                "Browser initialized successfully (will navigate when joining meeting)"
-            )
+            logger.info("Browser initialized successfully (will navigate when joining meeting)")
             return True
 
         except ImportError as e:
@@ -470,14 +439,14 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
                 except Exception:  # pylint: disable=broad-exception-caught
-                    pass
+                    logger.debug("Suppressed error", exc_info=True)
                 self._device_manager = None
                 self._devices = None
 
             return False
         except Exception as e:  # pylint: disable=broad-exception-caught
             error_msg = f"Failed to initialize browser: {e}"
-            logger.error(error_msg, exc_info=True)
+            logger.exception(error_msg)
             if self.state:
                 self.state.errors.append(error_msg)
 
@@ -490,12 +459,8 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                 )
                 try:
                     await self._device_manager.cleanup(restore_browser_audio=False)
-                except (
-                    Exception  # pylint: disable=broad-exception-caught
-                ) as cleanup_err:  # pylint: disable=broad-exception-caught
-                    logger.warning(
-                        "[%s] Device cleanup failed: %s", self._instance_id, cleanup_err
-                    )
+                except Exception as cleanup_err:  # pylint: disable=broad-exception-caught
+                    logger.warning("[%s] Device cleanup failed: %s", self._instance_id, cleanup_err, exc_info=True)
                 self._device_manager = None
                 self._devices = None
 
@@ -548,13 +513,11 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
         try:
             self.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
             # Use meeting_id for filename so each meeting has its own screenshot
-            screenshot_path = self.SCREENSHOT_DIR / f"{self.state.meeting_id}.png"
+            screenshot_path: Path = self.SCREENSHOT_DIR / f"{self.state.meeting_id}.png"
 
             await self.page.screenshot(path=str(screenshot_path))
             self.update_activity()
-            logger.debug(
-                "[%s] Screenshot saved: %s", self._instance_id, screenshot_path
-            )
+            logger.debug("[%s] Screenshot saved: %s", self._instance_id, screenshot_path)
             return screenshot_path
         except Exception as e:  # pylint: disable=broad-exception-caught
             error_msg = str(e)
@@ -586,9 +549,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
         # Check if page exists and is closed
         try:
             if self.page is None:
-                logger.warning(
-                    "[%s] is_browser_closed: page is None", self._instance_id
-                )
+                logger.warning("[%s] is_browser_closed: page is None", self._instance_id)
                 self._browser_closed = True
                 return True
             if self.page.is_closed():
@@ -601,11 +562,7 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             # Any error checking means browser is likely dead
-            logger.warning(
-                "[%s] is_browser_closed: exception during check: %s",
-                self._instance_id,
-                e,
-            )
+            logger.warning("[%s] is_browser_closed: exception during check: %s", self._instance_id, e, exc_info=True)
             self._browser_closed = True
             return True
 
@@ -634,13 +591,11 @@ class SessionMixin:  # pylint: disable=too-many-instance-attributes,too-few-publ
                 else:
                     consecutive_failures += 1
             except BrowserClosedError:
-                logger.error(
-                    "[%s] Browser closed - stopping screenshot loop", self._instance_id
-                )
+                logger.error("[%s] Browser closed - stopping screenshot loop", self._instance_id)
                 self.state.joined = False
                 break
             except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("[%s] Screenshot loop error: %s", self._instance_id, e)
+                logger.warning("[%s] Screenshot loop error: %s", self._instance_id, e, exc_info=True)
                 consecutive_failures += 1
 
             # If too many consecutive failures, assume browser is dead
