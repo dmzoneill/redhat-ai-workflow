@@ -18,7 +18,7 @@ repos:
 
   # Linting
   - repo: https://github.com/pycqa/flake8
-    rev: 7.4.1
+    rev: 7.5.0
     hooks:
       - id: flake8
         exclude: ^(\.claude/|extensions/.*node_modules/)
@@ -27,7 +27,7 @@ repos:
 
   # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.4.0
+    rev: v2.4.1
     hooks:
       - id: mypy
         files: ^scripts/common/(config_loader|parsers|validators)\.py$
