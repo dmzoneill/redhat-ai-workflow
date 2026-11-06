@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code,cyclic-import
 """Implementations for meta MCP tools.
 
 Registered in meta_tools.register_meta_tools. Bodies live here so the
@@ -6,25 +5,221 @@ registration module stays under the line and statement limits.
 """
 
 import logging
+from collections.abc import Callable, Iterable
+from datetime import datetime, timezone
 from typing import Any
 
+import anyio
+import yaml
 from fastmcp import Context
 from mcp.types import TextContent
 
+from server import persona_loader, workspace_state
+from tool_modules.aa_workflow.src import tool_gap_detector, workspace_exporter
+
 logger = logging.getLogger(__name__)
 
+detect_skill: Callable[..., Any] | None = None
+filter_tools_detailed: Callable[..., dict[str, Any]] | None = None
 try:
-    from tool_modules.aa_ollama.src.skill_discovery import detect_skill
-    from tool_modules.aa_ollama.src.tool_filter import filter_tools_detailed
-
-    TOOL_FILTER_AVAILABLE = True
+    from tool_modules.aa_ollama.src import skill_discovery, tool_filter
 except ImportError:
     TOOL_FILTER_AVAILABLE = False
-    filter_tools_detailed = None  # type: ignore[assignment]
-    detect_skill = None  # type: ignore[assignment]
+else:
+    TOOL_FILTER_AVAILABLE = True
+    detect_skill = skill_discovery.detect_skill
+    filter_tools_detailed = tool_filter.filter_tools_detailed
+
+_FILTER_UNAVAILABLE = "⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb"
+
+# Failures of the optional filter stack (embeddings, NPU, malformed results).
+_FILTER_ERRORS = (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError, ImportError)
+# Failures while exporting workspace state for the VS Code extension.
+_EXPORT_ERRORS = (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError)
+# Failures reading or writing the tool gap YAML file.
+_GAP_ERRORS = (OSError, yaml.YAMLError, ValueError, KeyError, TypeError, AttributeError)
+# Failures removing a tool from the server.
+_REMOVE_TOOL_ERRORS = (AttributeError, KeyError, ValueError)
+# Failures notifying a client whose session has gone away.
+_NOTIFY_ERRORS = (RuntimeError, OSError, anyio.ClosedResourceError, anyio.BrokenResourceError)
+
+# Core tools that should NEVER be removed by apply_tool_filter.
+CORE_TOOLS = frozenset(
+    {
+        "persona_load",
+        "persona_list",
+        "session_start",
+        "session_info",
+        "session_list",
+        "session_switch",
+        "session_rename",
+        "debug_tool",
+        "memory_read",
+        "memory_write",
+        "memory_update",
+        "memory_append",
+        "memory_query",
+        "memory_session_log",
+        "memory_stats",
+        "check_known_issues",
+        "learn_tool_fix",
+        "skill_list",
+        "skill_run",
+        "tool_list",
+        "tool_exec",
+        "context_filter",
+        "apply_tool_filter",
+        "vpn_connect",
+        "kube_login",
+        "workspace_state_export",
+        "workspace_state_list",
+    }
+)
+
+_PERSONA_ICONS = {
+    "developer": "👨‍💻",
+    "devops": "🔧",
+    "incident": "🚨",
+    "release": "📦",
+}
 
 
-async def context_filter_impl(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+def _text(text: str) -> list[TextContent]:
+    """A single text content block."""
+    return [TextContent(type="text", text=text)]
+
+
+def _as_aware(moment: datetime) -> datetime:
+    """``moment`` with a timezone; naive values are taken as local time."""
+    return moment if moment.tzinfo else moment.astimezone()
+
+
+def seconds_since(moment: datetime) -> float:
+    """Seconds elapsed since ``moment``, which may be timezone-aware or naive (local)."""
+    return (datetime.now(tz=timezone.utc) - _as_aware(moment)).total_seconds()
+
+
+def _activity_sort_key(moment: datetime | None) -> datetime:
+    """Sort key for an optional activity time; missing times sort oldest."""
+    return _as_aware(moment) if moment else datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _loaded_tool_count() -> int:
+    """Number of tools currently loaded by the persona loader."""
+    loader = persona_loader.get_loader()
+    return len(loader.get_status()["tools"]) if loader else 0
+
+
+def _group_by_prefix(tools: Iterable[str]) -> dict[str, list[str]]:
+    """Tool names grouped by the text before their first underscore."""
+    groups: dict[str, list[str]] = {}
+    for tool in tools:
+        prefix = tool.split("_")[0] if "_" in tool else "other"
+        groups.setdefault(prefix, []).append(tool)
+    return groups
+
+
+def _run_filter(message: str, persona: str) -> tuple[Any, dict[str, Any]]:
+    """Detected skill and the 4-layer filter result for ``message``."""
+    if filter_tools_detailed is None:
+        raise RuntimeError("tool filter not loaded")
+    detected_skill = detect_skill(message) if detect_skill is not None else None
+    result = filter_tools_detailed(message=message, persona=persona, detected_skill=detected_skill)
+    return detected_skill, result
+
+
+def _persona_line(result: dict[str, Any]) -> str:
+    """Persona line of the context analysis."""
+    icon = _PERSONA_ICONS.get(result["persona"], "👤")
+    if result.get("persona_auto_detected"):
+        reason = result.get("persona_detection_reason", "keyword")
+        return f"**Persona**: {icon} {result['persona']} (auto-detected via {reason})"
+    return f"**Persona**: {icon} {result['persona']}"
+
+
+def _skill_lines(skill: dict[str, Any]) -> list[str]:
+    """Detected skill section of the context analysis."""
+    if not skill.get("name"):
+        return ["**Detected Skill**: None (will use general tools)"]
+    lines = [f"**Detected Skill**: 🎯 {skill['name']}"]
+    if skill.get("description"):
+        lines.append(f"  - {skill['description'][:100]}")
+    if skill.get("tools"):
+        lines.append(f"  - Tools: {', '.join(skill['tools'][:10])}")
+    mem_ops = skill.get("memory_ops") or {}
+    if mem_ops.get("reads"):
+        lines.append(f"  - Memory reads: {len(mem_ops['reads'])}")
+    if mem_ops.get("writes"):
+        lines.append(f"  - Memory writes: {len(mem_ops['writes'])}")
+    return lines
+
+
+def _memory_lines(mem: dict[str, Any]) -> list[str]:
+    """Memory state section of the context analysis."""
+    lines = ["### 🧠 Memory State"]
+    if mem.get("current_repo"):
+        lines.append(f"- Active repo: `{mem['current_repo']}`")
+    if mem.get("current_branch"):
+        lines.append(f"- Branch: `{mem['current_branch']}`")
+    active_issues = mem.get("active_issues", [])
+    if active_issues:
+        issue_keys = [i.get("key", str(i)) for i in active_issues[:3]]
+        lines.append(f"- Active issues: {', '.join(issue_keys)}")
+    if not any([mem.get("current_repo"), mem.get("current_branch"), active_issues]):
+        lines.append("- No active work context")
+    return lines
+
+
+def _knowledge_lines(ctx: dict[str, Any]) -> list[str]:
+    """Learned patterns and semantic search sections of the context analysis."""
+    lines = []
+    patterns = ctx.get("learned_patterns", [])
+    if patterns:
+        lines.append("### 💡 Relevant Learned Patterns")
+        for p in patterns[:3]:
+            lines.append(f"- **{p.get('pattern', 'Unknown')[:40]}**")
+            if p.get("fix"):
+                lines.append(f"  Fix: {p['fix'][:60]}")
+    semantic = ctx.get("semantic_knowledge", [])
+    if semantic:
+        lines.append("")
+        lines.append("### 🔍 Relevant Code (Semantic Search)")
+        for s in semantic[:3]:
+            lines.append(f"- `{s.get('file', 'unknown')}`")
+            if s.get("content"):
+                lines.append(f"  ```\n  {s['content'][:100]}...\n  ```")
+    return lines
+
+
+def _recommended_tool_lines(result: dict[str, Any]) -> list[str]:
+    """Recommended tools section of the context analysis."""
+    tools = result.get("tools", [])
+    lines = [
+        f"### 📋 Recommended Tools ({len(tools)} tools)",
+        f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms",
+        "",
+    ]
+    for group, group_tools in sorted(_group_by_prefix(tools).items()):
+        more = f" +{len(group_tools) - 5} more" if len(group_tools) > 5 else ""
+        lines.append(f"**{group}**: {', '.join(group_tools[:5])}{more}")
+    return lines
+
+
+def _context_report(message: str, result: dict[str, Any]) -> str:
+    """Markdown context analysis for a filter result."""
+    ctx = result.get("context", {})
+    lines = [f'## 🎯 Context Analysis for: "{message[:50]}..."', "", _persona_line(result)]
+    lines.extend(_skill_lines(ctx.get("skill", {})))
+    lines.append("")
+    lines.extend(_memory_lines(ctx.get("memory_state", {})))
+    lines.append("")
+    lines.extend(_knowledge_lines(ctx))
+    lines.append("")
+    lines.extend(_recommended_tool_lines(result))
+    return "\n".join(lines)
+
+
+async def context_filter_impl(
     message: str,
     persona: str = "developer",
 ) -> list[TextContent]:
@@ -53,135 +248,97 @@ async def context_filter_impl(  # pylint: disable=too-many-branches,too-many-loc
         # Returns: detected skill, recommended tools, memory state, etc.
     """
     if not TOOL_FILTER_AVAILABLE:
-        return [
-            TextContent(
-                type="text",
-                # pylint: disable-next=line-too-long
-                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
-            )
-        ]
+        return _text(_FILTER_UNAVAILABLE)
 
     try:
-        # Detect skill first
-        detected_skill = detect_skill(message) if detect_skill is not None else None
-
-        # Run the 4-layer filter
-        result = filter_tools_detailed(
-            message=message,
-            persona=persona,
-            detected_skill=detected_skill,
-        )
-
-        # Format the response
-        ctx = result.get("context", {})
-        lines = []
-
-        # Header
-        lines.append(f'## 🎯 Context Analysis for: "{message[:50]}..."')
-        lines.append("")
-
-        # Persona
-        persona_icon = {
-            "developer": "👨‍💻",
-            "devops": "🔧",
-            "incident": "🚨",
-            "release": "📦",
-        }.get(result["persona"], "👤")
-        if result.get("persona_auto_detected"):
-            lines.append(
-                f"**Persona**: {persona_icon} {result['persona']} "
-                f"(auto-detected via {result.get('persona_detection_reason', 'keyword')})"
-            )
-        else:
-            lines.append(f"**Persona**: {persona_icon} {result['persona']}")
-
-        # Skill
-        skill = ctx.get("skill", {})
-        if skill.get("name"):
-            lines.append(f"**Detected Skill**: 🎯 {skill['name']}")
-            if skill.get("description"):
-                lines.append(f"  - {skill['description'][:100]}")
-            if skill.get("tools"):
-                lines.append(f"  - Tools: {', '.join(skill['tools'][:10])}")
-            if skill.get("memory_ops"):
-                mem_ops = skill["memory_ops"]
-                if mem_ops.get("reads"):
-                    lines.append(f"  - Memory reads: {len(mem_ops['reads'])}")
-                if mem_ops.get("writes"):
-                    lines.append(f"  - Memory writes: {len(mem_ops['writes'])}")
-        else:
-            lines.append("**Detected Skill**: None (will use general tools)")
-
-        lines.append("")
-
-        # Memory state
-        mem = ctx.get("memory_state", {})
-        lines.append("### 🧠 Memory State")
-        if mem.get("current_repo"):
-            lines.append(f"- Active repo: `{mem['current_repo']}`")
-        if mem.get("current_branch"):
-            lines.append(f"- Branch: `{mem['current_branch']}`")
-        active_issues = mem.get("active_issues", [])
-        if active_issues:
-            issue_keys = [i.get("key", str(i)) for i in active_issues[:3]]
-            lines.append(f"- Active issues: {', '.join(issue_keys)}")
-        if not any([mem.get("current_repo"), mem.get("current_branch"), active_issues]):
-            lines.append("- No active work context")
-
-        lines.append("")
-
-        # Learned patterns
-        patterns = ctx.get("learned_patterns", [])
-        if patterns:
-            lines.append("### 💡 Relevant Learned Patterns")
-            for p in patterns[:3]:
-                lines.append(f"- **{p.get('pattern', 'Unknown')[:40]}**")
-                if p.get("fix"):
-                    lines.append(f"  Fix: {p['fix'][:60]}")
-
-        # Semantic knowledge
-        semantic = ctx.get("semantic_knowledge", [])
-        if semantic:
-            lines.append("")
-            lines.append("### 🔍 Relevant Code (Semantic Search)")
-            for s in semantic[:3]:
-                lines.append(f"- `{s.get('file', 'unknown')}`")
-                if s.get("content"):
-                    lines.append(f"  ```\n  {s['content'][:100]}...\n  ```")
-
-        lines.append("")
-
-        # Recommended tools
-        tools = result.get("tools", [])
-        lines.append(f"### 📋 Recommended Tools ({len(tools)} tools)")
-        lines.append(
-            # pylint: disable-next=line-too-long
-            f"Reduction: {result.get('reduction_pct', 0):.1f}% | Latency: {result.get('latency_ms', 0)}ms"
-        )
-        lines.append("")
-
-        # Group tools by category
-        tool_groups: dict[str, list[str]] = {}
-        for t in tools:
-            prefix = t.split("_")[0] if "_" in t else "other"
-            if prefix not in tool_groups:
-                tool_groups[prefix] = []
-            tool_groups[prefix].append(t)
-
-        for group, group_tools in sorted(tool_groups.items()):
-            lines.append(
-                f"**{group}**: {', '.join(group_tools[:5])}"
-                + (f" +{len(group_tools) - 5} more" if len(group_tools) > 5 else "")
-            )
-
-        return [TextContent(type="text", text="\n".join(lines))]
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
+        _, result = _run_filter(message, persona)
+        return _text(_context_report(message, result))
+    except _FILTER_ERRORS as e:
         logger.error("Context filter error: %s", e)
-        return [TextContent(type="text", text=f"❌ Error running context filter: {e}")]
+        return _text(f"❌ Error running context filter: {e}")
 
 
-async def apply_tool_filter_impl(  # pylint: disable=too-many-branches,too-many-locals,too-many-statements
+def _server_from_ctx(ctx: Context) -> Any:
+    """The FastMCP server behind ``ctx``, or None when it is gone."""
+    try:
+        return ctx.fastmcp
+    except RuntimeError:
+        return None
+
+
+async def _hide_tools(server: Any, tools_to_keep: set[str]) -> tuple[list[str], list[str]]:
+    """Remove every server tool not in ``tools_to_keep``; returns (hidden, kept)."""
+    hidden_tools: list[str] = []
+    kept_tools: list[str] = []
+    for tool_name in list({t.name for t in await server.list_tools()}):
+        if tool_name in tools_to_keep:
+            kept_tools.append(tool_name)
+            continue
+        try:
+            server.remove_tool(tool_name)
+            hidden_tools.append(tool_name)
+        except _REMOVE_TOOL_ERRORS as e:
+            logger.warning("Could not remove tool %s: %s", tool_name, e)
+    return hidden_tools, kept_tools
+
+
+async def _notify_tools_changed(ctx: Context) -> None:
+    """Tell the client its tool list changed (no-op without a session)."""
+    try:
+        session = getattr(ctx, "session", None)
+        if session and hasattr(session, "send_tool_list_changed"):
+            await session.send_tool_list_changed()
+            logger.info("Sent tools/list_changed notification to client")
+    except ValueError as e:
+        logger.debug("Could not send notification (expected in test mode): %s", e)
+    except _NOTIFY_ERRORS as e:
+        logger.warning("Could not send tool list changed: %s", e)
+
+
+def _filter_applied_report(
+    message: str, persona: str, filtered: tuple[Any, dict[str, Any]], tools: tuple[list[str], list[str]]
+) -> str:
+    """Markdown summary of an applied tool filter."""
+    detected_skill, result = filtered
+    hidden_tools, kept_tools = tools
+    lines = [
+        "## ✅ Tool Filter Applied",
+        "",
+        f"**Task**: {message[:60]}{'...' if len(message) > 60 else ''}",
+        f"**Persona**: {result.get('persona', persona)}",
+    ]
+    if result.get("persona_auto_detected"):
+        lines.append(f"  _(auto-detected via {result.get('persona_detection_reason', 'keyword')})_")
+    if detected_skill:
+        lines.append(f"**Skill**: {detected_skill}")
+    lines.extend(
+        [
+            "",
+            "### 📊 Results",
+            f"- **Tools available**: {len(kept_tools)}",
+            f"- **Tools hidden**: {len(hidden_tools)}",
+            f"- **Reduction**: {result.get('reduction_pct', 0):.1f}%",
+            f"- **Latency**: {result.get('latency_ms', 0):.0f}ms",
+            "",
+        ]
+    )
+    if kept_tools:
+        lines.append("### 🔧 Available Tools")
+        for group, group_tools in sorted(_group_by_prefix(sorted(kept_tools)).items()):
+            more = f" +{len(group_tools) - 5} more" if len(group_tools) > 5 else ""
+            lines.append(f"- **{group}**: {', '.join(group_tools[:5])}{more}")
+    lines.extend(
+        [
+            "",
+            "---",
+            "💡 **Tip**: Call `apply_tool_filter` again with a different message to re-filter,",
+            "or use `persona_load` to restore all tools for a persona.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def apply_tool_filter_impl(
     ctx: Context,
     message: str,
     persona: str = "developer",
@@ -212,179 +369,39 @@ async def apply_tool_filter_impl(  # pylint: disable=too-many-branches,too-many-
         # Hides git, jira, lint tools; keeps k8s, bonfire, gitlab, quay
     """
     if not TOOL_FILTER_AVAILABLE:
-        return [
-            TextContent(
-                type="text",
-                # pylint: disable-next=line-too-long
-                text="⚠️ Tool filtering not available. Install: uv add sentence-transformers lancedb",
-            )
-        ]
+        return _text(_FILTER_UNAVAILABLE)
 
     if not ctx:
-        return [
-            TextContent(
-                type="text",
-                text="⚠️ Context not available - cannot apply filter dynamically.\n\n"
-                "Use `context_filter` instead to see recommendations.",
-            )
-        ]
+        return _text(
+            "⚠️ Context not available - cannot apply filter dynamically.\n\n"
+            "Use `context_filter` instead to see recommendations."
+        )
 
     try:
-        # Get the FastMCP server from context
-        server: Any = (
-            ctx._fastmcp  # pylint: disable=protected-access
-            if hasattr(ctx, "_fastmcp")
-            else None  # pylint: disable=protected-access
-        )  # pylint: disable=protected-access
+        server = _server_from_ctx(ctx)
         if not server:
-            return [
-                TextContent(
-                    type="text",
-                    text="⚠️ Server not available in context - cannot apply filter.\n\n"
-                    "Use `context_filter` instead to see recommendations.",
-                )
-            ]
-
-        # Detect skill first
-        detected_skill = detect_skill(message) if detect_skill is not None else None
-
-        # Run the 4-layer filter
-        result = filter_tools_detailed(
-            message=message,
-            persona=persona,
-            detected_skill=detected_skill,
-        )
-
-        relevant_tools = set(result.get("tools", []))
-
-        # Core tools that should NEVER be removed
-        CORE_TOOLS = {  # pylint: disable=invalid-name
-            "persona_load",
-            "persona_list",
-            "session_start",
-            "session_info",
-            "session_list",
-            "session_switch",
-            "session_rename",
-            "debug_tool",
-            "memory_read",
-            "memory_write",
-            "memory_update",
-            "memory_append",
-            "memory_query",
-            "memory_session_log",
-            "memory_stats",
-            "check_known_issues",
-            "learn_tool_fix",
-            "skill_list",
-            "skill_run",
-            "tool_list",
-            "tool_exec",
-            "context_filter",
-            "apply_tool_filter",
-            "vpn_connect",
-            "kube_login",
-            "workspace_state_export",
-            "workspace_state_list",
-        }
-
-        # Get current tools
-        current_tools = {t.name for t in await server.list_tools()}
-        tools_to_keep = relevant_tools | CORE_TOOLS
-
-        # Track what we're hiding
-        hidden_tools = []
-        kept_tools = []
-
-        # Remove tools not in the filtered set
-        for tool_name in list(current_tools):
-            if tool_name not in tools_to_keep:
-                try:
-                    server.remove_tool(tool_name)
-                    hidden_tools.append(tool_name)
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.warning("Could not remove tool %s: %s", tool_name, e)
-            else:
-                kept_tools.append(tool_name)
-
-        # Notify Cursor that tools changed
-        if hidden_tools:
-            try:
-                if hasattr(ctx, "session"):
-                    session = ctx.session
-                    if session and hasattr(session, "send_tool_list_changed"):
-                        await session.send_tool_list_changed()
-                        logger.info("Sent tools/list_changed notification to client")
-            except ValueError as e:
-                logger.debug(
-                    "Could not send notification (expected in test mode): %s", e
-                )
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning("Could not send tool list changed: %s", e)
-
-        # Format response
-        lines = [
-            "## ✅ Tool Filter Applied",
-            "",
-            f"**Task**: {message[:60]}{'...' if len(message) > 60 else ''}",
-            f"**Persona**: {result.get('persona', persona)}",
-        ]
-
-        if result.get("persona_auto_detected"):
-            lines.append(
-                f"  _(auto-detected via {result.get('persona_detection_reason', 'keyword')})_"
+            return _text(
+                "⚠️ Server not available in context - cannot apply filter.\n\n"
+                "Use `context_filter` instead to see recommendations."
             )
 
-        if detected_skill:
-            lines.append(f"**Skill**: {detected_skill}")
+        filtered = _run_filter(message, persona)
+        tools = await _hide_tools(server, set(filtered[1].get("tools", [])) | CORE_TOOLS)
+        if tools[0]:
+            await _notify_tools_changed(ctx)
+        return _text(_filter_applied_report(message, persona, filtered, tools))
 
-        lines.extend(
-            [
-                "",
-                "### 📊 Results",
-                f"- **Tools available**: {len(kept_tools)}",
-                f"- **Tools hidden**: {len(hidden_tools)}",
-                f"- **Reduction**: {result.get('reduction_pct', 0):.1f}%",
-                f"- **Latency**: {result.get('latency_ms', 0):.0f}ms",
-                "",
-            ]
-        )
+    except _FILTER_ERRORS as e:
+        logger.exception("Apply tool filter error")
+        return _text(f"❌ Error applying tool filter: {e}")
 
-        # Show kept tools by category
-        if kept_tools:
-            lines.append("### 🔧 Available Tools")
-            tool_groups: dict[str, list[str]] = {}
-            for t in sorted(kept_tools):
-                prefix = t.split("_")[0] if "_" in t else "other"
-                if prefix not in tool_groups:
-                    tool_groups[prefix] = []
-                tool_groups[prefix].append(t)
 
-            for group, group_tools in sorted(tool_groups.items()):
-                if len(group_tools) <= 5:
-                    lines.append(f"- **{group}**: {', '.join(group_tools)}")
-                else:
-                    lines.append(
-                        f"- **{group}**: {', '.join(group_tools[:5])} +{len(group_tools) - 5} more"
-                    )
-
-        lines.extend(
-            [
-                "",
-                "---",
-                "💡 **Tip**: Call `apply_tool_filter` again with a different message to re-filter,",
-                "or use `persona_load` to restore all tools for a persona.",
-            ]
-        )
-
-        return [TextContent(type="text", text="\n".join(lines))]
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        logger.error("Apply tool filter error: %s", e)
-        import traceback  # pylint: disable=import-outside-toplevel
-
-        logger.error(traceback.format_exc())
-        return [TextContent(type="text", text=f"❌ Error applying tool filter: {e}")]
+async def _export_quietly(ctx: Context) -> None:
+    """Refresh the VS Code export; failures are logged and ignored."""
+    try:
+        await workspace_exporter.export_workspace_state_async(ctx)
+    except _EXPORT_ERRORS as exc:
+        logger.debug("Suppressed error: %s", exc)
 
 
 async def workspace_state_export_impl(ctx: Context) -> list[TextContent]:
@@ -398,34 +415,39 @@ async def workspace_state_export_impl(ctx: Context) -> list[TextContent]:
         Export status and file path.
     """
     try:
-        from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
-            export_workspace_state_async,
+        result = await workspace_exporter.export_workspace_state_async(ctx)
+    except _EXPORT_ERRORS as e:
+        return _text(f"❌ Export error: {e}")
+
+    if result.get("success"):
+        return _text(
+            f"✅ Exported {result['workspace_count']} workspace(s) to:\n"
+            f"`{result['file']}`\n\n"
+            "The VS Code extension will pick up changes automatically."
         )
-
-        result = await export_workspace_state_async(ctx)
-
-        if result.get("success"):
-            return [
-                TextContent(
-                    type="text",
-                    text=f"✅ Exported {result['workspace_count']} workspace(s) to:\n"
-                    f"`{result['file']}`\n\n"
-                    "The VS Code extension will pick up changes automatically.",
-                )
-            ]
-        return [
-            TextContent(
-                type="text",
-                text=f"❌ Export failed: {result.get('error', 'Unknown error')}",
-            )
-        ]
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return [TextContent(type="text", text=f"❌ Export error: {e}")]
+    return _text(f"❌ Export failed: {result.get('error', 'Unknown error')}")
 
 
-async def workspace_state_list_impl(  # pylint: disable=too-many-locals
+def _workspace_session_lines(state: Any, current_session_id: str | None, loaded_tools: int) -> list[str]:
+    """Session bullet points of one workspace in workspace_state_list."""
+    lines = []
+    for sid, session in state.sessions.items():
+        active_marker = " ✓ *active*" if sid == state.active_session_id else ""
+        this_chat_marker = " ← *this chat*" if current_session_id and sid == current_session_id else ""
+        lines.append(f"  - `{sid[:8]}`{active_marker}{this_chat_marker}: {session.persona}")
+        if session.issue_key:
+            lines.append(f"    - Issue: {session.issue_key}")
+        if session.branch:
+            lines.append(f"    - Branch: {session.branch}")
+        tools = session.tool_count or loaded_tools
+        if tools:
+            lines.append(f"    - Tools: {tools} loaded")
+    return lines
+
+
+async def workspace_state_list_impl(
     ctx: Context,
-) -> list[TextContent]:  # pylint: disable=too-many-locals
+) -> list[TextContent]:
     """
     List all active workspace states.
 
@@ -435,77 +457,84 @@ async def workspace_state_list_impl(  # pylint: disable=too-many-locals
     Returns:
         List of workspace states with session details.
     """
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
+    registry = workspace_state.WorkspaceRegistry
 
     # Ensure current workspace is included
-    current_state = await WorkspaceRegistry.get_for_ctx(ctx)
+    current_state = await registry.get_for_ctx(ctx)
     current_session = current_state.get_active_session()
+    current_session_id = current_session.session_id if current_session else None
 
-    all_states = WorkspaceRegistry.get_all()
-
+    all_states = registry.get_all()
     if not all_states:
-        return [TextContent(type="text", text="No active workspaces.")]
+        return _text("No active workspaces.")
 
     lines = ["## 🖥️ Active Workspaces & Sessions\n"]
     total_sessions = 0
-
     for uri, state in all_states.items():
-        is_current = uri == current_state.workspace_uri
-        marker = " ← *current*" if is_current else ""
-
+        marker = " ← *current*" if uri == current_state.workspace_uri else ""
         lines.append(f"### `{uri}`{marker}")
         lines.append(f"- **Project:** {state.project or 'default'}")
-
-        # Show sessions
         session_count = state.session_count()
         total_sessions += session_count
         lines.append(f"- **Sessions:** {session_count}")
-
         if state.sessions:
-            current_tools = (
-                state._get_loaded_tools()  # pylint: disable=protected-access
-            )  # pylint: disable=protected-access
-
-            for sid, session in state.sessions.items():
-                is_active = sid == state.active_session_id
-                is_this_chat = current_session and sid == current_session.session_id
-                active_marker = " ✓ *active*" if is_active else ""
-                this_chat_marker = " ← *this chat*" if is_this_chat else ""
-                lines.append(
-                    f"  - `{sid[:8]}`{active_marker}{this_chat_marker}: {session.persona}"
-                )
-                if session.issue_key:
-                    lines.append(f"    - Issue: {session.issue_key}")
-                if session.branch:
-                    lines.append(f"    - Branch: {session.branch}")
-                tools = session.tool_count or len(current_tools)
-                if tools:
-                    lines.append(f"    - Tools: {tools} loaded")
-
+            lines.extend(_workspace_session_lines(state, current_session_id, _loaded_tool_count()))
         lines.append("")
 
-    lines.append(
-        f"*Total: {len(all_states)} workspace(s), {total_sessions} session(s)*"
-    )
+    lines.append(f"*Total: {len(all_states)} workspace(s), {total_sessions} session(s)*")
 
     # Auto-export to update VS Code extension
-    try:
-        from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
-            export_workspace_state_async,
-        )
-
-        await export_workspace_state_async(ctx)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.debug("Suppressed error: %s", exc)
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    await _export_quietly(ctx)
+    return _text("\n".join(lines))
 
 
-async def session_info_impl(  # pylint: disable=too-many-branches
-    ctx: Context, session_id: str = ""
-) -> list[TextContent]:  # pylint: disable=too-many-branches
+def _last_tool_lines(session: Any) -> list[str]:
+    """Last-tool footer of session_info."""
+    if not session.last_tool:
+        return []
+    time_ago = ""
+    if session.last_tool_time:
+        elapsed = seconds_since(session.last_tool_time)
+        if elapsed < 60:
+            time_ago = "just now"
+        elif elapsed < 3600:
+            time_ago = f"{int(elapsed / 60)} min ago"
+        else:
+            time_ago = f"{int(elapsed / 3600)} hours ago"
+    return [
+        f"*Last tool: `{session.last_tool}` ({time_ago})*",
+        f"*Total tool calls: {session.tool_call_count}*",
+    ]
+
+
+def _session_info_lines(workspace: Any, session: Any) -> list[str]:
+    """Property table of session_info."""
+    session_project = session.project or workspace.project or "default"
+    project_source = "(auto-detected)" if session.is_project_auto_detected else "(explicit)"
+    lines = [
+        "## 💬 Current Session Info\n",
+        "| Property | Value |",
+        "|----------|-------|",
+        f"| **Session ID** | `{session.session_id}` |",
+        f"| **Workspace** | `{workspace.workspace_uri}` |",
+        f"| **Project** | {session_project} {project_source} |",
+        f"| **Persona** | {session.persona} |",
+    ]
+    if session.issue_key:
+        lines.append(f"| **Issue** | {session.issue_key} |")
+    if session.branch:
+        lines.append(f"| **Branch** | {session.branch} |")
+    lines.append(f"| **Tools** | {session.tool_count or _loaded_tool_count()} loaded |")
+    if session.started_at:
+        lines.append(f"| **Started** | {session.started_at.isoformat()} |")
+    if session.last_activity:
+        lines.append(f"| **Last Active** | {session.last_activity.isoformat()} |")
+    lines.append(f"\n*Session name: {session.name or 'unnamed'}*")
+    lines.extend(_last_tool_lines(session))
+    return lines
+
+
+async def session_info_impl(ctx: Context, session_id: str = "") -> list[TextContent]:
     """
     Show session info for a specific session or the active session.
 
@@ -525,100 +554,33 @@ async def session_info_impl(  # pylint: disable=too-many-branches
         session_info(session_id="abc123")  # Get YOUR session info
         session_info()                      # Get workspace's active session (shared)
     """
-    from datetime import datetime  # pylint: disable=import-outside-toplevel
-
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
-
-    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+    workspace = await workspace_state.WorkspaceRegistry.get_for_ctx(ctx)
 
     # If session_id provided, look up that specific session
     if session_id:
         session = workspace.get_session(session_id)
         if not session:
-            available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-            return [
-                TextContent(
-                    type="text",
-                    text=f"❌ Session `{session_id}` not found.\n\n"
-                    f"Available sessions: {', '.join(available) or 'none'}\n\n"
-                    "Use `session_start()` to create a new session.",
-                )
-            ]
+            available = [f"`{sid}`" for sid in workspace.sessions]
+            return _text(
+                f"❌ Session `{session_id}` not found.\n\n"
+                f"Available sessions: {', '.join(available) or 'none'}\n\n"
+                "Use `session_start()` to create a new session."
+            )
         workspace.set_active_session(session_id)
     else:
         session = workspace.get_active_session()
 
     if not session:
-        return [
-            TextContent(
-                type="text",
-                text="❌ No active session. Call `session_start()` first.",
-            )
-        ]
+        return _text("❌ No active session. Call `session_start()` first.")
 
-    session_project = session.project or workspace.project or "default"
-    project_source = (
-        "(auto-detected)" if session.is_project_auto_detected else "(explicit)"
-    )
-
-    lines = [
-        "## 💬 Current Session Info\n",
-        "| Property | Value |",
-        "|----------|-------|",
-        f"| **Session ID** | `{session.session_id}` |",
-        f"| **Workspace** | `{workspace.workspace_uri}` |",
-        f"| **Project** | {session_project} {project_source} |",
-        f"| **Persona** | {session.persona} |",
-    ]
-
-    if session.issue_key:
-        lines.append(f"| **Issue** | {session.issue_key} |")
-    if session.branch:
-        lines.append(f"| **Branch** | {session.branch} |")
-
-    tools = session.tool_count or len(
-        workspace._get_loaded_tools()  # pylint: disable=protected-access
-    )  # pylint: disable=protected-access
-    lines.append(f"| **Tools** | {tools} loaded |")
-
-    if session.started_at:
-        lines.append(f"| **Started** | {session.started_at.isoformat()} |")
-    if session.last_activity:
-        lines.append(f"| **Last Active** | {session.last_activity.isoformat()} |")
-
-    lines.append(f"\n*Session name: {session.name or 'unnamed'}*")
-
-    if session.last_tool:
-        time_ago = ""
-        if session.last_tool_time:
-            delta = datetime.now() - session.last_tool_time
-            if delta.total_seconds() < 60:
-                time_ago = "just now"
-            elif delta.total_seconds() < 3600:
-                time_ago = f"{int(delta.total_seconds() / 60)} min ago"
-            else:
-                time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
-        lines.append(f"*Last tool: `{session.last_tool}` ({time_ago})*")
-        lines.append(f"*Total tool calls: {session.tool_call_count}*")
+    lines = _session_info_lines(workspace, session)
 
     # Auto-export
-    try:
-        from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
-            export_workspace_state_async,
-        )
-
-        await export_workspace_state_async(ctx)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.debug("Suppressed error: %s", exc)
-
-    return [TextContent(type="text", text="\n".join(lines))]
+    await _export_quietly(ctx)
+    return _text("\n".join(lines))
 
 
-async def session_rename_impl(
-    ctx: Context, name: str, session_id: str = ""
-) -> list[TextContent]:
+async def session_rename_impl(ctx: Context, name: str, session_id: str = "") -> list[TextContent]:
     """
     Rename a session.
 
@@ -635,43 +597,41 @@ async def session_rename_impl(
         session_rename(name="Fixing billing calculation bug")
         session_rename(name="AAP-61214 - API refactor", session_id="abc123")
     """
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
-
-    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+    registry = workspace_state.WorkspaceRegistry
+    workspace = await registry.get_for_ctx(ctx)
 
     if session_id:
         session = workspace.get_session(session_id)
         if not session:
-            return [
-                TextContent(type="text", text=f"❌ Session `{session_id}` not found.")
-            ]
+            return _text(f"❌ Session `{session_id}` not found.")
     else:
         session = workspace.get_active_session()
 
     if not session:
-        return [TextContent(type="text", text="❌ No active session to rename.")]
+        return _text("❌ No active session to rename.")
 
     old_name = session.name or "(unnamed)"
     session.name = name
 
-    # Save to disk
-    WorkspaceRegistry.save_to_disk()
+    # Save to disk, then export for VS Code extension
+    registry.save_to_disk()
+    await _export_quietly(ctx)
 
-    # Export for VS Code extension
-    try:
-        from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
-            export_workspace_state_async,
-        )
+    return _text(f"✅ Session renamed: `{old_name}` → `{name}`")
 
-        await export_workspace_state_async(ctx)
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.debug("Suppressed error: %s", exc)
 
-    return [
-        TextContent(type="text", text=f"✅ Session renamed: `{old_name}` → `{name}`")
-    ]
+def _time_ago(moment: datetime | None) -> str:
+    """Human-readable age of ``moment`` for session_list."""
+    if not moment:
+        return "unknown"
+    elapsed = seconds_since(moment)
+    if elapsed < 60:
+        return "just now"
+    if elapsed < 3600:
+        return f"{int(elapsed / 60)} min ago"
+    if elapsed < 86400:
+        return f"{int(elapsed / 3600)} hours ago"
+    return f"{int(elapsed / 86400)} days ago"
 
 
 async def session_list_impl(ctx: Context) -> list[TextContent]:
@@ -684,67 +644,38 @@ async def session_list_impl(ctx: Context) -> list[TextContent]:
     Returns:
         List of all sessions with their details.
     """
-    from datetime import datetime  # pylint: disable=import-outside-toplevel
-
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
-
-    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+    workspace = await workspace_state.WorkspaceRegistry.get_for_ctx(ctx)
     current_session = workspace.get_active_session()
 
     if not workspace.sessions:
-        return [TextContent(type="text", text="No sessions in this workspace.")]
+        return _text("No sessions in this workspace.")
 
     lines = ["## 📋 Sessions in this Workspace\n"]
 
     # Sort by last activity (most recent first)
     sorted_sessions = sorted(
         workspace.sessions.values(),
-        key=lambda s: s.last_activity or datetime.min,
+        key=lambda s: _activity_sort_key(s.last_activity),
         reverse=True,
     )
 
     for session in sorted_sessions:
-        is_current = (
-            current_session and session.session_id == current_session.session_id
-        )
+        is_current = current_session and session.session_id == current_session.session_id
         marker = "→ " if is_current else "  "
-
-        # Format time ago
-        time_ago = "unknown"
-        if session.last_activity:
-            delta = datetime.now() - session.last_activity
-            if delta.total_seconds() < 60:
-                time_ago = "just now"
-            elif delta.total_seconds() < 3600:
-                time_ago = f"{int(delta.total_seconds() / 60)} min ago"
-            elif delta.total_seconds() < 86400:
-                time_ago = f"{int(delta.total_seconds() / 3600)} hours ago"
-            else:
-                time_ago = f"{int(delta.total_seconds() / 86400)} days ago"
-
         name_display = f"**{session.name}**" if session.name else "*unnamed*"
         lines.append(f"{marker}`{session.session_id}` - {name_display}")
-        lines.append(f"   Persona: {session.persona} | Active: {time_ago}")
-
+        lines.append(f"   Persona: {session.persona} | Active: {_time_ago(session.last_activity)}")
         if session.last_tool:
-            lines.append(
-                f"   Last: `{session.last_tool}` ({session.tool_call_count} calls)"
-            )
-
+            lines.append(f"   Last: `{session.last_tool}` ({session.tool_call_count} calls)")
         if session.issue_key:
             lines.append(f"   Issue: {session.issue_key}")
-
         lines.append("")
 
     lines.append(f"*Total: {len(workspace.sessions)} session(s)*")
     lines.append("\n*Tip: Use `session_rename(name='...')` to name your sessions*")
-    lines.append(
-        "*Tip: Use `session_switch(session_id='...')` to switch to a different session*"
-    )
+    lines.append("*Tip: Use `session_switch(session_id='...')` to switch to a different session*")
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return _text("\n".join(lines))
 
 
 async def session_sync_impl(ctx: Context) -> list[TextContent]:
@@ -763,29 +694,17 @@ async def session_sync_impl(ctx: Context) -> list[TextContent]:
     Returns:
         Summary of sync operations performed.
     """
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
-    from tool_modules.aa_workflow.src.workspace_exporter import (  # pylint: disable=import-outside-toplevel
-        export_workspace_state_async,
-    )
+    registry = workspace_state.WorkspaceRegistry
+    workspace = await registry.get_for_ctx(ctx)
 
-    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
-
-    # Perform sync
+    # Perform sync, save changes, export for UI
     result = workspace.sync_with_cursor_db()
-
-    # Save changes
-    WorkspaceRegistry.save_to_disk()
-
-    # Export for UI
-    await export_workspace_state_async(ctx)
+    registry.save_to_disk()
+    await workspace_exporter.export_workspace_state_async(ctx)
 
     total = sum(result.values())
     if total == 0:
-        return [
-            TextContent(type="text", text="✅ Sessions already in sync with Cursor.")
-        ]
+        return _text("✅ Sessions already in sync with Cursor.")
 
     lines = ["## 🔄 Session Sync Complete\n"]
     if result["added"] > 0:
@@ -797,7 +716,7 @@ async def session_sync_impl(ctx: Context) -> list[TextContent]:
 
     lines.append(f"\n*Total sessions: {len(workspace.sessions)}*")
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return _text("\n".join(lines))
 
 
 async def session_switch_impl(ctx: Context, session_id: str) -> list[TextContent]:
@@ -817,32 +736,20 @@ async def session_switch_impl(ctx: Context, session_id: str) -> list[TextContent
     Examples:
         session_switch(session_id="abc123")
     """
-    from server.workspace_state import (  # pylint: disable=import-outside-toplevel
-        WorkspaceRegistry,
-    )
-
-    workspace = await WorkspaceRegistry.get_for_ctx(ctx)
+    registry = workspace_state.WorkspaceRegistry
+    workspace = await registry.get_for_ctx(ctx)
 
     # Check if session exists
     session = workspace.get_session(session_id)
     if not session:
-        available = [f"`{sid}`" for sid in workspace.sessions.keys()]
-        return [
-            TextContent(
-                type="text",
-                # pylint: disable-next=line-too-long
-                text=f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}",
-            )
-        ]
+        available = [f"`{sid}`" for sid in workspace.sessions]
+        return _text(f"❌ Session `{session_id}` not found.\n\nAvailable sessions: {', '.join(available) or 'none'}")
 
-    # Switch to the session
+    # Switch to the session and save to disk
     workspace.set_active_session(session_id)
     session.touch()
+    registry.save_to_disk()
 
-    # Save to disk
-    WorkspaceRegistry.save_to_disk()
-
-    # Build response
     lines = [
         f"✅ **Switched to session `{session_id}`**\n",
         "| Property | Value |",
@@ -850,25 +757,39 @@ async def session_switch_impl(ctx: Context, session_id: str) -> list[TextContent
         f"| **Name** | {session.name or '(unnamed)'} |",
         f"| **Persona** | {session.persona} |",
     ]
-
     if session.issue_key:
         lines.append(f"| **Issue** | {session.issue_key} |")
     if session.branch:
         lines.append(f"| **Branch** | {session.branch} |")
-
     lines.append(f"| **Tool Calls** | {session.tool_call_count} |")
-
     if session.last_tool:
         lines.append(f"| **Last Tool** | `{session.last_tool}` |")
-
     lines.append("\n*This session is now active for this chat.*")
 
-    return [TextContent(type="text", text="\n".join(lines))]
+    return _text("\n".join(lines))
 
 
-async def tool_gaps_list_impl(
-    status: str = "open", limit: int = 10
-) -> list[TextContent]:
+def _gap_lines(gap: dict[str, Any]) -> list[str]:
+    """Markdown block for one tool gap request."""
+    lines = [
+        f"### `{gap.get('suggested_tool_name', 'unknown')}`",
+        f"**Votes:** {gap.get('vote_count', 1)} | **Status:** {gap.get('status', 'open')}",
+        f"**Action:** {gap.get('desired_action', 'N/A')}",
+    ]
+    skills = gap.get("requesting_skills", [])
+    if skills:
+        lines.append(f"**Requested by:** {', '.join(skills)}")
+    if gap.get("context"):
+        lines.append(f"**Context:** {str(gap.get('context'))[:100]}")
+    if gap.get("workaround_used"):
+        lines.append(f"**Workaround:** {gap.get('workaround_used')}")
+    if gap.get("suggested_args"):
+        lines.append(f"**Suggested args:** `{gap.get('suggested_args')}`")
+    lines.append("")
+    return lines
+
+
+async def tool_gaps_list_impl(status: str = "open", limit: int = 10) -> list[TextContent]:
     """
     List requested tools that don't exist yet.
 
@@ -886,48 +807,19 @@ async def tool_gaps_list_impl(
         List of tool gap requests with vote counts and context.
     """
     try:
-        from tool_modules.aa_workflow.src.tool_gap_detector import (  # pylint: disable=import-outside-toplevel
-            tool_gap,
-        )
+        gaps = tool_gap_detector.tool_gap.get_gaps(status=status, limit=limit)
+    except _GAP_ERRORS as e:
+        return _text(f"❌ Error loading tool gaps: {e}")
 
-        gaps = tool_gap.get_gaps(status=status, limit=limit)
+    if not gaps:
+        return _text(f"No tool gaps with status '{status}'.")
 
-        if not gaps:
-            return [
-                TextContent(type="text", text=f"No tool gaps with status '{status}'.")
-            ]
-
-        lines = [f"## 🔧 Tool Gap Requests (status: {status})\n"]
-
-        for g in gaps:
-            lines.append(f"### `{g.get('suggested_tool_name', 'unknown')}`")
-            lines.append(
-                f"**Votes:** {g.get('vote_count', 1)} | **Status:** {g.get('status', 'open')}"
-            )
-            lines.append(f"**Action:** {g.get('desired_action', 'N/A')}")
-
-            skills = g.get("requesting_skills", [])
-            if skills:
-                lines.append(f"**Requested by:** {', '.join(skills)}")
-
-            if g.get("context"):
-                lines.append(f"**Context:** {str(g.get('context'))[:100]}")
-
-            if g.get("workaround_used"):
-                lines.append(f"**Workaround:** {g.get('workaround_used')}")
-
-            if g.get("suggested_args"):
-                lines.append(f"**Suggested args:** `{g.get('suggested_args')}`")
-
-            lines.append("")
-
-        lines.append(f"*Total: {len(gaps)} gap(s) shown*")
-        lines.append("\n*Use `tool_gap_update(gap_id, status)` to update status*")
-
-        return [TextContent(type="text", text="\n".join(lines))]
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return [TextContent(type="text", text=f"❌ Error loading tool gaps: {e}")]
+    lines = [f"## 🔧 Tool Gap Requests (status: {status})\n"]
+    for gap in gaps:
+        lines.extend(_gap_lines(gap))
+    lines.append(f"*Total: {len(gaps)} gap(s) shown*")
+    lines.append("\n*Use `tool_gap_update(gap_id, status)` to update status*")
+    return _text("\n".join(lines))
 
 
 async def tool_gap_update_impl(gap_id: str, status: str) -> list[TextContent]:
@@ -943,29 +835,15 @@ async def tool_gap_update_impl(gap_id: str, status: str) -> list[TextContent]:
     Returns:
         Confirmation of the update.
     """
+    valid_statuses = ["open", "in_progress", "implemented", "rejected"]
+    if status not in valid_statuses:
+        return _text(f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}")
+
     try:
-        from tool_modules.aa_workflow.src.tool_gap_detector import (  # pylint: disable=import-outside-toplevel
-            tool_gap,
-        )
+        updated = tool_gap_detector.tool_gap.update_status(gap_id, status)
+    except _GAP_ERRORS as e:
+        return _text(f"❌ Error updating tool gap: {e}")
 
-        valid_statuses = ["open", "in_progress", "implemented", "rejected"]
-        if status not in valid_statuses:
-            return [
-                TextContent(
-                    type="text",
-                    # pylint: disable-next=line-too-long
-                    text=f"❌ Invalid status '{status}'. Must be one of: {', '.join(valid_statuses)}",
-                )
-            ]
-
-        if tool_gap.update_status(gap_id, status):
-            return [
-                TextContent(
-                    type="text",
-                    text=f"✅ Updated gap `{gap_id}` status to `{status}`",
-                )
-            ]
-        return [TextContent(type="text", text=f"❌ Gap `{gap_id}` not found")]
-
-    except Exception as e:  # pylint: disable=broad-exception-caught
-        return [TextContent(type="text", text=f"❌ Error updating tool gap: {e}")]
+    if updated:
+        return _text(f"✅ Updated gap `{gap_id}` status to `{status}`")
+    return _text(f"❌ Gap `{gap_id}` not found")
