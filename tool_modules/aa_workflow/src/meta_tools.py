@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code,cyclic-import
 """Meta Tools - Dynamic tool discovery and execution.
 
 Provides tools for:
@@ -10,11 +9,12 @@ Provides tools for:
 import importlib.util
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import yaml
 from fastmcp import Context, FastMCP
+from fastmcp.exceptions import NotFoundError, ToolError
 from mcp.types import TextContent
+
 from server.tool_discovery import build_full_manifest, get_module_for_tool
 from server.tool_registry import ToolRegistry
 from tool_modules.aa_workflow.src.meta_tool_handlers import (
@@ -37,10 +37,22 @@ from tool_modules.common import PROJECT_ROOT
 
 TOOL_MODULES_DIR = PROJECT_ROOT / "tool_modules"
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
+
+# Failures loading a tool module or running one of its tools (fastmcp wraps
+# errors raised inside a tool in ToolError; unknown tools raise NotFoundError).
+_TOOL_EXEC_ERRORS = (
+    ToolError,
+    NotFoundError,
+    ImportError,
+    SyntaxError,
+    OSError,
+    AttributeError,
+    TypeError,
+    ValueError,
+    LookupError,
+    RuntimeError,
+)
 
 
 # Known issues checking - loads patterns from memory
@@ -56,9 +68,7 @@ def _learned_matches(document: dict, error_lower: str, tool_lower: str) -> list:
     for category in categories:
         for pattern in document.get(category, []):
             pattern_text = pattern.get("pattern", "").lower()
-            if pattern_text and (
-                pattern_text in error_lower or pattern_text in tool_lower
-            ):
+            if pattern_text and (pattern_text in error_lower or pattern_text in tool_lower):
                 matches.append(
                     {
                         "source": category,
@@ -98,7 +108,7 @@ def _read_yaml(path) -> dict:
         return yaml.safe_load(handle) or {}
 
 
-def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
+def check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
     """Check memory for known issues matching this tool/error."""
     error_lower = error_text.lower() if error_text else ""
     tool_lower = tool_name.lower() if tool_name else ""
@@ -119,7 +129,7 @@ def _check_known_issues_sync(tool_name: str = "", error_text: str = "") -> list:
 # No more hardcoded lists to maintain!
 
 
-def _get_tool_registry() -> dict[str, list[str]]:
+def get_tool_registry() -> dict[str, list[str]]:
     """Get the tool registry by discovering tools from modules.
 
     This replaces the old hardcoded TOOL_REGISTRY dict.
@@ -128,7 +138,7 @@ def _get_tool_registry() -> dict[str, list[str]]:
     return build_full_manifest()
 
 
-def _get_module_for_tool(tool_name: str) -> str | None:
+def module_for_tool(tool_name: str) -> str | None:
     """Get the module a tool belongs to.
 
     This replaces the old MODULE_PREFIXES dict.
@@ -137,20 +147,17 @@ def _get_module_for_tool(tool_name: str) -> str | None:
     return get_module_for_tool(tool_name)
 
 
-async def _tool_list_impl(module: str) -> list[TextContent]:
+async def tool_list_impl(module: str) -> list[TextContent]:
     """Implementation of tool_list tool."""
     # Get tools dynamically from discovery system
-    tool_registry = _get_tool_registry()
+    tool_registry = get_tool_registry()
 
     if module:
         if module not in tool_registry:
             return [
                 TextContent(
                     type="text",
-                    text=(
-                        f"❌ Unknown module: {module}\n\n"
-                        f"Available: {', '.join(tool_registry.keys())}"
-                    ),
+                    text=(f"❌ Unknown module: {module}\n\nAvailable: {', '.join(tool_registry.keys())}"),
                 )
             ]
 
@@ -171,18 +178,14 @@ async def _tool_list_impl(module: str) -> list[TextContent]:
     lines.append(f"\n**Total: {total} tools**")
     lines.append("\nUse `tool_list(module='git')` to see tools in a module")
     lines.append("\n**💡 TIP:** After loading an agent, call tools DIRECTLY by name:")
-    lines.append(
-        "   `bonfire_namespace_list(mine_only=True)`  ← Cursor shows actual name"
-    )
-    lines.append(
-        "   NOT: `tool_exec('bonfire_namespace_list', ...)`  ← Shows as 'tool_exec'"
-    )
+    lines.append("   `bonfire_namespace_list(mine_only=True)`  ← Cursor shows actual name")
+    lines.append("   NOT: `tool_exec('bonfire_namespace_list', ...)`  ← Shows as 'tool_exec'")
     lines.append("\nUse `tool_exec()` only for tools from non-loaded agents.")
 
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-def _extract_tool_result(result) -> list[TextContent]:
+def extract_tool_result(result) -> list[TextContent]:
     """Extract text content from tool execution result.
 
     Args:
@@ -201,9 +204,7 @@ def _extract_tool_result(result) -> list[TextContent]:
     return [TextContent(type="text", text=str(result))]
 
 
-async def _handle_tool_exec_error(
-    tool_name: str, error_msg: str, args: str, create_issue_fn
-) -> list[TextContent]:
+async def handle_tool_exec_error(tool_name: str, error_msg: str, args: str, create_issue_fn) -> list[TextContent]:
     """Handle tool execution error with known issues check and GitHub issue creation.
 
     Args:
@@ -218,23 +219,19 @@ async def _handle_tool_exec_error(
     lines = [f"❌ Error executing {tool_name}: {error_msg}"]
 
     # Check for known issues from memory
-    matches = _check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
+    matches = check_known_issues_sync(tool_name=tool_name, error_text=error_msg)
     known_text = _format_known_issues(matches)
     if known_text:
         lines.append(known_text)
     else:
         lines.append("")
         lines.append(f"💡 **Auto-fix:** `debug_tool('{tool_name}')`")
-        lines.append(
-            f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`"
-        )
+        lines.append(f"📚 **After fixing:** `learn_tool_fix('{tool_name}', '<pattern>', '<cause>', '<fix>')`")
 
     # Auto-create GitHub issue for all tool failures
     if create_issue_fn:
         try:
-            issue_result = await create_issue_fn(
-                tool=tool_name, error=error_msg, context=f"Args: {args}"
-            )
+            issue_result = await create_issue_fn(tool=tool_name, error=error_msg, context=f"Args: {args}")
 
             if issue_result["success"]:
                 lines.append("")
@@ -249,12 +246,10 @@ async def _handle_tool_exec_error(
     return [TextContent(type="text", text="\n".join(lines))]
 
 
-async def _tool_exec_impl(
-    tool_name: str, args: str, create_issue_fn
-) -> list[TextContent]:
+async def tool_exec_impl(tool_name: str, args: str, create_issue_fn) -> list[TextContent]:
     """Implementation of tool_exec tool."""
     # Determine which module the tool belongs to using discovery system
-    module = _get_module_for_tool(tool_name)
+    module = module_for_tool(tool_name)
 
     if not module:
         return [
@@ -283,13 +278,9 @@ async def _tool_exec_impl(
         temp_server = FastMCP(f"temp-{module}")
 
         # Load the module
-        spec = importlib.util.spec_from_file_location(
-            f"aa_{module}_tools_exec", tools_file
-        )
+        spec = importlib.util.spec_from_file_location(f"aa_{module}_tools_exec", tools_file)
         if spec is None or spec.loader is None:
-            return [
-                TextContent(type="text", text=f"❌ Could not load module: {module}")
-            ]
+            return [TextContent(type="text", text=f"❌ Could not load module: {module}")]
 
         loaded_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(loaded_module)
@@ -302,11 +293,11 @@ async def _tool_exec_impl(
         result = await temp_server.call_tool(tool_name, tool_args)
 
         # Extract text from result
-        return _extract_tool_result(result)
+        return extract_tool_result(result)
 
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        # Dynamic tools can raise anything; report it instead of killing the server.
-        return await _handle_tool_exec_error(tool_name, str(exc), args, create_issue_fn)
+    except _TOOL_EXEC_ERRORS as exc:
+        # Report loading or execution failures instead of killing the server.
+        return await handle_tool_exec_error(tool_name, str(exc), args, create_issue_fn)
 
 
 def register_meta_tools(server: "FastMCP", create_issue_fn=None) -> int:
@@ -335,7 +326,7 @@ def _register_lookup_tools(registry, create_issue_fn) -> None:
         Returns:
             List of available tools and their descriptions.
         """
-        return await _tool_list_impl(module)
+        return await tool_list_impl(module)
 
     @registry.tool()
     async def tool_exec(tool_name: str, args: str = "{}") -> list[TextContent]:
@@ -355,7 +346,7 @@ def _register_lookup_tools(registry, create_issue_fn) -> None:
         Example:
             tool_exec("gitlab_mr_list", '{"project": "your-backend"}')
         """
-        return await _tool_exec_impl(tool_name, args, create_issue_fn)
+        return await tool_exec_impl(tool_name, args, create_issue_fn)
 
     @registry.tool()
     async def context_filter(
@@ -475,9 +466,7 @@ def _register_session_tools(registry) -> None:
         return await session_info_impl(ctx, session_id)
 
     @registry.tool()
-    async def session_rename(
-        ctx: Context, name: str, session_id: str = ""
-    ) -> list[TextContent]:
+    async def session_rename(ctx: Context, name: str, session_id: str = "") -> list[TextContent]:
         """
         Rename a session.
 
@@ -549,9 +538,7 @@ def _register_session_tools(registry) -> None:
         return await session_switch_impl(ctx, session_id)
 
     @registry.tool()
-    async def tool_gaps_list(
-        status: str = "open", limit: int = 10
-    ) -> list[TextContent]:
+    async def tool_gaps_list(status: str = "open", limit: int = 10) -> list[TextContent]:
         """
         List requested tools that don't exist yet.
 
