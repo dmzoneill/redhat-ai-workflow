@@ -8,8 +8,26 @@ This module provides:
 4. Auto-fix capabilities for known patterns
 """
 
+import asyncio
+import logging
 import re
 from datetime import datetime
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+# Errors a memory helper or user-question callback can raise; anything else is a real bug and propagates.
+_RECOVERABLE_ERRORS = (OSError, KeyError, TypeError, ValueError, RuntimeError, AttributeError)
+
+# User-facing option label -> recovery action
+_LABEL_TO_ACTION = {
+    "Auto-fix (Recommended)": "auto_fix",
+    "Edit skill file": "edit",
+    "Skip skill": "skip",
+    "Create GitHub issue": "abort",
+    "Continue anyway": "continue",
+}
 
 
 class SkillErrorRecovery:
@@ -72,13 +90,9 @@ class SkillErrorRecovery:
                 if learned and "patterns" in learned:
                     # Merge learned patterns with defaults
                     default_patterns.update(learned["patterns"])
-            except Exception as e:
+            except _RECOVERABLE_ERRORS as e:
                 # Log but continue with defaults
-                import logging
-
-                logging.getLogger(__name__).debug(
-                    f"Could not load learned patterns: {e}"
-                )
+                logger.debug("Could not load learned patterns: %s", e)
 
         return default_patterns
 
@@ -100,20 +114,7 @@ class SkillErrorRecovery:
                 - fix_code: str or None (if auto-fixable)
                 - previous_fixes: list (from memory)
         """
-        # Check against known patterns
-        matched_pattern = None
-        extracted_data = {}
-
-        for pattern_id, pattern_info in self.patterns.items():
-            match = re.search(pattern_info["signature"], error_msg)
-            if match:
-                matched_pattern = pattern_id
-                # Extract captured groups (e.g., attribute name, variable name)
-                if match.groups():
-                    extracted_data = {
-                        f"group{i}": g for i, g in enumerate(match.groups())
-                    }
-                break
+        matched_pattern, extracted_data = self._match_pattern(error_msg)
 
         # Check memory for this specific error
         previous_fixes = self._get_previous_fixes(error_msg, step_name)
@@ -121,14 +122,12 @@ class SkillErrorRecovery:
         result = {
             "pattern_id": matched_pattern,
             "description": (
-                self.patterns[matched_pattern]["description"]
-                if matched_pattern
-                else "Unknown error pattern"
+                self.patterns[matched_pattern]["description"] if matched_pattern else "Unknown error pattern"
             ),
             "error_msg": error_msg[:200],
             "step_name": step_name,
             "previous_fixes": previous_fixes,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().astimezone().isoformat(),
         }
 
         # Generate suggestion and fix code if pattern matched
@@ -158,6 +157,14 @@ class SkillErrorRecovery:
             result["fix_code"] = None
 
         return result
+
+    def _match_pattern(self, error_msg: str) -> tuple[str | None, dict]:
+        """Return (pattern_id, captured groups as {"groupN": value}) for the first matching known pattern."""
+        for pattern_id, pattern_info in self.patterns.items():
+            match = re.search(pattern_info["signature"], error_msg)
+            if match:
+                return pattern_id, {f"group{i}": g for i, g in enumerate(match.groups())}
+        return None, {}
 
     def _generate_dict_access_fix(self, code: str, attr: str) -> str:
         """
@@ -210,9 +217,7 @@ class SkillErrorRecovery:
             # Find similar errors (same step or same error message)
             similar = []
             for fix in history["fixes"]:
-                if fix.get("step_name") == step_name or error_msg[:50] in fix.get(
-                    "error_msg", ""
-                ):
+                if fix.get("step_name") == step_name or error_msg[:50] in fix.get("error_msg", ""):
                     similar.append(
                         {
                             "timestamp": fix.get("timestamp"),
@@ -224,15 +229,11 @@ class SkillErrorRecovery:
 
             return similar[:5]  # Return last 5 similar fixes
 
-        except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).debug(f"Could not get similar fixes: {e}")
+        except _RECOVERABLE_ERRORS as e:
+            logger.debug("Could not get similar fixes: %s", e)
             return []
 
-    async def prompt_user_for_action(
-        self, error_info: dict, ask_question_fn=None
-    ) -> dict:
+    async def prompt_user_for_action(self, error_info: dict, ask_question_fn=None) -> dict:
         """
         Prompt user for recovery action (via AskUserQuestion or CLI fallback).
 
@@ -246,32 +247,41 @@ class SkillErrorRecovery:
                 - action: str (auto_fix, edit, skip, abort, continue)
                 - user_input: any additional user input
         """
-        step_name = error_info["step_name"]
-        error_msg = error_info["error_msg"]
-        suggestion = error_info["suggestion"]
-        auto_fixable = error_info.get("auto_fixable", False)
-        previous_fixes = error_info.get("previous_fixes", [])
+        context_msg = self._build_context_message(error_info)
+        options = self._build_options(error_info.get("auto_fixable", False), error_info["suggestion"])
 
-        # Build context message
+        selected = None
+        if ask_question_fn:
+            selected = await self._ask_via_tool(ask_question_fn, error_info["step_name"], context_msg, options)
+        if selected is None:
+            selected = await self._ask_via_cli(error_info["step_name"], context_msg, options)
+
+        return {
+            "action": _LABEL_TO_ACTION.get(selected, "abort"),
+            "selected_option": selected,
+            "error_info": error_info,
+        }
+
+    @staticmethod
+    def _build_context_message(error_info: dict) -> str:
+        """Human-readable summary of the error, suggestion and previous fixes."""
         context_lines = [
-            f"**Step:** {step_name}",
-            f"**Error:** {error_msg}",
-            f"**Suggestion:** {suggestion}",
+            f"**Step:** {error_info['step_name']}",
+            f"**Error:** {error_info['error_msg']}",
+            f"**Suggestion:** {error_info['suggestion']}",
         ]
-
+        previous_fixes = error_info.get("previous_fixes", [])
         if previous_fixes:
             context_lines.append("\n**Previous fixes for similar errors:**")
             for fix in previous_fixes:
                 status = "✅" if fix.get("success") else "❌"
-                context_lines.append(
-                    f"  {status} {fix.get('action')} - {fix.get('description', 'N/A')[:50]}"
-                )
+                context_lines.append(f"  {status} {fix.get('action')} - {fix.get('description', 'N/A')[:50]}")
+        return "\n".join(context_lines)
 
-        context_msg = "\n".join(context_lines)
-
-        # Build options based on whether auto-fix is available
+    @staticmethod
+    def _build_options(auto_fixable: bool, suggestion: str) -> list[dict]:
+        """Recovery options; auto-fix is offered first when available."""
         options = []
-
         if auto_fixable:
             options.append(
                 {
@@ -279,125 +289,61 @@ class SkillErrorRecovery:
                     "description": f"Apply automatic fix: {suggestion[:60]}",
                 }
             )
-
         options.extend(
             [
-                {
-                    "label": "Edit skill file",
-                    "description": "Open skill YAML in editor for manual fix",
-                },
-                {
-                    "label": "Skip skill",
-                    "description": "Stop execution and show manual tool commands",
-                },
-                {
-                    "label": "Create GitHub issue",
-                    "description": "Report bug and abort execution",
-                },
-                {
-                    "label": "Continue anyway",
-                    "description": "Debug mode - let broken data propagate",
-                },
+                {"label": "Edit skill file", "description": "Open skill YAML in editor for manual fix"},
+                {"label": "Skip skill", "description": "Stop execution and show manual tool commands"},
+                {"label": "Create GitHub issue", "description": "Report bug and abort execution"},
+                {"label": "Continue anyway", "description": "Debug mode - let broken data propagate"},
             ]
         )
+        return options
 
-        # Call AskUserQuestion if available, otherwise use CLI fallback
-        if ask_question_fn:
-            try:
-                response = await ask_question_fn(
-                    {
-                        "questions": [
-                            {
-                                "question": (
-                                    f"Skill error in step '{step_name}'. "
-                                    f"How should I proceed?\n\n{context_msg}"
-                                ),
-                                "header": "Skill Error",
-                                "options": options,
-                                "multiSelect": False,
-                            }
-                        ]
-                    }
-                )
-
-                # Parse response
-                answers = (
-                    response.get("answers", {}) if isinstance(response, dict) else {}
-                )
-                selected = (
-                    list(answers.values())[0] if answers else "Create GitHub issue"
-                )
-
-                # Map user selection to action
-                action_map = {
-                    "Auto-fix (Recommended)": "auto_fix",
-                    "Edit skill file": "edit",
-                    "Skip skill": "skip",
-                    "Create GitHub issue": "abort",
-                    "Continue anyway": "continue",
+    @staticmethod
+    async def _ask_via_tool(ask_question_fn, step_name: str, context_msg: str, options: list[dict]) -> str | None:
+        """Ask through AskUserQuestion; returns the selected label, or None to fall back to the CLI."""
+        try:
+            response = await ask_question_fn(
+                {
+                    "questions": [
+                        {
+                            "question": f"Skill error in step '{step_name}'. How should I proceed?\n\n{context_msg}",
+                            "header": "Skill Error",
+                            "options": options,
+                            "multiSelect": False,
+                        }
+                    ]
                 }
+            )
+        except _RECOVERABLE_ERRORS as e:
+            print(f"\n⚠️  AskUserQuestion failed: {e}")
+            print("Falling back to command-line input...\n")
+            return None
+        answers = response.get("answers", {}) if isinstance(response, dict) else {}
+        return next(iter(answers.values()), "Create GitHub issue")
 
-                action = action_map.get(selected, "abort")
-
-                return {
-                    "action": action,
-                    "selected_option": selected,
-                    "error_info": error_info,
-                }
-
-            except Exception as e:
-                # Fallback to CLI if AskUserQuestion fails
-                print(f"\n⚠️  AskUserQuestion failed: {e}")
-                print("Falling back to command-line input...\n")
-
-        # CLI Fallback - present options via command line
-        print(f"\n{'=' * 70}")
-        print(f"🔴 SKILL ERROR IN STEP: {step_name}")
-        print(f"{'=' * 70}")
-        print(f"\n{context_msg}\n")
-        print(f"{'=' * 70}")
+    @staticmethod
+    async def _ask_via_cli(step_name: str, context_msg: str, options: list[dict]) -> str:
+        """Present options on the terminal; input() runs in a thread so the event loop is not blocked."""
+        rule = "=" * 70
+        print(f"\n{rule}\n🔴 SKILL ERROR IN STEP: {step_name}\n{rule}\n\n{context_msg}\n\n{rule}")
         print("\nWhat would you like to do?\n")
-
         for i, opt in enumerate(options, 1):
             print(f"  {i}. {opt['label']}")
             print(f"     {opt['description']}\n")
 
         while True:
             try:
-                choice = input("Enter choice (1-{}): ".format(len(options)))
+                choice = await asyncio.to_thread(input, f"Enter choice (1-{len(options)}): ")
                 choice_num = int(choice)
-                if 1 <= choice_num <= len(options):
-                    selected_opt = options[choice_num - 1]
-                    break
-                print(f"Invalid choice. Please enter 1-{len(options)}")
-            except (ValueError, KeyboardInterrupt):
+            except (ValueError, KeyboardInterrupt, EOFError):
                 print("\nAborting...")
-                return {
-                    "action": "abort",
-                    "selected_option": "Aborted",
-                    "error_info": error_info,
-                }
+                return "Aborted"
+            if 1 <= choice_num <= len(options):
+                return str(options[choice_num - 1]["label"])
+            print(f"Invalid choice. Please enter 1-{len(options)}")
 
-        # Map selection to action
-        label_to_action = {
-            "Auto-fix (Recommended)": "auto_fix",
-            "Edit skill file": "edit",
-            "Skip skill": "skip",
-            "Create GitHub issue": "abort",
-            "Continue anyway": "continue",
-        }
-
-        action = label_to_action.get(selected_opt["label"], "abort")
-
-        return {
-            "action": action,
-            "selected_option": selected_opt["label"],
-            "error_info": error_info,
-        }
-
-    def log_fix_attempt(
-        self, error_info: dict, action: str, success: bool, details: str = ""
-    ) -> None:
+    def log_fix_attempt(self, error_info: dict, action: str, success: bool, details: str = "") -> None:
         """
         Log a fix attempt to memory for future learning.
 
@@ -411,7 +357,7 @@ class SkillErrorRecovery:
             return
 
         fix_entry = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now().astimezone().isoformat(),
             "pattern_id": error_info.get("pattern_id"),
             "step_name": error_info["step_name"],
             "error_msg": error_info["error_msg"],
@@ -427,19 +373,13 @@ class SkillErrorRecovery:
 
             # Update success stats
             if success:
-                self.memory.increment(
-                    "learned/skill_error_fixes", f"stats.{action}_success"
-                )
+                self.memory.increment("learned/skill_error_fixes", f"stats.{action}_success")
             else:
-                self.memory.increment(
-                    "learned/skill_error_fixes", f"stats.{action}_failed"
-                )
+                self.memory.increment("learned/skill_error_fixes", f"stats.{action}_failed")
 
-        except Exception as e:
+        except _RECOVERABLE_ERRORS as e:
             # Best-effort logging - don't fail the main operation
-            import logging
-
-            logging.getLogger(__name__).debug(f"Could not log fix to memory: {e}")
+            logger.debug("Could not log fix to memory: %s", e)
 
     def apply_auto_fix(self, skill_path: str, step_name: str, fix_code: str) -> dict:
         """
@@ -454,10 +394,8 @@ class SkillErrorRecovery:
             dict with success status and details
         """
         try:
-            import yaml
-
             # Read skill file
-            with open(skill_path, "r", encoding="utf-8") as f:
+            with open(skill_path, encoding="utf-8") as f:
                 content = f.read()
 
             # Parse YAML while preserving formatting
@@ -479,8 +417,7 @@ class SkillErrorRecovery:
                     "error": f"Step '{step_name}' not found in skill",
                 }
 
-            # Write back (WARNING: loses YAML comments/formatting)
-            # TODO: Use ruamel.yaml to preserve formatting
+            # Write back (WARNING: loses YAML comments/formatting; ruamel.yaml would preserve them)
             with open(skill_path, "w", encoding="utf-8") as f:
                 yaml.dump(
                     skill_data,
@@ -496,5 +433,5 @@ class SkillErrorRecovery:
                 "backup_note": "Original formatting may be lost. Consider manual review.",
             }
 
-        except Exception as e:
+        except (OSError, yaml.YAMLError, AttributeError, TypeError) as e:
             return {"success": False, "error": str(e)}
