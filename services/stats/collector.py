@@ -42,6 +42,7 @@ class DataCollector:
                     if path and Path(path).exists():
                         repos.append({"name": name, "path": path})
         except Exception:
+            logger.debug("Could not read repository config", exc_info=True)
             pass
 
         if not repos:
@@ -85,6 +86,7 @@ class DataCollector:
                         if username:
                             break
                 except Exception:
+                    logger.debug("Could not read config %s", cfg_path, exc_info=True)
                     continue
             if not username:
                 try:

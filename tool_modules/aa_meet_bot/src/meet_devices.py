@@ -583,6 +583,7 @@ class DeviceMixin:
                             return True
                     # Meet UI boundary: page or callback failures must not kill the bot.
                     except Exception:  # pylint: disable=broad-exception-caught
+                        logger.debug("Camera dropdown item not selectable", exc_info=True)
                         continue
 
                 # Close dropdown if we didn't find MeetBot
@@ -600,6 +601,7 @@ class DeviceMixin:
                     await self.page.keyboard.press("Escape")
                 # Meet UI boundary: page or callback failures must not kill the bot.
                 except Exception:  # pylint: disable=broad-exception-caught
+                    logger.debug("Closing camera dropdown failed", exc_info=True)
                     pass
 
         logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")

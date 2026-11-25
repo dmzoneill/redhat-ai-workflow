@@ -96,6 +96,7 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
                     if token:
                         break
             except Exception:
+                logger.debug("Could not read glab config", exc_info=True)
                 pass
     if not token:
         logger.warning("No GitLab token found for MR enrichment")
@@ -206,6 +207,7 @@ def build_strategy_alignment(
             with open(f, encoding="utf-8") as fh:
                 data = json.load(fh)
         except Exception:
+            logger.debug("Skipping unreadable email file", exc_info=True)
             continue
         email_count += 1
         senders_seen.add(data.get("sender_email", data.get("sender", "unknown")))

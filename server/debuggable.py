@@ -188,6 +188,7 @@ def _search_for_tool(tool_name: str) -> dict | None:
                         "func_name": tool_name,
                     }
             except Exception:
+                logger.debug("Skipping tools file that could not be inspected", exc_info=True)
                 continue
 
     return None

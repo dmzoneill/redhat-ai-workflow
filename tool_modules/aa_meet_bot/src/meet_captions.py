@@ -363,6 +363,7 @@ class CaptionMixin:
                 """)
             # Meet UI boundary: page or callback failures must not kill the bot.
             except Exception:  # pylint: disable=broad-exception-caught
+                logger.debug("Caption observer disconnect failed", exc_info=True)
                 pass
 
         logger.info("Caption capture stopped")

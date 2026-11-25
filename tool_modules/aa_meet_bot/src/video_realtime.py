@@ -254,6 +254,7 @@ class RealtimeVideoRenderer(RealtimeDrawMixin, RealtimeFrameMixin, RealtimeStrea
             try:
                 self._webrtc_pipeline.stop()
             except Exception:  # pylint: disable=broad-exception-caught
+                logger.debug("WebRTC pipeline stop failed", exc_info=True)
                 pass
             self.__dict__["_webrtc_pipeline"] = None
 

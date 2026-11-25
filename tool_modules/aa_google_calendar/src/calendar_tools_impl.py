@@ -172,6 +172,7 @@ def find_free_slots(  # pylint: disable=too-many-locals
                 end = end.astimezone(tz)
                 all_busy.append((start, end))
             except Exception:  # pylint: disable=broad-exception-caught
+                logger.debug("Skipping malformed busy period", exc_info=True)
                 continue
 
     # Sort busy periods by start time
