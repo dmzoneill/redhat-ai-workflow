@@ -43,7 +43,6 @@ class DataCollector:
                         repos.append({"name": name, "path": path})
         except Exception:
             logger.debug("Could not read repository config", exc_info=True)
-            pass
 
         if not repos:
             common_paths = [

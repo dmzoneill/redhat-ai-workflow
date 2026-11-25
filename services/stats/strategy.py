@@ -97,7 +97,6 @@ def get_quarter_gitlab_mrs(year: int, quarter: int) -> list[dict]:
                         break
             except Exception:
                 logger.debug("Could not read glab config", exc_info=True)
-                pass
     if not token:
         logger.warning("No GitLab token found for MR enrichment")
         return []

@@ -602,7 +602,6 @@ class DeviceMixin:
                 # Meet UI boundary: page or callback failures must not kill the bot.
                 except Exception:  # pylint: disable=broad-exception-caught
                     logger.debug("Closing camera dropdown failed", exc_info=True)
-                    pass
 
         logger.error("[CAMERA-SELECT] Failed to select camera after 3 attempts")
         return False
