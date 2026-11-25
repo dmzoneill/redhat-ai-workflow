@@ -368,7 +368,7 @@ class SlackPhotoFetcher:
                     try:
                         cache_path.symlink_to(photo_path)
                     except Exception:
-                        pass
+                        logger.debug("Could not create email photo symlink", exc_info=True)
 
                 return photo_path
 

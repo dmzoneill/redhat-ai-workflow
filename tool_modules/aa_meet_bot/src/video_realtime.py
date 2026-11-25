@@ -254,7 +254,7 @@ class RealtimeVideoRenderer(RealtimeDrawMixin, RealtimeFrameMixin, RealtimeStrea
             try:
                 self._webrtc_pipeline.stop()
             except Exception:  # pylint: disable=broad-exception-caught
-                pass
+                logger.debug("WebRTC pipeline stop failed", exc_info=True)
             self.__dict__["_webrtc_pipeline"] = None
 
         # Clean up GPU text renderer (CRITICAL: must cleanup GLFW context)
